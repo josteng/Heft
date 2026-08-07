@@ -2,6 +2,11 @@ import AppKit
 import HeftCore
 import SwiftUI
 
+struct FindSelection: Equatable {
+    let range: NSRange
+    let generation: Int
+}
+
 /// The editing surface: one continuous TextKit 2 text view.
 ///
 /// Replaces the block-swapping editor. That design rendered each block as a
@@ -22,6 +27,7 @@ import SwiftUI
 struct LiveTextEditor: NSViewRepresentable {
     @Binding var text: String
     let generation: Int
+    let findSelection: FindSelection?
     let context: RenderContext
     let onAttachment: (NSPasteboard) -> String?
     let onFollowLink: (URL) -> Void
@@ -42,8 +48,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
+        textView.usesFindBar = false
         textView.insertionPointColor = .controlAccentColor
         textView.textContainerInset = NSSize(width: 28, height: 28)
         textView.linkTextAttributes = [:]
@@ -71,6 +76,10 @@ struct LiveTextEditor: NSViewRepresentable {
             guard let textView, let coordinator else { return }
             coordinator.trackingEnded(textView)
         }
+        textView.onFirstResponderChange = { [weak textView, weak coordinator = nsContext.coordinator] focused in
+            guard let textView, let coordinator else { return }
+            coordinator.focusChanged(focused, in: textView)
+        }
         return scrollView
     }
 
@@ -78,6 +87,14 @@ struct LiveTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? HeftTextKit2View else { return }
         nsContext.coordinator.parent = self
         textView.onAttachment = onAttachment
+
+        if let findSelection,
+           nsContext.coordinator.lastFindGeneration != findSelection.generation {
+            nsContext.coordinator.lastFindGeneration = findSelection.generation
+            nsContext.coordinator.selectFindResult(findSelection.range, in: textView)
+        } else if findSelection == nil {
+            nsContext.coordinator.hideSelectionWhenUnfocused(in: textView)
+        }
 
         // Link and embed rendering depends on the index, which finishes loading
         // after the first restyle and is rebuilt whenever the vault changes on
@@ -112,10 +129,12 @@ struct LiveTextEditor: NSViewRepresentable {
         var lastGeneration = -1
         var layout = LiveLayout()
         var indexFingerprint = ""
+        var lastFindGeneration = -1
         private var revealedLine = NSRange(location: NSNotFound, length: 0)
         private var needsRevealRestyle = false
         private var pendingScope: InvalidationScope = .revealedLines
         private var restyleTask: Task<Void, Never>?
+        private var revealsSelection = true
 
         init(_ parent: LiveTextEditor) { self.parent = parent }
 
@@ -145,6 +164,29 @@ struct LiveTextEditor: NSViewRepresentable {
             restyle(textView, scope: scope)
         }
 
+        func selectFindResult(_ match: NSRange, in textView: NSTextView) {
+            guard match.location != NSNotFound, match.length > 0 else { return }
+            revealsSelection = true
+            textView.setSelectedRange(match)
+            restyle(textView)
+            textView.setSelectedRange(match)
+            textView.scrollRangeToVisible(match)
+            textView.showFindIndicator(for: match)
+        }
+
+        func focusChanged(_ focused: Bool, in textView: NSTextView) {
+            let shouldReveal = focused || parent.findSelection != nil
+            guard shouldReveal != revealsSelection else { return }
+            revealsSelection = shouldReveal
+            restyle(textView)
+        }
+
+        func hideSelectionWhenUnfocused(in textView: NSTextView) {
+            guard textView.window?.firstResponder !== textView, revealsSelection else { return }
+            revealsSelection = false
+            restyle(textView)
+        }
+
         private func scheduleRestyle(_ textView: NSTextView) {
             restyleTask?.cancel()
             restyleTask = Task { @MainActor [weak textView] in
@@ -171,7 +213,9 @@ struct LiveTextEditor: NSViewRepresentable {
 
             let selection = textView.selectedRange()
             let previouslyRevealed = revealedLine
-            revealedLine = (textView.string as NSString).lineRange(for: selection)
+            revealedLine = revealsSelection
+                ? (textView.string as NSString).lineRange(for: selection)
+                : NSRange(location: NSNotFound, length: 0)
 
             let width = textView.textContainer?.size.width ?? Theme.contentMaxWidth
             let previous = layout.signature
@@ -184,11 +228,20 @@ struct LiveTextEditor: NSViewRepresentable {
 
             switch scope {
             case .revealedLines:
-                // Only two paragraphs can have changed: the one the caret left
-                // and the one it entered. Everything else keeps its fragment,
-                // so the view does not reflow under the pointer.
-                invalidate(previouslyRevealed, in: textView)
-                invalidate(revealedLine, in: textView)
+                if layout.signature != previous,
+                   let manager = textView.textLayoutManager,
+                   let content = manager.textContentManager {
+                    // A multi-line widget such as a table belongs to its first
+                    // paragraph. A find match can select a later row, so
+                    // invalidating only that row would leave the old widget
+                    // painted over the newly revealed source.
+                    manager.invalidateLayout(for: content.documentRange)
+                } else {
+                    // Ordinary caret movement only changes the line it left
+                    // and the one it entered, avoiding a full reflow.
+                    invalidate(previouslyRevealed, in: textView)
+                    invalidate(revealedLine, in: textView)
+                }
             case .whole:
                 // Editing inside a paragraph already invalidates it, so a full
                 // relayout is only needed when widgets appear or disappear.
@@ -200,6 +253,7 @@ struct LiveTextEditor: NSViewRepresentable {
             }
 
             settleLayout(textView)
+            textView.scrollRangeToVisible(selection)
         }
 
         /// Lays the whole document out now instead of letting TextKit 2 do it
@@ -265,11 +319,24 @@ extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
 /// Text view with vault-aware paste and list continuation.
 final class HeftTextKit2View: NSTextView {
     var onAttachment: ((NSPasteboard) -> String?)?
+    var onFirstResponderChange: ((Bool) -> Void)?
     /// Called when the usable width changes. Tables are measured against it, so
     /// a stale width leaves columns squeezed; the first layout in particular
     /// happens after the initial restyle, when the container is still zero.
     var onWidthChange: (() -> Void)?
     private var lastWidth: CGFloat = 0
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFirstResponderChange?(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let accepted = super.resignFirstResponder()
+        if accepted { onFirstResponderChange?(false) }
+        return accepted
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -305,6 +372,7 @@ final class HeftTextKit2View: NSTextView {
         isTrackingMouse = false
         onTrackingEnded?()
     }
+
 
     private func toggleTask(at point: CGPoint) -> Bool {
         let text = string as NSString

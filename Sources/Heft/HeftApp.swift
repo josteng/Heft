@@ -43,6 +43,18 @@ struct HeftCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
         }
         CommandGroup(after: .textEditing) {
+            Menu("Find") {
+                Button("Find…") { model.showFind() }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("Find Next") { model.findNext() }
+                    .keyboardShortcut("g", modifiers: .command)
+                Button("Find Previous") { model.findPrevious() }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                Divider()
+                Button("Search Vault…") { model.isVaultSearchPresented = true }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+            }
+            Divider()
             Button("Quick Open…") { model.isQuickOpenPresented = true }
                 .keyboardShortcut("o", modifiers: .command)
             Button("Command Palette…") { model.isCommandPalettePresented = true }
@@ -63,4 +75,5 @@ struct HeftCommands: Commands {
                 .keyboardShortcut("b", modifiers: [.command, .option])
         }
     }
+
 }

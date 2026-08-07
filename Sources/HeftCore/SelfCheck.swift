@@ -281,6 +281,9 @@ public enum SelfCheck {
         let wordBoundary = FuzzyMatch.score(query: "dn", candidate: "daily notes") ?? 0
         let midWord = FuzzyMatch.score(query: "dn", candidate: "dnxxxxxxx") ?? 0
         expectTrue(wordBoundary > 0 && midWord > 0, "fuzzy scores positive")
+        expectTrue(wordBoundary >= max(36, 2 * 16), "compact fuzzy search clears threshold")
+        let loose = FuzzyMatch.score(query: "eee", candidate: "2026-05-19 thesis meeting") ?? 0
+        expectTrue(loose < max(36, 3 * 16), "loose repeated letters stay below threshold")
 
         return r
     }

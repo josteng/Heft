@@ -1,7 +1,7 @@
 import HeftCore
 import SwiftUI
 
-/// Fuzzy note switcher (⌘O).
+/// Conservative fuzzy note-name switcher (⌘O).
 struct QuickOpenView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -20,6 +20,8 @@ struct QuickOpenView: View {
                     .font(.system(size: 16))
                     .focused($isFocused)
                     .onSubmit(openSelection)
+                    .onKeyPress(.upArrow) { move(-1); return .handled }
+                    .onKeyPress(.downArrow) { move(1); return .handled }
                     .onChange(of: query) { selection = 0 }
             }
             .padding(.horizontal, 16)
@@ -46,8 +48,6 @@ struct QuickOpenView: View {
         .background(.regularMaterial)
         .onAppear { isFocused = true }
         // Arrow keys move the selection while focus stays in the text field.
-        .onKeyPress(.upArrow) { move(-1); return .handled }
-        .onKeyPress(.downArrow) { move(1); return .handled }
         .onKeyPress(.escape) { dismiss(); return .handled }
     }
 

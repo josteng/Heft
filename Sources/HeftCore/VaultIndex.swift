@@ -214,7 +214,9 @@ public final class VaultIndex: @unchecked Sendable {
         outgoingLinks(from: path).filter { resolve($0, from: source) == nil && !$0.target.isEmpty }
     }
 
-    /// Ranked fuzzy search over note names for the quick-open switcher.
+    /// Conservative filename search for Quick Open and the sidebar. Literal
+    /// matches rank first; compact or word-boundary fuzzy matches are accepted,
+    /// while loose subsequences such as `eee` across a long title are rejected.
     public func search(_ query: String, limit: Int = 50) -> [NoteRef] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else {
@@ -222,10 +224,17 @@ public final class VaultIndex: @unchecked Sendable {
         }
         var scored: [(NoteRef, Int)] = []
         for note in notes {
-            if let score = FuzzyMatch.score(query: q, candidate: note.name.lowercased())
-                ?? FuzzyMatch.score(query: q, candidate: note.relativePath.lowercased()) {
-                scored.append((note, score))
+            let name = note.name.lowercased()
+            let score: Int
+            if name == q { score = 400 }
+            else if name.hasPrefix(q) { score = 300 }
+            else if name.contains(q) { score = 200 }
+            else if let fuzzy = FuzzyMatch.score(query: q, candidate: name),
+                    fuzzy >= max(36, q.count * 16) {
+                score = 100 + fuzzy
             }
+            else { continue }
+            scored.append((note, score))
         }
         return scored
             .sorted { a, b in a.1 == b.1 ? a.0.name.count < b.0.name.count : a.1 > b.1 }

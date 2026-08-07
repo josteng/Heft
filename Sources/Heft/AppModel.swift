@@ -58,9 +58,14 @@ final class AppModel: ObservableObject {
     /// with no visible file tree. Lives here rather than as view state so the
     /// View menu can toggle it too.
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
-    @Published var isInspectorVisible = true
+    @Published var isInspectorVisible = false
     @Published var isQuickOpenPresented = false
+    @Published var isVaultSearchPresented = false
     @Published var isCommandPalettePresented = false
+    @Published var isFindPresented = false
+    @Published private(set) var findFocusGeneration = 0
+    @Published private(set) var findNavigationGeneration = 0
+    @Published private(set) var findNavigationDirection = 1
     @Published var isPresentationPresented = false
     @Published var isColorfulFormattingEnabled = false {
         didSet {
@@ -72,6 +77,23 @@ final class AppModel: ObservableObject {
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
+
+    func showFind() {
+        isFindPresented = true
+        findFocusGeneration += 1
+    }
+
+    func findNext() {
+        isFindPresented = true
+        findNavigationDirection = 1
+        findNavigationGeneration += 1
+    }
+
+    func findPrevious() {
+        isFindPresented = true
+        findNavigationDirection = -1
+        findNavigationGeneration += 1
+    }
 
     private var watcher: VaultWatcher?
     private var saveTask: Task<Void, Never>?

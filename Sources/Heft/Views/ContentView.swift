@@ -35,6 +35,7 @@ struct ContentView: View {
         }
         .toolbar { toolbarContent }
         .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
+        .sheet(isPresented: $model.isVaultSearchPresented) { VaultSearchView() }
         .sheet(isPresented: $model.isCommandPalettePresented) { CommandPaletteView() }
         .onChange(of: model.isPresentationPresented) { _, isPresented in
             if isPresented { openWindow(id: "presentation") }
@@ -65,13 +66,6 @@ struct ContentView: View {
         ToolbarItem(placement: .principal) { Spacer() }
 
         ToolbarItem(placement: .primaryAction) {
-            Button { model.isQuickOpenPresented = true } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            .help("Quick open (⌘O)")
-        }
-
-        ToolbarItem(placement: .primaryAction) {
             Button { model.isInspectorVisible.toggle() } label: {
                 Image(systemName: "link")
             }
@@ -85,6 +79,12 @@ struct ContentView: View {
 struct EditorPane: View {
     @EnvironmentObject private var model: AppModel
     @State private var parsed: (frontmatter: String?, blocks: [MDBlock]) = (nil, [])
+    @State private var findQuery = ""
+    @State private var findMatches: [NSRange] = []
+    @State private var findIndex = 0
+    @State private var findSelection: FindSelection?
+    @State private var findSelectionGeneration = 0
+    @FocusState private var findFieldFocused: Bool
 
     private var context: RenderContext {
         RenderContext(
@@ -99,11 +99,16 @@ struct EditorPane: View {
             // No document header row: the note's name and folder are in the
             // window toolbar now.
 
+            if model.isFindPresented {
+                findBar
+            }
+
             // One surface. `--source-mode` exposes the raw text view as a
             // debugging escape hatch, not as a user-facing mode.
             LiveTextEditor(
                 text: $model.text,
                 generation: model.documentGeneration,
+                findSelection: findSelection,
                 context: context,
                 onAttachment: handleAttachment,
                 onFollowLink: { url in
@@ -128,7 +133,101 @@ struct EditorPane: View {
         }
         .task(id: model.documentGeneration) {
             parsed = MarkdownModel.parse(model.text)
+            closeFind()
         }
+        .onChange(of: model.isFindPresented) { _, presented in
+            if presented {
+                findFieldFocused = true
+            } else {
+                findSelection = nil
+            }
+        }
+        .onChange(of: model.findFocusGeneration) { _, _ in
+            findFieldFocused = true
+        }
+        .onChange(of: model.findNavigationGeneration) { _, _ in
+            moveFind(by: model.findNavigationDirection)
+        }
+    }
+
+    private var findBar: some View {
+        HStack(spacing: 8) {
+            Spacer()
+            TextField("Find", text: $findQuery)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 240)
+                .focused($findFieldFocused)
+                .onSubmit { moveFind(by: 1) }
+                .onExitCommand { closeFind() }
+                .onChange(of: findQuery) { _, _ in refreshFindMatches() }
+            Text(findMatches.isEmpty ? "0 of 0" : "\(findIndex + 1) of \(findMatches.count)")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(minWidth: 68, alignment: .trailing)
+            Button { moveFind(by: -1) } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.borderless)
+                .disabled(findMatches.isEmpty)
+                .help("Previous match (⇧⌘G)")
+            Button { moveFind(by: 1) } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.borderless)
+                .disabled(findMatches.isEmpty)
+                .help("Next match (⌘G)")
+            Button { closeFind() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless)
+                .help("Close Find")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) { Divider() }
+        .onAppear { findFieldFocused = true }
+    }
+
+    private func refreshFindMatches() {
+        let source = model.text as NSString
+        findMatches.removeAll(keepingCapacity: true)
+        guard !findQuery.isEmpty else {
+            findSelection = nil
+            return
+        }
+        var cursor = 0
+        while cursor < source.length {
+            let range = source.range(
+                of: findQuery, options: .caseInsensitive,
+                range: NSRange(location: cursor, length: source.length - cursor)
+            )
+            guard range.location != NSNotFound else { break }
+            findMatches.append(range)
+            cursor = NSMaxRange(range)
+        }
+        findIndex = 0
+        selectFindMatch()
+    }
+
+    private func moveFind(by offset: Int) {
+        guard !findMatches.isEmpty else {
+            if !model.isFindPresented { model.showFind() }
+            findFieldFocused = true
+            return
+        }
+        findIndex = (findIndex + offset + findMatches.count) % findMatches.count
+        selectFindMatch()
+    }
+
+    private func selectFindMatch() {
+        guard findMatches.indices.contains(findIndex) else { return }
+        findSelectionGeneration += 1
+        findSelection = FindSelection(
+            range: findMatches[findIndex], generation: findSelectionGeneration
+        )
+    }
+
+    private func closeFind() {
+        model.isFindPresented = false
+        findQuery = ""
+        findMatches = []
+        findIndex = 0
+        findSelection = nil
     }
 
     /// TextKit 2 live surface under evaluation; see `EngineEditor`.
