@@ -110,6 +110,10 @@ struct EditorPane: View {
                     if !model.handle(url: url) { NSWorkspace.shared.open(url) }
                 }
             )
+            // Keep prose readable in wide windows while preserving the
+            // editor's existing 28pt TextKit inset on either side.
+            .frame(maxWidth: Theme.contentMaxWidth + 56)
+            .frame(maxWidth: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
 
             StatusBar()
