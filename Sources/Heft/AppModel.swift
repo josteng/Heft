@@ -60,6 +60,7 @@ final class AppModel: ObservableObject {
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
     @Published var isInspectorVisible = true
     @Published var isQuickOpenPresented = false
+    @Published var isCommandPalettePresented = false
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""

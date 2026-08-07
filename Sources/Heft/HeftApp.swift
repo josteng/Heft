@@ -38,6 +38,8 @@ struct HeftCommands: Commands {
         CommandGroup(after: .textEditing) {
             Button("Quick Open…") { model.isQuickOpenPresented = true }
                 .keyboardShortcut("o", modifiers: .command)
+            Button("Command Palette…") { model.isCommandPalettePresented = true }
+                .keyboardShortcut("p", modifiers: .command)
         }
         CommandGroup(after: .toolbar) {
             // NavigationSplitView contributes no sidebar command of its own,

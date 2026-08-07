@@ -34,6 +34,7 @@ struct ContentView: View {
         }
         .toolbar { toolbarContent }
         .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
+        .sheet(isPresented: $model.isCommandPalettePresented) { CommandPaletteView() }
         // Wikilinks in the rendered preview come back through this handler;
         // anything not addressed to Heft falls through to the browser.
         .environment(\.openURL, OpenURLAction { url in
