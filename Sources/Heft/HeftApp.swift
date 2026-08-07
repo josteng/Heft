@@ -26,7 +26,7 @@ struct HeftCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Note") { model.createNote() }
+            Button("New Note…") { model.createNote() }
                 .keyboardShortcut("n", modifiers: .command)
             Button("Today's Daily Note") { model.openDailyNote(for: Date()) }
                 .keyboardShortcut("t", modifiers: [.command, .shift])

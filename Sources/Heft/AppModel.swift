@@ -246,16 +246,189 @@ final class AppModel: ObservableObject {
 
     // MARK: - Creating notes
 
-    func createNote() {
+    /// Creates a note in `folder`, or beside the open note when none is given.
+    ///
+    /// Asks for the name up front. The filename *is* the note's title here:
+    /// wikilinks address notes by it, so being dropped into an `Untitled.md`
+    /// with no obvious way to name it leaves the note unlinkable.
+    func createNote(in folder: URL? = nil) {
         guard let vaultRoot else { promptForVault(); return }
-        let folder = current?.url.deletingLastPathComponent() ?? vaultRoot
-        var target = folder.appendingPathComponent("Untitled.md")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: target.path) {
-            target = folder.appendingPathComponent("Untitled \(counter).md")
-            counter += 1
+        let directory = folder ?? current?.url.deletingLastPathComponent() ?? vaultRoot
+        // Pre-filled and selected, so Return alone still gives the old
+        // behaviour and typing replaces it.
+        let suggestion = (uniqueURL(in: directory, base: "Untitled", extension: "md")
+            .lastPathComponent as NSString).deletingPathExtension
+
+        guard let entered = FilePrompt.name(
+            title: "New Note", message: "In \(describe(directory))",
+            initial: suggestion, confirm: "Create"
+        ) else { return }
+
+        var filename = sanitised(entered)
+        guard !filename.isEmpty else { return }
+        if !filename.lowercased().hasSuffix(".md") { filename += ".md" }
+
+        let target = directory.appendingPathComponent(filename)
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            // Opening the existing note beats silently doing nothing.
+            status = "\(filename) already exists"
+            if let ref = NoteRef(url: target, vaultRoot: vaultRoot) { open(ref) }
+            return
         }
         createFile(at: target, contents: "")
+    }
+
+    /// Human-readable location for a folder, for use in prompts.
+    private func describe(_ directory: URL) -> String {
+        guard let vaultRoot else { return directory.lastPathComponent }
+        return directory.path == vaultRoot.path
+            ? "the vault root"
+            : relativePath(of: directory)
+    }
+
+    func createFolder(in parent: URL) {
+        guard vaultRoot != nil else { return }
+        guard let name = FilePrompt.name(
+            title: "New Folder", message: "Name for the new folder.", initial: "Untitled",
+            confirm: "Create"
+        ) else { return }
+
+        let target = parent.appendingPathComponent(sanitised(name))
+        do {
+            try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+            expandedFolders.insert(relativePath(of: target))
+            reload()
+            status = "Created \(relativePath(of: target))"
+        } catch {
+            status = "Could not create folder: \(error.localizedDescription)"
+        }
+    }
+
+    /// A name not already taken in `directory`, as `Untitled`, `Untitled 1`, …
+    private func uniqueURL(in directory: URL, base: String, extension ext: String) -> URL {
+        let suffix = ext.isEmpty ? "" : ".\(ext)"
+        var candidate = directory.appendingPathComponent(base + suffix)
+        var counter = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = directory.appendingPathComponent("\(base) \(counter)\(suffix)")
+            counter += 1
+        }
+        return candidate
+    }
+
+    // MARK: - File operations
+
+    func rename(_ item: VaultItem) {
+        // Markdown items display without their extension, so it must not appear
+        // in the field and must be put back afterwards.
+        let hasHiddenExtension = item.isMarkdown
+        guard let entered = FilePrompt.name(
+            title: "Rename \(item.isFolder ? "Folder" : "Note")",
+            message: item.relativePath, initial: item.name, confirm: "Rename"
+        ) else { return }
+
+        let cleaned = sanitised(entered)
+        guard !cleaned.isEmpty, cleaned != item.name else { return }
+        let filename = hasHiddenExtension && !cleaned.lowercased().hasSuffix(".md")
+            ? cleaned + ".md"
+            : cleaned
+        let target = item.url.deletingLastPathComponent().appendingPathComponent(filename)
+
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            status = "\(filename) already exists"
+            return
+        }
+
+        // Renaming the open note would otherwise leave the editor pointed at a
+        // path that no longer exists, and the next autosave would recreate it.
+        let wasOpen = current?.relativePath == item.relativePath
+        if wasOpen { flushPendingSave() }
+
+        do {
+            try FileManager.default.moveItem(at: item.url, to: target)
+            if wasOpen, let root = vaultRoot, let ref = NoteRef(url: target, vaultRoot: root) {
+                current = ref
+            }
+            reload()
+            status = "Renamed to \(filename)"
+        } catch {
+            status = "Rename failed: \(error.localizedDescription)"
+        }
+        // Links pointing at the old name are deliberately left alone: rewriting
+        // them across the vault is a bulk edit, not a rename.
+        if !item.isFolder && hasHiddenExtension {
+            status += ". Links to the old name were not updated"
+        }
+    }
+
+    func duplicate(_ item: VaultItem) {
+        guard let vaultRoot else { return }
+        let directory = item.url.deletingLastPathComponent()
+        let ext = item.url.pathExtension
+        let base = (item.url.lastPathComponent as NSString).deletingPathExtension
+        let target = uniqueURL(in: directory, base: base + " copy", extension: ext)
+        do {
+            try FileManager.default.copyItem(at: item.url, to: target)
+            reload()
+            if item.isMarkdown, let ref = NoteRef(url: target, vaultRoot: vaultRoot) { open(ref) }
+            status = "Duplicated to \(target.lastPathComponent)"
+        } catch {
+            status = "Duplicate failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Moves to the Trash rather than unlinking, so a mis-click stays
+    /// recoverable, and confirms first because this is the user's real vault.
+    func delete(_ item: VaultItem) {
+        let count = item.isFolder ? item.flattened().filter { !$0.isFolder }.count : 0
+        let detail = item.isFolder
+            ? "The folder and its \(count) file\(count == 1 ? "" : "s") will be moved to the Trash."
+            : "It will be moved to the Trash."
+        guard FilePrompt.confirm(
+            title: "Delete \(item.name)?", message: detail, confirm: "Delete", destructive: true
+        ) else { return }
+
+        if current?.relativePath == item.relativePath
+            || (item.isFolder && current?.relativePath.hasPrefix(item.relativePath + "/") == true) {
+            // Drop the buffer first so the pending save cannot write the file
+            // back out after it has gone.
+            saveTask?.cancel()
+            saveTask = nil
+            current = nil
+            setText("")
+            isDirty = false
+        }
+
+        var trashed: NSURL?
+        do {
+            try FileManager.default.trashItem(at: item.url, resultingItemURL: &trashed)
+            reload()
+            status = "Moved \(item.name) to the Trash"
+        } catch {
+            status = "Delete failed: \(error.localizedDescription)"
+        }
+    }
+
+    func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func copyToPasteboard(_ string: String, describedAs label: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(string, forType: .string)
+        status = "Copied \(label)"
+    }
+
+    /// Strips path separators so a typed name cannot move the file elsewhere.
+    private func sanitised(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+    }
+
+    private func relativePath(of url: URL) -> String {
+        guard let vaultRoot else { return url.lastPathComponent }
+        return url.path.replacingOccurrences(of: vaultRoot.path + "/", with: "")
     }
 
     private func createFile(at url: URL, contents: String) {
