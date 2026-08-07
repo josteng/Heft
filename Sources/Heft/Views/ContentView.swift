@@ -4,15 +4,12 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
-    /// Driven explicitly rather than left to the system. Without this, a
-    /// collapsed sidebar is restored on the next launch and the app reopens
-    /// with no visible file tree and no obvious way back.
-    @State private var columns: NavigationSplitViewVisibility = .all
-
     var body: some View {
-        NavigationSplitView(columnVisibility: $columns) {
+        NavigationSplitView(columnVisibility: $model.columnVisibility) {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 260, max: 380)
+                // The minimum has to clear the traffic lights and sidebar
+                // toggle, or the toolbar starts dropping items into overflow.
+                .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 380)
         } detail: {
             Group {
                 if model.vaultRoot == nil {
@@ -25,6 +22,11 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
+            // The note's name belongs in the toolbar, the way every document
+            // app puts it there. It used to sit in a row of its own below,
+            // which cost a strip of height and left the toolbar looking empty.
+            .navigationTitle(model.current?.name ?? "Heft")
+            .navigationSubtitle(subtitle)
         }
         .inspector(isPresented: $model.isInspectorVisible) {
             BacklinksPanel()
@@ -39,17 +41,19 @@ struct ContentView: View {
         })
     }
 
+    /// Folder, or the note count when nothing is open, mirroring how Notes
+    /// captions its title.
+    private var subtitle: String {
+        guard let current = model.current else {
+            return model.vaultRoot == nil ? "" : "\(model.index.notes.count) notes"
+        }
+        let folder = current.folder
+        let where_ = folder.isEmpty ? "Vault root" : folder
+        return model.isDirty ? "\(where_) · Edited" : where_
+    }
+
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button {
-                model.isCalendarVisible.toggle()
-            } label: {
-                Image(systemName: "calendar")
-            }
-            .help("Toggle calendar (⇧⌘D)")
-        }
-
         // A flexible centre item restores what the removed mode picker used to
         // provide: something between the leading buttons and these, pushing
         // them back to the trailing edge.
@@ -86,8 +90,8 @@ struct EditorPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DocumentHeader()
-            Divider()
+            // No document header row: the note's name and folder are in the
+            // window toolbar now.
 
             // One surface. `--source-mode` exposes the raw text view as a
             // debugging escape hatch, not as a user-facing mode.
@@ -189,34 +193,6 @@ struct EditorPane: View {
             model.status = "Attachment failed: \(error.localizedDescription)"
         }
         return nil
-    }
-}
-
-private struct DocumentHeader: View {
-    @EnvironmentObject private var model: AppModel
-
-    var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(model.current?.name ?? "")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                if let folder = model.current?.folder, !folder.isEmpty {
-                    Text(folder)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer()
-            if model.isDirty {
-                Circle().fill(.secondary).frame(width: 6, height: 6)
-                    .help("Unsaved changes")
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.bar)
     }
 }
 

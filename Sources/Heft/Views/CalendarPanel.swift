@@ -21,23 +21,35 @@ struct CalendarPanel: View {
             header
             weekdayLabels
             grid
-            footer
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 4) {
             Button { shiftMonth(-1) } label: {
                 Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
             }
             .buttonStyle(.plain)
 
             Spacer()
-            Text(MomentFormat.format(model.calendarMonth, pattern: "MMMM YYYY"))
-                .font(.system(size: 12, weight: .semibold))
-                .contentTransition(.numericText())
+            // Doubles as the way back to the current month, which is what the
+            // removed Today button was mostly used for. ⇧⌘T opens the note.
+            Button { goToCurrentMonth() } label: {
+                Text(MomentFormat.format(model.calendarMonth, pattern: "MMMM YYYY"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .contentTransition(.numericText())
+            }
+            .buttonStyle(.plain)
+            .help("Jump to this month")
+
+            if model.settings.dailyNoteTemplate == nil {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .help("No daily-note template configured in this vault; new notes get a plain heading.")
+            }
             Spacer()
 
             Button { shiftMonth(1) } label: {
@@ -60,58 +72,62 @@ struct CalendarPanel: View {
 
     private var grid: some View {
         LazyVGrid(columns: columns, spacing: 2) {
-            ForEach(Array(days.enumerated()), id: \.offset) { _, day in
-                if let day {
-                    DayCell(
-                        date: day,
-                        isToday: calendar.isDateInToday(day),
-                        isSelected: isOpen(day),
-                        hasNote: hasNote(day)
-                    ) {
-                        model.openDailyNote(for: day)
-                    }
-                } else {
-                    Color.clear.frame(height: 22)
+            ForEach(days) { day in
+                DayCell(
+                    date: day.date,
+                    isToday: calendar.isDateInToday(day.date),
+                    isSelected: isOpen(day.date),
+                    hasNote: hasNote(day.date),
+                    isOutsideMonth: !day.isInMonth
+                ) {
+                    open(day)
                 }
             }
         }
     }
 
-    private var footer: some View {
-        HStack(spacing: 6) {
-            Button("Today") {
-                model.calendarMonth = Date()
-                model.openDailyNote(for: Date())
-            }
-            .font(.system(size: 11))
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+    // MARK: - Data
 
-            if model.settings.dailyNoteTemplate == nil {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .help("No daily-note template configured in this vault; new notes get a plain heading.")
-            }
-            Spacer()
+    private struct CalendarDay: Identifiable {
+        let date: Date
+        /// False for the neighbouring months' days that pad the grid.
+        let isInMonth: Bool
+        var id: Date { date }
+    }
+
+    /// Always six weeks.
+    ///
+    /// Padding with blanks made the panel change height between a month that
+    /// needs five rows and one that needs six, which moved the whole sidebar.
+    /// Filling the edges with the neighbouring months' days instead, dimmed,
+    /// keeps the height fixed and is what Obsidian and Calendar.app do.
+    private var days: [CalendarDay] {
+        guard let interval = calendar.dateInterval(of: .month, for: model.calendarMonth) else { return [] }
+        let first = interval.start
+        // weekday is 1=Sunday; shift so Monday is 0.
+        let leading = (calendar.component(.weekday, from: first) + 5) % 7
+        guard let gridStart = calendar.date(byAdding: .day, value: -leading, to: first) else { return [] }
+
+        let month = calendar.component(.month, from: first)
+        return (0..<42).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: gridStart) else { return nil }
+            return CalendarDay(
+                date: date, isInMonth: calendar.component(.month, from: date) == month
+            )
         }
     }
 
-    // MARK: - Data
-
-    /// Leading `nil`s pad the grid so the first day lands under its weekday.
-    private var days: [Date?] {
-        guard let interval = calendar.dateInterval(of: .month, for: model.calendarMonth) else { return [] }
-        let first = interval.start
-        let count = calendar.range(of: .day, in: .month, for: first)?.count ?? 30
-        // weekday is 1=Sunday; shift so Monday is 0.
-        let leading = (calendar.component(.weekday, from: first) + 5) % 7
-
-        var result: [Date?] = Array(repeating: nil, count: leading)
-        for offset in 0..<count {
-            result.append(calendar.date(byAdding: .day, value: offset, to: first))
+    /// Opening a padding day follows it into its own month, so the grid does
+    /// not end up showing a selected day that is not really part of it.
+    private func open(_ day: CalendarDay) {
+        if !day.isInMonth {
+            withAnimation(.snappy(duration: 0.18)) { model.calendarMonth = day.date }
         }
-        return result
+        model.openDailyNote(for: day.date)
+    }
+
+    private func goToCurrentMonth() {
+        withAnimation(.snappy(duration: 0.18)) { model.calendarMonth = Date() }
     }
 
     private var weekdaySymbols: [String] {
@@ -142,6 +158,7 @@ private struct DayCell: View {
     let isToday: Bool
     let isSelected: Bool
     let hasNote: Bool
+    var isOutsideMonth = false
     let action: () -> Void
 
     @State private var isHovering = false
@@ -152,8 +169,12 @@ private struct DayCell: View {
                 Text(MomentFormat.format(date, pattern: "D"))
                     .font(.system(size: 10, weight: isToday ? .bold : .regular))
                     .monospacedDigit()
+                    .foregroundStyle(isOutsideMonth ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.primary))
                 Circle()
                     .fill(hasNote ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.clear))
+                    // A padding day's note still gets a dot, but a faint one:
+                    // it belongs to a month that is not on screen.
+                    .opacity(isOutsideMonth ? 0.4 : 1)
                     .frame(width: 3, height: 3)
             }
             .frame(maxWidth: .infinity)

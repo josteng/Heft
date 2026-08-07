@@ -53,6 +53,11 @@ final class AppModel: ObservableObject {
     /// and callouts, which the engine has no token for.
     let useLegacyEditor = CommandLine.arguments.contains("--legacy-editor")
     @Published var isCalendarVisible = true
+    /// Driven explicitly rather than left to the system. Without this, a
+    /// collapsed sidebar is restored on the next launch and the app reopens
+    /// with no visible file tree. Lives here rather than as view state so the
+    /// View menu can toggle it too.
+    @Published var columnVisibility: NavigationSplitViewVisibility = .all
     @Published var isInspectorVisible = true
     @Published var isQuickOpenPresented = false
     @Published var calendarMonth = Date()
@@ -509,6 +514,12 @@ final class AppModel: ObservableObject {
         for part in parts {
             prefix = prefix.isEmpty ? part : "\(prefix)/\(part)"
             expandedFolders.insert(prefix)
+        }
+    }
+
+    func toggleSidebar() {
+        withAnimation(.snappy(duration: 0.2)) {
+            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
         }
     }
 

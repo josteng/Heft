@@ -79,6 +79,9 @@ Three files carry it:
 - **Protection in `LiveDecorator` rejects any candidate that *intersects* a protected
   range.** So block constructs must be collected before inline spans are protected,
   or `# The $h(t)$ model` loses its heading entirely instead of nesting.
+- **Calendar visibility belongs in the View menu, not the window toolbar.** The
+  `Show Calendar` command also has the `⇧⌘D` shortcut. Leave the system-provided
+  `NavigationSplitView` sidebar toggle untouched.
 - **Real-vault syntax that breaks naive parsers:** Obsidian writes `\|` for a literal
   pipe inside tables (`![[chart.png\|500]]`), and brackets can abut links
   (`\[[[Paper Name]]`), where the link is the innermost pair.

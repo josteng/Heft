@@ -14,8 +14,9 @@ struct HeftApp: App {
             ContentView()
                 .environmentObject(model)
         }
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unified(showsTitle: false))
+        // The toolbar shows the open note's name and folder, so the title has
+        // to be visible; a hidden title bar suppresses it entirely.
+        .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1500, height: 950)
         .commands { HeftCommands(model: model) }
     }
@@ -39,6 +40,13 @@ struct HeftCommands: Commands {
                 .keyboardShortcut("o", modifiers: .command)
         }
         CommandGroup(after: .toolbar) {
+            // NavigationSplitView contributes no sidebar command of its own,
+            // and the toolbar button disappears with the sidebar, so without
+            // this there is no menu-discoverable way back.
+            Button(model.columnVisibility == .detailOnly ? "Show Sidebar" : "Hide Sidebar") {
+                model.toggleSidebar()
+            }
+            .keyboardShortcut("s", modifiers: [.control, .command])
             Toggle("Show Calendar", isOn: $model.isCalendarVisible)
                 .keyboardShortcut("d", modifiers: [.command, .shift])
             Toggle("Show Backlinks", isOn: $model.isInspectorVisible)
