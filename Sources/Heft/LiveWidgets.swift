@@ -13,8 +13,8 @@ import HeftCore
 enum BlockWidget {
     /// A drawn bullet, numeral or checkbox in the gutter of a list line.
     case list(glyph: ListGlyph, indent: CGFloat, fontSize: CGFloat)
-    /// The hairline under an H1 or H2.
-    case headingRule(level: Int)
+    /// A compact, level-coloured indicator beside a heading.
+    case headingAccent(level: Int)
     case thematicBreak
     case blockMath(NSImage)
     case image(NSImage)
@@ -243,13 +243,14 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
                 height: contentSize.height + Self.blockInset * 2
             ))
         }
-        // Headings draw a rule below the text and lists draw into the gutter to
-        // the left, both outside the text's own bounds.
+        // Heading accents and list glyphs draw into the gutter to the left.
         switch widget {
-        case .headingRule, .thematicBreak:
+        case .thematicBreak:
             bounds = bounds.union(CGRect(
                 x: 0, y: -8, width: containerWidth, height: bounds.height + 16
             ))
+        case .headingAccent:
+            bounds = bounds.union(CGRect(x: -16, y: 0, width: bounds.width + 16, height: bounds.height))
         case .list:
             bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
         default:
@@ -292,8 +293,8 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         switch widget {
         case .list(let glyph, let indent, let fontSize):
             draw(glyph, indent: indent, fontSize: fontSize, at: point, in: context)
-        case .headingRule(let level):
-            drawHeadingRule(level: level, at: point, in: context)
+        case .headingAccent(let level):
+            drawHeadingAccent(level: level, at: point, in: context)
         case .thematicBreak:
             drawThematicBreak(at: point, in: context)
         default:
@@ -455,14 +456,19 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         }
     }
 
-    private func drawHeadingRule(level: Int, at point: CGPoint, in context: CGContext) {
-        guard level <= 2, let line = textLineFragments.last else { return }
-        let y = (point.y + line.typographicBounds.maxY + 6).rounded() + 0.5
-        context.setStrokeColor(NSColor.separatorColor.cgColor)
-        context.setLineWidth(1)
-        context.move(to: CGPoint(x: point.x, y: y))
-        context.addLine(to: CGPoint(x: point.x + containerWidth, y: y))
-        context.strokePath()
+    private func drawHeadingAccent(level: Int, at point: CGPoint, in context: CGContext) {
+        guard let line = textLineFragments.first else { return }
+        let lineBounds = line.typographicBounds
+        let height = max(8, lineBounds.height - 8)
+        let rect = CGRect(
+            x: point.x - 12,
+            y: point.y + lineBounds.midY - height / 2,
+            width: 3,
+            height: height
+        )
+        context.setFillColor(Theme.headingAccentNSColor(level).cgColor)
+        context.addPath(CGPath(roundedRect: rect, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
+        context.fillPath()
     }
 
     private func drawThematicBreak(at point: CGPoint, in context: CGContext) {

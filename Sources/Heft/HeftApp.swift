@@ -19,6 +19,13 @@ struct HeftApp: App {
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1500, height: 950)
         .commands { HeftCommands(model: model) }
+
+        Window("Presentation", id: "presentation") {
+            PresentationView()
+                .environmentObject(model)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1280, height: 720)
     }
 }
 
@@ -51,6 +58,7 @@ struct HeftCommands: Commands {
             .keyboardShortcut("s", modifiers: [.control, .command])
             Toggle("Show Calendar", isOn: $model.isCalendarVisible)
                 .keyboardShortcut("d", modifiers: [.command, .shift])
+            Toggle("Colorful Formatting", isOn: $model.isColorfulFormattingEnabled)
             Toggle("Show Backlinks", isOn: $model.isInspectorVisible)
                 .keyboardShortcut("b", modifiers: [.command, .option])
         }

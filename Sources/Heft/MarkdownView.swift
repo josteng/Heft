@@ -16,6 +16,25 @@ extension EnvironmentValues {
         get { self[MarkdownSelectableKey.self] }
         set { self[MarkdownSelectableKey.self] = newValue }
     }
+
+    var markdownFontScale: CGFloat {
+        get { self[MarkdownFontScaleKey.self] }
+        set { self[MarkdownFontScaleKey.self] = newValue }
+    }
+}
+
+private struct MarkdownFontScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+private enum HeadingBaselineAlignment: AlignmentID {
+    static func defaultValue(in dimensions: ViewDimensions) -> CGFloat {
+        dimensions[.firstTextBaseline]
+    }
+}
+
+private extension VerticalAlignment {
+    static let headingBaseline = VerticalAlignment(HeadingBaselineAlignment.self)
 }
 
 private extension View {
@@ -46,22 +65,40 @@ private struct BlockView: View {
     let block: MDBlock
     let context: RenderContext
     let embedDepth: Int
+    @Environment(\.markdownFontScale) private var fontScale
 
     var body: some View {
         switch block {
         case .heading(let level, let inlines, _):
-            ParagraphView(inlines: inlines, context: context, font: Theme.heading(level), embedDepth: embedDepth)
-                .padding(.top, Theme.headingTopPadding(level))
-                // A rule under H1/H2 gives long notes a scannable structure.
-                .overlay(alignment: .bottom) {
-                    if level <= 2 {
-                        Divider().opacity(0.5).offset(y: 8)
-                    }
+            ParagraphView(
+                inlines: inlines,
+                context: context,
+                font: Theme.heading(level, scale: fontScale),
+                embedDepth: embedDepth
+            )
+            .overlay(alignment: Alignment(horizontal: .leading, vertical: .headingBaseline)) {
+                if context.colorfulFormatting {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Theme.headingAccent(level))
+                        .frame(
+                            width: 3,
+                            height: Theme.headingCapHeight(level, scale: fontScale)
+                        )
+                        .alignmentGuide(.headingBaseline) { dimensions in
+                            dimensions[.bottom]
+                        }
+                        .offset(x: -12)
                 }
-                .padding(.bottom, level <= 2 ? 8 : 0)
+            }
+            .padding(.top, Theme.headingTopPadding(level))
 
         case .paragraph(let inlines):
-            ParagraphView(inlines: inlines, context: context, font: Theme.body, embedDepth: embedDepth)
+            ParagraphView(
+                inlines: inlines,
+                context: context,
+                font: Theme.body(scale: fontScale),
+                embedDepth: embedDepth
+            )
 
         case .codeBlock(let language, let code):
             CodeBlockView(language: language, code: code)
@@ -86,7 +123,7 @@ private struct BlockView: View {
             // Raw HTML is shown as source rather than rendered: a WebView per
             // block would defeat the point of the app being instant.
             Text(raw.trimmingCharacters(in: .whitespacesAndNewlines))
-                .font(Theme.mono)
+                .font(Theme.mono(scale: fontScale))
                 .foregroundStyle(.secondary)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -102,12 +139,14 @@ private struct ParagraphView: View {
     let context: RenderContext
     let font: Font
     let embedDepth: Int
+    @Environment(\.markdownFontScale) private var fontScale
 
     var body: some View {
         PieceStack(
             pieces: InlineText.pieces(inlines, context: context, baseFont: font),
             context: context,
-            embedDepth: embedDepth
+            embedDepth: embedDepth,
+            fontScale: fontScale
         )
     }
 }
@@ -123,6 +162,7 @@ private struct PieceStack: View {
     /// Body paragraphs claim the full measure; table cells must not, or every
     /// column stretches and the row grows far beyond its content.
     var fillWidth: Bool = true
+    var fontScale: CGFloat = 1
 
     @Environment(\.markdownTextSelectable) private var isSelectable
 
@@ -132,7 +172,7 @@ private struct PieceStack: View {
                 switch piece {
                 case .text(let runs):
                     Self.concatenated(runs)
-                        .lineSpacing(Theme.lineSpacing)
+                        .lineSpacing(Theme.lineSpacing * fontScale)
                         .markdownSelectable(isSelectable)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
@@ -234,7 +274,12 @@ private struct TransclusionView: View {
                 let parsed = MarkdownModel.parse(source)
                 MarkdownView(
                     blocks: parsed.blocks,
-                    context: RenderContext(index: context.index, current: ref, vaultRoot: context.vaultRoot),
+                    context: RenderContext(
+                        index: context.index,
+                        current: ref,
+                        vaultRoot: context.vaultRoot,
+                        colorfulFormatting: context.colorfulFormatting
+                    ),
                     embedDepth: embedDepth + 1
                 )
             } else {
@@ -256,13 +301,14 @@ private struct CodeBlockView: View {
     let language: String?
     let code: String
     @State private var didCopy = false
+    @Environment(\.markdownFontScale) private var fontScale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 if let language {
                     Text(language.uppercased())
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 10 * fontScale, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -273,7 +319,7 @@ private struct CodeBlockView: View {
                     Task { try? await Task.sleep(for: .seconds(1.5)); didCopy = false }
                 } label: {
                     Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 10))
+                        .font(.system(size: 10 * fontScale))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -285,7 +331,7 @@ private struct CodeBlockView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
-                    .font(Theme.mono)
+                    .font(Theme.mono(scale: fontScale))
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
@@ -322,12 +368,13 @@ private struct CalloutView: View {
     let blocks: [MDBlock]
     let context: RenderContext
     let embedDepth: Int
+    @Environment(\.markdownFontScale) private var fontScale
 
     var body: some View {
         let tint = Theme.calloutTint(kind)
         VStack(alignment: .leading, spacing: 8) {
             Label(title, systemImage: kind.symbol)
-                .font(.system(size: Theme.bodySize, weight: .semibold))
+                .font(.system(size: Theme.bodySize * fontScale, weight: .semibold))
                 .foregroundStyle(tint)
             if !blocks.isEmpty {
                 MarkdownView(blocks: blocks, context: context, embedDepth: embedDepth)
@@ -351,6 +398,7 @@ private struct ListView: View {
     let items: [MDListItem]
     let context: RenderContext
     let embedDepth: Int
+    @Environment(\.markdownFontScale) private var fontScale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -372,14 +420,14 @@ private struct ListView: View {
         if let checked = item.checked {
             Image(systemName: checked ? "checkmark.square.fill" : "square")
                 .foregroundStyle(checked ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
-                .font(.system(size: Theme.bodySize))
+                .font(.system(size: Theme.bodySize * fontScale))
         } else if ordered {
             Text("\(start + offset).")
-                .font(Theme.body.monospacedDigit())
+                .font(Theme.body(scale: fontScale).monospacedDigit())
                 .foregroundStyle(.secondary)
         } else {
             Text("•")
-                .font(Theme.body)
+                .font(Theme.body(scale: fontScale))
                 .foregroundStyle(.secondary)
         }
     }
@@ -392,6 +440,7 @@ private struct TableView: View {
     let rows: [[[MDInline]]]
     let alignments: [MDColumnAlignment]
     let context: RenderContext
+    @Environment(\.markdownFontScale) private var fontScale
 
     var body: some View {
         // Tables are the one block that legitimately exceeds the measure, so
@@ -420,12 +469,17 @@ private struct TableView: View {
     private func cellView(_ cell: [MDInline], index: Int, bold: Bool) -> some View {
         PieceStack(
             pieces: InlineText.pieces(
-                cell, context: context, baseFont: bold ? Theme.body.bold() : Theme.body
+                cell,
+                context: context,
+                baseFont: bold ? Theme.body(scale: fontScale).bold() : Theme.body(scale: fontScale),
+                mathPointSize: Theme.bodySize * fontScale,
+                fontScale: fontScale
             ),
             context: context,
             embedDepth: 0,
             spacing: 6,
-            fillWidth: false
+            fillWidth: false,
+            fontScale: fontScale
         )
         .frame(alignment: alignment(index))
     }

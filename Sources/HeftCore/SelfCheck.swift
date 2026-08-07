@@ -145,6 +145,19 @@ public enum SelfCheck {
         expect(parsed.source(ofBlock: 2, in: blockDoc) ?? "", "- item one", "list item 1 is its own unit")
         expect(parsed.source(ofBlock: 3, in: blockDoc) ?? "", "- item two", "list item 2 is its own unit")
 
+        // MARK: Presentation slides
+        let slideBlocks = MarkdownModel.parse("# One\n\n---\n\n## Two\n\n---\n\nThree").blocks
+        let slides = PresentationDeck.slides(from: slideBlocks)
+        expectTrue(slides.count == 3, "thematic breaks split presentation slides")
+        expectTrue(slides.allSatisfy { !$0.contains(where: {
+            if case .thematicBreak = $0 { true } else { false }
+        }) }, "slide separators are not rendered")
+        let fencedSlides = PresentationDeck.slides(
+            from: MarkdownModel.parse("# Code\n\n```md\n---\n```").blocks
+        )
+        expectTrue(fencedSlides.count == 1, "thematic break inside code does not split slides")
+        expectTrue(PresentationDeck.slides(from: []).count == 1, "empty note still has one slide")
+
         // Multi-line `$$…$$` is one paragraph split by soft breaks, so it has
         // to be detected at paragraph level or it renders as raw source.
         let mathDoc = "Before.\n\n$$\nE = mc^2\n$$\n\nAfter."

@@ -10,6 +10,7 @@ struct RenderContext {
     let vaultRoot: URL?
     /// Mirrors the vault's Obsidian setting; see `ObsidianSettings`.
     var strictLineBreaks: Bool = false
+    var colorfulFormatting: Bool = false
 
     func resolve(_ link: WikiLink) -> NoteRef? { index.resolve(link, from: current) }
 
@@ -88,7 +89,8 @@ enum InlineText {
         _ inlines: [MDInline],
         context: RenderContext,
         baseFont: Font = Theme.body,
-        mathPointSize: CGFloat = Theme.bodySize
+        mathPointSize: CGFloat = Theme.bodySize,
+        fontScale: CGFloat = 1
     ) -> [ParagraphPiece] {
         var pieces: [ParagraphPiece] = []
         var runs: [InlineRun] = []
@@ -112,7 +114,9 @@ enum InlineText {
             for inline in list {
                 switch inline {
                 case .text(let s):
-                    buffer += styled(s, style, baseFont)
+                    buffer += styled(
+                        s, style, baseFont, colorfulFormatting: context.colorfulFormatting
+                    )
 
                 case .emphasis(let c):
                     append(c, style.with(italic: true))
@@ -125,7 +129,7 @@ enum InlineText {
 
                 case .code(let s):
                     var run = AttributedString(s)
-                    run.font = Theme.mono
+                    run.font = Theme.mono(scale: fontScale)
                     run.backgroundColor = Theme.codeBackground
                     if let link = style.link { run.link = link }
                     buffer += run
@@ -150,7 +154,12 @@ enum InlineText {
                         flush()
                         pieces.append(.image(url: url, width: nil, height: nil, alt: alt))
                     } else {
-                        buffer += styled(alt.isEmpty ? "🖼︎" : alt, style, baseFont)
+                        buffer += styled(
+                            alt.isEmpty ? "🖼︎" : alt,
+                            style,
+                            baseFont,
+                            colorfulFormatting: context.colorfulFormatting
+                        )
                     }
 
                 case .embed(let link):
@@ -167,7 +176,12 @@ enum InlineText {
                     guard let rendered else {
                         // Unparseable LaTeX (often just mid-typing): show the
                         // source rather than dropping the content.
-                        buffer += styled(display ? "$$\(latex)$$" : "$\(latex)$", style.with(highlight: false), Theme.mono)
+                        buffer += styled(
+                            display ? "$$\(latex)$$" : "$\(latex)$",
+                            style.with(highlight: false),
+                            Theme.mono(scale: fontScale),
+                            colorfulFormatting: context.colorfulFormatting
+                        )
                         continue
                     }
                     if display {
@@ -250,7 +264,12 @@ enum InlineText {
         }
     }
 
-    private static func styled(_ string: String, _ style: Style, _ baseFont: Font) -> AttributedString {
+    private static func styled(
+        _ string: String,
+        _ style: Style,
+        _ baseFont: Font,
+        colorfulFormatting: Bool
+    ) -> AttributedString {
         var run = AttributedString(string)
         var font = baseFont
         if style.bold { font = font.bold() }
@@ -258,7 +277,13 @@ enum InlineText {
         run.font = font
         if style.strike { run.strikethroughStyle = .single }
         if style.highlight { run.backgroundColor = Theme.highlightBackground }
-        if let color = style.color { run.foregroundColor = color }
+        if let color = style.color {
+            run.foregroundColor = color
+        } else if colorfulFormatting, style.bold {
+            run.foregroundColor = Theme.strongColor
+        } else if colorfulFormatting, style.italic {
+            run.foregroundColor = Theme.emphasisColor
+        }
         if let link = style.link { run.link = link }
         return run
     }

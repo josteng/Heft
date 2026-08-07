@@ -301,8 +301,8 @@ enum LiveStyler {
                 ),
                 .paragraphStyle: heading,
             ], range: text.lineRange(for: range))
-            if drawsWidgets, level <= 2 {
-                layout.blocks[text.lineRange(for: range).location] = .headingRule(level: level)
+            if drawsWidgets, context.colorfulFormatting {
+                layout.blocks[text.lineRange(for: range).location] = .headingAccent(level: level)
             }
 
         case .blockQuote:
@@ -352,8 +352,14 @@ enum LiveStyler {
 
         case .bold:
             addTrait(.boldFontMask, to: storage, range: range, base: base)
+            if context.colorfulFormatting {
+                storage.addAttribute(.foregroundColor, value: NSColor.systemRed, range: range)
+            }
         case .italic:
             addTrait(.italicFontMask, to: storage, range: range, base: base)
+            if context.colorfulFormatting {
+                storage.addAttribute(.foregroundColor, value: NSColor.systemOrange, range: range)
+            }
         case .strikethrough:
             storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
         case .highlight:

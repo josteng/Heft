@@ -83,7 +83,7 @@ struct LiveTextEditor: NSViewRepresentable {
         // after the first restyle and is rebuilt whenever the vault changes on
         // disk. Without this an embed styled before the index arrived stays an
         // unresolved orange filename instead of becoming a picture.
-        let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")"
+        let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/\(context.colorfulFormatting)"
         if nsContext.coordinator.indexFingerprint != fingerprint {
             nsContext.coordinator.indexFingerprint = fingerprint
             nsContext.coordinator.restyle(textView)

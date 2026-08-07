@@ -118,7 +118,7 @@ enum HeftMain {
         for offset in layout.blocks.keys.sorted() {
             let described: String = switch layout.blocks[offset]! {
             case .list(let glyph, let indent, _): "list \(glyph) indent \(indent)"
-            case .headingRule(let level): "heading rule h\(level)"
+            case .headingAccent(let level): "heading accent h\(level)"
             case .thematicBreak: "thematic break"
             case .blockMath(let image): "block math \(size(image.size))"
             case .image(let image): "image \(size(image.size))"

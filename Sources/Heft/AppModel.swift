@@ -61,6 +61,14 @@ final class AppModel: ObservableObject {
     @Published var isInspectorVisible = true
     @Published var isQuickOpenPresented = false
     @Published var isCommandPalettePresented = false
+    @Published var isPresentationPresented = false
+    @Published var isColorfulFormattingEnabled = false {
+        didSet {
+            UserDefaults.standard.set(
+                isColorfulFormattingEnabled, forKey: Self.colorfulFormattingKey
+            )
+        }
+    }
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
@@ -69,12 +77,14 @@ final class AppModel: ObservableObject {
     private var saveTask: Task<Void, Never>?
     private var lastKnownModification: Date?
     private static let vaultPathKey = "dev.stenglein.Heft.vaultPath"
+    private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
 
     var dailyNotes: DailyNotes? {
         vaultRoot.map { DailyNotes(vaultRoot: $0, settings: settings) }
     }
 
     init() {
+        isColorfulFormattingEnabled = UserDefaults.standard.bool(forKey: Self.colorfulFormattingKey)
         // `--vault <path>` and `--open <relative-path>` let a launch go
         // straight to a known state, which is how the app gets driven during
         // development without clicking through it.

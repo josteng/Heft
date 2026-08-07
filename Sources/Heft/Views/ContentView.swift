@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     var body: some View {
         NavigationSplitView(columnVisibility: $model.columnVisibility) {
             SidebarView()
@@ -35,6 +36,9 @@ struct ContentView: View {
         .toolbar { toolbarContent }
         .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
         .sheet(isPresented: $model.isCommandPalettePresented) { CommandPaletteView() }
+        .onChange(of: model.isPresentationPresented) { _, isPresented in
+            if isPresented { openWindow(id: "presentation") }
+        }
         // Wikilinks in the rendered preview come back through this handler;
         // anything not addressed to Heft falls through to the browser.
         .environment(\.openURL, OpenURLAction { url in
@@ -85,7 +89,8 @@ struct EditorPane: View {
     private var context: RenderContext {
         RenderContext(
             index: model.index, current: model.current, vaultRoot: model.vaultRoot,
-            strictLineBreaks: model.settings.strictLineBreaks
+            strictLineBreaks: model.settings.strictLineBreaks,
+            colorfulFormatting: model.isColorfulFormattingEnabled
         )
     }
 

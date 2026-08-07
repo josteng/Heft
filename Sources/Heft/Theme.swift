@@ -17,15 +17,30 @@ enum Theme {
     static let bodySize: CGFloat = 15
     static let lineSpacing: CGFloat = 5.5
 
-    static func heading(_ level: Int) -> Font {
+    static func headingPointSize(_ level: Int) -> CGFloat {
         switch level {
-        case 1: .system(size: 28, weight: .bold, design: .default)
-        case 2: .system(size: 22, weight: .semibold)
-        case 3: .system(size: 18, weight: .semibold)
-        case 4: .system(size: 16, weight: .semibold)
-        case 5: .system(size: 15, weight: .semibold)
-        default: .system(size: 14, weight: .semibold)
+        case 1: 28
+        case 2: 22
+        case 3: 18
+        case 4: 16
+        case 5: 15
+        default: 14
         }
+    }
+
+    static func heading(_ level: Int, scale: CGFloat = 1) -> Font {
+        .system(
+            size: headingPointSize(level) * scale,
+            weight: level == 1 ? .bold : .semibold,
+            design: .default
+        )
+    }
+
+    static func headingCapHeight(_ level: Int, scale: CGFloat = 1) -> CGFloat {
+        NSFont.systemFont(
+            ofSize: headingPointSize(level) * scale,
+            weight: level == 1 ? .bold : .semibold
+        ).capHeight
     }
 
     static func headingTopPadding(_ level: Int) -> CGFloat {
@@ -38,6 +53,10 @@ enum Theme {
 
     static let body = Font.system(size: bodySize)
     static let mono = Font.system(size: bodySize - 1.5, design: .monospaced)
+    static func body(scale: CGFloat) -> Font { .system(size: bodySize * scale) }
+    static func mono(scale: CGFloat) -> Font {
+        .system(size: (bodySize - 1.5) * scale, design: .monospaced)
+    }
     static let editorFont = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     /// Live mode reads as prose, so it uses a proportional face; raw source
     /// stays monospaced.
@@ -53,6 +72,30 @@ enum Theme {
     static let tagColor = Color.purple
     static let tagBackground = Color.purple.opacity(0.14)
     static let highlightBackground = Color.yellow.opacity(0.30)
+    static let emphasisColor = Color.orange
+    static let strongColor = Color.red
+
+    static func headingAccent(_ level: Int) -> Color {
+        switch level {
+        case 1: .red
+        case 2: .orange
+        case 3: .yellow
+        case 4: .green
+        case 5: .blue
+        default: .purple
+        }
+    }
+
+    static func headingAccentNSColor(_ level: Int) -> NSColor {
+        switch level {
+        case 1: .systemRed
+        case 2: .systemOrange
+        case 3: .systemYellow
+        case 4: .systemGreen
+        case 5: .systemBlue
+        default: .systemPurple
+        }
+    }
 
     /// Callout tints live here rather than in the portable core, which stays
     /// free of any UI framework.
