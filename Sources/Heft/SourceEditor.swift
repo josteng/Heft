@@ -576,6 +576,11 @@ enum MarkdownStyler {
         guard range.location >= 0, NSMaxRange(range) <= storage.length else { return }
 
         switch decoration.style {
+        // Raw source mode styles pipes and image syntax as plain text; only the
+        // live surface draws them as grids and pictures.
+        case .table, .image:
+            break
+
         case .frontmatter:
             storage.addAttributes([
                 .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),

@@ -13,6 +13,11 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case heading(level: Int)
         case blockQuote
         case listMarker(kind: ListMarkerKind, depth: Int)
+        /// A whole GFM table, header and delimiter row included. Carried as one
+        /// decoration because the editor draws the grid itself rather than
+        /// styling the pipe characters in place.
+        case table(TableLayout)
+        case image(source: String, alt: String)
         case bold
         case italic
         case strikethrough
@@ -35,6 +40,24 @@ public struct MarkdownDecoration: Sendable, Equatable {
         self.syntax = syntax
         self.style = style
     }
+}
+
+/// A GFM table reduced to raw cell text plus column alignment.
+///
+/// Cells stay as markdown source: the editor runs the decorator over each one
+/// again when it draws, so `**bold**` and `[[links]]` inside a cell get the
+/// same treatment they do in prose.
+public struct TableLayout: Sendable, Hashable {
+    /// Row 0 is the header.
+    public let rows: [[String]]
+    public let alignments: [MDColumnAlignment]
+
+    public init(rows: [[String]], alignments: [MDColumnAlignment]) {
+        self.rows = rows
+        self.alignments = alignments
+    }
+
+    public var columnCount: Int { rows.map(\.count).max() ?? 0 }
 }
 
 public enum ListMarkerKind: Sendable, Equatable {
@@ -76,6 +99,26 @@ public enum LiveDecorator {
             result.append(MarkdownDecoration(range: match, style: .codeBlock(language: nil)))
             protected.append(match)
         }
+
+        // Tables claim their lines whole: the editor draws a grid rather than
+        // styling pipes, so nothing inside may be matched independently.
+        for match in matches(tablePattern, text, excluding: protected) {
+            guard let layout = parseTable(text.substring(with: match)) else { continue }
+            result.append(MarkdownDecoration(range: match, style: .table(layout)))
+            protected.append(match)
+        }
+
+        // Block constructs are found *before* any inline span is protected.
+        // Protection rejects a candidate that merely intersects a protected
+        // range, so computing inline spans first would delete the heading on
+        // `# The $h(t)$ model` (and on any heading holding code or math)
+        // instead of just nesting inside it.
+        let blocks = blockDecorations(text, protected: protected)
+        result.append(contentsOf: blocks)
+
+        // Marker characters themselves are off limits to inline matching, so a
+        // task's `[ ]` can never be read as a link label.
+        protected.append(contentsOf: blocks.flatMap(\.syntax))
 
         // Block math before inline, so `$$x$$` is not read as two empty `$$`.
         for match in matches(#"\$\$[\s\S]+?\$\$"#, text, excluding: protected) {
@@ -121,9 +164,72 @@ public enum LiveDecorator {
             protected.append(match)
         }
 
-        result.append(contentsOf: blockDecorations(text, protected: protected))
+        // Block constructs were already collected above, before inline spans
+        // were protected; collecting them again here would emit every heading
+        // and list marker twice.
         result.append(contentsOf: inlineDecorations(text, protected: protected))
         return result
+    }
+
+    // MARK: - Tables
+
+    /// A pipe row, a delimiter row carrying at least one dash, then any number
+    /// of further pipe rows.
+    private static let tablePattern = #"""
+    (?m)^[ \t]*\|[^\n]*\n[ \t]*\|(?=[^\n]*-)[ \t:\-|]+\|?[ \t]*(?:\n[ \t]*\|[^\n]*)*
+    """#
+
+    /// Splits a matched table into cells. Returns nil when the delimiter row
+    /// does not line up, which means it was not a table after all.
+    static func parseTable(_ source: String) -> TableLayout? {
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0) }
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard lines.count >= 2 else { return nil }
+
+        let delimiterCells = splitRow(lines[1])
+        guard !delimiterCells.isEmpty,
+              delimiterCells.allSatisfy({ $0.range(of: #"^:?-+:?$"#, options: .regularExpression) != nil })
+        else { return nil }
+
+        let alignments: [MDColumnAlignment] = delimiterCells.map { cell in
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
+            case (true, true): .center
+            case (false, true): .trailing
+            default: .leading
+            }
+        }
+
+        var rows = [splitRow(lines[0])]
+        rows.append(contentsOf: lines.dropFirst(2).map(splitRow))
+        return TableLayout(rows: rows, alignments: alignments)
+    }
+
+    /// `| a | b |` to `["a", "b"]`. Obsidian writes `\|` for a literal pipe
+    /// inside a cell, so that escape must survive the split.
+    private static func splitRow(_ line: String) -> [String] {
+        var cells: [String] = []
+        var current = ""
+        var escaped = false
+        for character in line.trimmingCharacters(in: .whitespaces) {
+            if escaped {
+                current.append(character == "|" ? "|" : character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        // A well-formed row is bracketed by pipes, which yields an empty cell
+        // at each end.
+        if cells.first?.isEmpty == true { cells.removeFirst() }
+        if cells.last?.isEmpty == true { cells.removeLast() }
+        return cells
     }
 
     /// True when nothing but whitespace shares the construct's first and last lines.
@@ -197,8 +303,9 @@ public enum LiveDecorator {
 
     // MARK: - Inline constructs
 
-    private static func inlineDecorations(_ text: NSString, protected: [NSRange]) -> [MarkdownDecoration] {
+    private static func inlineDecorations(_ text: NSString, protected initial: [NSRange]) -> [MarkdownDecoration] {
         var result: [MarkdownDecoration] = []
+        var protected = initial
 
         func wrapped(_ pattern: String, _ markerLength: Int, _ style: MarkdownDecoration.Style) {
             for match in matches(pattern, text, excluding: protected) {
@@ -242,6 +349,20 @@ public enum LiveDecorator {
                 range: match, syntax: syntax,
                 style: .wikiLink(target: link?.target ?? body, isEmbed: isEmbed)
             ))
+            protected.append(match)
+        }
+
+        // Images before links: `![alt](x.png)` contains a valid link match, and
+        // whichever runs first claims the range.
+        for match in matches(#"!\[([^\]\n]*)\]\(([^)\n]+)\)"#, text, excluding: protected) {
+            let raw = text.substring(with: match)
+            guard let close = raw.range(of: "](") else { continue }
+            let alt = String(raw[raw.index(raw.startIndex, offsetBy: 2)..<close.lowerBound])
+            let source = String(raw[close.upperBound...].dropLast())
+            result.append(MarkdownDecoration(
+                range: match, syntax: [match], style: .image(source: source, alt: alt)
+            ))
+            protected.append(match)
         }
 
         for match in matches(#"\[([^\]\n]*)\]\(([^)\n]+)\)"#, text, excluding: protected) {

@@ -211,6 +211,45 @@ public enum SelfCheck {
             if case .inlineMath = $0 { true } else { false }
         }), "no math inside a fence")
 
+        // A heading keeps its decoration when it also holds an inline span.
+        // Protection rejects any candidate that *intersects* a protected range,
+        // so finding inline math or code before headings deleted the heading
+        // outright instead of nesting inside it.
+        func headingLevels(_ source: String) -> [Int] {
+            styles(source).compactMap { if case .heading(let level) = $0 { level } else { nil } }
+        }
+        expect("\(headingLevels("# The $h(t)$ model"))", "[1]", "heading survives inline math")
+        expect("\(headingLevels("## Use `swift build`"))", "[2]", "heading survives inline code")
+        expect("\(headingLevels("# A **bold** title"))", "[1]", "heading survives bold")
+        expectTrue(styles("# The $h(t)$ model").contains(.inlineMath("h(t)")),
+                   "inline math inside a heading is still found")
+
+        // Tables are claimed whole, so nothing inside is matched separately.
+        let table = "| A | B |\n|---|--:|\n| 1 | 2 |\n"
+        let tableStyles = styles(table)
+        expectTrue(tableStyles.contains(where: { if case .table = $0 { true } else { false } }),
+                   "decorator finds a table")
+        expectTrue(tableStyles.count == 1, "a table emits exactly one decoration")
+        if case .table(let layout)? = tableStyles.first {
+            expect("\(layout.rows)", #"[["A", "B"], ["1", "2"]]"#, "table rows split on pipes")
+            expect("\(layout.alignments.map { "\($0)" })", #"["leading", "trailing"]"#, "delimiter row sets alignment")
+        }
+        // Two pipe lines with no delimiter row are not a table.
+        expectTrue(!styles("| A | B |\n| 1 | 2 |\n").contains(where: {
+            if case .table = $0 { true } else { false }
+        }), "pipes without a delimiter row are not a table")
+        // Obsidian escapes a literal pipe inside a cell.
+        if case .table(let escaped)? = styles("| A |\n|---|\n| x \\| y |\n").first {
+            expect("\(escaped.rows.last ?? [])", #"["x | y"]"#, "escaped pipe stays inside its cell")
+        }
+
+        // `![alt](x.png)` must be an image, not a link with a stray `!`.
+        expectTrue(styles("![alt](x.png)").contains(.image(source: "x.png", alt: "alt")),
+                   "markdown image detected")
+        expectTrue(!styles("![alt](x.png)").contains(where: {
+            if case .link = $0 { true } else { false }
+        }), "an image is not also matched as a link")
+
         // Every syntax range must fall inside its own decoration, or the editor
         // would hide characters belonging to unrelated text.
         let sample = "# H\n**b** *i* `c` [[L|A]] [t](u) ==h== $x$\n> quote\n- [ ] task\n"

@@ -91,11 +91,16 @@ struct EditorPane: View {
 
             // One surface. `--source-mode` exposes the raw text view as a
             // debugging escape hatch, not as a user-facing mode.
-            if model.useLegacyEditor {
-                editor
-            } else {
-                BlockEditorView()
-            }
+            LiveTextEditor(
+                text: $model.text,
+                generation: model.documentGeneration,
+                context: context,
+                onAttachment: handleAttachment,
+                onFollowLink: { url in
+                    if !model.handle(url: url) { NSWorkspace.shared.open(url) }
+                }
+            )
+            .background(Color(nsColor: .textBackgroundColor))
 
             StatusBar()
         }

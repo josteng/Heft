@@ -46,6 +46,17 @@ enum HeftMain {
                 exit(1)
             }
         }
+        // `render <vault> <note>` reports what the live surface would draw for
+        // a note: which widgets, at what size, and how much height each line
+        // reserves. Exists so the editor's rendering can be checked without
+        // launching a window over whatever the user is doing.
+        if arguments.first == "render", arguments.count > 2 {
+            runRenderProbe(
+                vaultPath: arguments[1], note: arguments[2],
+                caret: arguments.count > 3 ? Int(arguments[3]) : nil
+            )
+            return
+        }
         if arguments.first == "files", arguments.count > 1 {
             let root = URL(fileURLWithPath: (arguments[1] as NSString).expandingTildeInPath)
             for item in VaultScanner.scan(root: root).flattened() where !item.isFolder {
@@ -59,6 +70,86 @@ enum HeftMain {
     /// Read-only report over a vault. Exists so indexing and link resolution
     /// can be checked against a real vault without launching the editor, which
     /// autosaves and would risk writing to notes that matter.
+    private static func runRenderProbe(vaultPath: String, note: String, caret: Int?) {
+        let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
+        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        guard let ref = index.notes.first(where: {
+            $0.relativePath == note || $0.name == note
+        }) else {
+            print("no such note: \(note)")
+            exit(1)
+        }
+        let source = (try? String(contentsOf: ref.url, encoding: .utf8)) ?? ""
+        let context = RenderContext(index: index, current: ref, vaultRoot: root)
+
+        let storage = NSTextStorage(string: source)
+        // A caret offset reveals its line, the way clicking into it does.
+        let revealed = caret.map {
+            (source as NSString).lineRange(for: NSRange(location: min($0, storage.length), length: 0))
+        } ?? NSRange(location: NSNotFound, length: 0)
+        let layout = LiveStyler.apply(
+            to: storage, revealedLine: revealed, context: context
+        )
+        if let caret { print("caret \(caret) reveals \(revealed)") }
+
+        // Cost of one restyle. The editor does this on every caret move, so a
+        // slow one is felt directly as click latency.
+        var samples: [Double] = []
+        for _ in 0..<12 {
+            let probe = NSTextStorage(string: source)
+            let start = Date()
+            _ = LiveStyler.apply(to: probe, revealedLine: revealed, context: context)
+            samples.append(Date().timeIntervalSince(start) * 1000)
+        }
+        samples.sort()
+        print("chars \((source as NSString).length), restyle median \(fmt(CGFloat(samples[6])))ms, worst \(fmt(CGFloat(samples.last!)))ms")
+
+        let text = source as NSString
+        func line(at offset: Int) -> Int {
+            var number = 1
+            text.enumerateSubstrings(
+                in: NSRange(location: 0, length: offset), options: [.byLines, .substringNotRequired]
+            ) { _, _, _, _ in number += 1 }
+            return number
+        }
+
+        print("decorations: \(LiveDecorator.decorations(in: source).count)")
+        print("block widgets: \(layout.blocks.count)")
+        for offset in layout.blocks.keys.sorted() {
+            let described: String = switch layout.blocks[offset]! {
+            case .list(let glyph, let indent, _): "list \(glyph) indent \(indent)"
+            case .headingRule(let level): "heading rule h\(level)"
+            case .thematicBreak: "thematic break"
+            case .blockMath(let image): "block math \(size(image.size))"
+            case .image(let image): "image \(size(image.size))"
+            case .table(let grid):
+                "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
+            }
+            // Reserved height is what the paragraph style actually gives the
+            // line; if it is ~0 the widget has nowhere to draw.
+            let style = storage.attribute(.paragraphStyle, at: offset, effectiveRange: nil)
+            let reserved = (style as? NSParagraphStyle)?.minimumLineHeight ?? 0
+            print("  line \(line(at: offset)): \(described), reserves \(fmt(reserved))pt")
+        }
+
+        print("inline math: \(layout.inlineMath.values.map(\.count).reduce(0, +))")
+        for offset in layout.inlineMath.keys.sorted() {
+            // The gap is bought with kerning on the formula's last character,
+            // so the widest kern on the line is what was actually reserved.
+            var widest: CGFloat = 0
+            storage.enumerateAttribute(.kern, in: text.lineRange(for: NSRange(location: offset, length: 0))) {
+                value, _, _ in widest = max(widest, (value as? CGFloat) ?? 0)
+            }
+            for item in layout.inlineMath[offset]! {
+                print("  line \(line(at: offset)): \(size(item.image.size)), gap \(fmt(widest))pt")
+            }
+        }
+        exit(0)
+    }
+
+    private static func size(_ s: CGSize) -> String { "\(fmt(s.width))x\(fmt(s.height))" }
+    private static func fmt(_ value: CGFloat) -> String { String(format: "%.1f", value) }
+
     private static func runStats(vaultPath: String) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
         guard FileManager.default.fileExists(atPath: root.path) else {

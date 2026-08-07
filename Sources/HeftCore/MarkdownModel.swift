@@ -34,7 +34,7 @@ public struct MDListItem: Sendable {
     }
 }
 
-public enum MDColumnAlignment: Sendable { case leading, center, trailing }
+public enum MDColumnAlignment: Sendable, Hashable { case leading, center, trailing }
 
 /// Obsidian callouts: `> [!note] Title`.
 public enum CalloutKind: String, Sendable {
