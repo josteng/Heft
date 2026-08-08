@@ -646,6 +646,42 @@ public enum SelfCheck {
         ).reveals(heading!), "a heading reveals from anywhere on its line")
         expectTrue(!Reveal.none.reveals(heading!), "nothing reveals without a caret")
 
+        func listMarker(in source: String) -> MarkdownDecoration {
+            LiveDecorator.decorations(in: source).first {
+                if case .listMarker = $0.style { true } else { false }
+            }!
+        }
+
+        // List source comes back only when the caret touches the semantic
+        // marker. The trailing separator stays hidden at the content edge, so
+        // typing an item or continuing a list does not make its marker jump.
+        let bulletSource = "- item"
+        let bulletMarker = listMarker(in: bulletSource)
+        expectTrue(Reveal(
+            selection: NSRange(location: 1, length: 0), in: bulletSource as NSString
+        ).reveals(bulletMarker), "a caret beside the bullet reveals its source")
+        expectTrue(!Reveal(
+            selection: NSRange(location: 2, length: 0), in: bulletSource as NSString
+        ).reveals(bulletMarker), "the bullet stays rendered at the content edge")
+
+        let orderedSource = "12. item"
+        let orderedMarker = listMarker(in: orderedSource)
+        expectTrue(Reveal(
+            selection: NSRange(location: 3, length: 0), in: orderedSource as NSString
+        ).reveals(orderedMarker), "a caret beside an ordered marker reveals its source")
+        expectTrue(!Reveal(
+            selection: NSRange(location: 4, length: 0), in: orderedSource as NSString
+        ).reveals(orderedMarker), "an ordered marker stays rendered at the content edge")
+
+        let taskSource = "- [ ] item"
+        let taskMarker = listMarker(in: taskSource)
+        expectTrue(Reveal(
+            selection: NSRange(location: 5, length: 0), in: taskSource as NSString
+        ).reveals(taskMarker), "a caret beside a task marker reveals its source")
+        expectTrue(!Reveal(
+            selection: NSRange(location: 6, length: 0), in: taskSource as NSString
+        ).reveals(taskMarker), "a task marker stays rendered at the content edge")
+
         // Code must shield its contents from inline styling.
         let fenced = "```\n**not bold**\n```"
         expectTrue(styles(fenced).contains(where: { if case .codeBlock = $0 { true } else { false } }),

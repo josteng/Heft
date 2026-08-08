@@ -63,7 +63,7 @@ enum LiveStyler {
         // a restyle is needed at all.
         layout.revealableSpans = decorations
             .filter { !Reveal.revealsWithItsLine($0.style) }
-            .map(\.range)
+            .map { $0.revealRange ?? $0.range }
 
         for decoration in decorations {
             style(
@@ -97,13 +97,18 @@ enum LiveStyler {
         return layout
     }
 
-    /// Empty TextKit 2 paragraphs otherwise use their full line-spacing box as
-    /// the insertion point. Moving that spacing after the paragraph preserves
-    /// the next baseline while leaving the caret at the font's natural height.
+    /// AppKit considers every newline a paragraph boundary, while Markdown
+    /// considers a single newline a soft break. Keep ordinary source lines on
+    /// one continuous baseline rhythm; the empty source line in `\n\n` is what
+    /// supplies the visible paragraph separation.
+    ///
+    /// Empty TextKit 2 paragraphs otherwise include line spacing in the caret.
+    /// Moving that spacing after the empty paragraph preserves the next
+    /// baseline while leaving its insertion point at the font's natural height.
     static func bodyParagraphStyle(compactEmptyLine: Bool = false) -> NSMutableParagraphStyle {
         let body = NSMutableParagraphStyle()
         body.lineSpacing = compactEmptyLine ? 0 : Theme.lineSpacing
-        body.paragraphSpacing = 9 + (compactEmptyLine ? Theme.lineSpacing : 0)
+        body.paragraphSpacing = compactEmptyLine ? Theme.lineSpacing : 0
         return body
     }
 
@@ -459,9 +464,17 @@ enum LiveStyler {
             let leadingLength = leading.utf16.count
             let visibleMarker = String(marker.dropFirst(leadingLength))
             let visibleMarkerWidth = markerWidth(visibleMarker, font: base)
+            let glyphOffset = listGlyphOffset(
+                marker: visibleMarker, kind: kind, font: base
+            )
             let list = NSMutableParagraphStyle()
             list.lineSpacing = Theme.lineSpacing
             list.paragraphSpacing = 2
+            // With no item text, every character in the line is collapsed
+            // marker syntax. TextKit would then shrink the fragment to the
+            // hairline font, clipping the painted glyph and leaving almost no
+            // row to click. Reserve the same height as an ordinary body line.
+            list.minimumLineHeight = ceil(base.ascender - base.descender + base.leading)
             list.headIndent = indent
             // Collapsed, the marker takes no width, so the first line starts
             // where the wrapped lines do and the glyph is drawn to its left.
@@ -500,7 +513,7 @@ enum LiveStyler {
                 case .ordered: .ordered(orderedLabel(marker))
                 }
                 layout.blocks[line.location] = .list(
-                    glyph: glyph, indent: indent, fontSize: base.pointSize
+                    glyph: glyph, markerOffset: glyphOffset, fontSize: base.pointSize
                 )
             }
 
@@ -575,6 +588,32 @@ enum LiveStyler {
     /// Width the literal marker occupies once it is visible again.
     private static func markerWidth(_ marker: String, font: NSFont) -> CGFloat {
         NSAttributedString(string: marker, attributes: [.font: font]).size().width
+    }
+
+    /// Centre of the rendered glyph relative to the list item's content edge.
+    /// It is derived from the literal source marker, so revealing `-`, `1.` or
+    /// `[ ]` swaps in place rather than making the marker jump sideways.
+    static func listGlyphOffset(
+        marker: String, kind: ListMarkerKind, font: NSFont
+    ) -> CGFloat {
+        let fullWidth = markerWidth(marker, font: font)
+        switch kind {
+        case .bullet:
+            let token = marker.trimmingCharacters(in: .whitespacesAndNewlines)
+            return -fullWidth + markerWidth(token, font: font) / 2
+        case .ordered:
+            let token = orderedLabel(marker)
+            return -fullWidth + markerWidth(token, font: font) / 2
+        case .task:
+            let source = marker as NSString
+            let box = source.range(of: #"\[[ xX]\]"#, options: .regularExpression)
+            guard box.location != NSNotFound else { return -fullWidth / 2 }
+            let before = source.substring(with: NSRange(location: 0, length: box.location))
+            let token = source.substring(with: box)
+            return -fullWidth
+                + markerWidth(before, font: font)
+                + markerWidth(token, font: font) / 2
+        }
     }
 
     private static func addCodeBlockWidgets(

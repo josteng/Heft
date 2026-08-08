@@ -12,7 +12,7 @@ import HeftCore
 /// inserting attachment characters into the user's document.
 enum BlockWidget {
     /// A drawn bullet, numeral or checkbox in the gutter of a list line.
-    case list(glyph: ListGlyph, indent: CGFloat, fontSize: CGFloat)
+    case list(glyph: ListGlyph, markerOffset: CGFloat, fontSize: CGFloat)
     /// A compact, level-coloured indicator beside a heading.
     case headingAccent(level: Int)
     case codeBlock(edge: CodeBlockEdge, language: String?)
@@ -502,8 +502,8 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         super.draw(at: point, in: context)
 
         switch widget {
-        case .list(let glyph, let indent, let fontSize):
-            draw(glyph, indent: indent, fontSize: fontSize, at: point, in: context)
+        case .list(let glyph, let markerOffset, let fontSize):
+            draw(glyph, markerOffset: markerOffset, fontSize: fontSize, at: point, in: context)
         case .headingAccent(let level):
             drawHeadingAccent(level: level, at: point, in: context)
         case .thematicBreak:
@@ -924,7 +924,8 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     // MARK: Line decoration
 
     private func draw(
-        _ glyph: ListGlyph, indent: CGFloat, fontSize: CGFloat, at point: CGPoint, in context: CGContext
+        _ glyph: ListGlyph, markerOffset: CGFloat, fontSize: CGFloat,
+        at point: CGPoint, in context: CGContext
     ) {
         guard let line = textLineFragments.first else { return }
         let centreY = point.y + line.typographicBounds.midY
@@ -932,13 +933,14 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         // the text's leading edge is the origin and the gutter is behind it.
         // Deriving this from `indent` instead would double-count the indent.
         let textLeft = point.x + line.typographicBounds.minX
+        let markerCentre = textLeft + markerOffset
 
         switch glyph {
         case .bullet:
             let radius: CGFloat = 2.75
             context.setFillColor(NSColor.tertiaryLabelColor.cgColor)
             context.fillEllipse(in: CGRect(
-                x: textLeft - 16 - radius, y: centreY - radius,
+                x: markerCentre - radius, y: centreY - radius,
                 width: radius * 2, height: radius * 2
             ))
 
@@ -950,14 +952,15 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             let size = text.size()
             withAppKitContext(context) {
                 text.draw(at: CGPoint(
-                    x: textLeft - 9 - size.width, y: centreY - size.height / 2
+                    x: markerCentre - size.width / 2, y: centreY - size.height / 2
                 ))
             }
 
         case .checkbox(let checked):
             let side: CGFloat = 13
             let box = CGRect(
-                x: textLeft - 20, y: centreY - side / 2, width: side, height: side
+                x: markerCentre - side / 2, y: centreY - side / 2,
+                width: side, height: side
             )
             let path = CGPath(roundedRect: box, cornerWidth: 3.5, cornerHeight: 3.5, transform: nil)
             if checked {

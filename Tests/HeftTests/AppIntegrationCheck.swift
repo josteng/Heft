@@ -53,6 +53,73 @@ enum AppIntegrationCheck {
             "two hashes receive H2 metrics immediately"
         )
 
+        func paragraphStyle(_ source: String, at location: Int) -> NSParagraphStyle? {
+            let storage = NSTextStorage(string: source)
+            _ = LiveStyler.apply(
+                to: storage,
+                reveal: Reveal.none,
+                context: RenderContext(index: .empty, current: nil, vaultRoot: nil)
+            )
+            return storage.attribute(
+                .paragraphStyle, at: location, effectiveRange: nil
+            ) as? NSParagraphStyle
+        }
+
+        let softLine = paragraphStyle("first\nsecond", at: 0)
+        expect(
+            softLine?.paragraphSpacing == 0 && softLine?.lineSpacing == Theme.lineSpacing,
+            "a soft Markdown newline uses line spacing without a paragraph gap"
+        )
+        let blankSeparator = paragraphStyle("first\n\nsecond", at: 6)
+        expect(
+            blankSeparator?.lineSpacing == 0
+                && blankSeparator?.paragraphSpacing == Theme.lineSpacing,
+            "one empty source line supplies one compact paragraph separator"
+        )
+        let headingSpacing = paragraphStyle("# Heading", at: 0)
+        expect(
+            (headingSpacing?.paragraphSpacingBefore ?? 0) > 0
+                && (headingSpacing?.paragraphSpacing ?? 0) > 0,
+            "heading-specific breathing room remains intact"
+        )
+
+        func listMinimumHeight(_ source: String) -> CGFloat {
+            let storage = NSTextStorage(string: source)
+            let reveal = Reveal(
+                selection: NSRange(location: storage.length, length: 0),
+                in: source as NSString
+            )
+            _ = LiveStyler.apply(
+                to: storage,
+                reveal: reveal,
+                context: RenderContext(index: .empty, current: nil, vaultRoot: nil)
+            )
+            return (storage.attribute(
+                .paragraphStyle, at: 0, effectiveRange: nil
+            ) as? NSParagraphStyle)?.minimumLineHeight ?? 0
+        }
+
+        expect(listMinimumHeight("- ") > 10, "an empty bullet reserves a clickable body line")
+        expect(listMinimumHeight("1. ") > 10, "an empty number reserves a clickable body line")
+        expect(listMinimumHeight("- [ ] ") > 10, "an empty task reserves a clickable body line")
+        expect(
+            HeftTextKit2View.nextListMarker(after: "\t9. ") == "\t10. ",
+            "ordered-list continuation increments and retains its formatting"
+        )
+        expect(
+            HeftTextKit2View.nextListMarker(after: "- [x] ") == "- [x] ",
+            "task-list continuation does not alter its marker"
+        )
+
+        let orderedEditor = HeftTextKit2View(usingTextLayoutManager: true)
+        orderedEditor.string = "9. first"
+        orderedEditor.setSelectedRange(NSRange(location: orderedEditor.string.utf16.count, length: 0))
+        orderedEditor.insertNewline(nil)
+        expect(
+            orderedEditor.string == "9. first\n10. ",
+            "pressing Return inserts the incremented ordered marker"
+        )
+
         let completionEditor = HeftTextKit2View(usingTextLayoutManager: true)
         completionEditor.string = "["
         completionEditor.setSelectedRange(NSRange(location: 1, length: 0))

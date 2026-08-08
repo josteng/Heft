@@ -114,7 +114,8 @@ enum HeftMain {
         print("block widgets: \(layout.blocks.count)")
         for offset in layout.blocks.keys.sorted() {
             let described: String = switch layout.blocks[offset]! {
-            case .list(let glyph, let indent, _): "list \(glyph) indent \(indent)"
+            case .list(let glyph, let markerOffset, _):
+                "list \(glyph) marker offset \(markerOffset)"
             case .headingAccent(let level): "heading accent h\(level)"
             case .codeBlock(let edge, let language):
                 "code block \(edge)\(language.map { " \($0)" } ?? "")"

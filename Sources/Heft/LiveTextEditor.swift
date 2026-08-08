@@ -468,6 +468,39 @@ final class HeftTextKit2View: NSTextView {
     private(set) var isTrackingMouse = false
     var onTrackingEnded: (() -> Void)?
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+
+        let text = string as NSString
+        var location = 0
+        while location < text.length {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            let source = text.substring(with: line)
+            if let marker = Self.listMarker(of: source),
+               marker.range(of: #"\[[ xX]\]"#, options: .regularExpression) != nil {
+                let leading = marker.prefix { $0 == " " || $0 == "\t" }
+                let depth = Self.listDepth(of: leading)
+                let markerLength = marker.utf16.count
+                if let lineRect = rect(forSelection: NSRange(
+                    location: line.location,
+                    length: min(max(1, markerLength), line.length)
+                )) {
+                    let horizontal = taskHitRange(for: marker, depth: depth)
+                    addCursorRect(CGRect(
+                        x: horizontal.lowerBound,
+                        y: lineRect.minY,
+                        width: horizontal.upperBound - horizontal.lowerBound,
+                        height: max(lineRect.height, Theme.liveFont.boundingRectForFont.height)
+                    ), cursor: .pointingHand)
+                }
+            }
+
+            let next = NSMaxRange(line)
+            guard next > location else { break }
+            location = next
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
         dismissLinkCompletion()
         if event.clickCount == 1, toggleTask(at: convert(event.locationInWindow, from: nil)) {
@@ -495,11 +528,10 @@ final class HeftTextKit2View: NSTextView {
             of: #"^[ \t]*([-*+]|\d+[.)])[ \t]+\[([ xX])\]"#, options: .regularExpression
         ) else { return false }
 
-        let leading = source.prefix { $0 == " " || $0 == "\t" }
-        let depth = leading.reduce(0) { $0 + ($1 == "\t" ? 1 : 0) }
-            + (leading.filter { $0 == " " }.count / 2)
-        let indent = LiveStyler.listIndent(depth: depth) + textContainerInset.width
-        guard point.x >= indent - 24, point.x <= indent - 4 else { return false }
+        guard let fullMarker = Self.listMarker(of: source) else { return false }
+        let leading = fullMarker.prefix { $0 == " " || $0 == "\t" }
+        let depth = Self.listDepth(of: leading)
+        guard taskHitRange(for: fullMarker, depth: depth).contains(point.x) else { return false }
 
         // The box is the last three characters of the matched marker.
         let boxStart = line.location + source.distance(from: source.startIndex, to: marker.upperBound) - 3
@@ -511,6 +543,25 @@ final class HeftTextKit2View: NSTextView {
         textStorage?.replaceCharacters(in: box, with: replacement)
         didChangeText()
         return true
+    }
+
+    private static func listDepth<S: StringProtocol>(of leading: S) -> Int {
+        leading.reduce(0) { $0 + ($1 == "\t" ? 1 : 0) }
+            + leading.filter { $0 == " " }.count / 2
+    }
+
+    /// Horizontal click/hover target around the exact checkbox position used
+    /// by the layout fragment. The padding makes the 13pt box forgiving while
+    /// keeping the surrounding text under the normal I-beam cursor.
+    private func taskHitRange(for marker: String, depth: Int) -> ClosedRange<CGFloat> {
+        let leading = marker.prefix { $0 == " " || $0 == "\t" }
+        let visible = String(marker.dropFirst(leading.utf16.count))
+        let centre = textContainerInset.width
+            + LiveStyler.listIndent(depth: depth)
+            + LiveStyler.listGlyphOffset(
+                marker: visible, kind: .task(checked: false), font: Theme.liveFont
+            )
+        return (centre - 10)...(centre + 10)
     }
 
     override func paste(_ sender: Any?) {
@@ -653,7 +704,8 @@ final class HeftTextKit2View: NSTextView {
         let line = text.substring(with: text.lineRange(for: NSRange(location: caret.location, length: 0)))
             .trimmingCharacters(in: .newlines)
 
-        guard let marker = Self.listMarker(of: line) ?? Self.quoteMarker(of: line) else {
+        let listMarker = Self.listMarker(of: line)
+        guard let marker = listMarker ?? Self.quoteMarker(of: line) else {
             super.insertNewline(sender)
             return
         }
@@ -672,7 +724,8 @@ final class HeftTextKit2View: NSTextView {
         }
 
         super.insertNewline(sender)
-        insertText(marker, replacementRange: selectedRange())
+        let continuation = listMarker.map(Self.nextListMarker(after:)) ?? marker
+        insertText(continuation, replacementRange: selectedRange())
     }
 
     override func insertTab(_ sender: Any?) {
@@ -842,5 +895,17 @@ final class HeftTextKit2View: NSTextView {
         return String(line[match])
             .replacingOccurrences(of: "[x]", with: "[ ]")
             .replacingOccurrences(of: "[X]", with: "[ ]")
+    }
+
+    /// Marker for the following list item. Bullets and tasks repeat, while an
+    /// ordered marker advances and retains its indentation, delimiter and
+    /// whitespace (`9. ` becomes `10. ` and `9) ` becomes `10) `).
+    static func nextListMarker(after marker: String) -> String {
+        guard let number = marker.range(
+            of: #"\d+(?=[.)][ \t]+$)"#, options: .regularExpression
+        ), let value = Int(marker[number]), value < Int.max else { return marker }
+        var result = marker
+        result.replaceSubrange(number, with: String(value + 1))
+        return result
     }
 }

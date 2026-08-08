@@ -40,11 +40,20 @@ public struct MarkdownDecoration: Sendable, Equatable {
 
     public let range: NSRange
     public let syntax: [NSRange]
+    /// Optional smaller range that activates source reveal. A list's trailing
+    /// space belongs to hidden syntax but not to its marker: the normal typing
+    /// caret sits after that space and should continue to see the rendered
+    /// bullet, numeral or checkbox.
+    public let revealRange: NSRange?
     public let style: Style
 
-    public init(range: NSRange, syntax: [NSRange] = [], style: Style) {
+    public init(
+        range: NSRange, syntax: [NSRange] = [],
+        revealRange: NSRange? = nil, style: Style
+    ) {
         self.range = range
         self.syntax = syntax
+        self.revealRange = revealRange
         self.style = style
     }
 }
@@ -155,7 +164,7 @@ public struct Reveal: Equatable, Sendable {
             guard line.location != NSNotFound else { return false }
             return NSIntersectionRange(decoration.range, line).length > 0
         }
-        return Self.touches(decoration.range, selection)
+        return Self.touches(decoration.revealRange ?? decoration.range, selection)
     }
 
     /// True for markup belonging to the line as a whole, so that putting the
@@ -166,13 +175,13 @@ public struct Reveal: Equatable, Sendable {
     /// dissolving into raw asterisks the moment it is clicked.
     public static func revealsWithItsLine(_ style: MarkdownDecoration.Style) -> Bool {
         switch style {
-        case .frontmatter, .comment, .codeBlock, .heading, .quoteLine, .listMarker,
+        case .frontmatter, .comment, .codeBlock, .heading, .quoteLine,
              .table, .thematicBreak, .blockMath, .image:
             true
         // An embed owning its line is drawn as a block, so it behaves like one.
         case .wikiLink(let link):
             link.isEmbed
-        case .bold, .italic, .strikethrough, .highlight, .inlineCode,
+        case .listMarker, .bold, .italic, .strikethrough, .highlight, .inlineCode,
              .link, .tag, .inlineMath:
             false
         }
@@ -437,8 +446,16 @@ public enum LiveDecorator {
             // The whole marker hides, indentation included: the editor redraws
             // it as a real bullet, checkbox or numeral, and positions it from
             // the paragraph indent rather than from leading whitespace.
+            let visible = String(marker.dropFirst(leading.utf16.count))
+            let semanticLength = visible
+                .trimmingCharacters(in: .whitespacesAndNewlines).utf16.count
+            let revealRange = NSRange(
+                location: match.location + leading.utf16.count,
+                length: semanticLength
+            )
             result.append(MarkdownDecoration(
-                range: match, syntax: [match], style: .listMarker(kind: kind, depth: depth)
+                range: match, syntax: [match], revealRange: revealRange,
+                style: .listMarker(kind: kind, depth: depth)
             ))
         }
 
