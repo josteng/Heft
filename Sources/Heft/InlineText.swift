@@ -11,6 +11,25 @@ struct RenderContext {
     /// Mirrors the vault's Obsidian setting; see `ObsidianSettings`.
     var strictLineBreaks: Bool = false
     var colorfulFormatting: Bool = false
+    /// The appearance the surface is actually drawn in.
+    ///
+    /// System colours are dynamic, and resolving one *outside* a drawing
+    /// context picks whatever `NSAppearance.current` happens to be, which is
+    /// nothing in particular during a restyle. That is how typeset formulae
+    /// ended up painted in the dark-mode label colour on a light page: the
+    /// colour is baked into the rendered image, so the mistake is permanent.
+    /// Anything whose colour gets flattened into a bitmap goes through
+    /// `resolved(_:)` first.
+    var appearance: NSAppearance?
+
+    func resolved(_ color: NSColor) -> NSColor {
+        guard let appearance else { return color.usingColorSpace(.sRGB) ?? color }
+        var out = color
+        appearance.performAsCurrentDrawingAppearance {
+            out = color.usingColorSpace(.sRGB) ?? color
+        }
+        return out
+    }
 
     func resolve(_ link: WikiLink) -> NoteRef? { index.resolve(link, from: current) }
 

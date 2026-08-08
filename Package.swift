@@ -16,9 +16,9 @@ let package = Package(
         // because those run MathJax through JavaScriptCore, which would undo
         // the startup speed that is the whole point of a native app.
         .package(url: "https://github.com/mgriebling/SwiftMath.git", from: "1.7.3"),
-        // TextKit 2 live-styling editor. Evaluated unmodified first; its
-        // wikilink transform rewrites `[[a|b]]` suffixes, which matters for
-        // `![[img.png|500]]` widths. See README for the standing caveat.
+        // Kept only for its syntax-highlighting grammars, which back fenced
+        // code blocks. Its own editor was evaluated and dropped: the wikilink
+        // transform rewrites `[[a|b]]` suffixes, which breaks `![[img.png|500]]`.
         .package(url: "https://github.com/nodes-app/swift-markdown-engine.git", from: "0.9.0"),
     ],
     targets: [
@@ -33,9 +33,7 @@ let package = Package(
             dependencies: [
                 "HeftCore",
                 "SwiftMath",
-                .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
                 .product(name: "MarkdownEngineCodeBlocks", package: "swift-markdown-engine"),
-                .product(name: "MarkdownEngineLatex", package: "swift-markdown-engine"),
             ],
             path: "Sources/Heft",
             swiftSettings: [.swiftLanguageMode(.v5)]

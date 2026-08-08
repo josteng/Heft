@@ -11,7 +11,10 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case frontmatter
         case codeBlock(language: String?)
         case heading(level: Int)
-        case blockQuote
+        /// One line of a `>` block. Carried per line rather than per block so
+        /// each paragraph can be given its own indent and its own slice of the
+        /// bar or callout card the editor draws behind it.
+        case quoteLine(QuoteLine)
         case listMarker(kind: ListMarkerKind, depth: Int)
         /// A whole GFM table, header and delimiter row included. Carried as one
         /// decoration because the editor draws the grid itself rather than
@@ -60,6 +63,41 @@ public struct TableLayout: Sendable, Hashable {
     public var columnCount: Int { rows.map(\.count).max() ?? 0 }
 }
 
+/// Where a line sits inside the run of `>` lines it belongs to. The editor
+/// paints a callout's card across several paragraphs, so each one needs to know
+/// which of its corners to round.
+public enum QuoteEdge: Sendable, Equatable { case only, first, middle, last }
+
+/// One `>`-prefixed line, described in terms of the block around it.
+public struct QuoteLine: Sendable, Equatable {
+    /// Nesting level, counted from the number of `>` markers on the line.
+    public let depth: Int
+    public let edge: QuoteEdge
+    /// Set on *every* line of an Obsidian callout, so the whole card is tinted.
+    public let callout: CalloutKind?
+    /// The word inside `[!…]`, kept even when it names no known kind so an
+    /// unrecognised callout still reads as one rather than silently degrading.
+    public let rawCallout: String?
+    /// Title text, on the `[!kind] Title` line only. Empty means the kind's own
+    /// name is drawn instead, which is what Obsidian shows.
+    public let title: String?
+
+    public init(
+        depth: Int, edge: QuoteEdge, callout: CalloutKind? = nil,
+        rawCallout: String? = nil, title: String? = nil
+    ) {
+        self.depth = depth
+        self.edge = edge
+        self.callout = callout
+        self.rawCallout = rawCallout
+        self.title = title
+    }
+
+    public var isCallout: Bool { rawCallout != nil }
+    /// True on the line carrying `[!kind]`.
+    public var isTitleLine: Bool { title != nil }
+}
+
 public enum ListMarkerKind: Sendable, Equatable {
     /// `-`, `*` or `+`: replaced by a drawn bullet.
     case bullet
@@ -67,6 +105,73 @@ public enum ListMarkerKind: Sendable, Equatable {
     case ordered
     /// `- [ ]` / `- [x]`: replaced by a drawn checkbox.
     case task(checked: Bool)
+}
+
+/// What the caret currently exposes as literal markdown source.
+///
+/// Two ranges rather than one because Obsidian treats block and inline markup
+/// differently, and matching that is most of what makes the surface feel right.
+/// A heading's `#` comes back as soon as the caret is anywhere on its line; a
+/// `**bold**` pair comes back only when the caret is inside *that* span, so the
+/// rest of the sentence stays rendered.
+public struct Reveal: Equatable, Sendable {
+    public var line: NSRange
+    public var selection: NSRange
+
+    public static let none = Reveal(
+        line: NSRange(location: NSNotFound, length: 0),
+        selection: NSRange(location: NSNotFound, length: 0)
+    )
+
+    public init(line: NSRange, selection: NSRange) {
+        self.line = line
+        self.selection = selection
+    }
+
+    /// The state a caret or selection in `text` produces.
+    public init(selection: NSRange, in text: NSString) {
+        self.selection = selection
+        self.line = text.lineRange(for: selection)
+    }
+
+    public func reveals(_ decoration: MarkdownDecoration) -> Bool {
+        if Self.revealsWithItsLine(decoration.style) {
+            guard line.location != NSNotFound else { return false }
+            return NSIntersectionRange(decoration.range, line).length > 0
+        }
+        return Self.touches(decoration.range, selection)
+    }
+
+    /// True for markup belonging to the line as a whole, so that putting the
+    /// caret anywhere on that line brings it back.
+    ///
+    /// Everything else is an inline span and returns only when the caret is
+    /// inside it. The split is what stops a sentence full of `**bold**` from
+    /// dissolving into raw asterisks the moment it is clicked.
+    public static func revealsWithItsLine(_ style: MarkdownDecoration.Style) -> Bool {
+        switch style {
+        case .frontmatter, .codeBlock, .heading, .quoteLine, .listMarker,
+             .table, .thematicBreak, .blockMath, .image:
+            true
+        // An embed owning its line is drawn as a block, so it behaves like one.
+        case .wikiLink(_, let isEmbed):
+            isEmbed
+        case .bold, .italic, .strikethrough, .highlight, .inlineCode,
+             .link, .tag, .inlineMath:
+            false
+        }
+    }
+
+    /// Whether a caret or selection lies inside `range`, counting both edges.
+    ///
+    /// The edges matter: markup is collapsed to no width, so a click lands the
+    /// caret *beside* a span far more often than within it, and a span that
+    /// will not open from its own boundary is one the user cannot edit.
+    public static func touches(_ range: NSRange, _ selection: NSRange) -> Bool {
+        guard selection.location != NSNotFound else { return false }
+        if selection.length > 0 { return NSIntersectionRange(range, selection).length > 0 }
+        return selection.location >= range.location && selection.location <= NSMaxRange(range)
+    }
 }
 
 public enum LiveDecorator {
@@ -276,9 +381,7 @@ public enum LiveDecorator {
             ))
         }
 
-        for match in matches(#"(?m)^[ \t]*>[ \t]?"#, text, excluding: protected) {
-            result.append(MarkdownDecoration(range: match, syntax: [match], style: .blockQuote))
-        }
+        result.append(contentsOf: quoteDecorations(text, protected: protected))
 
         for match in matches(#"(?m)^[ \t]*([-*+]|\d+[.)])[ \t]+(\[[ xX]\][ \t]+)?"#, text, excluding: protected) {
             let marker = text.substring(with: match)
@@ -309,6 +412,133 @@ public enum LiveDecorator {
         }
 
         return result
+    }
+
+    // MARK: - Block quotes and callouts
+
+    /// Groups contiguous `>` lines into blocks, then describes each line in
+    /// terms of the block around it.
+    ///
+    /// Per *line* rather than per block because the editor's unit of drawing is
+    /// the layout fragment, and a fragment is one paragraph. Grouping still has
+    /// to happen first: a line cannot know whether it rounds the top of a
+    /// callout, sits in its middle, or closes it without seeing its neighbours.
+    private static func quoteDecorations(
+        _ text: NSString, protected: [NSRange]
+    ) -> [MarkdownDecoration] {
+        var runs: [[NSRange]] = []
+        var run: [NSRange] = []
+
+        var location = 0
+        while location < text.length {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            if markerRange(inQuoteLine: line, text) != nil {
+                run.append(line)
+            } else if !run.isEmpty {
+                runs.append(run)
+                run = []
+            }
+            let next = NSMaxRange(line)
+            guard next > location else { break }
+            location = next
+        }
+        if !run.isEmpty { runs.append(run) }
+
+        var result: [MarkdownDecoration] = []
+        for lines in runs {
+            let span = NSRange(
+                location: lines[0].location,
+                length: NSMaxRange(lines[lines.count - 1]) - lines[0].location
+            )
+            guard !protected.contains(where: { NSIntersectionRange($0, span).length > 0 })
+            else { continue }
+
+            // Only the block's opening line can declare a callout, and it
+            // applies to every line beneath it.
+            var callout: (kind: CalloutKind?, raw: String, title: String, syntax: NSRange)?
+            if let marker = markerRange(inQuoteLine: lines[0], text) {
+                callout = calloutHeader(after: marker, in: lines[0], text)
+            }
+
+            for (index, line) in lines.enumerated() {
+                guard let marker = markerRange(inQuoteLine: line, text) else { continue }
+                let edge: QuoteEdge
+                if lines.count == 1 { edge = .only }
+                else if index == 0 { edge = .first }
+                else if index == lines.count - 1 { edge = .last }
+                else { edge = .middle }
+
+                var syntax = [marker]
+                var title: String?
+                if let callout {
+                    if index == 0 {
+                        // `[!note]-` is markup, but the title beside it is
+                        // prose and stays visible.
+                        syntax.append(callout.syntax)
+                        title = callout.title
+                    }
+                }
+
+                result.append(MarkdownDecoration(
+                    range: line,
+                    syntax: syntax,
+                    style: .quoteLine(QuoteLine(
+                        depth: depth(ofMarker: marker, text),
+                        edge: edge,
+                        callout: callout?.kind,
+                        rawCallout: callout?.raw,
+                        title: title
+                    ))
+                ))
+            }
+        }
+        return result
+    }
+
+    /// The `> ` (or `>>`, `> > `) prefix of a quote line, or nil for prose.
+    private static func markerRange(inQuoteLine line: NSRange, _ text: NSString) -> NSRange? {
+        guard line.length > 0 else { return nil }
+        let source = text.substring(with: line)
+        guard let found = source.range(
+            of: #"^[ \t]*(?:>[ \t]?)+"#, options: .regularExpression
+        ) else { return nil }
+        // The pattern is anchored, so the marker starts where the line does and
+        // only its length has to be converted into UTF-16 units.
+        return NSRange(
+            location: line.location, length: (String(source[found]) as NSString).length
+        )
+    }
+
+    private static func depth(ofMarker marker: NSRange, _ text: NSString) -> Int {
+        max(1, text.substring(with: marker).count(where: { $0 == ">" }))
+    }
+
+    /// Parses `[!warning]- Some title` sitting just after a quote marker.
+    private static func calloutHeader(
+        after marker: NSRange, in line: NSRange, _ text: NSString
+    ) -> (kind: CalloutKind?, raw: String, title: String, syntax: NSRange)? {
+        let bodyStart = NSMaxRange(marker)
+        let bodyLength = NSMaxRange(line) - bodyStart
+        guard bodyLength > 0 else { return nil }
+        let body = text.substring(with: NSRange(location: bodyStart, length: bodyLength))
+
+        // The trailing `+`/`-` is Obsidian's fold state. Heft does not fold
+        // yet, but the character is still markup and must not be shown.
+        guard let match = body.range(
+            of: #"^\[!([A-Za-z][A-Za-z0-9_-]*)\][+-]?[ \t]*"#, options: .regularExpression
+        ) else { return nil }
+
+        let header = String(body[match])
+        guard let name = header.range(of: #"[A-Za-z][A-Za-z0-9_-]*"#, options: .regularExpression)
+        else { return nil }
+        let raw = String(header[name])
+
+        let title = String(body[match.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (
+            CalloutKind.parse(raw), raw, title,
+            NSRange(location: bodyStart, length: (header as NSString).length)
+        )
     }
 
     // MARK: - Inline constructs

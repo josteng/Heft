@@ -3,31 +3,6 @@ import Combine
 import HeftCore
 import SwiftUI
 
-enum EditorMode: String, CaseIterable, Identifiable {
-    /// Hybrid: one editable buffer, markup hidden until the cursor enters a
-    /// line. This makes a separate side-by-side pane redundant, so there is no
-    /// split mode.
-    case live
-    case source
-    case preview
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .live: "Live"
-        case .source: "Source"
-        case .preview: "Preview"
-        }
-    }
-    var symbol: String {
-        switch self {
-        case .live: "text.cursor"
-        case .source: "chevron.left.forwardslash.chevron.right"
-        case .preview: "doc.richtext"
-        }
-    }
-}
-
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -47,11 +22,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var documentGeneration = 0
 
     // MARK: UI state
-    @Published var viewMode: EditorMode = .live
-    /// Escape hatch back to the hand-rolled TextKit 1 editor via
-    /// `--legacy-editor`. It renders fewer constructs but still styles `#tags`
-    /// and callouts, which the engine has no token for.
-    let useLegacyEditor = CommandLine.arguments.contains("--legacy-editor")
     @Published var isCalendarVisible = true
     /// Driven explicitly rather than left to the system. Without this, a
     /// collapsed sidebar is restored on the next launch and the app reopens

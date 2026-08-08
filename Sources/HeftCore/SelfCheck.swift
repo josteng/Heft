@@ -203,6 +203,69 @@ public enum SelfCheck {
         expect(hiddenText("# Heading"), "# ", "heading hides hashes and space")
         expectTrue(styles("#tag").contains(.tag), "decorator finds tag")
 
+        // MARK: Quotes and callouts
+        func quotes(_ source: String) -> [QuoteLine] {
+            LiveDecorator.decorations(in: source).compactMap {
+                if case .quoteLine(let quote) = $0.style { quote } else { nil }
+            }
+        }
+
+        let plainQuote = quotes("> one\n> two\n")
+        expect("\(plainQuote.count)", "2", "both quote lines are decorated")
+        expect("\(plainQuote.first?.edge ?? .only)", "first", "first quote line opens the block")
+        expect("\(plainQuote.last?.edge ?? .only)", "last", "last quote line closes the block")
+        expectTrue(plainQuote.allSatisfy { !$0.isCallout }, "a plain quote is not a callout")
+        expect(hiddenText("> quoted"), "> ", "quote marker is hideable")
+
+        // A blank line ends the block, so two quotes in a row stay separate.
+        let twoBlocks = quotes("> a\n\ntext\n\n> b\n")
+        expectTrue(twoBlocks.count == 2 && twoBlocks.allSatisfy { $0.edge == .only },
+                   "quotes separated by prose are separate blocks")
+
+        let callout = quotes("> [!warning] Careful\n> body\n")
+        expect("\(callout.first?.callout.map(String.init(describing:)) ?? "nil")", "warning",
+               "callout kind is parsed")
+        expect(callout.first?.title ?? "", "Careful", "callout title is parsed")
+        expectTrue(callout.last?.isCallout == true && callout.last?.isTitleLine == false,
+                   "the callout's kind carries to its body lines, its title does not")
+        // `[!warning]` is markup and hides; the title beside it is prose.
+        expectTrue(hiddenText("> [!warning] Careful").contains("[!warning] "),
+                   "callout marker is hideable")
+        expect(quotes("> [!tip]\n> x").first?.title ?? "nil", "",
+               "a callout with no title reports an empty one, not nil")
+        expectTrue(quotes("> [!nonsense] hi").first?.callout == nil
+                   && quotes("> [!nonsense] hi").first?.rawCallout == "nonsense",
+                   "an unknown callout kind is still recognised as a callout")
+        expect("\(quotes("> a\n> > b").last?.depth ?? 0)", "2", "nested quote reports depth 2")
+
+        // MARK: Reveal policy
+        // A heading's hashes come back from anywhere on the line; a bold span
+        // only when the caret is inside that span.
+        let sentence = "a **one** b **two**"
+        let spans = LiveDecorator.decorations(in: sentence).filter { $0.style == .bold }
+        expect("\(spans.count)", "2", "two bold spans found")
+        func revealed(at caret: Int) -> Int {
+            let reveal = Reveal(
+                selection: NSRange(location: caret, length: 0), in: sentence as NSString
+            )
+            return spans.count { reveal.reveals($0) }
+        }
+        expect("\(revealed(at: 0))", "0", "caret before any span reveals none")
+        expect("\(revealed(at: 5))", "1", "caret inside the first span reveals only it")
+        expect("\(revealed(at: 16))", "1", "caret inside the second span reveals only it")
+        // Collapsed markup has no width, so a click lands beside a span far
+        // more often than in it; the boundary has to count as inside.
+        expect("\(revealed(at: 2))", "1", "caret at a span's leading edge reveals it")
+
+        let headingLine = "# Title here"
+        let heading = LiveDecorator.decorations(in: headingLine).first {
+            if case .heading = $0.style { true } else { false }
+        }
+        expectTrue(Reveal(
+            selection: NSRange(location: 10, length: 0), in: headingLine as NSString
+        ).reveals(heading!), "a heading reveals from anywhere on its line")
+        expectTrue(!Reveal.none.reveals(heading!), "nothing reveals without a caret")
+
         // Code must shield its contents from inline styling.
         let fenced = "```\n**not bold**\n```"
         expectTrue(styles(fenced).contains(where: { if case .codeBlock = $0 { true } else { false } }),

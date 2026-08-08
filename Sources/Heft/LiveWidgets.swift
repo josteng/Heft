@@ -21,6 +21,8 @@ enum BlockWidget {
     case image(NSImage)
     /// Drawn as a grid; the widget owns every line of the table.
     case table(TableGrid)
+    /// One line's slice of a quote bar, or of a callout's tinted card.
+    case quote(QuoteLine, indent: CGFloat)
 }
 
 enum CodeBlockEdge: Equatable {
@@ -42,6 +44,10 @@ struct LiveLayout {
     var blocks: [Int: BlockWidget] = [:]
     /// Formulae drawn inside a line, keyed by that line's start offset.
     var inlineMath: [Int: [(location: Int, image: NSImage)]] = [:]
+    /// Ranges of the inline spans that reveal on the caret rather than on their
+    /// line. The editor keeps these to tell an ordinary cursor move apart from
+    /// one that crosses into or out of a span and so needs a restyle.
+    var revealableSpans: [NSRange] = []
 
     /// Cheap identity for "did the set of widgets change". Compared to decide
     /// whether a full layout invalidation is needed; the images themselves are
@@ -205,7 +211,7 @@ enum CellText {
         // table with the caret in it is shown as source instead of drawn.
         _ = LiveStyler.apply(
             to: storage,
-            revealedLine: NSRange(location: NSNotFound, length: 0),
+            reveal: .none,
             context: context,
             baseFont: base,
             drawsWidgets: false
@@ -265,6 +271,12 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ))
         case .list:
             bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
+        case .quote(_, let indent):
+            // The card and the bars are painted in the gutter the paragraph's
+            // head indent opened up, which is to the left of every glyph.
+            bounds = bounds.union(CGRect(
+                x: -indent, y: -1, width: containerWidth, height: bounds.height + 2
+            ))
         default:
             break
         }
@@ -287,6 +299,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     private func drawContents(at point: CGPoint, in context: CGContext) {
         if case .codeBlock(let edge, let language) = widget {
             drawCodeBlockBackground(edge: edge, language: language, at: point, in: context)
+        }
+        if case .quote(let quote, let indent) = widget {
+            drawQuoteBackground(quote, indent: indent, at: point, in: context)
         }
         switch widget {
         case .blockMath(let image):
@@ -375,6 +390,108 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         let size = label.size()
         withAppKitContext(context) {
             label.draw(at: CGPoint(x: rect.maxX - size.width - 9, y: rect.minY + 5))
+        }
+    }
+
+    // MARK: Quotes and callouts
+
+    /// Paints one line's share of a quote bar, or of a callout's card.
+    ///
+    /// The block is drawn a paragraph at a time because that is the unit a
+    /// layout fragment covers. Continuity comes from the rounded rectangle
+    /// being oversized past the edges this line does not own and then clipped
+    /// back to it, which is the same trick the code-block background uses.
+    private func drawQuoteBackground(
+        _ quote: QuoteLine, indent: CGFloat, at point: CGPoint, in context: CGContext
+    ) {
+        guard let line = textLineFragments.first else { return }
+        let height = max(line.typographicBounds.height, layoutFragmentFrame.height)
+        let left = point.x - indent
+        let rect = CGRect(x: left, y: point.y, width: containerWidth, height: height)
+        let tint = quote.isCallout
+            ? Theme.calloutNSTint(quote.callout)
+            : NSColor.quaternaryLabelColor
+
+        if quote.isCallout {
+            context.saveGState()
+            context.setFillColor(tint.withAlphaComponent(0.11).cgColor)
+            fill(rect, edge: quote.edge, radius: 8, in: context)
+            context.restoreGState()
+        }
+
+        // One bar per nesting level, so `> >` reads as two.
+        context.setFillColor(tint.withAlphaComponent(quote.isCallout ? 0.9 : 1).cgColor)
+        for level in 0..<max(1, quote.depth) {
+            let x = left + 5 + CGFloat(level) * 18
+            context.fill(CGRect(x: x, y: rect.minY, width: 3, height: rect.height))
+        }
+
+        guard quote.isTitleLine else { return }
+        drawCalloutIcon(
+            quote, tint: tint, at: CGPoint(x: left + 16, y: point.y),
+            line: line, in: context
+        )
+    }
+
+    /// Rounds only the corners this line actually owns.
+    private func fill(_ rect: CGRect, edge: QuoteEdge, radius: CGFloat, in context: CGContext) {
+        switch edge {
+        case .only:
+            context.addPath(CGPath(
+                roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil
+            ))
+            context.fillPath()
+        case .first, .last, .middle:
+            // Grow past the open end so its corners fall outside the clip and
+            // the fill meets the neighbouring paragraph with a straight edge.
+            let grown = CGRect(
+                x: rect.minX,
+                y: edge == .last ? rect.minY - radius : rect.minY,
+                width: rect.width,
+                height: rect.height + (edge == .middle ? radius * 2 : radius)
+            )
+            context.saveGState()
+            context.clip(to: rect)
+            context.addPath(CGPath(
+                roundedRect: grown, cornerWidth: radius, cornerHeight: radius, transform: nil
+            ))
+            context.fillPath()
+            context.restoreGState()
+        }
+    }
+
+    private func drawCalloutIcon(
+        _ quote: QuoteLine, tint: NSColor, at origin: CGPoint,
+        line: NSTextLineFragment, in context: CGContext
+    ) {
+        let side: CGFloat = 14
+        let centreY = origin.y + line.typographicBounds.midY
+        guard let symbol = NSImage(
+            systemSymbolName: quote.callout?.symbol ?? "quote.bubble.fill",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [tint]))
+        ) else { return }
+
+        withAppKitContext(context) {
+            symbol.draw(
+                in: CGRect(x: origin.x, y: centreY - side / 2, width: side, height: side),
+                from: .zero, operation: .sourceOver, fraction: 1,
+                respectFlipped: true, hints: nil
+            )
+
+            // `> [!tip]` with nothing after it still shows a heading in
+            // Obsidian: the kind's own name. There is no text on the line to
+            // style into one, so it is drawn.
+            guard quote.title?.isEmpty == true, let raw = quote.rawCallout else { return }
+            let label = NSAttributedString(string: raw.capitalized, attributes: [
+                .font: NSFont.systemFont(ofSize: Theme.bodySize, weight: .semibold),
+                .foregroundColor: tint,
+            ])
+            label.draw(at: CGPoint(
+                x: origin.x + side + 6, y: centreY - label.size().height / 2
+            ))
         }
     }
 

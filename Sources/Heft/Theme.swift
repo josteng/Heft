@@ -97,6 +97,21 @@ enum Theme {
         }
     }
 
+    /// AppKit twin of `calloutTint`, for the editor's own drawing. A callout
+    /// whose kind Obsidian does not know still gets a card, in grey.
+    static func calloutNSTint(_ kind: CalloutKind?) -> NSColor {
+        switch kind {
+        case .note, .info, .abstract: .systemBlue
+        case .todo, .question: .systemPurple
+        case .tip: .systemTeal
+        case .success: .systemGreen
+        case .warning: .systemOrange
+        case .failure, .danger, .bug: .systemRed
+        case .example: .systemIndigo
+        case .quote, .none: .secondaryLabelColor
+        }
+    }
+
     /// Callout tints live here rather than in the portable core, which stays
     /// free of any UI framework.
     static func calloutTint(_ kind: CalloutKind) -> Color {

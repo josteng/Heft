@@ -97,7 +97,6 @@ struct ContentView: View {
 
 struct EditorPane: View {
     @EnvironmentObject private var model: AppModel
-    @State private var parsed: (frontmatter: String?, blocks: [MDBlock]) = (nil, [])
     @State private var findQuery = ""
     @State private var findMatches: [NSRange] = []
     @State private var findIndex = 0
@@ -122,8 +121,9 @@ struct EditorPane: View {
                 findBar
             }
 
-            // One surface. `--source-mode` exposes the raw text view as a
-            // debugging escape hatch, not as a user-facing mode.
+            // One surface, always. Source and preview modes were removed once
+            // live mode could render everything they could: keeping them meant
+            // three editors to fix every bug in.
             LiveTextEditor(
                 text: $model.text,
                 generation: model.documentGeneration,
@@ -142,16 +142,7 @@ struct EditorPane: View {
 
             StatusBar()
         }
-        // Re-parsing on every keystroke is wasted work while typing; a short
-        // debounce keeps the preview feeling live without the churn.
-        .task(id: model.text) {
-            if model.viewMode == .source { return }
-            try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled else { return }
-            parsed = MarkdownModel.parse(model.text)
-        }
         .task(id: model.documentGeneration) {
-            parsed = MarkdownModel.parse(model.text)
             closeFind()
         }
         .onChange(of: model.isFindPresented) { _, presented in
@@ -247,56 +238,6 @@ struct EditorPane: View {
         findMatches = []
         findIndex = 0
         findSelection = nil
-    }
-
-    /// TextKit 2 live surface under evaluation; see `EngineEditor`.
-    private var engineEditor: some View {
-        EngineEditor(
-            text: $model.text,
-            documentID: model.current?.relativePath ?? "untitled",
-            vaultRoot: model.vaultRoot,
-            index: model.index,
-            current: model.current,
-            onAttachment: handleAttachment,
-            onFollowLink: { target in
-                model.follow(WikiLinkParser.links(in: "[[\(target)]]").first ?? WikiLink(target: target))
-            }
-        )
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-
-    private var editor: some View {
-        SourceEditor(
-            text: $model.text,
-            generation: model.documentGeneration,
-            isLive: model.viewMode == .live,
-            onAttachment: handleAttachment,
-            onFollowLink: { url in
-                // Wikilinks route back into the app; anything else is external.
-                if !model.handle(url: url) { NSWorkspace.shared.open(url) }
-            }
-        )
-        // Live mode is prose, so it gets the same measure as the preview.
-        .frame(maxWidth: model.viewMode == .live ? Theme.contentMaxWidth + 80 : .infinity)
-        .frame(maxWidth: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-
-    private var preview: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                if let frontmatter = parsed.frontmatter, !frontmatter.isEmpty {
-                    FrontmatterView(yaml: frontmatter)
-                        .padding(.bottom, Theme.blockSpacing)
-                }
-                MarkdownView(blocks: parsed.blocks, context: context)
-            }
-            .padding(.horizontal, Theme.horizontalPadding)
-            .padding(.vertical, Theme.verticalPadding)
-            .frame(maxWidth: Theme.contentMaxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .background(Color(nsColor: .textBackgroundColor))
     }
 
     /// Called by the text view on paste and drop. Returning nil lets the text

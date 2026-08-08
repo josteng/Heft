@@ -71,7 +71,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.string = text
         nsContext.coordinator.lastGeneration = generation
         nsContext.coordinator.restyle(textView)
-        textView.onWidthChange = { [weak textView, weak coordinator = nsContext.coordinator] in
+        textView.onNeedsRestyle = { [weak textView, weak coordinator = nsContext.coordinator] in
             guard let textView, let coordinator else { return }
             coordinator.restyle(textView)
         }
@@ -138,7 +138,8 @@ struct LiveTextEditor: NSViewRepresentable {
         var layout = LiveLayout()
         var indexFingerprint = ""
         var lastFindGeneration = -1
-        private var revealedLine = NSRange(location: NSNotFound, length: 0)
+        private var reveal = Reveal.none
+        private var revealedSpans = ""
         private var needsRevealRestyle = false
         private var pendingScope: InvalidationScope = .revealedLines
         private var restyleTask: Task<Void, Never>?
@@ -154,13 +155,26 @@ struct LiveTextEditor: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            let line = (textView.string as NSString).lineRange(for: textView.selectedRange())
-            // Only a change of *line* alters what is revealed; moving within a
-            // line must not trigger a restyle or typing stutters.
-            guard !NSEqualRanges(line, revealedLine) else { return }
+            let selection = textView.selectedRange()
+            let line = (textView.string as NSString).lineRange(for: selection)
+            // Block markup reveals per line, inline spans per caret position,
+            // so both have to be checked. Moving within a line and within the
+            // same set of spans changes nothing on screen, and restyling there
+            // would put a stutter into every arrow key.
+            guard !NSEqualRanges(line, reveal.line)
+                || spanSignature(for: selection) != revealedSpans
+            else { return }
 
             // Never mid-drag: see `HeftTextKit2View.isTrackingMouse`.
             restyle(textView, scope: .revealedLines)
+        }
+
+        /// Which revealable spans a caret sits inside, as a comparable key.
+        private func spanSignature(for selection: NSRange) -> String {
+            layout.revealableSpans.indices
+                .filter { Reveal.touches(layout.revealableSpans[$0], selection) }
+                .map(String.init)
+                .joined(separator: ",")
         }
 
         /// Runs whatever restyle was held back while the mouse was down.
@@ -238,19 +252,27 @@ struct LiveTextEditor: NSViewRepresentable {
             }
 
             let selection = textView.selectedRange()
-            let previouslyRevealed = revealedLine
-            revealedLine = revealsSelection
-                ? (textView.string as NSString).lineRange(for: selection)
-                : NSRange(location: NSNotFound, length: 0)
+            let previouslyRevealed = reveal.line
+            reveal = revealsSelection
+                ? Reveal(selection: selection, in: textView.string as NSString)
+                : .none
 
             let width = textView.textContainer?.size.width ?? Theme.contentMaxWidth
             let previous = layout.signature
+            // Formulae bake their colour into a bitmap, so the styler has to be
+            // told which appearance the view is actually drawn in rather than
+            // resolving `labelColor` against whatever is current.
+            var context = parent.context
+            context.appearance = textView.effectiveAppearance
             layout = LiveStyler.apply(
                 to: storage,
-                revealedLine: revealedLine,
-                context: parent.context,
+                reveal: reveal,
+                context: context,
                 contentWidth: max(240, width - 8)
             )
+            // Recorded after styling: the span list is only known once the
+            // decorator has run over the current text.
+            revealedSpans = spanSignature(for: selection)
             updateTypingAttributes(for: selection, in: textView)
 
             switch scope {
@@ -267,7 +289,7 @@ struct LiveTextEditor: NSViewRepresentable {
                     // Ordinary caret movement only changes the line it left
                     // and the one it entered, avoiding a full reflow.
                     invalidate(previouslyRevealed, in: textView)
-                    invalidate(revealedLine, in: textView)
+                    invalidate(reveal.line, in: textView)
                 }
             case .whole:
                 // Editing inside a paragraph already invalidates it, so a full
@@ -374,7 +396,7 @@ final class HeftTextKit2View: NSTextView {
     /// Called when the usable width changes. Tables are measured against it, so
     /// a stale width leaves columns squeezed; the first layout in particular
     /// happens after the initial restyle, when the container is still zero.
-    var onWidthChange: (() -> Void)?
+    var onNeedsRestyle: (() -> Void)?
     private var lastWidth: CGFloat = 0
 
     override func becomeFirstResponder() -> Bool {
@@ -389,6 +411,15 @@ final class HeftTextKit2View: NSTextView {
         return accepted
     }
 
+    /// Switching between light and dark changes colours that were flattened
+    /// into images during the last restyle, so those have to be re-typeset.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        DispatchQueue.main.async { [weak self] in
+            self?.onNeedsRestyle?()
+        }
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         guard abs(newSize.width - lastWidth) > 1 else { return }
@@ -397,7 +428,7 @@ final class HeftTextKit2View: NSTextView {
         // layout pass; the guard above keeps this from repeating.
         DispatchQueue.main.async { [weak self] in
             guard self != nil else { return }
-            self?.onWidthChange?()
+            self?.onNeedsRestyle?()
         }
     }
 

@@ -83,14 +83,16 @@ enum HeftMain {
         let context = RenderContext(index: index, current: ref, vaultRoot: root)
 
         let storage = NSTextStorage(string: source)
-        // A caret offset reveals its line, the way clicking into it does.
-        let revealed = caret.map {
-            (source as NSString).lineRange(for: NSRange(location: min($0, storage.length), length: 0))
-        } ?? NSRange(location: NSNotFound, length: 0)
-        let layout = LiveStyler.apply(
-            to: storage, revealedLine: revealed, context: context
-        )
-        if let caret { print("caret \(caret) reveals \(revealed)") }
+        // A caret offset reveals its line's block markup and whichever inline
+        // span it lands in, the way clicking into it does.
+        let reveal = caret.map {
+            Reveal(
+                selection: NSRange(location: min($0, storage.length), length: 0),
+                in: source as NSString
+            )
+        } ?? .none
+        let layout = LiveStyler.apply(to: storage, reveal: reveal, context: context)
+        if let caret { print("caret \(caret) reveals line \(reveal.line)") }
 
         // Cost of one restyle. The editor does this on every caret move, so a
         // slow one is felt directly as click latency.
@@ -98,7 +100,7 @@ enum HeftMain {
         for _ in 0..<12 {
             let probe = NSTextStorage(string: source)
             let start = Date()
-            _ = LiveStyler.apply(to: probe, revealedLine: revealed, context: context)
+            _ = LiveStyler.apply(to: probe, reveal: reveal, context: context)
             samples.append(Date().timeIntervalSince(start) * 1000)
         }
         samples.sort()
@@ -126,6 +128,8 @@ enum HeftMain {
             case .image(let image): "image \(size(image.size))"
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
+            case .quote(let quote, let indent):
+                "\(quote.rawCallout.map { "callout \($0)" } ?? "quote") depth \(quote.depth) \(quote.edge) indent \(fmt(indent))"
             }
             // Reserved height is what the paragraph style actually gives the
             // line; if it is ~0 the widget has nowhere to draw.

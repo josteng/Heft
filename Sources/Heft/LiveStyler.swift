@@ -19,6 +19,11 @@ enum LiveStyler {
         return sizes[min(max(level, 1), 6) - 1]
     }
 
+    /// Leading edge of the text inside a quote or callout at `depth`.
+    static func quoteIndent(depth: Int, callout: Bool) -> CGFloat {
+        (callout ? 36 : 22) + CGFloat(max(0, depth - 1)) * 18
+    }
+
     /// Leading edge of the text in a list item at `depth`. The marker is
     /// collapsed, so both the first and the wrapped lines start here and the
     /// glyph is drawn in the gutter to the left.
@@ -27,7 +32,7 @@ enum LiveStyler {
     @discardableResult
     static func apply(
         to storage: NSTextStorage,
-        revealedLine: NSRange,
+        reveal: Reveal,
         context: RenderContext,
         baseFont: NSFont = Theme.liveFont,
         drawsWidgets: Bool = true,
@@ -52,17 +57,25 @@ enum LiveStyler {
         let decorations = LiveDecorator.decorations(in: source)
         var layout = LiveLayout()
 
+        // The caret has to be able to re-enter a span it just left, so the
+        // ranges that reveal on the caret alone are reported back to the
+        // editor: it compares them on every selection change to decide whether
+        // a restyle is needed at all.
+        layout.revealableSpans = decorations
+            .filter { !Reveal.revealsWithItsLine($0.style) }
+            .map(\.range)
+
         for decoration in decorations {
             style(
                 decoration, in: storage, base: baseFont, body: body,
                 context: context, layout: &layout, drawsWidgets: drawsWidgets,
-                revealed: isRevealed(decoration, line: revealedLine)
+                revealed: reveal.reveals(decoration)
             )
         }
 
         // Second pass so collapsing always wins over the styling above.
         for decoration in decorations {
-            guard !isRevealed(decoration, line: revealedLine) else { continue }
+            guard !reveal.reveals(decoration) else { continue }
             for range in decoration.syntax where range.length > 0 && NSMaxRange(range) <= storage.length {
                 collapse(range, in: storage)
             }
@@ -74,7 +87,7 @@ enum LiveStyler {
         // hidden whole, not just at their markers, so this cannot run until
         // every attribute above is settled.
         for decoration in decorations {
-            guard !isRevealed(decoration, line: revealedLine) else { continue }
+            guard !reveal.reveals(decoration) else { continue }
             widget(
                 decoration, in: storage, text: text, base: baseFont,
                 context: context, layout: &layout, contentWidth: contentWidth
@@ -138,7 +151,7 @@ enum LiveStyler {
         case .blockMath(let latex):
             guard let image = MathRenderer.image(
                 latex: latex, fontSize: base.pointSize + 3,
-                color: .labelColor, display: true
+                color: context.resolved(.labelColor), display: true
             ) else { return }
             hideWhole(range, in: storage, text: text, reserving: image.size.height)
             layout.blocks[lineStart] = .blockMath(image)
@@ -151,7 +164,7 @@ enum LiveStyler {
             let inner = min(range.location + 1, max(0, storage.length - 1))
             let size = max(9, fontSize(at: inner, in: storage, fallback: base) + 1)
             guard let image = MathRenderer.image(
-                latex: latex, fontSize: size, color: .labelColor, display: false
+                latex: latex, fontSize: size, color: context.resolved(.labelColor), display: false
             ) else { return }
             collapse(range, in: storage)
             // The collapsed source occupies no width, so the gap the formula
@@ -268,11 +281,6 @@ enum LiveStyler {
         ], range: range)
     }
 
-    private static func isRevealed(_ decoration: MarkdownDecoration, line: NSRange) -> Bool {
-        guard line.location != NSNotFound else { return false }
-        return NSIntersectionRange(decoration.range, line).length > 0
-    }
-
     // MARK: - Attributes
 
     private static func style(
@@ -354,8 +362,36 @@ enum LiveStyler {
                 layout.blocks[text.lineRange(for: range).location] = .headingAccent(level: level)
             }
 
-        case .blockQuote:
-            storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: range)
+        case .quoteLine(let quote):
+            let indent = quoteIndent(depth: quote.depth, callout: quote.isCallout)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = Theme.lineSpacing
+            // Both edges use the same indent: the `>` markers are collapsed, so
+            // the first line has no marker occupying space and would otherwise
+            // start further left than the lines it wraps onto.
+            paragraph.firstLineHeadIndent = indent
+            paragraph.headIndent = indent
+            paragraph.tailIndent = -12
+            // The card is one background painted across several paragraphs, so
+            // the space belongs outside the block, not between its lines.
+            paragraph.paragraphSpacingBefore = quote.edge == .first || quote.edge == .only ? 12 : 0
+            paragraph.paragraphSpacing = quote.edge == .last || quote.edge == .only ? 12 : 0
+            storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
+
+            if !quote.isCallout {
+                storage.addAttribute(
+                    .foregroundColor, value: NSColor.secondaryLabelColor, range: range
+                )
+            }
+            if quote.isTitleLine {
+                // The title is prose and stays visible; only `[!kind]` hides.
+                // Weight is what separates it from the body beneath it.
+                addTrait(.boldFontMask, to: storage, range: range, base: base)
+            }
+
+            if drawsWidgets {
+                layout.blocks[text.lineRange(for: range).location] = .quote(quote, indent: indent)
+            }
 
         case .listMarker(let kind, let depth):
             let indent = listIndent(depth: depth)
