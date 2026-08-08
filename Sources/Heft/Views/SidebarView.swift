@@ -2,11 +2,55 @@ import HeftCore
 import SwiftUI
 
 /// Which list the sidebar is showing.
+///
+/// Three ways into the same vault, because they answer different questions:
+/// where a note lives, what was open lately, and what it is about.
 enum SidebarMode: String, CaseIterable, Identifiable {
-    case files, tags
+    case files, recent, tags
+
     var id: String { rawValue }
-    var title: String { self == .files ? "Files" : "Tags" }
-    var symbol: String { self == .files ? "folder" : "number" }
+
+    var title: String {
+        switch self {
+        case .files: "Files"
+        case .recent: "Recent"
+        case .tags: "Tags"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .files: "folder"
+        case .recent: "clock"
+        case .tags: "number"
+        }
+    }
+
+    var filterPrompt: String {
+        switch self {
+        case .files: "Filter notes"
+        case .recent: "Filter recent"
+        case .tags: "Filter tags"
+        }
+    }
+}
+
+/// One row of the tag list, flattened.
+///
+/// Flat rather than a `ForEach` of tags each containing a `ForEach` of notes:
+/// nested lazy stacks lost track of their children as tags were expanded, and
+/// left blank gaps where a note should have been. One list of stably-identified
+/// rows cannot get into that state.
+private enum TagListRow: Identifiable {
+    case tag(name: String, count: Int, isExpanded: Bool)
+    case note(NoteRef, underTag: String)
+
+    var id: String {
+        switch self {
+        case .tag(let name, _, _): "tag:\(name)"
+        case .note(let note, let tag): "note:\(tag):\(note.relativePath)"
+        }
+    }
 }
 
 struct SidebarView: View {
@@ -19,12 +63,10 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             header
 
-            if mode == .tags {
-                tagList
-            } else if filter.isEmpty {
-                treeList
-            } else {
-                filteredList
+            switch mode {
+            case .tags: tagList
+            case .recent: recentList
+            case .files: if filter.isEmpty { treeList } else { filteredList }
             }
 
             if model.isCalendarVisible {
@@ -42,11 +84,15 @@ struct SidebarView: View {
 
     private var header: some View {
         VStack(spacing: 6) {
+            // The picker comes first: it decides what the field below filters,
+            // so reading top to bottom matches what the controls do.
+            modePicker
+
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                TextField(mode == .tags ? "Filter tags" : "Filter notes", text: $filter)
+                TextField(mode.filterPrompt, text: $filter)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                 if !filter.isEmpty {
@@ -61,32 +107,26 @@ struct SidebarView: View {
             .padding(.vertical, 5)
             .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
 
-            Picker("", selection: $mode) {
-                ForEach(SidebarMode.allCases) { option in
-                    Label(option.title, systemImage: option.symbol).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-
-            // ⌘N exists in the File menu, but nothing in the window showed that
-            // making a note was possible.
-            HStack(spacing: 4) {
-                Button { model.createNote() } label: {
-                    Label("New Note", systemImage: "square.and.pencil")
-                        .font(.system(size: 11))
-                }
-                .help("New note (⌘N)")
-                Spacer(minLength: 0)
-                if let root = model.vaultRoot {
-                    Button { model.createFolder(in: root) } label: {
-                        Image(systemName: "folder.badge.plus").font(.system(size: 11))
+            // Creating files belongs to the file tree; in the other lists there
+            // is no folder for a new note to go into. ⌘N still works from the
+            // File menu wherever you are.
+            if mode == .files {
+                HStack(spacing: 4) {
+                    Button { model.createNote() } label: {
+                        Label("New Note", systemImage: "square.and.pencil")
+                            .font(.system(size: 11))
                     }
-                    .help("New folder at the vault root")
+                    .help("New note (⌘N)")
+                    Spacer(minLength: 0)
+                    if let root = model.vaultRoot {
+                        Button { model.createFolder(in: root) } label: {
+                            Image(systemName: "folder.badge.plus").font(.system(size: 11))
+                        }
+                        .help("New folder at the vault root")
+                    }
                 }
+                .buttonStyle(.accessoryBar)
             }
-            .buttonStyle(.accessoryBar)
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -119,40 +159,80 @@ struct SidebarView: View {
         }
     }
 
+    /// Switches which list the sidebar shows.
+    ///
+    /// Hand-rolled rather than a `Picker`. `.segmented` fills the sidebar's
+    /// whole width with three words and reads as heavy chrome; `.palette`
+    /// shrinks the icons past legibility. This keeps the icon at a readable
+    /// size *and* keeps the labels, which matter because "Recent" and "Tags"
+    /// are not guessable from a clock and a hash.
+    private var modePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(SidebarMode.allCases) { option in
+                let isSelected = mode == option
+                Button {
+                    mode = option
+                    filter = ""
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: option.symbol).font(.system(size: 12))
+                        Text(option.title).font(.system(size: 11, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .background {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                                .shadow(color: .black.opacity(0.16), radius: 1, y: 0.5)
+                        }
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .help(option.title)
+            }
+        }
+        .padding(2)
+        .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 7))
+    }
+
     /// Tags, most used first, each expanding to the notes carrying it.
     private var tagList: some View {
-        let tags = model.index.tags(matching: filter)
+        let rows = tagRows
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
-                if tags.isEmpty {
-                    Text(filter.isEmpty ? "No tags in this vault" : "No matching tags")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 20)
-                        .frame(maxWidth: .infinity)
+                if rows.isEmpty {
+                    empty(filter.isEmpty ? "No tags in this vault" : "No matching tags")
                 }
-                ForEach(tags, id: \.self) { tag in
-                    let isExpanded = expandedTags.contains(tag)
-                    NoteRow(
-                        name: tag,
-                        detail: "\(model.index.noteCount(forTag: tag))",
-                        isSelected: false,
-                        depth: 0,
-                        symbol: "number",
-                        disclosure: isExpanded
-                    ) {
-                        if isExpanded { expandedTags.remove(tag) } else { expandedTags.insert(tag) }
-                    }
-
-                    if isExpanded {
-                        ForEach(model.index.notes(taggedWith: tag)) { note in
-                            NoteRow(
-                                name: note.name,
-                                detail: note.folder,
-                                isSelected: model.current?.relativePath == note.relativePath,
-                                depth: 1,
-                                symbol: "doc.text"
-                            ) { model.open(note) }
+                ForEach(rows) { row in
+                    switch row {
+                    case .tag(let name, let count, let isExpanded):
+                        NoteRow(
+                            name: name,
+                            detail: "\(count)",
+                            isSelected: false,
+                            depth: 0,
+                            symbol: "number",
+                            disclosure: isExpanded
+                        ) {
+                            if isExpanded { expandedTags.remove(name) }
+                            else { expandedTags.insert(name) }
+                        }
+                    case .note(let note, _):
+                        NoteRow(
+                            name: note.name,
+                            detail: note.folder,
+                            isSelected: model.current?.relativePath == note.relativePath,
+                            depth: 1,
+                            symbol: "doc.text"
+                        ) { model.open(note) }
+                        .contextMenu {
+                            FileMenu(item: VaultItem(
+                                url: note.url, relativePath: note.relativePath,
+                                kind: note.kind, name: note.name
+                            ))
                         }
                     }
                 }
@@ -160,6 +240,57 @@ struct SidebarView: View {
             .padding(.horizontal, 6)
             .padding(.bottom, 8)
         }
+    }
+
+    private var tagRows: [TagListRow] {
+        var rows: [TagListRow] = []
+        for tag in model.index.tags(matching: filter) {
+            let notes = model.index.notes(taggedWith: tag)
+            let isExpanded = expandedTags.contains(tag)
+            rows.append(.tag(name: tag, count: notes.count, isExpanded: isExpanded))
+            guard isExpanded else { continue }
+            rows.append(contentsOf: notes.map { .note($0, underTag: tag) })
+        }
+        return rows
+    }
+
+    /// Notes in the order they were last opened, newest first.
+    private var recentList: some View {
+        let notes = model.recentNotes.filter {
+            filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter)
+        }
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 1) {
+                if notes.isEmpty {
+                    empty(filter.isEmpty ? "Nothing opened yet" : "No matching notes")
+                }
+                ForEach(notes) { note in
+                    NoteRow(
+                        name: note.name,
+                        detail: note.folder,
+                        isSelected: model.current?.relativePath == note.relativePath,
+                        depth: 0,
+                        symbol: "doc.text"
+                    ) { model.open(note) }
+                    .contextMenu {
+                        FileMenu(item: VaultItem(
+                            url: note.url, relativePath: note.relativePath,
+                            kind: note.kind, name: note.name
+                        ))
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func empty(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            .padding(.top, 24)
+            .frame(maxWidth: .infinity)
     }
 
     private var filteredList: some View {

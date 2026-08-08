@@ -157,6 +157,7 @@ final class AppModel: ObservableObject {
         isDirty = false
         navigationHistory = []
         navigationIndex = -1
+        loadRecents()
 
         reload()
         watcher = VaultWatcher(root: url) { [weak self] in self?.vaultDidChangeOnDisk() }
@@ -224,6 +225,23 @@ final class AppModel: ObservableObject {
         recentPaths.removeAll { $0 == relativePath }
         recentPaths.insert(relativePath, at: 0)
         if recentPaths.count > 40 { recentPaths.removeLast(recentPaths.count - 40) }
+        // Persisted per vault: a recents list that empties on every launch is
+        // not one, and the first thing wanted after opening the app is usually
+        // whatever was being worked on before it closed.
+        guard let key = recentsKey else { return }
+        UserDefaults.standard.set(recentPaths, forKey: key)
+    }
+
+    private var recentsKey: String? {
+        vaultRoot.map { "dev.stenglein.Heft.recents.\($0.path)" }
+    }
+
+    private func loadRecents() {
+        guard let key = recentsKey else {
+            recentPaths = []
+            return
+        }
+        recentPaths = UserDefaults.standard.stringArray(forKey: key) ?? []
     }
 
     private func open(_ ref: NoteRef, recordingNavigation: Bool) {
@@ -695,9 +713,34 @@ final class AppModel: ObservableObject {
             lastKnownModification = (try? FileManager.default
                 .attributesOfItem(atPath: current.url.path))?[.modificationDate] as? Date
             status = "Saved \(current.relativePath)"
+            reindexIfMetadataChanged(for: current)
         } catch {
             status = "Save failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Rebuilds the index after Heft's own save, when the note's metadata moved.
+    ///
+    /// The watcher is created with `kFSEventStreamCreateFlagIgnoreSelf`, so
+    /// writes made here never come back as filesystem events — and nothing else
+    /// rebuilds the index. A tag added in Heft stayed missing from the tag list,
+    /// and a new link never showed up in backlinks, until the vault changed from
+    /// outside or the app was restarted.
+    ///
+    /// A rebuild re-reads every note in the vault, so it is worth doing only
+    /// when the note's *metadata* actually changed. Typing prose — very nearly
+    /// all typing — moves neither its tags nor its links and costs nothing here.
+    private func reindexIfMetadataChanged(for note: NoteRef) {
+        let tags = NoteTags.all(in: text)
+        var targets: [String] = []
+        NoteText.forEachProseLine(text) { _, line in
+            targets.append(contentsOf: WikiLinkParser.links(in: line).map(\.target))
+        }
+
+        guard tags != index.tags(of: note.relativePath)
+            || targets != index.outgoingLinks(from: note.relativePath).map(\.target)
+        else { return }
+        reload()
     }
 
     // MARK: - Tree helpers
