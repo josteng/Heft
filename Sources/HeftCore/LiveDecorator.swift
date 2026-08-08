@@ -81,8 +81,13 @@ public struct QuoteLine: Sendable, Equatable {
     /// The word inside `[!…]`, kept even when it names no known kind so an
     /// unrecognised callout still reads as one rather than silently degrading.
     public let rawCallout: String?
-    /// Title text, on the `[!kind] Title` line only. Empty means the kind's own
-    /// name is drawn instead, which is what Obsidian shows.
+    /// Text after `[!kind]`, on the callout's header line only.
+    ///
+    /// Three states, and they are all different: `nil` means this is not a
+    /// header line at all (a body line, or any line of a plain quote); `""`
+    /// means it is the header but nothing was written after the marker, so the
+    /// kind's own name is drawn instead, as Obsidian does; anything else is the
+    /// title the author wrote.
     public let title: String?
 
     public init(
@@ -97,8 +102,15 @@ public struct QuoteLine: Sendable, Equatable {
     }
 
     public var isCallout: Bool { rawCallout != nil }
-    /// True on the line carrying `[!kind]`.
-    public var isTitleLine: Bool { title != nil }
+
+    /// True on the one line carrying `[!kind]`, whether or not a title was
+    /// written after it. Named for the line's role, not its contents: a header
+    /// line with nothing after the marker is still the header.
+    public var isCalloutHeader: Bool { title != nil }
+
+    /// True when the header line carries no title, so the kind's name has to be
+    /// drawn in its place.
+    public var needsDrawnTitle: Bool { title?.isEmpty == true }
 }
 
 public enum ListMarkerKind: Sendable, Equatable {

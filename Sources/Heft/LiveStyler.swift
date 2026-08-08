@@ -398,28 +398,49 @@ enum LiveStyler {
             // inside its own background.
             let isFirst = quote.edge == .first || quote.edge == .only
             let isLast = quote.edge == .last || quote.edge == .only
-            paragraph.paragraphSpacingBefore = isFirst ? Theme.quoteBlockPadding : 0
+            // Every line already carries `lineSpacing` worth of lead inside its
+            // fragment, so the opening line needs only the remainder to match
+            // the closing line's trail. Measured with `Heft render`, which
+            // prints each fragment's box against the text inside it.
+            paragraph.paragraphSpacingBefore = isFirst
+                ? max(0, Theme.quoteBlockPadding - Theme.lineSpacing)
+                : 0
             paragraph.paragraphSpacing = isLast ? Theme.quoteBlockPadding : 0
 
             // A callout whose title line carries no text of its own still has
             // an icon and a drawn label to fit. Without the reservation the
             // line is only as tall as an empty paragraph and both get clipped.
-            if quote.isTitleLine, quote.title?.isEmpty == true {
-                paragraph.minimumLineHeight = Theme.bodySize + 8
+            //
+            // Only while that label is actually drawn, though. Revealed, the
+            // line holds the real `> [!tip]` text, which is shorter than the
+            // reservation — and the surplus goes above the glyphs, so the
+            // heading appeared to drop as soon as it was clicked. A titled
+            // callout never reserved anything and never moved, which is what
+            // made the two behave differently.
+            // Sized to the line the revealed source produces, so switching
+            // between the two states moves nothing at all.
+            if quote.needsDrawnTitle, !revealed {
+                paragraph.minimumLineHeight = ceil(base.ascender - base.descender + base.leading)
             }
             storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
 
             // Quoted text stays at full contrast. Dimming it is the obvious
             // way to say "this is set apart", but the card already says that,
             // and a quote is usually the passage that matters most on the page.
-            if quote.isTitleLine {
+            if quote.isCalloutHeader {
                 // The title is prose and stays visible; only `[!kind]` hides.
                 // Weight is what separates it from the body beneath it.
                 addTrait(.boldFontMask, to: storage, range: range, base: base)
             }
 
+            // The card is drawn even while the source shows, so editing a
+            // callout does not make it flicker out of existence. What must not
+            // survive is the *drawn* title: with the source visible, the real
+            // `> [!tip]` text is on the line and the painted label lands on
+            // top of it.
             if drawsWidgets {
-                layout.blocks[text.lineRange(for: range).location] = .quote(quote, indent: indent)
+                layout.blocks[text.lineRange(for: range).location] =
+                    .quote(quote, indent: indent, isRevealed: revealed)
             }
 
         case .listMarker(let kind, let depth):

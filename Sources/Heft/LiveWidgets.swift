@@ -22,7 +22,9 @@ enum BlockWidget {
     /// Drawn as a grid; the widget owns every line of the table.
     case table(TableGrid)
     /// One line's slice of a quote bar, or of a callout's tinted card.
-    case quote(QuoteLine, indent: CGFloat)
+    /// `isRevealed` means the line's real source is on screen, so nothing may
+    /// be drawn where that source sits.
+    case quote(QuoteLine, indent: CGFloat, isRevealed: Bool)
     /// Another note's content, transcluded by `![[Note]]`.
     case embed(EmbeddedNote)
     /// YAML frontmatter, drawn as a key/value table.
@@ -439,19 +441,14 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ))
         case .list:
             bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
-        case .quote(_, let indent):
+        case .quote(_, let indent, _):
             // The card and the bars are painted in the gutter the paragraph's
-            // head indent opened up, which is to the left of every glyph. The
-            // vertical slack covers the callout icon, which is centred on the
-            // line box and would otherwise be clipped on a short one.
-            // The slack below covers the closing line's padding, which is
-            // painted into the paragraph spacing that sits outside the
-            // fragment; the slack above covers the callout icon, centred on a
-            // line box that may be shorter than it is.
+            // head indent opened up, which is to the left of every glyph.
+            // Only a little vertical slack, for the callout icon centred on a
+            // line box that may be shorter than it is. Anything more and the
+            // card paints over the paragraph below.
             bounds = bounds.union(CGRect(
-                x: -indent, y: -4,
-                width: containerWidth,
-                height: bounds.height + 8 + Theme.quoteBlockPadding
+                x: -indent, y: -2, width: containerWidth, height: bounds.height + 4
             ))
         default:
             break
@@ -476,8 +473,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         if case .codeBlock(let edge, let language) = widget {
             drawCodeBlockBackground(edge: edge, language: language, at: point, in: context)
         }
-        if case .quote(let quote, let indent) = widget {
-            drawQuoteBackground(quote, indent: indent, at: point, in: context)
+        if case .quote(let quote, let indent, let isRevealed) = widget {
+            drawQuoteBackground(
+                quote, indent: indent, isRevealed: isRevealed, at: point, in: context
+            )
         }
         switch widget {
         case .blockMath(let image):
@@ -584,20 +583,22 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     /// being oversized past the edges this line does not own and then clipped
     /// back to it, which is the same trick the code-block background uses.
     private func drawQuoteBackground(
-        _ quote: QuoteLine, indent: CGFloat, at point: CGPoint, in context: CGContext
+        _ quote: QuoteLine, indent: CGFloat, isRevealed: Bool,
+        at point: CGPoint, in context: CGContext
     ) {
         guard let line = textLineFragments.first else { return }
         let left = point.x - indent
         let tint = Theme.calloutNSTint(quote.callout)
 
-        // `paragraphSpacingBefore` lands inside the fragment, so the top
-        // padding is already part of its height — but `paragraphSpacing` does
-        // not, so the closing line has to paint down into the gap it reserved
-        // or the card ends flush against its last line of text.
-        let closes = quote.edge == .last || quote.edge == .only
-        let height = max(line.typographicBounds.height, layoutFragmentFrame.height)
-            + (closes ? Theme.quoteBlockPadding : 0)
-        let rect = CGRect(x: left, y: point.y, width: containerWidth, height: height)
+        // Both `paragraphSpacingBefore` and `paragraphSpacing` land *inside*
+        // the layout fragment, so the padding at each end of the block is
+        // already part of this height. Adding it again on the closing line
+        // pushed the card a whole line past the block and it was drawn over
+        // the paragraph underneath.
+        let rect = CGRect(
+            x: left, y: point.y, width: containerWidth,
+            height: max(line.typographicBounds.height, layoutFragmentFrame.height)
+        )
 
         context.saveGState()
         // No alpha adjustment on the neutral fill: `withAlphaComponent` on a
@@ -623,10 +624,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             }
         }
 
-        guard quote.isTitleLine else { return }
+        guard quote.isCalloutHeader else { return }
         drawCalloutIcon(
             quote, tint: tint, at: CGPoint(x: left + 16, y: point.y),
-            line: line, in: context
+            line: line, isRevealed: isRevealed, in: context
         )
     }
 
@@ -659,7 +660,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
 
     private func drawCalloutIcon(
         _ quote: QuoteLine, tint: NSColor, at origin: CGPoint,
-        line: NSTextLineFragment, in context: CGContext
+        line: NSTextLineFragment, isRevealed: Bool, in context: CGContext
     ) {
         let side: CGFloat = 14
         let centreY = origin.y + line.typographicBounds.midY
@@ -680,8 +681,12 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
 
             // `> [!tip]` with nothing after it still shows a heading in
             // Obsidian: the kind's own name. There is no text on the line to
-            // style into one, so it is drawn.
-            guard quote.title?.isEmpty == true, let raw = quote.rawCallout else { return }
+            // style into one, so it is drawn — but only while the source is
+            // hidden. With the caret on the line the literal `> [!tip]` is
+            // visible in exactly that spot, and both would be painted over
+            // each other.
+            guard !isRevealed, quote.needsDrawnTitle, let raw = quote.rawCallout
+            else { return }
             let label = NSAttributedString(string: raw.capitalized, attributes: [
                 .font: NSFont.systemFont(ofSize: Theme.bodySize, weight: .semibold),
                 .foregroundColor: tint,

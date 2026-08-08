@@ -132,7 +132,7 @@ enum HeftMain {
                 "properties \(card.rows.count) rows \(size(card.size))"
             case .embed(let embed):
                 "embed \"\(embed.title)\" \(size(embed.size))\(embed.isTruncated ? " truncated" : "")"
-            case .quote(let quote, let indent):
+            case .quote(let quote, let indent, _):
                 "\(quote.rawCallout.map { "callout \($0)" } ?? "quote") depth \(quote.depth) \(quote.edge) indent \(fmt(indent))"
             }
             // Reserved height is what the paragraph style actually gives the
@@ -141,6 +141,8 @@ enum HeftMain {
             let reserved = (style as? NSParagraphStyle)?.minimumLineHeight ?? 0
             print("  line \(line(at: offset)): \(described), reserves \(fmt(reserved))pt")
         }
+
+        reportFragmentGeometry(storage: storage, contentWidth: Theme.contentMaxWidth, line: line)
 
         print("inline math: \(layout.inlineMath.values.map(\.count).reduce(0, +))")
         for offset in layout.inlineMath.keys.sorted() {
@@ -155,6 +157,44 @@ enum HeftMain {
             }
         }
         exit(0)
+    }
+
+    /// Lays the styled text out in a headless TextKit 2 stack and reports, per
+    /// paragraph, the fragment's box against the text line inside it.
+    ///
+    /// Exists because "is `paragraphSpacing` part of the layout fragment or
+    /// not" decides where a block widget may paint, and getting it wrong shows
+    /// up only as a card overhanging the next paragraph — or as padding that
+    /// looks even on one edge and not the other. Guessing it twice was enough.
+    private static func reportFragmentGeometry(
+        storage: NSTextStorage, contentWidth: CGFloat, line: (Int) -> Int
+    ) {
+        let content = NSTextContentStorage()
+        content.textStorage?.setAttributedString(storage)
+        let manager = NSTextLayoutManager()
+        content.addTextLayoutManager(manager)
+        let container = NSTextContainer(
+            size: CGSize(width: contentWidth, height: .greatestFiniteMagnitude)
+        )
+        manager.textContainer = container
+        manager.ensureLayout(for: content.documentRange)
+
+        print("fragment geometry (frame height / text height / lead / trail):")
+        manager.enumerateTextLayoutFragments(from: nil, options: [.ensuresLayout]) { fragment in
+            let offset = content.offset(
+                from: content.documentRange.location, to: fragment.rangeInElement.location
+            )
+            let frame = fragment.layoutFragmentFrame
+            guard let first = fragment.textLineFragments.first else { return true }
+            let textHeight = fragment.textLineFragments
+                .reduce(0) { $0 + $1.typographicBounds.height }
+            // How much of the fragment sits above the first line of text, and
+            // how much below the last: this is where paragraph spacing lands.
+            let lead = first.typographicBounds.minY
+            let trail = frame.height - textHeight - lead
+            print("  line \(line(offset)): \(fmt(frame.height)) / \(fmt(textHeight)) / \(fmt(lead)) / \(fmt(trail))")
+            return true
+        }
     }
 
     private static func size(_ s: CGSize) -> String { "\(fmt(s.width))x\(fmt(s.height))" }

@@ -366,7 +366,7 @@ public enum SelfCheck {
         expect("\(callout.first?.callout.map(String.init(describing:)) ?? "nil")", "warning",
                "callout kind is parsed")
         expect(callout.first?.title ?? "", "Careful", "callout title is parsed")
-        expectTrue(callout.last?.isCallout == true && callout.last?.isTitleLine == false,
+        expectTrue(callout.last?.isCallout == true && callout.last?.isCalloutHeader == false,
                    "the callout's kind carries to its body lines, its title does not")
         // `[!warning]` is markup and hides; the title beside it is prose.
         expectTrue(hiddenText("> [!warning] Careful").contains("[!warning] "),
