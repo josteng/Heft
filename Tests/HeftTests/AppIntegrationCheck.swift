@@ -171,6 +171,64 @@ enum AppIntegrationCheck {
         let indexed = await waitUntil { files.tree != nil && files.index.notes.count >= 5 }
         expect(indexed, "the disposable vault finishes indexing")
 
+        let beforeCapture = files.current?.relativePath
+        let firstCapture = "Remember the useful thing"
+        expect(files.captureToInbox(firstCapture), "the app captures to Inbox.md")
+        let inboxURL = root.appendingPathComponent("Inbox.md")
+        expect(
+            contents(inboxURL)?.contains(firstCapture) == true,
+            "an inbox capture is written as plain markdown"
+        )
+        expect(
+            files.current?.relativePath == beforeCapture,
+            "capturing does not disturb the current note"
+        )
+        let secondCapture = "This should be newer"
+        expect(files.captureToInbox(secondCapture), "a second inbox capture succeeds")
+        if let inboxText = contents(inboxURL),
+           let firstRange = inboxText.range(of: firstCapture),
+           let secondRange = inboxText.range(of: secondCapture) {
+            expect(secondRange.lowerBound < firstRange.lowerBound, "newer inbox captures come first")
+        } else {
+            result.failures.append("inbox captures were unavailable for ordering")
+        }
+
+        if let inboxRef = NoteRef(url: inboxURL, vaultRoot: root) {
+            files.open(inboxRef)
+            files.text += "\nManual inbox edit\n"
+            expect(
+                files.captureToInbox("Captured while Inbox was open"),
+                "capturing safely saves and reloads an open Inbox"
+            )
+            expect(
+                files.text.contains("Manual inbox edit")
+                    && files.text.contains("Captured while Inbox was open"),
+                "an open Inbox keeps both editor changes and the capture"
+            )
+
+            let intentStyleCapture = "Captured outside the editor model"
+            _ = try? InboxCapture(vaultRoot: root).capture(intentStyleCapture)
+            let openInboxRefreshed = await waitUntil {
+                files.text.contains(intentStyleCapture)
+            }
+            expect(
+                openInboxRefreshed,
+                "an open Inbox refreshes after an App Intent-style capture"
+            )
+
+            let directDiskEdit = files.text + "\nExternal writer\n"
+            try? directDiskEdit.write(to: inboxURL, atomically: true, encoding: .utf8)
+            let genericExternalEditRefreshed = await waitUntil {
+                files.text.contains("External writer")
+            }
+            expect(
+                genericExternalEditRefreshed,
+                "an open clean note refreshes after a same-process disk edit"
+            )
+        } else {
+            result.failures.append("Inbox.md could not be represented as a note")
+        }
+
         let created = files.createUntitledNote(in: root)
         expect(created?.path == "Untitled.md", "inline creation writes an untitled note")
         let createdAppeared = await waitUntil {

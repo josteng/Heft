@@ -55,6 +55,9 @@ struct ContentView: View {
         .sheet(isPresented: $model.isDailyNotesSettingsPresented) {
             DailyNotesSettingsView()
         }
+        .sheet(isPresented: $model.isInboxCapturePresented) {
+            InboxCaptureView()
+        }
         .alert(
             "This Note Changed Outside Heft",
             isPresented: Binding(

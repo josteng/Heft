@@ -1,6 +1,7 @@
 .build/
 .DS_Store
-*.xcodeproj
+*.xcuserstate
+*.xcodeproj/xcuserdata/
 .swiftpm/
 # Compiled from Resources/Heft.icon by actool during bundling.
 Resources/Heft.icns

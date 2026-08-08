@@ -9,6 +9,7 @@ import Foundation
 public struct MarkdownDecoration: Sendable, Equatable {
     public enum Style: Sendable, Equatable {
         case frontmatter
+        case comment
         case codeBlock(language: String?)
         case heading(level: Int)
         /// One line of a `>` block. Carried per line rather than per block so
@@ -165,7 +166,7 @@ public struct Reveal: Equatable, Sendable {
     /// dissolving into raw asterisks the moment it is clicked.
     public static func revealsWithItsLine(_ style: MarkdownDecoration.Style) -> Bool {
         switch style {
-        case .frontmatter, .codeBlock, .heading, .quoteLine, .listMarker,
+        case .frontmatter, .comment, .codeBlock, .heading, .quoteLine, .listMarker,
              .table, .thematicBreak, .blockMath, .image:
             true
         // An embed owning its line is drawn as a block, so it behaves like one.
@@ -235,6 +236,18 @@ public enum LiveDecorator {
         for match in matches(tablePattern, text, excluding: protected) {
             guard let layout = parseTable(text.substring(with: match)) else { continue }
             result.append(MarkdownDecoration(range: match, style: .table(layout)))
+            protected.append(match)
+        }
+
+        // HTML comments are metadata, not visible prose. Keep them in the
+        // buffer and reveal them on their line for editing, while shielding
+        // any markdown-looking text inside from further decoration.
+        for match in matches(#"<!--[\s\S]*?-->"#, text, excluding: protected) {
+            result.append(MarkdownDecoration(
+                range: match,
+                syntax: [match],
+                style: .comment
+            ))
             protected.append(match)
         }
 

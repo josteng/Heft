@@ -105,7 +105,9 @@ final class AppModel: ObservableObject {
     @Published var isCommandPalettePresented = false
     @Published var isVaultSearchPresented = false
     @Published var isDailyNotesSettingsPresented = false
+    @Published var isInboxCapturePresented = false
     private var shouldPresentDailyNotesSettingsAfterPalette = false
+    private var shouldPresentInboxCaptureAfterPalette = false
     @Published var isFindPresented = false
     @Published private(set) var findFocusGeneration = 0
     @Published private(set) var findNavigationGeneration = 0
@@ -158,6 +160,7 @@ final class AppModel: ObservableObject {
     }
 
     private var saveTask: Task<Void, Never>?
+    private var externalChangePollTask: Task<Void, Never>?
     private var lastKnownModification: Date?
     /// Exact source last read from or written to disk. Comparing contents,
     /// rather than timestamps, catches same-tick writes and filesystems with
@@ -224,6 +227,8 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+
+        startExternalChangePolling()
     }
 
     // MARK: - Vault lifecycle
@@ -292,18 +297,72 @@ final class AppModel: ObservableObject {
         session?.reload(immediately: immediately)
     }
 
-    /// Picks up edits made elsewhere (another device via iCloud, or Obsidian
-    /// itself). Local unsaved edits always win: we never clobber the buffer.
+    /// Picks up edits made elsewhere (another device via iCloud, Obsidian, or
+    /// an App Intent). Exact contents are authoritative: timestamps are only a
+    /// hint and can remain unchanged for two writes in the same filesystem tick.
     private func reloadCurrentIfChangedExternally() {
-        guard let current, !isDirty else { return }
-        let attributes = try? FileManager.default.attributesOfItem(atPath: current.url.path)
-        let modified = attributes?[.modificationDate] as? Date
-        guard modified != lastKnownModification else { return }
+        guard let current else { return }
+        let exists = FileManager.default.fileExists(atPath: current.url.path)
+        guard exists else {
+            if isDirty {
+                presentExternalChangeConflict(for: current, diskVersionExists: false)
+            } else if lastKnownDiskText != nil {
+                lastKnownDiskText = nil
+                lastKnownModification = nil
+                status = "\(current.name) was removed from disk"
+            }
+            return
+        }
+
         guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else { return }
+        let modified = modificationDate(of: current.url)
+        guard fresh != lastKnownDiskText else {
+            lastKnownModification = modified
+            return
+        }
+
+        guard !isDirty else {
+            presentExternalChangeConflict(for: current, diskVersionExists: true)
+            return
+        }
+
         lastKnownModification = modified
         lastKnownDiskText = fresh
-        guard fresh != text else { return }
-        setText(fresh)
+        if fresh != text {
+            setText(fresh)
+            status = "Reloaded \(current.relativePath) from disk"
+        }
+    }
+
+    private func presentExternalChangeConflict(
+        for current: NoteRef,
+        diskVersionExists: Bool
+    ) {
+        guard saveConflict == nil else { return }
+        saveTask?.cancel()
+        saveTask = nil
+        saveConflict = SaveConflict(
+            noteName: current.name,
+            relativePath: current.relativePath,
+            diskVersionExists: diskVersionExists
+        )
+        status = diskVersionExists
+            ? "Save paused: \(current.name) changed on disk"
+            : "Save paused: \(current.name) was removed from disk"
+    }
+
+    /// FSEvents remains the fast path. Polling one open file is a cheap safety
+    /// net for same-process writers (which the vault watcher deliberately
+    /// ignores), dropped events, and coarse filesystem modification dates.
+    private func startExternalChangePolling() {
+        externalChangePollTask?.cancel()
+        externalChangePollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                self?.reloadCurrentIfChangedExternally()
+            }
+        }
     }
 
     // MARK: - Opening notes
@@ -1093,10 +1152,58 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func presentInboxCapture() {
+        guard vaultRoot != nil else {
+            promptForVault()
+            return
+        }
+        if isCommandPalettePresented {
+            shouldPresentInboxCaptureAfterPalette = true
+            isCommandPalettePresented = false
+        } else {
+            isInboxCapturePresented = true
+        }
+    }
+
     func commandPaletteDidDismiss() {
-        guard shouldPresentDailyNotesSettingsAfterPalette else { return }
-        shouldPresentDailyNotesSettingsAfterPalette = false
-        isDailyNotesSettingsPresented = true
+        if shouldPresentDailyNotesSettingsAfterPalette {
+            shouldPresentDailyNotesSettingsAfterPalette = false
+            isDailyNotesSettingsPresented = true
+        } else if shouldPresentInboxCaptureAfterPalette {
+            shouldPresentInboxCaptureAfterPalette = false
+            isInboxCapturePresented = true
+        }
+    }
+
+    /// Adds a timestamped bullet without changing the note this window is
+    /// showing. If Inbox.md itself is being edited here, save and reload it so
+    /// the capture and the editor cannot silently overwrite each other.
+    @discardableResult
+    func captureToInbox(_ capture: String, at date: Date = Date()) -> Bool {
+        guard let vaultRoot else {
+            status = InboxCaptureError.vaultUnavailable.localizedDescription
+            return false
+        }
+
+        let inbox = InboxCapture(vaultRoot: vaultRoot)
+        let isEditingInbox = current?.url.standardizedFileURL == inbox.url.standardizedFileURL
+        if isEditingInbox, !flushPendingSave() {
+            status = "Resolve the Inbox save conflict before capturing"
+            return false
+        }
+
+        do {
+            let url = try inbox.capture(capture, at: date)
+            if isEditingInbox, let ref = NoteRef(url: url, vaultRoot: vaultRoot) {
+                open(ref, recordingNavigation: false)
+            }
+            reload(immediately: true)
+            status = "Captured to Inbox.md"
+            return true
+        } catch {
+            status = "Could not capture to Inbox: \(error.localizedDescription)"
+            return false
+        }
     }
 
     var hasDailyNoteTemplate: Bool {
@@ -1392,6 +1499,8 @@ final class AppModel: ObservableObject {
     }
 
     func closeWorkspace() {
+        externalChangePollTask?.cancel()
+        externalChangePollTask = nil
         if !flushPendingSave() {
             preserveRecoveryCopy()
         }

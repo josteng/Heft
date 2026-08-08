@@ -17,6 +17,9 @@ struct AppCommandShortcut {
     static let toggleBacklinks = Self(
         key: "b", modifiers: [.command, .option], display: "⌥⌘B"
     )
+    static let captureInbox = Self(
+        key: "i", modifiers: [.command, .shift], display: "⇧⌘I"
+    )
 }
 
 /// One command owns all of its palette metadata and behaviour. Adding a
@@ -52,6 +55,15 @@ struct AppCommand: Identifiable {
     }
 
     static let registry: [Self] = [
+        Self(
+            id: "captureInbox",
+            title: "Capture to Inbox…",
+            symbol: "tray.and.arrow.down",
+            searchTerms: "quick note add jot remember thought inbox",
+            shortcut: .captureInbox,
+            enabled: { $0.vaultRoot != nil },
+            action: { $0.presentInboxCapture() }
+        ),
         Self(
             id: "startPresentation",
             title: "Start presentation",

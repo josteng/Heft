@@ -234,6 +234,8 @@ public enum MarkdownModel {
             return self.table(table)
 
         case let html as HTMLBlock:
+            let raw = html.rawHTML.trimmingCharacters(in: .whitespacesAndNewlines)
+            if raw.hasPrefix("<!--"), raw.hasSuffix("-->") { return nil }
             return .html(html.rawHTML)
 
         default:
@@ -392,6 +394,8 @@ public enum MarkdownModel {
         case is LineBreak:
             return [.lineBreak]
         case let html as InlineHTML:
+            let raw = html.rawHTML.trimmingCharacters(in: .whitespacesAndNewlines)
+            if raw.hasPrefix("<!--"), raw.hasSuffix("-->") { return [] }
             // Obsidian passes raw inline HTML through; showing the markup is
             // less surprising than dropping the content entirely.
             return [.text(html.rawHTML)]

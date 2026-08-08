@@ -222,6 +222,10 @@ struct DailyNotesSettingsView: View {
 
     > {{date:dddd, MMMM Do YYYY}}
 
+    ## Daily Log
+
+    <!-- heft:daily-log -->
+
     ## Notes
 
     """
@@ -292,6 +296,24 @@ struct DailyNotesSettingsView: View {
                         .popover(isPresented: $isVariableHelpPresented, arrowEdge: .bottom) {
                             variableReference
                         }
+                    }
+
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(DailyNoteCapture.insertionMarker)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                        Button { copy(DailyNoteCapture.insertionMarker) } label: {
+                            Image(systemName: copiedVariable == DailyNoteCapture.insertionMarker
+                                  ? "checkmark"
+                                  : "doc.on.doc")
+                                .frame(width: 14, height: 14)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy daily-log marker")
+                        Text("Spotlight daily-note captures are inserted immediately above this marker.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             } label: {

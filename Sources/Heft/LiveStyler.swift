@@ -324,6 +324,15 @@ enum LiveStyler {
                 .foregroundColor: NSColor.tertiaryLabelColor,
             ], range: range)
 
+        case .comment:
+            storage.addAttributes([
+                .font: NSFont.monospacedSystemFont(
+                    ofSize: base.pointSize - 2,
+                    weight: .regular
+                ),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ], range: range)
+
         case .codeBlock(let language):
             let code = NSMutableParagraphStyle()
             code.lineSpacing = 2

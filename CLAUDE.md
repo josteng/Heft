@@ -1,14 +1,14 @@
 # Heft
 
-Native macOS markdown vault editor (Bear/Obsidian alternative). Pure Swift, plain
-Swift Package Manager, no Xcode project, macOS 26 target. Sync is just pointing the
-vault folder at iCloud Drive; there is no custom sync engine. Opens an existing
-Obsidian vault unmodified, including its `.obsidian/` config.
+Native macOS markdown vault editor (Bear/Obsidian alternative). Pure Swift with a
+native Xcode app target and a SwiftPM core package, targeting macOS 26. Sync is just
+pointing the vault folder at iCloud Drive; there is no custom sync engine. Opens an
+existing Obsidian vault unmodified, including its `.obsidian/` config.
 
 ```bash
-swift build                                     # compile
-Scripts/bundle.sh debug                         # assemble .build/Heft.app (dock icon + menu bar)
-Scripts/install.sh [--launch]                   # release build into /Applications
+Scripts/run.sh [vault] [note]                   # Xcode build, then launch
+Scripts/bundle.sh debug                         # Xcode build without launching
+Scripts/install.sh [--install-only]             # release install; launches by default
 swift test                                      # core and disposable-vault integration checks
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless

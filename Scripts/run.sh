@@ -6,9 +6,8 @@
 #   Scripts/run.sh <vault> <note.md>    # ...and jump straight to a note
 #   Scripts/run.sh --release            # optimised build
 #
-# Launching via the bundle rather than `swift run` is deliberate: a bare SwiftPM
-# executable has no dock icon, no menu bar, and no stable code identity, so
-# macOS forgets the chosen vault between launches.
+# The script keeps the one-command workflow while Xcode supplies the native app
+# bundle, resources, signing, and App Intent metadata.
 
 set -euo pipefail
 
@@ -24,6 +23,13 @@ VAULT="${1:-}"
 NOTE="${2:-}"
 
 "$ROOT/Scripts/bundle.sh" "$CONFIG"
+
+if [[ "$CONFIG" == "debug" ]]; then
+    XCODE_CONFIGURATION="Debug"
+else
+    XCODE_CONFIGURATION="Release"
+fi
+APP="$ROOT/.build/XcodeDerivedData/Build/Products/$XCODE_CONFIGURATION/Heft.app"
 
 # Replace a running copy so the new build is what actually starts.
 if pgrep -x Heft >/dev/null; then
@@ -49,9 +55,9 @@ if [[ -n "$VAULT" ]]; then
 fi
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then
-    open -a "$ROOT/.build/Heft.app" --args "${ARGS[@]}"
+    open -a "$APP" --args "${ARGS[@]}"
 else
-    open -a "$ROOT/.build/Heft.app"
+    open -a "$APP"
 fi
 
 echo "Launched Heft (${CONFIG})${VAULT:+ on $VAULT}"

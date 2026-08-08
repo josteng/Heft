@@ -29,6 +29,7 @@ final class VaultSession: ObservableObject {
 
     private var watcher: VaultWatcher?
     private var reloadTask: Task<Void, Never>?
+    private var contentChangeObserver: NSObjectProtocol?
 
     init(root: URL) {
         self.root = root.standardizedFileURL
@@ -38,11 +39,25 @@ final class VaultSession: ObservableObject {
         watcher = VaultWatcher(root: self.root) { [weak self] in
             self?.vaultDidChangeOnDisk()
         }
+        let rootPath = self.root.path
+        contentChangeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: VaultContentChangeNotification.name,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard notification.object as? String == rootPath else { return }
+            Task { @MainActor [weak self] in
+                self?.vaultDidChangeOnDisk()
+            }
+        }
     }
 
     deinit {
         reloadTask?.cancel()
         watcher?.stop()
+        if let contentChangeObserver {
+            DistributedNotificationCenter.default().removeObserver(contentChangeObserver)
+        }
     }
 
     private var recentsKey: String {
@@ -101,16 +116,19 @@ final class VaultRegistry: ObservableObject {
         init(_ value: NSWindow) { self.value = value }
     }
 
+    private final class WeakModel {
+        weak var value: AppModel?
+        init(_ value: AppModel) { self.value = value }
+    }
+
     private var sessions: [String: WeakSession] = [:]
     private var documentOwners: [String: UUID] = [:]
     private var focusedFolders: [UUID: String] = [:]
     private var workspaceWindows: [UUID: WeakWindow] = [:]
-    private static let lastVaultPathKey = "dev.stenglein.Heft.vaultPath"
-
+    private var workspaceModels: [UUID: WeakModel] = [:]
+    private var windowOpeners: [UUID: (WorkspaceDescriptor) -> Void] = [:]
     var lastVaultURL: URL? {
-        guard let path = UserDefaults.standard.string(forKey: Self.lastVaultPathKey) else { return nil }
-        let url = URL(fileURLWithPath: path).standardizedFileURL
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        CaptureVaultPreference.url
     }
 
     func session(for url: URL) -> VaultSession {
@@ -118,7 +136,7 @@ final class VaultRegistry: ObservableObject {
         if let existing = sessions[root.path]?.value { return existing }
         let session = VaultSession(root: root)
         sessions[root.path] = WeakSession(session)
-        UserDefaults.standard.set(root.path, forKey: Self.lastVaultPathKey)
+        UserDefaults.standard.set(root.path, forKey: CaptureVaultPreference.defaultsKey)
         return session
     }
 
@@ -152,6 +170,16 @@ final class VaultRegistry: ObservableObject {
         documentOwners = documentOwners.filter { $0.value != owner }
         focusedFolders.removeValue(forKey: owner)
         workspaceWindows.removeValue(forKey: owner)
+        workspaceModels.removeValue(forKey: owner)
+        windowOpeners.removeValue(forKey: owner)
+    }
+
+    func register(
+        model: AppModel,
+        openWindow: @escaping (WorkspaceDescriptor) -> Void
+    ) {
+        workspaceModels[model.workspaceID] = WeakModel(model)
+        windowOpeners[model.workspaceID] = openWindow
     }
 
     func register(window: NSWindow, for owner: UUID) {
@@ -171,6 +199,64 @@ final class VaultRegistry: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         return true
+    }
+
+    /// Opens an intent target in the best existing workspace. A focused-folder
+    /// window is eligible only when the target lies inside its scope; otherwise
+    /// the action creates a new full-vault window instead of changing that
+    /// window's browsing boundary behind the user's back.
+    func openFromIntent(_ url: URL, in vaultRoot: URL) -> Bool {
+        let target = url.standardizedFileURL
+        let root = vaultRoot.standardizedFileURL
+        guard target.path.hasPrefix(root.path + "/") else { return false }
+
+        if documentOwners[target.path] != nil, focusWindowEditing(target) {
+            return true
+        }
+
+        guard let targetRef = NoteRef(url: target, vaultRoot: root) else { return false }
+        let relativePath = String(target.path.dropFirst(root.path.count + 1))
+        let eligible = workspaceModels.compactMap { owner, weakModel -> (UUID, AppModel)? in
+            guard let model = weakModel.value,
+                  model.vaultRoot?.standardizedFileURL == root,
+                  model.isInScope(targetRef) else { return nil }
+            return (owner, model)
+        }
+
+        let ordered = eligible.sorted { lhs, rhs in
+            intentWindowScore(owner: lhs.0) > intentWindowScore(owner: rhs.0)
+        }
+        for (owner, model) in ordered {
+            model.open(targetRef)
+            guard model.current?.url.standardizedFileURL == target else { continue }
+            focusWindow(owner: owner)
+            return true
+        }
+
+        guard let opener = preferredWindowOpener() else { return false }
+        opener(WorkspaceDescriptor(vaultPath: root.path, notePath: relativePath))
+        return true
+    }
+
+    private func intentWindowScore(owner: UUID) -> Int {
+        guard let window = workspaceWindows[owner]?.value else { return 0 }
+        if window.isKeyWindow { return 2 }
+        if window.isMainWindow { return 1 }
+        return 0
+    }
+
+    private func preferredWindowOpener() -> ((WorkspaceDescriptor) -> Void)? {
+        if let keyOwner = workspaceWindows.first(where: { $0.value.value?.isKeyWindow == true })?.key,
+           let opener = windowOpeners[keyOwner] {
+            return opener
+        }
+        return windowOpeners.values.first
+    }
+
+    private func focusWindow(owner: UUID) {
+        guard let window = workspaceWindows[owner]?.value else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     func updateFocus(root: URL, scopePath: String?, for owner: UUID) {

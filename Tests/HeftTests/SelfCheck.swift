@@ -68,6 +68,126 @@ public enum SelfCheck {
         expect(MomentFormat.expandTemplate("{{unknown}}", date: day, title: "t"),
                "{{unknown}}", "unknown placeholder preserved")
 
+        // MARK: Inbox capture
+        do {
+            let first = try InboxCapture.contents(
+                byCapturing: "First thought", in: "", at: day, calendar: cal
+            )
+            expect(
+                first,
+                "# Inbox\n\n## 2026-08-07\n- 14:05 First thought\n",
+                "inbox creates readable markdown"
+            )
+            let second = try InboxCapture.contents(
+                byCapturing: "Newer thought\nwith context", in: first, at: day, calendar: cal
+            )
+            expect(
+                second,
+                "# Inbox\n\n## 2026-08-07\n- 14:05 Newer thought\n  with context\n- 14:05 First thought\n",
+                "inbox prepends multiline captures within the day"
+            )
+
+            let nextDay = cal.date(from: DateComponents(
+                timeZone: utc, year: 2026, month: 8, day: 8, hour: 9, minute: 30
+            ))!
+            expect(
+                try InboxCapture.contents(
+                    byCapturing: "Tomorrow", in: second, at: nextDay, calendar: cal
+                ),
+                "# Inbox\n\n## 2026-08-08\n- 09:30 Tomorrow\n\n## 2026-08-07\n- 14:05 Newer thought\n  with context\n- 14:05 First thought\n",
+                "inbox prepends a new dated section"
+            )
+            expect(
+                try InboxCapture.contents(
+                    byCapturing: "Windows", in: "# Inbox\r\n\r\nOlder\r\n", at: day,
+                    calendar: cal
+                ),
+                "# Inbox\r\n\r\n## 2026-08-07\r\n- 14:05 Windows\r\n\r\nOlder\r\n",
+                "inbox preserves CRLF files"
+            )
+            do {
+                _ = try InboxCapture.contents(
+                    byCapturing: "  \n", in: first, at: day, calendar: cal
+                )
+                r.failures.append("empty inbox capture was accepted")
+            } catch InboxCaptureError.emptyCapture {
+                r.passed += 1
+            }
+        } catch {
+            r.failures.append("inbox formatting: \(error.localizedDescription)")
+        }
+
+        // MARK: Daily-note capture
+        do {
+            let first = try DailyNoteCapture.contents(
+                byCapturing: "First log item",
+                in: "# 2026-08-07\n\n",
+                at: day,
+                calendar: cal
+            )
+            expect(
+                first,
+                "# 2026-08-07\n\n- 14:05 First log item\n",
+                "daily capture appends a timestamped bullet"
+            )
+            expect(
+                try DailyNoteCapture.contents(
+                    byCapturing: "Second item\nwith context",
+                    in: first,
+                    at: day,
+                    calendar: cal
+                ),
+                "# 2026-08-07\n\n- 14:05 First log item\n- 14:05 Second item\n  with context\n",
+                "daily capture keeps chronological order and multiline indentation"
+            )
+            let structured = """
+            # 2026-08-07
+
+            ## Daily Log
+
+            <!-- heft:daily-log -->
+
+            ---
+
+            ## Closure
+            Keep this at the bottom.
+
+            """
+            expect(
+                try DailyNoteCapture.contents(
+                    byCapturing: "Inside the log",
+                    in: structured,
+                    at: day,
+                    calendar: cal
+                ),
+                """
+                # 2026-08-07
+
+                ## Daily Log
+
+                - 14:05 Inside the log
+                <!-- heft:daily-log -->
+
+                ---
+
+                ## Closure
+                Keep this at the bottom.
+
+                """,
+                "daily capture inserts above the template marker"
+            )
+            do {
+                _ = try DailyNoteCapture.contents(
+                    byCapturing: " \n", in: first, at: day, calendar: cal
+                )
+                r.failures.append("empty daily-note capture was accepted")
+            } catch DailyNoteCaptureError.emptyCapture {
+                r.passed += 1
+            }
+        } catch {
+            r.failures.append("daily-note capture formatting: \(error.localizedDescription)")
+        }
+
         // Daily-note setup writes Obsidian-compatible JSON without discarding
         // settings from versions or plugins Heft does not know about.
         let settingsVault = FileManager.default.temporaryDirectory
@@ -243,6 +363,22 @@ public enum SelfCheck {
         expectTrue(styles("*italic*").contains(.italic), "decorator finds italic")
         expectTrue(styles("a_b_c").isEmpty, "underscores inside a word are not italic")
         expectTrue(styles("==hi==").contains(.highlight), "decorator finds highlight")
+        expectTrue(
+            styles(DailyNoteCapture.insertionMarker).contains(.comment),
+            "decorator recognises an HTML comment"
+        )
+        expect(
+            hiddenText(DailyNoteCapture.insertionMarker),
+            DailyNoteCapture.insertionMarker,
+            "live mode hides an HTML comment"
+        )
+        let commentBlocks = MarkdownModel.parse(
+            "Before\n\n\(DailyNoteCapture.insertionMarker)\n\nAfter"
+        ).blocks
+        expectTrue(
+            !commentBlocks.contains { if case .html = $0 { true } else { false } },
+            "reading mode omits HTML comments"
+        )
         expect(hiddenText("[[Note|Alias]]"), "[[Note|]]", "wikilink hides brackets and alias target")
         expect(hiddenText("# Heading"), "# ", "heading hides hashes and space")
         expectTrue(styles("#").contains(.heading(level: 1)),

@@ -4,19 +4,24 @@ A native macOS markdown vault editor. Opens an existing Obsidian vault as-is,
 starts instantly, and syncs by living in an iCloud Drive folder rather than by
 running a sync engine.
 
-Pure Swift, plain SwiftPM, no Xcode project. macOS 26+.
+Pure Swift with a native Xcode app target and a SwiftPM core package. macOS 26+.
 
 ## Build and run
 
 ```bash
-swift build                 # compile
-swift run Heft              # run (no bundle: no dock icon, no menu bar)
-Scripts/bundle.sh debug     # assemble .build/Heft.app
-open .build/Heft.app        # run as a real app
+Scripts/run.sh                         # build and run the last-used vault
+Scripts/run.sh /path/to/vault          # build and run a specific vault
+Scripts/bundle.sh debug                 # build without launching
+Scripts/install.sh                     # release install into /Applications, then launch
+Scripts/install.sh --install-only      # install without launching
+open Heft.xcodeproj                     # or use Xcode and press Command-R
 ```
 
-`swift run Heft` launches a bare executable. Use `Scripts/bundle.sh` and open the
-`.app` for the real thing: dock icon, menu bar, window restoration.
+The scripts invoke the Xcode project, so the result includes the native app
+bundle, icon, menu bar, window restoration, signing, and App Intent metadata.
+Spotlight and Shortcuts can only execute an action from a validated app bundle.
+For local development, add your Apple ID in Xcode and create an Apple Development
+certificate; this is free and the build scripts pick it up automatically.
 
 ### Command-line tools
 
@@ -25,7 +30,7 @@ swift test                                 # core and disposable-vault checks
 swift run Heft stats  <vault>              # read-only index report
 swift run Heft files  <vault>              # list every indexed file
 swift run Heft daily  <vault> [YYYY-MM-DD] # create a daily note, print it
-Scripts/bundle.sh debug && open .build/Heft.app --args --vault <path> --open <relative-path>
+Scripts/run.sh <vault> <relative-path>     # launch and open one note
 ```
 
 `stats` is read-only and safe to point at a real vault. `daily` writes a note.
@@ -91,6 +96,10 @@ structurally out of reach.
 - **Content search** (⇧⌘F) across the focused folder or the full vault.
 - **Command palette** (⌘P) for daily-note settings and window controls such as
   the sidebar, calendar, backlinks, and colorful formatting.
+- **Spotlight and Shortcuts actions** capture to `Inbox.md`, append a
+  timestamped item to today's daily note, or open either note in the best
+  matching Heft window. They currently use the most recently opened vault.
+  Inbox capture is also available in-app with ⇧⌘I.
 - **Image paste and drop** into the vault's attachment folder, content-hashed so
   pasting the same screenshot twice does not create a second file.
 - **Live reload** via FSEvents; external edits appear without clobbering unsaved
@@ -143,6 +152,7 @@ also reports as unresolved).
 | ⌘N | New note |
 | ⌘S | Save pending edits now |
 | ⇧⌘S | Toggle sidebar |
+| ⇧⌘I | Capture to Inbox |
 | ⇧⌘N | New window |
 | ⇧⌘T | Today's daily note |
 | ⇧⌘O | Open vault in new window |
@@ -157,9 +167,11 @@ also reports as unresolved).
 
 ## Testing
 
-Tests use a normal SwiftPM test target with Swift Testing:
+The same Swift Testing suite is available from Xcode and SwiftPM:
 
 ```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
+  -project Heft.xcodeproj -scheme Heft -destination 'platform=macOS' test
 swift test
 ```
 

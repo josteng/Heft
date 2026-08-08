@@ -1,4 +1,5 @@
 import AppKit
+import AppIntents
 import HeftCore
 import SwiftUI
 
@@ -15,6 +16,10 @@ extension FocusedValues {
 
 struct HeftApp: App {
     @StateObject private var registry = VaultRegistry()
+
+    init() {
+        HeftAppShortcuts.updateAppShortcutParameters()
+    }
 
     var body: some Scene {
         WindowGroup("Heft", for: WorkspaceDescriptor.self) { $descriptor in
@@ -47,10 +52,13 @@ private struct WorkspaceSceneRoot: View {
 }
 
 private struct WorkspaceWindow: View {
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var model: AppModel
+    private let registry: VaultRegistry
     @Binding private var descriptor: WorkspaceDescriptor?
 
     init(registry: VaultRegistry, descriptor: Binding<WorkspaceDescriptor?>) {
+        self.registry = registry
         _descriptor = descriptor
         _model = StateObject(wrappedValue: AppModel(
             registry: registry, descriptor: descriptor.wrappedValue
@@ -61,7 +69,13 @@ private struct WorkspaceWindow: View {
         ContentView()
             .environmentObject(model)
             .focusedSceneValue(\.workspaceModel, model)
-            .onAppear { descriptor = model.restorationDescriptor }
+            .onAppear {
+                descriptor = model.restorationDescriptor
+                registry.register(model: model) { descriptor in
+                    openWindow(value: descriptor)
+                }
+                IntentNavigation.shared.attach(registry)
+            }
             .onChange(of: model.restorationDescriptor) { _, value in descriptor = value }
             .onDisappear { model.closeWorkspace() }
     }
@@ -82,6 +96,12 @@ struct HeftCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
             Divider()
+            Button("Capture to Inbox…") { model?.presentInboxCapture() }
+                .keyboardShortcut(
+                    AppCommandShortcut.captureInbox.key,
+                    modifiers: AppCommandShortcut.captureInbox.modifiers
+                )
+                .disabled(model?.vaultRoot == nil)
             if model?.dailyNotesAreInScope != false {
                 Button("Today's Daily Note") { model?.openDailyNote(for: Date()) }
                     .keyboardShortcut(
