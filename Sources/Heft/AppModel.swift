@@ -29,17 +29,13 @@ final class AppModel: ObservableObject {
     /// View menu can toggle it too.
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
     @Published var isInspectorVisible = false
-    /// The one palette: notes, commands and content behind a single shortcut.
-    /// `searchSeed` preloads its field, which is how `>` (commands) and `#`
-    /// (tags) get their own menu items without a second window.
-    @Published var isSearchPresented = false
-    @Published var searchSeed = ""
+    /// Three narrow pickers rather than one that does everything. A combined
+    /// palette was tried and removed: mixing content hits into a note switcher
+    /// made the common case — jump to a note by name — slower and noisier,
+    /// which is the opposite of what a switcher is for.
+    @Published var isQuickOpenPresented = false
+    @Published var isCommandPalettePresented = false
     @Published var isVaultSearchPresented = false
-
-    func presentSearch(seededWith seed: String = "") {
-        searchSeed = seed
-        isSearchPresented = true
-    }
     @Published var isFindPresented = false
     @Published private(set) var findFocusGeneration = 0
     @Published private(set) var findNavigationGeneration = 0
@@ -94,6 +90,7 @@ final class AppModel: ObservableObject {
 
     private var watcher: VaultWatcher?
     private var saveTask: Task<Void, Never>?
+    private var reloadTask: Task<Void, Never>?
     private var lastKnownModification: Date?
     private static let vaultPathKey = "dev.stenglein.Heft.vaultPath"
     private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
@@ -165,20 +162,31 @@ final class AppModel: ObservableObject {
         watcher = VaultWatcher(root: url) { [weak self] in self?.vaultDidChangeOnDisk() }
     }
 
-    /// Rescans and reindexes off the main thread; the vault is hundreds of
-    /// files and this runs on every external change.
+    /// Rescans and reindexes off the main thread.
+    ///
+    /// Coalesced, because a rebuild reads *every* note in the vault to
+    /// reconstruct the link and tag graph, and the events that ask for one
+    /// arrive in bursts: saving a note, or iCloud bringing a folder down,
+    /// produces a stream of them. Without the delay each burst ran the whole
+    /// scan several times over.
     func reload() {
         guard let root = vaultRoot else { return }
         isLoading = true
-        Task.detached(priority: .userInitiated) {
-            let tree = VaultScanner.scan(root: root)
-            let index = VaultIndex.build(root: tree)
-            await MainActor.run {
-                self.tree = tree
-                self.index = index
-                self.isLoading = false
-                if self.current == nil { self.status = "\(index.notes.count) notes" }
-            }
+        reloadTask?.cancel()
+        reloadTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+
+            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex) in
+                let tree = VaultScanner.scan(root: root)
+                return (tree, VaultIndex.build(root: tree))
+            }.value
+
+            guard !Task.isCancelled, let self else { return }
+            self.tree = scanned.0
+            self.index = scanned.1
+            self.isLoading = false
+            if self.current == nil { self.status = "\(scanned.1.notes.count) notes" }
         }
     }
 

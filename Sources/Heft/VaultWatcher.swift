@@ -19,9 +19,13 @@ final class VaultWatcher {
             retain: nil, release: nil, copyDescription: nil
         )
 
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
-            guard let info else { return }
+        let callback: FSEventStreamCallback = { _, info, count, paths, _, _ in
+            guard let info, count > 0 else { return }
             let watcher = Unmanaged<VaultWatcher>.fromOpaque(info).takeUnretainedValue()
+            // `kFSEventStreamCreateFlagUseCFTypes` makes this a CFArray of
+            // CFString rather than a C string array.
+            let changed = unsafeBitCast(paths, to: CFArray.self) as? [String] ?? []
+            guard changed.contains(where: VaultWatcher.isInteresting) else { return }
             DispatchQueue.main.async { watcher.onChange() }
         }
 
@@ -41,6 +45,27 @@ final class VaultWatcher {
         self.stream = stream
         FSEventStreamSetDispatchQueue(stream, queue)
         FSEventStreamStart(stream)
+    }
+
+    /// Whether a changed path is worth rebuilding the vault index for.
+    ///
+    /// An iCloud-backed vault is never quiet: the daemon writes and removes
+    /// `.icloud` placeholders, updates extended attributes, and Obsidian
+    /// rewrites `workspace.json` on every pane change. Every one of those used
+    /// to trigger a full rescan, which re-reads every note in the vault to
+    /// rebuild the link and tag index — so the app burned CPU while sitting
+    /// apparently idle.
+    static func isInteresting(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        if name == ".DS_Store" { return false }
+        // A placeholder appearing means the real file is on its way; the real
+        // file's own event is the one worth acting on.
+        if name.hasPrefix("."), name.hasSuffix(".icloud") { return false }
+        for hidden in ["/.obsidian/", "/.git/", "/.trash/", "/.stversions/"]
+        where path.contains(hidden) {
+            return false
+        }
+        return true
     }
 
     func stop() {

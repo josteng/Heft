@@ -85,3 +85,106 @@ struct AppCommand: Identifiable {
 
     @MainActor func perform(on model: AppModel) { action(model) }
 }
+
+struct CommandPaletteView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var selection = 0
+    @FocusState private var isFocused: Bool
+
+    private var results: [AppCommand] {
+        AppCommand.registry.filter { $0.matches(query) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right.2")
+                    .foregroundStyle(.secondary)
+                TextField("Type a command", text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16))
+                    .focused($isFocused)
+                    .onSubmit(runSelection)
+                    .onChange(of: query) { selection = 0 }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(spacing: 1) {
+                    ForEach(Array(results.enumerated()), id: \.element.id) { index, command in
+                        CommandRow(
+                            command: command,
+                            isSelected: index == selection,
+                            isEnabled: command.isEnabled(on: model)
+                        )
+                            .onTapGesture {
+                                selection = index
+                                runSelection()
+                            }
+                    }
+                }
+                .padding(6)
+            }
+            .frame(height: 180)
+        }
+        .frame(width: 560)
+        .background(.regularMaterial)
+        .onAppear { isFocused = true }
+        .onKeyPress(.upArrow) { move(-1); return .handled }
+        .onKeyPress(.downArrow) { move(1); return .handled }
+        .onKeyPress(.escape) { dismiss(); return .handled }
+    }
+
+    private func move(_ delta: Int) {
+        guard !results.isEmpty else { return }
+        selection = min(max(selection + delta, 0), results.count - 1)
+    }
+
+    private func runSelection() {
+        guard results.indices.contains(selection) else { return }
+        let command = results[selection]
+        guard command.isEnabled(on: model) else { return }
+        command.perform(on: model)
+        dismiss()
+    }
+}
+
+private struct CommandRow: View {
+    let command: AppCommand
+    let isSelected: Bool
+    let isEnabled: Bool
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: command.symbol)
+                .frame(width: 16)
+                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            Text(command.title)
+                .font(.system(size: 13))
+            Spacer(minLength: 8)
+            if let shortcut = command.shortcut {
+                Text(shortcut.display)
+                    .font(.system(size: 11))
+                    .foregroundStyle(
+                        isSelected
+                            ? AnyShapeStyle(.white.opacity(0.75))
+                            : AnyShapeStyle(.tertiary)
+                    )
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if isSelected { RoundedRectangle(cornerRadius: 6).fill(Color.accentColor) }
+        }
+        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .opacity(isEnabled ? 1 : 0.45)
+        .contentShape(.rect)
+    }
+}

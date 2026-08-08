@@ -34,9 +34,8 @@ struct ContentView: View {
                 .inspectorColumnWidth(min: 220, ideal: 280, max: 420)
         }
         .toolbar { toolbarContent }
-        .sheet(isPresented: $model.isSearchPresented) {
-            UnifiedSearchView(initialQuery: model.searchSeed)
-        }
+        .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
+        .sheet(isPresented: $model.isCommandPalettePresented) { CommandPaletteView() }
         .sheet(isPresented: $model.isVaultSearchPresented) { VaultSearchView() }
         .onChange(of: model.isPresentationPresented) { _, isPresented in
             if isPresented { openWindow(id: "presentation") }
@@ -410,7 +409,7 @@ private struct EmptySelectionView: View {
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
             HStack {
-                Button("Search…") { model.presentSearch() }
+                Button("Quick Open…") { model.isQuickOpenPresented = true }
                 Button("Today's Note") { model.openDailyNote(for: Date()) }
             }
         }

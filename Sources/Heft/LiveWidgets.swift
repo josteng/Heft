@@ -375,8 +375,14 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             // head indent opened up, which is to the left of every glyph. The
             // vertical slack covers the callout icon, which is centred on the
             // line box and would otherwise be clipped on a short one.
+            // The slack below covers the closing line's padding, which is
+            // painted into the paragraph spacing that sits outside the
+            // fragment; the slack above covers the callout icon, centred on a
+            // line box that may be shorter than it is.
             bounds = bounds.union(CGRect(
-                x: -indent, y: -4, width: containerWidth, height: bounds.height + 8
+                x: -indent, y: -4,
+                width: containerWidth,
+                height: bounds.height + 8 + Theme.quoteBlockPadding
             ))
         default:
             break
@@ -509,30 +515,40 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         _ quote: QuoteLine, indent: CGFloat, at point: CGPoint, in context: CGContext
     ) {
         guard let line = textLineFragments.first else { return }
-        let height = max(line.typographicBounds.height, layoutFragmentFrame.height)
         let left = point.x - indent
-        let rect = CGRect(x: left, y: point.y, width: containerWidth, height: height)
-        let tint = quote.isCallout
-            ? Theme.calloutNSTint(quote.callout)
-            : NSColor.quaternaryLabelColor
+        let tint = Theme.calloutNSTint(quote.callout)
 
-        // A plain quote gets a card too, just a neutral one. Without it the
-        // bar floats against the page and the block reads as loose text
-        // rather than as something set apart, the way code blocks are.
+        // `paragraphSpacingBefore` lands inside the fragment, so the top
+        // padding is already part of its height — but `paragraphSpacing` does
+        // not, so the closing line has to paint down into the gap it reserved
+        // or the card ends flush against its last line of text.
+        let closes = quote.edge == .last || quote.edge == .only
+        let height = max(line.typographicBounds.height, layoutFragmentFrame.height)
+            + (closes ? Theme.quoteBlockPadding : 0)
+        let rect = CGRect(x: left, y: point.y, width: containerWidth, height: height)
+
         context.saveGState()
+        // No alpha adjustment on the neutral fill: `withAlphaComponent` on a
+        // dynamic system colour resolves it there and then, outside the
+        // appearance this is being drawn in, which turned the dark-mode quote
+        // into a near-white slab.
         context.setFillColor(
             quote.isCallout
                 ? tint.withAlphaComponent(0.11).cgColor
-                : NSColor.quaternarySystemFill.withAlphaComponent(0.6).cgColor
+                : NSColor.quaternarySystemFill.cgColor
         )
         fill(rect, edge: quote.edge, radius: 8, in: context)
         context.restoreGState()
 
-        // One bar per nesting level, so `> >` reads as two.
-        context.setFillColor(tint.withAlphaComponent(quote.isCallout ? 0.9 : 1).cgColor)
-        for level in 0..<max(1, quote.depth) {
-            let x = left + 5 + CGFloat(level) * 18
-            context.fill(CGRect(x: x, y: rect.minY, width: 3, height: rect.height))
+        // Only a plain quote gets bars, one per nesting level so `> >` reads as
+        // two. A callout already announces itself with a tinted card and an
+        // icon, and a coloured stripe on top of that is just noise.
+        if !quote.isCallout {
+            context.setFillColor(NSColor.quaternaryLabelColor.cgColor)
+            for level in 0..<max(1, quote.depth) {
+                let x = left + 5 + CGFloat(level) * 18
+                context.fill(CGRect(x: x, y: rect.minY, width: 3, height: rect.height))
+            }
         }
 
         guard quote.isTitleLine else { return }
