@@ -203,6 +203,31 @@ public enum SelfCheck {
         expect(hiddenText("# Heading"), "# ", "heading hides hashes and space")
         expectTrue(styles("#tag").contains(.tag), "decorator finds tag")
 
+        // MARK: Inline formatting
+        func format(_ f: InlineFormat, _ source: String, _ range: NSRange) -> String {
+            MarkdownEditing.toggle(f, in: source, range: range).text
+        }
+        // "hello world", selecting "world".
+        expect(format(.bold, "hello world", NSRange(location: 6, length: 5)),
+               "hello **world**", "bold wraps the selection")
+        // Selecting the marked-up run whole removes it.
+        expect(format(.bold, "hello **world**", NSRange(location: 6, length: 9)),
+               "hello world", "bold unwraps when the markers are selected")
+        // Selecting only the words, with the markers just outside, also removes.
+        expect(format(.bold, "hello **world**", NSRange(location: 8, length: 5)),
+               "hello world", "bold unwraps when the markers surround the selection")
+        expect(format(.italic, "a b", NSRange(location: 2, length: 1)), "a *b*",
+               "italic uses one asterisk")
+        expect(format(.code, "x", NSRange(location: 0, length: 1)), "`x`", "code uses backticks")
+        // An empty selection gives an empty pair to type into.
+        let empty = MarkdownEditing.toggle(.bold, in: "ab", range: NSRange(location: 1, length: 0))
+        expect(empty.text, "a****b", "bold on an empty selection inserts a pair")
+        expect("\(empty.selection.location)", "3", "the caret lands between the markers")
+
+        let link = MarkdownEditing.makeLink(in: "see docs", range: NSRange(location: 4, length: 4))
+        expect(link.text, "see [docs]()", "a link wraps the selection as its label")
+        expect("\(link.selection.location)", "11", "the caret lands inside the parentheses")
+
         // MARK: Properties and tags
         let properties = Frontmatter.parse("""
         title: A Note

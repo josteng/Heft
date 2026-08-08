@@ -161,6 +161,8 @@ struct LiveTextEditor: NSViewRepresentable {
             // so both have to be checked. Moving within a line and within the
             // same set of spans changes nothing on screen, and restyling there
             // would put a stutter into every arrow key.
+            (textView as? HeftTextKit2View)?.updateFormatBar()
+
             guard !NSEqualRanges(line, reveal.line)
                 || spanSignature(for: selection) != revealedSpans
             else { return }
@@ -303,6 +305,8 @@ struct LiveTextEditor: NSViewRepresentable {
 
             settleLayout(textView)
             textView.scrollRangeToVisible(selection)
+            // Revealing markup reflows the line, so the bar's anchor moves.
+            (textView as? HeftTextKit2View)?.updateFormatBar()
         }
 
         private func updateTypingAttributes(for selection: NSRange, in textView: NSTextView) {
@@ -503,6 +507,76 @@ final class HeftTextKit2View: NSTextView {
             return true
         }
         return super.performDragOperation(sender)
+    }
+
+    /// The formatting bar, added lazily so a document that is never selected
+    /// into never builds one.
+    private(set) var formatBar: FormatBar?
+
+    /// Shows or hides the formatting bar for the current selection.
+    func updateFormatBar() {
+        let selection = selectedRange()
+        guard selection.length > 0, window?.firstResponder === self else {
+            formatBar?.isHidden = true
+            return
+        }
+
+        let bar: FormatBar
+        if let existing = formatBar {
+            bar = existing
+        } else {
+            bar = FormatBar()
+            bar.onFormat = { [weak self] format in self?.applyFormat(format) }
+            addSubview(bar)
+            formatBar = bar
+        }
+        bar.update(for: rect(forSelection: selection), in: self)
+    }
+
+    /// Bounding box of a selection in view coordinates.
+    private func rect(forSelection range: NSRange) -> CGRect? {
+        guard let manager = textLayoutManager,
+              let content = manager.textContentManager,
+              let start = content.location(content.documentRange.location, offsetBy: range.location),
+              let end = content.location(start, offsetBy: range.length),
+              let textRange = NSTextRange(location: start, end: end)
+        else { return nil }
+
+        var union: CGRect?
+        manager.enumerateTextSegments(
+            in: textRange, type: .selection, options: []
+        ) { _, frame, _, _ in
+            union = union.map { $0.union(frame) } ?? frame
+            return true
+        }
+        guard var rect = union else { return nil }
+        rect.origin.x += textContainerInset.width
+        rect.origin.y += textContainerInset.height
+        return rect
+    }
+
+    // Selector targets for the Format menu. They exist as distinct methods
+    // because a menu item sends one selector and carries no payload.
+    @objc func formatBold() { applyFormat(.bold) }
+    @objc func formatItalic() { applyFormat(.italic) }
+    @objc func formatStrikethrough() { applyFormat(.strikethrough) }
+    @objc func formatHighlight() { applyFormat(.highlight) }
+    @objc func formatCode() { applyFormat(.code) }
+    @objc func formatLink() { applyFormat(nil) }
+
+    func applyFormat(_ format: InlineFormat?) {
+        let selection = selectedRange()
+        let edit = format.map { MarkdownEditing.toggle($0, in: string, range: selection) }
+            ?? MarkdownEditing.makeLink(in: string, range: selection)
+        guard edit.text != string else { return }
+
+        // Through the text system rather than by assigning `string`, so the
+        // edit joins the undo stack as one step.
+        let whole = NSRange(location: 0, length: (string as NSString).length)
+        guard shouldChangeText(in: whole, replacementString: edit.text) else { return }
+        textStorage?.replaceCharacters(in: whole, with: edit.text)
+        didChangeText()
+        setSelectedRange(edit.selection)
     }
 
     /// Continues a list or a block quote on Enter, and ends it when the line is

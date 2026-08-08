@@ -399,11 +399,9 @@ enum LiveStyler {
             }
             storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
 
-            if !quote.isCallout {
-                storage.addAttribute(
-                    .foregroundColor, value: NSColor.secondaryLabelColor, range: range
-                )
-            }
+            // Quoted text stays at full contrast. Dimming it is the obvious
+            // way to say "this is set apart", but the card already says that,
+            // and a quote is usually the passage that matters most on the page.
             if quote.isTitleLine {
                 // The title is prose and stays visible; only `[!kind]` hides.
                 // Weight is what separates it from the body beneath it.

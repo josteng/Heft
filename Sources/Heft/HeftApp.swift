@@ -46,6 +46,25 @@ struct HeftCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
         }
         CommandGroup(after: .textEditing) {
+            Menu("Format") {
+                // Routed through the responder chain rather than the model:
+                // the edit belongs to whichever text view has focus, and has
+                // to land on its undo stack.
+                Button("Bold") { NSApp.sendAction(#selector(HeftTextKit2View.formatBold), to: nil, from: nil) }
+                    .keyboardShortcut("b", modifiers: .command)
+                Button("Italic") { NSApp.sendAction(#selector(HeftTextKit2View.formatItalic), to: nil, from: nil) }
+                    .keyboardShortcut("i", modifiers: .command)
+                Button("Strikethrough") { NSApp.sendAction(#selector(HeftTextKit2View.formatStrikethrough), to: nil, from: nil) }
+                    .keyboardShortcut("x", modifiers: [.command, .shift])
+                Button("Highlight") { NSApp.sendAction(#selector(HeftTextKit2View.formatHighlight), to: nil, from: nil) }
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                Button("Code") { NSApp.sendAction(#selector(HeftTextKit2View.formatCode), to: nil, from: nil) }
+                    .keyboardShortcut("e", modifiers: .command)
+                Divider()
+                Button("Link") { NSApp.sendAction(#selector(HeftTextKit2View.formatLink), to: nil, from: nil) }
+                    .keyboardShortcut("k", modifiers: .command)
+            }
+            Divider()
             Menu("Find") {
                 Button("Find…") { model.showFind() }
                     .keyboardShortcut("f", modifiers: .command)
