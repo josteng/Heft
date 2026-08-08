@@ -203,6 +203,47 @@ public enum SelfCheck {
         expect(hiddenText("# Heading"), "# ", "heading hides hashes and space")
         expectTrue(styles("#tag").contains(.tag), "decorator finds tag")
 
+        // MARK: Properties and tags
+        let properties = Frontmatter.parse("""
+        title: A Note
+        tags: [alpha, beta]
+        aliases:
+          - one
+          - two
+        empty:
+        quoted: "with: a colon"
+        """)
+        expect("\(properties.count)", "5", "every top-level key is a property")
+        expect(properties.first?.key ?? "", "title", "keys keep file order")
+        expect(properties.first(where: { $0.key == "tags" })?.value.items.joined(separator: ",") ?? "",
+               "alpha,beta", "an inline list is parsed")
+        expect(properties.first(where: { $0.key == "aliases" })?.value.items.joined(separator: ",") ?? "",
+               "one,two", "a block list is parsed")
+        expect(properties.first(where: { $0.key == "empty" })?.value.display ?? "nil", "",
+               "a key with no value is empty, not missing")
+        // Splitting on the first colon only, or the value loses its tail.
+        expect(properties.first(where: { $0.key == "quoted" })?.value.display ?? "",
+               "with: a colon", "a quoted value keeps its colon and loses its quotes")
+
+        let tagged = """
+        ---
+        tags: [project, "#work/admin"]
+        ---
+        Body with #inline and #work/admin again.
+
+        ```
+        #notatag
+        ```
+        """
+        let foundTags = NoteTags.all(in: tagged)
+        expectTrue(foundTags.contains("project"), "frontmatter tags are found")
+        expectTrue(foundTags.contains("inline"), "inline tags are found")
+        // Both spellings of the same tag are one tag.
+        expect("\(foundTags.count(where: { $0.lowercased() == "work/admin" }))", "1",
+               "a tag written in both places is counted once")
+        expectTrue(!foundTags.contains("notatag"), "tags inside a fence are not indexed")
+        expect(NoteTags.normalise("  #work/admin "), "work/admin", "a tag normalises to its bare name")
+
         // MARK: Embed bodies
         let embedSource = """
         ---

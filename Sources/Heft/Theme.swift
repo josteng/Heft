@@ -16,6 +16,10 @@ enum Theme {
 
     static let bodySize: CGFloat = 15
     static let lineSpacing: CGFloat = 5.5
+    /// Breathing room inside a quote or callout card, above the first line and
+    /// below the last. Equal on both sides: the block is one painted rectangle,
+    /// and uneven padding makes the text look like it has slipped upwards.
+    static let quoteBlockPadding: CGFloat = 10
 
     static func headingPointSize(_ level: Int) -> CGFloat {
         switch level {

@@ -505,15 +505,16 @@ final class HeftTextKit2View: NSTextView {
         return super.performDragOperation(sender)
     }
 
-    /// Continues a list on Enter, and ends it when the item is left empty —
-    /// the behaviour every editor has and the block version never got right.
+    /// Continues a list or a block quote on Enter, and ends it when the line is
+    /// left empty — the behaviour every editor has and the block version never
+    /// got right.
     override func insertNewline(_ sender: Any?) {
         let text = string as NSString
         let caret = selectedRange()
         let line = text.substring(with: text.lineRange(for: NSRange(location: caret.location, length: 0)))
             .trimmingCharacters(in: .newlines)
 
-        guard let marker = Self.listMarker(of: line) else {
+        guard let marker = Self.listMarker(of: line) ?? Self.quoteMarker(of: line) else {
             super.insertNewline(sender)
             return
         }
@@ -584,6 +585,18 @@ final class HeftTextKit2View: NSTextView {
             length: selection.length
         ))
         return true
+    }
+
+    /// `> `, `> > ` … with indentation, or nil when the line is not quoted.
+    ///
+    /// A callout's `[!kind]` header is deliberately not carried down: the next
+    /// line continues the callout's body, and repeating the marker would
+    /// declare a second callout inside the first.
+    static func quoteMarker(of line: String) -> String? {
+        guard let match = line.range(
+            of: #"^[ \t]*(?:>[ \t]?)+"#, options: .regularExpression
+        ) else { return nil }
+        return String(line[match])
     }
 
     /// `- `, `* `, `- [ ] `, `3. ` … with indentation, or nil for prose.

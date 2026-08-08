@@ -383,9 +383,20 @@ enum LiveStyler {
             paragraph.headIndent = indent
             paragraph.tailIndent = -12
             // The card is one background painted across several paragraphs, so
-            // the space belongs outside the block, not between its lines.
-            paragraph.paragraphSpacingBefore = quote.edge == .first || quote.edge == .only ? 12 : 0
-            paragraph.paragraphSpacing = quote.edge == .last || quote.edge == .only ? 12 : 0
+            // the space belongs outside the block, not between its lines — and
+            // it has to be equal on both sides, or the block sits visibly high
+            // inside its own background.
+            let isFirst = quote.edge == .first || quote.edge == .only
+            let isLast = quote.edge == .last || quote.edge == .only
+            paragraph.paragraphSpacingBefore = isFirst ? Theme.quoteBlockPadding : 0
+            paragraph.paragraphSpacing = isLast ? Theme.quoteBlockPadding : 0
+
+            // A callout whose title line carries no text of its own still has
+            // an icon and a drawn label to fit. Without the reservation the
+            // line is only as tall as an empty paragraph and both get clipped.
+            if quote.isTitleLine, quote.title?.isEmpty == true {
+                paragraph.minimumLineHeight = Theme.bodySize + 8
+            }
             storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
 
             if !quote.isCallout {

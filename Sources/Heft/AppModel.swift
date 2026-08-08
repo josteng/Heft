@@ -29,9 +29,17 @@ final class AppModel: ObservableObject {
     /// View menu can toggle it too.
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
     @Published var isInspectorVisible = false
-    @Published var isQuickOpenPresented = false
+    /// The one palette: notes, commands and content behind a single shortcut.
+    /// `searchSeed` preloads its field, which is how `>` (commands) and `#`
+    /// (tags) get their own menu items without a second window.
+    @Published var isSearchPresented = false
+    @Published var searchSeed = ""
     @Published var isVaultSearchPresented = false
-    @Published var isCommandPalettePresented = false
+
+    func presentSearch(seededWith seed: String = "") {
+        searchSeed = seed
+        isSearchPresented = true
+    }
     @Published var isFindPresented = false
     @Published private(set) var findFocusGeneration = 0
     @Published private(set) var findNavigationGeneration = 0
@@ -50,6 +58,17 @@ final class AppModel: ObservableObject {
 
     @Published private var navigationHistory: [String] = []
     @Published private var navigationIndex = -1
+    /// Most recently opened first, newest visit wins. Backs the palette's
+    /// empty state, where a list of what was just being worked on is far more
+    /// useful than the first dozen notes in alphabetical order.
+    @Published private(set) var recentPaths: [String] = []
+    /// Line the editor should jump to once the note is open, 1-based. Consumed
+    /// by the editor, which clears it.
+    @Published var pendingLineReveal: Int?
+
+    var recentNotes: [NoteRef] {
+        recentPaths.compactMap { index.note(atRelativePath: $0) }
+    }
 
     var canNavigateBack: Bool { navigationIndex > 0 }
     var canNavigateForward: Bool {
@@ -186,6 +205,19 @@ final class AppModel: ObservableObject {
         open(ref, recordingNavigation: true)
     }
 
+    /// Opens a note and puts the caret on `line`, as a search result does.
+    func open(_ ref: NoteRef, revealingLine line: Int) {
+        open(ref, recordingNavigation: true)
+        guard current?.relativePath == ref.relativePath else { return }
+        pendingLineReveal = line
+    }
+
+    private func recordRecent(_ relativePath: String) {
+        recentPaths.removeAll { $0 == relativePath }
+        recentPaths.insert(relativePath, at: 0)
+        if recentPaths.count > 40 { recentPaths.removeLast(recentPaths.count - 40) }
+    }
+
     private func open(_ ref: NoteRef, recordingNavigation: Bool) {
         guard ref.isMarkdown else {
             NSWorkspace.shared.open(ref.url)
@@ -195,6 +227,7 @@ final class AppModel: ObservableObject {
 
         if let contents = read(ref.url) {
             if recordingNavigation { recordNavigation(to: ref.relativePath) }
+            recordRecent(ref.relativePath)
             current = ref
             setText(contents)
             isDirty = false

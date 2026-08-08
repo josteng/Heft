@@ -34,9 +34,10 @@ struct ContentView: View {
                 .inspectorColumnWidth(min: 220, ideal: 280, max: 420)
         }
         .toolbar { toolbarContent }
-        .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
+        .sheet(isPresented: $model.isSearchPresented) {
+            UnifiedSearchView(initialQuery: model.searchSeed)
+        }
         .sheet(isPresented: $model.isVaultSearchPresented) { VaultSearchView() }
-        .sheet(isPresented: $model.isCommandPalettePresented) { CommandPaletteView() }
         .onChange(of: model.isPresentationPresented) { _, isPresented in
             if isPresented { openWindow(id: "presentation") }
         }
@@ -145,6 +146,16 @@ struct EditorPane: View {
         .task(id: model.documentGeneration) {
             closeFind()
         }
+        .task(id: model.pendingLineReveal) {
+            guard let line = model.pendingLineReveal else { return }
+            // Opening the note resets the caret to the top, and that reset is
+            // queued behind this change. Jumping before it lands would be
+            // undone a moment later.
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            reveal(line: line)
+            model.pendingLineReveal = nil
+        }
         .onChange(of: model.isFindPresented) { _, presented in
             if presented {
                 findFieldFocused = true
@@ -230,6 +241,34 @@ struct EditorPane: View {
         findSelection = FindSelection(
             range: findMatches[findIndex], generation: findSelectionGeneration
         )
+    }
+
+    /// Selects a 1-based line and scrolls to it, which is how a search result
+    /// lands on the text it matched instead of at the top of the note.
+    private func reveal(line: Int) {
+        let text = model.text as NSString
+        guard text.length > 0, line > 0 else { return }
+
+        var start = 0
+        var number = 1
+        while number < line {
+            let next = NSMaxRange(text.lineRange(for: NSRange(location: start, length: 0)))
+            guard next > start, next < text.length else { break }
+            start = next
+            number += 1
+        }
+
+        var range = text.lineRange(for: NSRange(location: start, length: 0))
+        // Drop the trailing newline so the highlight covers the text alone.
+        while range.length > 0,
+              let last = text.substring(with: NSRange(location: NSMaxRange(range) - 1, length: 1)).first,
+              last == "\n" || last == "\r" {
+            range.length -= 1
+        }
+        guard range.length > 0 else { return }
+
+        findSelectionGeneration += 1
+        findSelection = FindSelection(range: range, generation: findSelectionGeneration)
     }
 
     private func closeFind() {
@@ -371,7 +410,7 @@ private struct EmptySelectionView: View {
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
             HStack {
-                Button("Quick Open…") { model.isQuickOpenPresented = true }
+                Button("Search…") { model.presentSearch() }
                 Button("Today's Note") { model.openDailyNote(for: Date()) }
             }
         }

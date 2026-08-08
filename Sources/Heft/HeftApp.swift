@@ -58,10 +58,14 @@ struct HeftCommands: Commands {
                     .keyboardShortcut("f", modifiers: [.command, .shift])
             }
             Divider()
-            Button("Quick Open…") { model.isQuickOpenPresented = true }
+            // One palette, three doorways. The seeds are the same prefixes
+            // typed by hand, so the menu teaches the shortcut.
+            Button("Search Everything…") { model.presentSearch() }
                 .keyboardShortcut("o", modifiers: .command)
-            Button("Command Palette…") { model.isCommandPalettePresented = true }
+            Button("Run Command…") { model.presentSearch(seededWith: ">") }
                 .keyboardShortcut("p", modifiers: .command)
+            Button("Find by Tag…") { model.presentSearch(seededWith: "#") }
+                .keyboardShortcut("t", modifiers: [.command, .option])
         }
         CommandGroup(after: .toolbar) {
             // NavigationSplitView contributes no sidebar command of its own,

@@ -372,9 +372,11 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
         case .quote(_, let indent):
             // The card and the bars are painted in the gutter the paragraph's
-            // head indent opened up, which is to the left of every glyph.
+            // head indent opened up, which is to the left of every glyph. The
+            // vertical slack covers the callout icon, which is centred on the
+            // line box and would otherwise be clipped on a short one.
             bounds = bounds.union(CGRect(
-                x: -indent, y: -1, width: containerWidth, height: bounds.height + 2
+                x: -indent, y: -4, width: containerWidth, height: bounds.height + 8
             ))
         default:
             break
@@ -514,12 +516,17 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ? Theme.calloutNSTint(quote.callout)
             : NSColor.quaternaryLabelColor
 
-        if quote.isCallout {
-            context.saveGState()
-            context.setFillColor(tint.withAlphaComponent(0.11).cgColor)
-            fill(rect, edge: quote.edge, radius: 8, in: context)
-            context.restoreGState()
-        }
+        // A plain quote gets a card too, just a neutral one. Without it the
+        // bar floats against the page and the block reads as loose text
+        // rather than as something set apart, the way code blocks are.
+        context.saveGState()
+        context.setFillColor(
+            quote.isCallout
+                ? tint.withAlphaComponent(0.11).cgColor
+                : NSColor.quaternarySystemFill.withAlphaComponent(0.6).cgColor
+        )
+        fill(rect, edge: quote.edge, radius: 8, in: context)
+        context.restoreGState()
 
         // One bar per nesting level, so `> >` reads as two.
         context.setFillColor(tint.withAlphaComponent(quote.isCallout ? 0.9 : 1).cgColor)

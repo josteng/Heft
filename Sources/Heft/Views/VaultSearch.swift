@@ -144,7 +144,9 @@ struct VaultSearchView: View {
 
     private func openSelection() {
         guard visibleResponse.hits.indices.contains(selection) else { return }
-        model.open(visibleResponse.hits[selection].note)
+        let hit = visibleResponse.hits[selection]
+        // Land on the line that matched, not at the top of the note.
+        model.open(hit.note, revealingLine: hit.line)
         dismiss()
     }
 }

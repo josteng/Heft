@@ -71,15 +71,24 @@ public final class VaultIndex: @unchecked Sendable {
     private let byName: [String: [NoteRef]]     // lowercased basename
     private let outgoingByPath: [String: [WikiLink]]
     private let backlinksByPath: [String: [Backlink]]
+    /// Lowercased tag to the notes carrying it, and the display spelling of
+    /// each tag — the first one seen wins, so `#Project` and `#project` are one
+    /// tag shown the way the vault first wrote it.
+    private let notesByTag: [String: [NoteRef]]
+    private let tagSpelling: [String: String]
+    private let tagsByPath: [String: [String]]
 
     public static let empty = VaultIndex(
-        notes: [], allFiles: [], byPath: [:], byName: [:], outgoing: [:], backlinks: [:]
+        notes: [], allFiles: [], byPath: [:], byName: [:], outgoing: [:], backlinks: [:],
+        notesByTag: [:], tagSpelling: [:], tagsByPath: [:]
     )
 
     private init(
         notes: [NoteRef], allFiles: [NoteRef],
         byPath: [String: NoteRef], byName: [String: [NoteRef]],
-        outgoing: [String: [WikiLink]], backlinks: [String: [Backlink]]
+        outgoing: [String: [WikiLink]], backlinks: [String: [Backlink]],
+        notesByTag: [String: [NoteRef]], tagSpelling: [String: String],
+        tagsByPath: [String: [String]]
     ) {
         self.notes = notes
         self.allFiles = allFiles
@@ -87,6 +96,9 @@ public final class VaultIndex: @unchecked Sendable {
         self.byName = byName
         self.outgoingByPath = outgoing
         self.backlinksByPath = backlinks
+        self.notesByTag = notesByTag
+        self.tagSpelling = tagSpelling
+        self.tagsByPath = tagsByPath
     }
 
     // MARK: - Building
@@ -127,13 +139,16 @@ public final class VaultIndex: @unchecked Sendable {
         let notes = allFiles.filter(\.isMarkdown)
         let partial = VaultIndex(
             notes: notes, allFiles: allFiles, byPath: byPath, byName: byName,
-            outgoing: [:], backlinks: [:]
+            outgoing: [:], backlinks: [:], notesByTag: [:], tagSpelling: [:], tagsByPath: [:]
         )
 
         // Second pass: read note bodies and build the link graph. Resolution
         // needs the tables above, hence the two passes.
         var outgoing: [String: [WikiLink]] = [:]
         var backlinks: [String: [Backlink]] = [:]
+        var notesByTag: [String: [NoteRef]] = [:]
+        var tagSpelling: [String: String] = [:]
+        var tagsByPath: [String: [String]] = [:]
 
         for note in notes {
             guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { continue }
@@ -152,11 +167,26 @@ public final class VaultIndex: @unchecked Sendable {
                 }
             }
             if !links.isEmpty { outgoing[note.relativePath] = links }
+
+            // Tags come from the same read, so indexing them costs nothing
+            // beyond the parse.
+            let tags = NoteTags.all(in: text)
+            if !tags.isEmpty {
+                tagsByPath[note.relativePath] = tags
+                for tag in tags {
+                    let key = tag.lowercased()
+                    notesByTag[key, default: []].append(note)
+                    // First spelling seen wins, so `#Project` and `#project`
+                    // are one tag rather than two that differ only in case.
+                    if tagSpelling[key] == nil { tagSpelling[key] = tag }
+                }
+            }
         }
 
         return VaultIndex(
             notes: notes, allFiles: allFiles, byPath: byPath, byName: byName,
-            outgoing: outgoing, backlinks: backlinks
+            outgoing: outgoing, backlinks: backlinks,
+            notesByTag: notesByTag, tagSpelling: tagSpelling, tagsByPath: tagsByPath
         )
     }
 
@@ -199,6 +229,44 @@ public final class VaultIndex: @unchecked Sendable {
 
     public func note(atRelativePath path: String) -> NoteRef? {
         byPath[path.lowercased()]
+    }
+
+    // MARK: Tags
+
+    /// Every tag in the vault, most used first, then alphabetically.
+    public var allTags: [String] {
+        var counted: [(name: String, count: Int)] = []
+        counted.reserveCapacity(notesByTag.count)
+        for (key, notes) in notesByTag {
+            counted.append((tagSpelling[key] ?? key, notes.count))
+        }
+        counted.sort { left, right in
+            if left.count != right.count { return left.count > right.count }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+        return counted.map(\.name)
+    }
+
+    /// Tags whose name contains `query`. An empty query returns all of them.
+    ///
+    /// Nested tags match on any segment, so `#work/admin` is found by "admin"
+    /// as well as by "work".
+    public func tags(matching query: String) -> [String] {
+        let needle = NoteTags.normalise(query).lowercased()
+        guard !needle.isEmpty else { return allTags }
+        return allTags.filter { $0.lowercased().contains(needle) }
+    }
+
+    public func notes(taggedWith tag: String) -> [NoteRef] {
+        notesByTag[NoteTags.normalise(tag).lowercased()] ?? []
+    }
+
+    public func tags(of path: String) -> [String] {
+        tagsByPath[path] ?? []
+    }
+
+    public func noteCount(forTag tag: String) -> Int {
+        notes(taggedWith: tag).count
     }
 
     public func backlinks(to path: String) -> [Backlink] {
