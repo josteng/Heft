@@ -70,6 +70,52 @@ public enum SelfCheck {
         expect(MomentFormat.expandTemplate("{{unknown}}", date: day, title: "t"),
                "{{unknown}}", "unknown placeholder preserved")
 
+        // Daily-note setup writes Obsidian-compatible JSON without discarding
+        // settings from versions or plugins Heft does not know about.
+        let settingsVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-settings-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: settingsVault) }
+        do {
+            let config = settingsVault.appendingPathComponent(".obsidian", isDirectory: true)
+            try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+            try #"{"customKey":"keep me","format":"old"}"#.write(
+                to: config.appendingPathComponent("daily-notes.json"),
+                atomically: true,
+                encoding: .utf8
+            )
+            var configured = ObsidianSettings()
+            configured.dailyNotesFolder = "Daily"
+            configured.dailyNoteFormat = "YYYY-MM-DD"
+            configured.dailyNoteTemplate = "Templates/Daily Note"
+            try configured.saveDailyNotesConfiguration(vaultRoot: settingsVault)
+
+            let loaded = ObsidianSettings.load(vaultRoot: settingsVault)
+            expect(loaded.dailyNotesFolder, "Daily", "daily settings folder round trip")
+            expect(loaded.dailyNoteFormat, "YYYY-MM-DD", "daily settings format round trip")
+            expect(loaded.dailyNoteTemplate ?? "", "Templates/Daily Note",
+                   "daily settings template round trip")
+
+            let savedData = try Data(contentsOf: config.appendingPathComponent("daily-notes.json"))
+            let saved = try JSONSerialization.jsonObject(with: savedData) as? [String: Any]
+            expect(saved?["customKey"] as? String ?? "", "keep me",
+                   "daily settings preserve unknown keys")
+
+            let invalid = Data("not json".utf8)
+            try invalid.write(to: config.appendingPathComponent("daily-notes.json"), options: .atomic)
+            do {
+                try configured.saveDailyNotesConfiguration(vaultRoot: settingsVault)
+                r.failures.append("invalid daily settings were overwritten")
+            } catch ObsidianSettingsWriteError.invalidDailyNotesConfiguration {
+                let stillInvalid = try Data(
+                    contentsOf: config.appendingPathComponent("daily-notes.json")
+                )
+                expect(String(decoding: stillInvalid, as: UTF8.self), "not json",
+                       "invalid daily settings remain untouched")
+            }
+        } catch {
+            r.failures.append("daily settings write: \(error.localizedDescription)")
+        }
+
         // MARK: Wikilink parsing
         func onlyLink(_ s: String) -> WikiLink? { WikiLinkParser.links(in: s).first }
 

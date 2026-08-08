@@ -40,8 +40,14 @@ struct ContentView: View {
         .toolbar { toolbarContent }
         .background(WindowToolbarConfiguration(registry: registry, workspaceID: model.workspaceID))
         .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
-        .sheet(isPresented: $model.isCommandPalettePresented) { CommandPaletteView() }
+        .sheet(
+            isPresented: $model.isCommandPalettePresented,
+            onDismiss: { model.commandPaletteDidDismiss() }
+        ) { CommandPaletteView() }
         .sheet(isPresented: $model.isVaultSearchPresented) { VaultSearchView() }
+        .sheet(isPresented: $model.isDailyNotesSettingsPresented) {
+            DailyNotesSettingsView()
+        }
         .onChange(of: model.isPresentationPresented) { _, isPresented in
             if isPresented {
                 registry.presentationModel = model
@@ -73,9 +79,14 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var sidebarToolbar: some ToolbarContent {
-        ToolbarSpacer(.flexible, placement: .status)
-        ToolbarItem(placement: .status) { WorkspaceScopePicker() }
-        ToolbarSpacer(.flexible, placement: .status)
+        // A sidebar-scoped toolbar item otherwise survives briefly while the
+        // split-view column animates to zero width. AppKit then moves it into
+        // the window toolbar's overflow menu, flashing a trailing » button.
+        if model.columnVisibility != .detailOnly {
+            ToolbarSpacer(.flexible, placement: .status)
+            ToolbarItem(placement: .status) { WorkspaceScopePicker() }
+            ToolbarSpacer(.flexible, placement: .status)
+        }
     }
 
     @ToolbarContentBuilder

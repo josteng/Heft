@@ -1,5 +1,16 @@
 import Foundation
 
+public enum ObsidianSettingsWriteError: LocalizedError {
+    case invalidDailyNotesConfiguration
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidDailyNotesConfiguration:
+            return "The existing .obsidian/daily-notes.json is not valid JSON. Heft left it unchanged."
+        }
+    }
+}
+
 /// The subset of an existing vault's `.obsidian/` configuration that Heft
 /// honours, so that opening a vault Obsidian already manages behaves the way
 /// the user has it set up rather than the way Heft would guess.
@@ -53,6 +64,38 @@ public struct ObsidianSettings: Equatable, Sendable {
         }
 
         return settings
+    }
+
+    /// Writes only the daily-notes configuration, preserving keys from
+    /// Obsidian versions or plugins that Heft does not understand.
+    ///
+    /// The file is replaced atomically so an interrupted write cannot leave a
+    /// production vault with half a JSON document.
+    public func saveDailyNotesConfiguration(vaultRoot: URL) throws {
+        let configDir = vaultRoot.appendingPathComponent(".obsidian", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: configDir, withIntermediateDirectories: true
+        )
+
+        let url = configDir.appendingPathComponent("daily-notes.json")
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        guard !exists || Self.json(at: url) != nil else {
+            throw ObsidianSettingsWriteError.invalidDailyNotesConfiguration
+        }
+        var daily = Self.json(at: url) ?? [:]
+        daily["folder"] = dailyNotesFolder
+        daily["format"] = dailyNoteFormat
+        if let dailyNoteTemplate, !dailyNoteTemplate.isEmpty {
+            daily["template"] = dailyNoteTemplate
+        } else {
+            daily.removeValue(forKey: "template")
+        }
+
+        var data = try JSONSerialization.data(
+            withJSONObject: daily, options: [.prettyPrinted, .sortedKeys]
+        )
+        data.append(0x0A)
+        try data.write(to: url, options: .atomic)
     }
 
     /// Resolves where a pasted or dropped attachment should be written.

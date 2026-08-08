@@ -79,8 +79,12 @@ sample is structurally out of reach.
 - **Backlinks** panel with the referencing line as context, plus unresolved
   outgoing links.
 - **Calendar** with a dot per existing daily note; clicking a day creates it
-  from the vault's configured template.
+  from the vault's configured template. If none exists, the calendar can set
+  up editable daily-note and template paths, show supported placeholders with
+  a live preview, and create an Obsidian-compatible configuration.
 - **Quick open** (⌘O) with fuzzy matching.
+- **Command palette** (⌘P) for daily-note settings and window controls such as
+  the sidebar, calendar, backlinks, and colorful formatting.
 - **Image paste and drop** into the vault's attachment folder, content-hashed so
   pasting the same screenshot twice does not create a second file.
 - **Live reload** via FSEvents; external edits appear without clobbering unsaved
@@ -114,6 +118,8 @@ also reports as unresolved).
 |---|---|
 | ⌘O | Quick open |
 | ⌘N | New note |
+| ⌘S | Save pending edits now |
+| ⇧⌘S | Toggle sidebar |
 | ⇧⌘N | New window |
 | ⇧⌘T | Today's daily note |
 | ⇧⌘O | Open vault in new window |

@@ -3,6 +3,29 @@ import Combine
 import HeftCore
 import SwiftUI
 
+private enum DailyNotesSetupError: LocalizedError {
+    case noVault
+    case emptyFormat
+    case emptyTemplatePath
+    case invalidPath(String)
+    case templateAlreadyExists(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noVault:
+            return "Open a vault before setting up daily notes."
+        case .emptyFormat:
+            return "Enter a filename format."
+        case .emptyTemplatePath:
+            return "Enter a path for the template."
+        case .invalidPath(let path):
+            return "\(path) is not a valid path inside the vault."
+        case .templateAlreadyExists(let path):
+            return "\(path) already exists with different contents. Choose another path so it is not overwritten."
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -68,6 +91,8 @@ final class AppModel: ObservableObject {
     @Published var isQuickOpenPresented = false
     @Published var isCommandPalettePresented = false
     @Published var isVaultSearchPresented = false
+    @Published var isDailyNotesSettingsPresented = false
+    private var shouldPresentDailyNotesSettingsAfterPalette = false
     @Published var isFindPresented = false
     @Published private(set) var findFocusGeneration = 0
     @Published private(set) var findNavigationGeneration = 0
@@ -897,6 +922,111 @@ final class AppModel: ObservableObject {
 
     func hasDailyNote(for date: Date) -> Bool {
         dailyNotes?.exists(for: date) ?? false
+    }
+
+    func presentDailyNotesSettings() {
+        if isCommandPalettePresented {
+            shouldPresentDailyNotesSettingsAfterPalette = true
+            isCommandPalettePresented = false
+        } else {
+            isDailyNotesSettingsPresented = true
+        }
+    }
+
+    func commandPaletteDidDismiss() {
+        guard shouldPresentDailyNotesSettingsAfterPalette else { return }
+        shouldPresentDailyNotesSettingsAfterPalette = false
+        isDailyNotesSettingsPresented = true
+    }
+
+    var hasDailyNoteTemplate: Bool {
+        dailyNotes?.templateBody() != nil
+    }
+
+    /// Creates the daily-note folder and template, then points Obsidian's
+    /// daily-notes configuration at them. Saving may update the template that
+    /// is already configured, but never replaces an unrelated existing file.
+    func configureDailyNotes(
+        folder: String, format: String, templatePath: String, templateBody: String
+    ) throws {
+        guard let vaultRoot else { throw DailyNotesSetupError.noVault }
+
+        let folder = try safeVaultRelativePath(folder, allowingEmpty: true)
+        let format = format.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !format.isEmpty else { throw DailyNotesSetupError.emptyFormat }
+        _ = try safeVaultRelativePath(
+            MomentFormat.format(Date(), pattern: format) + ".md", allowingEmpty: false
+        )
+
+        var templatePath = try safeVaultRelativePath(templatePath, allowingEmpty: false)
+        if templatePath.lowercased().hasSuffix(".md") {
+            templatePath.removeLast(3)
+        }
+        guard !templatePath.isEmpty else { throw DailyNotesSetupError.emptyTemplatePath }
+
+        let dailyFolderURL = folder.isEmpty
+            ? vaultRoot
+            : vaultRoot.appendingPathComponent(folder, isDirectory: true)
+        let templateURL = vaultRoot.appendingPathComponent(templatePath + ".md")
+
+        let configuredTemplatePath = settings.dailyNoteTemplate.map {
+            $0.lowercased().hasSuffix(".md") ? String($0.dropLast(3)) : $0
+        }
+        let mayReplaceTemplate = configuredTemplatePath?.caseInsensitiveCompare(templatePath)
+            == .orderedSame
+        let templateExists = FileManager.default.fileExists(atPath: templateURL.path)
+        if templateExists {
+            let existing = try String(contentsOf: templateURL, encoding: .utf8)
+            guard existing == templateBody || mayReplaceTemplate else {
+                throw DailyNotesSetupError.templateAlreadyExists(templatePath + ".md")
+            }
+        }
+
+        try FileManager.default.createDirectory(
+            at: dailyFolderURL, withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: templateURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        if !templateExists || mayReplaceTemplate {
+            try templateBody.write(to: templateURL, atomically: true, encoding: .utf8)
+        }
+
+        var updated = settings
+        updated.dailyNotesFolder = folder
+        updated.dailyNoteFormat = format
+        updated.dailyNoteTemplate = templatePath
+        try updated.saveDailyNotesConfiguration(vaultRoot: vaultRoot)
+        session?.reload()
+        status = "Daily notes set up in \(folder.isEmpty ? vaultName : folder)"
+    }
+
+    func templateBody(at relativePath: String) -> String? {
+        guard let vaultRoot,
+              let path = try? safeVaultRelativePath(relativePath, allowingEmpty: false)
+        else { return nil }
+        let withExtension = path.lowercased().hasSuffix(".md") ? path : path + ".md"
+        return try? String(
+            contentsOf: vaultRoot.appendingPathComponent(withExtension), encoding: .utf8
+        )
+    }
+
+    private func safeVaultRelativePath(_ raw: String, allowingEmpty: Bool) throws -> String {
+        let whitespaceTrimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !whitespaceTrimmed.hasPrefix("/") else {
+            throw DailyNotesSetupError.invalidPath(raw)
+        }
+        let trimmed = whitespaceTrimmed
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if trimmed.isEmpty {
+            if allowingEmpty { return "" }
+            throw DailyNotesSetupError.emptyTemplatePath
+        }
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw DailyNotesSetupError.invalidPath(raw)
+        }
+        return parts.joined(separator: "/")
     }
 
     // MARK: - Saving

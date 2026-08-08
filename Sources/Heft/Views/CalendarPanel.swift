@@ -1,3 +1,4 @@
+import AppKit
 import HeftCore
 import SwiftUI
 
@@ -50,6 +51,18 @@ struct CalendarPanel: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        if !model.hasDailyNoteTemplate {
+                            Divider().padding(.vertical, 2)
+                            Button(model.settings.dailyNoteTemplate == nil
+                                   ? "Set Up Daily Notes…"
+                                   : "Repair Daily Note Template…") {
+                                isWarningPresented = false
+                                DispatchQueue.main.async {
+                                    model.presentDailyNotesSettings()
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
                     }
                     .frame(width: 280, alignment: .leading)
                     .padding(14)
@@ -92,6 +105,8 @@ struct CalendarPanel: View {
         }
         if model.settings.dailyNoteTemplate == nil {
             warnings.append("No daily-note template is configured in this vault. New daily notes receive a plain heading.")
+        } else if !model.hasDailyNoteTemplate {
+            warnings.append("The configured daily-note template could not be found. New daily notes receive a plain heading.")
         }
         return warnings.isEmpty ? nil : warnings.joined(separator: "\n\n")
     }
@@ -186,6 +201,233 @@ struct CalendarPanel: View {
     private func shiftMonth(_ delta: Int) {
         guard let shifted = calendar.date(byAdding: .month, value: delta, to: model.calendarMonth) else { return }
         withAnimation(.snappy(duration: 0.18)) { model.calendarMonth = shifted }
+    }
+}
+
+struct DailyNotesSettingsView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var dailyFolder = ""
+    @State private var filenameFormat = ""
+    @State private var templatePath = ""
+    @State private var templateBody = ""
+    @State private var errorMessage: String?
+    @State private var didLoad = false
+    @State private var isVariableHelpPresented = false
+    @State private var copiedVariable: String?
+
+    private static let starterTemplate = """
+    # {{title}}
+
+    > {{date:dddd, MMMM Do YYYY}}
+
+    ## Notes
+
+    """
+
+    private struct Placeholder: Identifiable {
+        let token: String
+        let meaning: String
+        var id: String { token }
+    }
+
+    private let placeholders: [Placeholder] = [
+        Placeholder(token: "{{title}}", meaning: "Daily note filename"),
+        Placeholder(token: "{{date}}", meaning: "Date using the filename format"),
+        Placeholder(token: "{{time}}", meaning: "Current time, such as 14:30"),
+        Placeholder(token: "{{date:dddd}}", meaning: "Full weekday, such as Friday"),
+        Placeholder(token: "{{date:MMMM Do YYYY}}", meaning: "Long date, such as August 8th 2026"),
+        Placeholder(token: "{{date:GGGG-[W]WW}}", meaning: "ISO week, such as 2026-W32"),
+        Placeholder(token: "{{time:h:mm A}}", meaning: "12-hour time, such as 2:30 PM"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(isConfigured ? "Daily Note Settings" : "Set Up Daily Notes")
+                    .font(.title2.weight(.semibold))
+                Text(isConfigured
+                     ? "These settings belong to \(model.vaultName)."
+                     : "Heft will create the missing folders and configuration. Existing unrelated files are never overwritten.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
+                GridRow {
+                    Text("Daily notes folder")
+                    TextField("Daily", text: $dailyFolder)
+                        .textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    Text("Filename")
+                    TextField("YYYY-MM-DD", text: $filenameFormat)
+                        .textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    Text("Template file")
+                    TextField("Templates/Daily Note.md", text: $templatePath)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            .font(.callout)
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextEditor(text: $templateBody)
+                        .font(.system(.body, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                        .frame(minHeight: 150)
+                        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 6))
+
+                    HStack(spacing: 5) {
+                        Button { isVariableHelpPresented.toggle() } label: {
+                            Label("Template variables", systemImage: "questionmark.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .popover(isPresented: $isVariableHelpPresented, arrowEdge: .bottom) {
+                            variableReference
+                        }
+                    }
+                }
+            } label: {
+                Text("Template contents")
+            }
+
+            GroupBox("Preview for today · \(previewPath)") {
+                ScrollView {
+                    Text(previewBody.isEmpty ? "Empty template" : previewBody)
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(previewBody.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
+                .frame(height: 90)
+            }
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(isConfigured ? "Save" : "Create & Use") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(templatePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || filenameFormat.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 620)
+        .onAppear { loadDefaultsOnce() }
+    }
+
+    private var sampleTitle: String {
+        let format = filenameFormat.isEmpty ? "YYYY-MM-DD" : filenameFormat
+        return MomentFormat.format(Date(), pattern: format)
+    }
+
+    private var isConfigured: Bool {
+        model.settings.dailyNoteTemplate != nil
+    }
+
+    private var variableReference: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Template Variables")
+                .font(.headline)
+            ForEach(placeholders) { placeholder in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(placeholder.token)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(width: 180, alignment: .leading)
+                    Text(placeholder.meaning)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 6)
+                    Button { copy(placeholder.token) } label: {
+                        Image(systemName: copiedVariable == placeholder.token
+                              ? "checkmark"
+                              : "doc.on.doc")
+                            .frame(width: 14, height: 14)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy \(placeholder.token)")
+                }
+            }
+            Divider()
+            Text("Moment-style tokens: YYYY/YY year, MMMM/MMM/MM/M month, DD/D/Do day, dddd/ddd weekday, GGGG and WW/W ISO week, and HH/h/mm/ss/A time. Put literal text in brackets, as in [W].")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(width: 470, alignment: .leading)
+        .padding(14)
+    }
+
+    private func copy(_ variable: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(variable, forType: .string)
+        copiedVariable = variable
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.2))
+            if copiedVariable == variable { copiedVariable = nil }
+        }
+    }
+
+    private var previewPath: String {
+        let folder = dailyFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        return folder.isEmpty ? "\(sampleTitle).md" : "\(folder)/\(sampleTitle).md"
+    }
+
+    private var previewBody: String {
+        MomentFormat.expandTemplate(
+            templateBody,
+            date: Date(),
+            title: sampleTitle,
+            dateFormat: filenameFormat.isEmpty ? "YYYY-MM-DD" : filenameFormat
+        )
+    }
+
+    private func loadDefaultsOnce() {
+        guard !didLoad else { return }
+        didLoad = true
+        dailyFolder = model.settings.dailyNotesFolder.isEmpty
+            ? "Daily"
+            : model.settings.dailyNotesFolder
+        filenameFormat = model.settings.dailyNoteFormat
+
+        if let configured = model.settings.dailyNoteTemplate {
+            templatePath = configured + (configured.lowercased().hasSuffix(".md") ? "" : ".md")
+        } else {
+            let templatesFolder = model.settings.templatesFolder ?? "Templates"
+            templatePath = "\(templatesFolder)/Daily Note.md"
+        }
+        templateBody = model.templateBody(at: templatePath) ?? Self.starterTemplate
+    }
+
+    private func save() {
+        do {
+            try model.configureDailyNotes(
+                folder: dailyFolder,
+                format: filenameFormat,
+                templatePath: templatePath,
+                templateBody: templateBody
+            )
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 

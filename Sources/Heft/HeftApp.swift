@@ -90,6 +90,10 @@ struct HeftCommands: Commands {
                     )
                     .disabled(model == nil)
             }
+            Button("Daily Note Settings…") {
+                model?.presentDailyNotesSettings()
+            }
+            .disabled(model?.vaultRoot == nil)
             Divider()
             Button("Open Vault in New Window…") { openVaultInNewWindow() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -128,11 +132,16 @@ struct HeftCommands: Commands {
             Button("Command Palette…") { model?.isCommandPalettePresented = true }
                 .keyboardShortcut("p", modifiers: .command)
         }
+        CommandGroup(replacing: .saveItem) {
+            Button("Save") { model?.flushPendingSave() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(model == nil)
+        }
         CommandGroup(after: .toolbar) {
             Button(model?.columnVisibility == .detailOnly ? "Show Sidebar" : "Hide Sidebar") {
                 model?.toggleSidebar()
             }
-            .keyboardShortcut("s", modifiers: [.control, .command])
+            .keyboardShortcut("s", modifiers: [.command, .shift])
             Toggle("Show Calendar", isOn: binding(\.isCalendarVisible))
                 .keyboardShortcut(
                     AppCommandShortcut.toggleCalendar.key,

@@ -69,13 +69,14 @@ final class VaultSession: ObservableObject {
         reloadTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex) in
+            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings) in
                 let tree = VaultScanner.scan(root: root)
-                return (tree, VaultIndex.build(root: tree))
+                return (tree, VaultIndex.build(root: tree), ObsidianSettings.load(vaultRoot: root))
             }.value
             guard !Task.isCancelled, let self else { return }
             tree = scanned.0
             index = scanned.1
+            settings = scanned.2
             isLoading = false
         }
     }

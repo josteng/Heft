@@ -11,6 +11,12 @@ struct AppCommandShortcut {
     static let toggleCalendar = Self(
         key: "d", modifiers: [.command, .shift], display: "⇧⌘D"
     )
+    static let toggleSidebar = Self(
+        key: "s", modifiers: [.command, .shift], display: "⇧⌘S"
+    )
+    static let toggleBacklinks = Self(
+        key: "b", modifiers: [.command, .option], display: "⌥⌘B"
+    )
 }
 
 /// One command owns all of its palette metadata and behaviour. Adding a
@@ -21,6 +27,7 @@ struct AppCommand: Identifiable {
     let symbol: String
     let searchTerms: String
     let shortcut: AppCommandShortcut?
+    private let displayTitle: @MainActor (AppModel) -> String
     private let enabled: @MainActor (AppModel) -> Bool
     private let action: @MainActor (AppModel) -> Void
 
@@ -30,6 +37,7 @@ struct AppCommand: Identifiable {
         symbol: String,
         searchTerms: String,
         shortcut: AppCommandShortcut? = nil,
+        displayTitle: (@MainActor (AppModel) -> String)? = nil,
         enabled: @escaping @MainActor (AppModel) -> Bool = { _ in true },
         action: @escaping @MainActor (AppModel) -> Void
     ) {
@@ -38,6 +46,7 @@ struct AppCommand: Identifiable {
         self.symbol = symbol
         self.searchTerms = searchTerms
         self.shortcut = shortcut
+        self.displayTitle = displayTitle ?? { _ in title }
         self.enabled = enabled
         self.action = action
     }
@@ -61,10 +70,30 @@ struct AppCommand: Identifiable {
             action: { $0.openDailyNote(for: Date()) }
         ),
         Self(
+            id: "dailyNoteSettings",
+            title: "Daily note settings",
+            symbol: "gearshape",
+            searchTerms: "calendar daily template folder format configure preferences",
+            enabled: { $0.vaultRoot != nil },
+            action: { $0.presentDailyNotesSettings() }
+        ),
+        Self(
+            id: "toggleSidebar",
+            title: "Toggle sidebar",
+            symbol: "sidebar.leading",
+            searchTerms: "sidebar navigator files show hide open close view",
+            shortcut: .toggleSidebar,
+            displayTitle: { $0.columnVisibility == .detailOnly ? "Show sidebar" : "Hide sidebar" },
+            action: { $0.toggleSidebar() }
+        ),
+        Self(
             id: "toggleColorfulEmphasis",
             title: "Toggle colorful formatting",
             symbol: "paintpalette",
             searchTerms: "heading bars bold italic color formatting appearance",
+            displayTitle: { $0.isColorfulFormattingEnabled
+                ? "Turn off colorful formatting"
+                : "Turn on colorful formatting" },
             action: { $0.isColorfulFormattingEnabled.toggle() }
         ),
         Self(
@@ -73,11 +102,22 @@ struct AppCommand: Identifiable {
             symbol: "calendar",
             searchTerms: "calendar show hide toggle sidebar",
             shortcut: .toggleCalendar,
+            displayTitle: { $0.isCalendarVisible ? "Hide calendar" : "Show calendar" },
             action: { $0.isCalendarVisible.toggle() }
+        ),
+        Self(
+            id: "toggleBacklinks",
+            title: "Toggle backlinks",
+            symbol: "link",
+            searchTerms: "backlinks inspector panel show hide open close view",
+            shortcut: .toggleBacklinks,
+            displayTitle: { $0.isInspectorVisible ? "Hide backlinks" : "Show backlinks" },
+            action: { $0.isInspectorVisible.toggle() }
         ),
     ]
 
     @MainActor func isEnabled(on model: AppModel) -> Bool { enabled(model) }
+    @MainActor func title(on model: AppModel) -> String { displayTitle(model) }
 
     func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -121,6 +161,7 @@ struct CommandPaletteView: View {
                     ForEach(Array(results.enumerated()), id: \.element.id) { index, command in
                         CommandRow(
                             command: command,
+                            title: command.title(on: model),
                             isSelected: index == selection,
                             isEnabled: command.isEnabled(on: model)
                         )
@@ -132,7 +173,7 @@ struct CommandPaletteView: View {
                 }
                 .padding(6)
             }
-            .frame(height: 180)
+            .frame(height: 240)
         }
         .frame(width: 560)
         .background(.regularMaterial)
@@ -158,6 +199,7 @@ struct CommandPaletteView: View {
 
 private struct CommandRow: View {
     let command: AppCommand
+    let title: String
     let isSelected: Bool
     let isEnabled: Bool
 
@@ -166,7 +208,7 @@ private struct CommandRow: View {
             Image(systemName: command.symbol)
                 .frame(width: 16)
                 .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-            Text(command.title)
+            Text(title)
                 .font(.system(size: 13))
             Spacer(minLength: 8)
             if let shortcut = command.shortcut {
