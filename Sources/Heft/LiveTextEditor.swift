@@ -251,6 +251,7 @@ struct LiveTextEditor: NSViewRepresentable {
                 context: parent.context,
                 contentWidth: max(240, width - 8)
             )
+            updateTypingAttributes(for: selection, in: textView)
 
             switch scope {
             case .revealedLines:
@@ -280,6 +281,30 @@ struct LiveTextEditor: NSViewRepresentable {
 
             settleLayout(textView)
             textView.scrollRangeToVisible(selection)
+        }
+
+        private func updateTypingAttributes(for selection: NSRange, in textView: NSTextView) {
+            guard selection.length == 0 else { return }
+            let source = textView.string as NSString
+            let location = min(selection.location, source.length)
+            let line = source.lineRange(for: NSRange(location: location, length: 0))
+            let contents = source.substring(with: line)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard contents.isEmpty else { return }
+
+            // Code blocks deliberately reserve a taller fixed line box. Their
+            // insertion point should follow that block geometry, not prose.
+            if case .codeBlock? = layout.blocks[line.location] { return }
+
+            textView.typingAttributes = [
+                .font: Theme.liveFont,
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: LiveStyler.bodyParagraphStyle(compactEmptyLine: true),
+            ]
+            // TextKit 2 derives the final zero-length paragraph from typing
+            // attributes. Recompute its insertion fragment without restarting
+            // the user's blink cadence.
+            textView.updateInsertionPointStateAndRestartTimer(false)
         }
 
         /// Lays the whole document out now instead of letting TextKit 2 do it

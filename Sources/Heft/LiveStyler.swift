@@ -37,9 +37,7 @@ enum LiveStyler {
         let text = source as NSString
         let full = NSRange(location: 0, length: storage.length)
 
-        let body = NSMutableParagraphStyle()
-        body.lineSpacing = Theme.lineSpacing
-        body.paragraphSpacing = 9
+        let body = bodyParagraphStyle()
 
         storage.beginEditing()
         defer { storage.endEditing() }
@@ -49,6 +47,7 @@ enum LiveStyler {
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: body,
         ], range: full)
+        styleEmptyBodyLines(in: storage, text: text)
 
         let decorations = LiveDecorator.decorations(in: source)
         var layout = LiveLayout()
@@ -83,6 +82,33 @@ enum LiveStyler {
         }
 
         return layout
+    }
+
+    /// Empty TextKit 2 paragraphs otherwise use their full line-spacing box as
+    /// the insertion point. Moving that spacing after the paragraph preserves
+    /// the next baseline while leaving the caret at the font's natural height.
+    static func bodyParagraphStyle(compactEmptyLine: Bool = false) -> NSMutableParagraphStyle {
+        let body = NSMutableParagraphStyle()
+        body.lineSpacing = compactEmptyLine ? 0 : Theme.lineSpacing
+        body.paragraphSpacing = 9 + (compactEmptyLine ? Theme.lineSpacing : 0)
+        return body
+    }
+
+    private static func styleEmptyBodyLines(in storage: NSTextStorage, text: NSString) {
+        guard text.length > 0 else { return }
+        let compact = bodyParagraphStyle(compactEmptyLine: true)
+        var location = 0
+        while location < text.length {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            let contents = text.substring(with: line)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if contents.isEmpty {
+                storage.addAttribute(.paragraphStyle, value: compact, range: line)
+            }
+            let next = NSMaxRange(line)
+            guard next > location else { break }
+            location = next
+        }
     }
 
     // MARK: - Widgets
