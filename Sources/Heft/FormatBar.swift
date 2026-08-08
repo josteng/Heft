@@ -31,8 +31,19 @@ final class FormatBar: NSView {
         background.wantsLayer = true
         background.layer?.cornerRadius = 8
         background.layer?.borderWidth = 0.5
+        background.layer?.borderColor = NSColor.separatorColor.cgColor
         background.layer?.masksToBounds = true
         addSubview(background)
+
+        // The bar floats over prose, so it needs a shadow to read as being in
+        // front of the text rather than part of it.
+        shadow = {
+            let shadow = NSShadow()
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+            shadow.shadowBlurRadius = 8
+            shadow.shadowOffset = NSSize(width: 0, height: -2)
+            return shadow
+        }()
 
         stack.orientation = .horizontal
         stack.spacing = 1
@@ -72,7 +83,14 @@ final class FormatBar: NSView {
 
     private func button(symbol: String, help: String, action: Selector, tag: Int) -> NSButton {
         let button = NSButton()
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)
+        // Weighted and explicitly tinted. Left to their defaults these render
+        // as thin secondary-coloured glyphs that read as disabled — which is
+        // exactly how the bar looked: present, but greyed out.
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+            )
+        button.contentTintColor = .labelColor
         button.imagePosition = .imageOnly
         button.isBordered = false
         button.bezelStyle = .toolbar
@@ -82,7 +100,7 @@ final class FormatBar: NSView {
         button.tag = tag
         button.toolTip = help
         button.refusesFirstResponder = true
-        button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        button.widthAnchor.constraint(equalToConstant: 30).isActive = true
         return button
     }
 

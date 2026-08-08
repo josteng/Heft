@@ -568,15 +568,16 @@ final class HeftTextKit2View: NSTextView {
         let selection = selectedRange()
         let edit = format.map { MarkdownEditing.toggle($0, in: string, range: selection) }
             ?? MarkdownEditing.makeLink(in: string, range: selection)
-        guard edit.text != string else { return }
+        guard !edit.isEmpty else { return }
 
-        // Through the text system rather than by assigning `string`, so the
-        // edit joins the undo stack as one step.
-        let whole = NSRange(location: 0, length: (string as NSString).length)
-        guard shouldChangeText(in: whole, replacementString: edit.text) else { return }
-        textStorage?.replaceCharacters(in: whole, with: edit.text)
+        // Only the affected span is replaced, so the rest of the document keeps
+        // its layout and the undo stack gets one small step rather than the
+        // whole file.
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
         setSelectedRange(edit.selection)
+        updateFormatBar()
     }
 
     /// Continues a list or a block quote on Enter, and ends it when the line is

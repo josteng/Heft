@@ -205,7 +205,7 @@ public enum SelfCheck {
 
         // MARK: Inline formatting
         func format(_ f: InlineFormat, _ source: String, _ range: NSRange) -> String {
-            MarkdownEditing.toggle(f, in: source, range: range).text
+            MarkdownEditing.toggle(f, in: source, range: range).applied(to: source)
         }
         // "hello world", selecting "world".
         expect(format(.bold, "hello world", NSRange(location: 6, length: 5)),
@@ -221,12 +221,23 @@ public enum SelfCheck {
         expect(format(.code, "x", NSRange(location: 0, length: 1)), "`x`", "code uses backticks")
         // An empty selection gives an empty pair to type into.
         let empty = MarkdownEditing.toggle(.bold, in: "ab", range: NSRange(location: 1, length: 0))
-        expect(empty.text, "a****b", "bold on an empty selection inserts a pair")
+        expect(empty.applied(to: "ab"), "a****b", "bold on an empty selection inserts a pair")
         expect("\(empty.selection.location)", "3", "the caret lands between the markers")
 
         let link = MarkdownEditing.makeLink(in: "see docs", range: NSRange(location: 4, length: 4))
-        expect(link.text, "see [docs]()", "a link wraps the selection as its label")
+        expect(link.applied(to: "see docs"), "see [docs]()", "a link wraps the selection as its label")
         expect("\(link.selection.location)", "11", "the caret lands inside the parentheses")
+
+        // The edit must touch only the span it changes. Returning the whole
+        // document made the editor replace every character to bold one word,
+        // which relaid the document out and made the view jump.
+        let long = String(repeating: "word ", count: 200) + "target"
+        let target = NSRange(location: (long as NSString).length - 6, length: 6)
+        let scoped = MarkdownEditing.toggle(.bold, in: long, range: target)
+        expect("\(scoped.range.location)", "\(target.location)", "the edit starts at the selection")
+        expect("\(scoped.range.length)", "6", "the edit spans the selection, not the document")
+        expect(scoped.applied(to: long).hasSuffix("**target**") ? "yes" : "no", "yes",
+               "the scoped edit still produces the right text")
 
         // MARK: Properties and tags
         let properties = Frontmatter.parse("""

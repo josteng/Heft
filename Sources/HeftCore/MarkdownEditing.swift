@@ -40,13 +40,35 @@ public enum InlineFormat: String, Sendable, CaseIterable {
 /// without a window.
 public enum MarkdownEditing {
 
+    /// The smallest replacement that performs a formatting change.
+    ///
+    /// A range and a replacement rather than the whole new document. Handing
+    /// back the entire text made the caller replace every character of the
+    /// file to bold one word, which relaid the whole document out — the view
+    /// jumped — and put the file's entire contents on the undo stack as a
+    /// single step.
     public struct Edit: Equatable, Sendable {
-        public let text: String
+        /// Range in the *original* source to replace.
+        public let range: NSRange
+        public let replacement: String
+        /// Where the selection belongs once the replacement is in.
         public let selection: NSRange
 
-        public init(text: String, selection: NSRange) {
-            self.text = text
+        public init(range: NSRange, replacement: String, selection: NSRange) {
+            self.range = range
+            self.replacement = replacement
             self.selection = selection
+        }
+
+        /// True when there is nothing to do, so callers can bail cheaply.
+        public var isEmpty: Bool { range.length == 0 && replacement.isEmpty }
+
+        public func applied(to source: String) -> String {
+            (source as NSString).replacingCharacters(in: range, with: replacement)
+        }
+
+        static func nothing(keeping selection: NSRange) -> Edit {
+            Edit(range: NSRange(location: 0, length: 0), replacement: "", selection: selection)
         }
     }
 
@@ -60,9 +82,8 @@ public enum MarkdownEditing {
         let text = source as NSString
         let marker = format.marker
         let markerLength = (marker as NSString).length
-        guard range.location != NSNotFound,
-              NSMaxRange(range) <= text.length
-        else { return Edit(text: source, selection: range) }
+        guard range.location != NSNotFound, NSMaxRange(range) <= text.length
+        else { return .nothing(keeping: range) }
 
         // The selection carries the markers: `**bold**` selected whole.
         if range.length >= markerLength * 2 {
@@ -70,8 +91,11 @@ public enum MarkdownEditing {
             if body.hasPrefix(marker), body.hasSuffix(marker) {
                 let inner = String(body.dropFirst(marker.count).dropLast(marker.count))
                 return Edit(
-                    text: text.replacingCharacters(in: range, with: inner),
-                    selection: NSRange(location: range.location, length: (inner as NSString).length)
+                    range: range,
+                    replacement: inner,
+                    selection: NSRange(
+                        location: range.location, length: (inner as NSString).length
+                    )
                 )
             }
         }
@@ -86,7 +110,8 @@ public enum MarkdownEditing {
                 location: before.location, length: range.length + markerLength * 2
             )
             return Edit(
-                text: text.replacingCharacters(in: outer, with: text.substring(with: range)),
+                range: outer,
+                replacement: text.substring(with: range),
                 selection: NSRange(location: before.location, length: range.length)
             )
         }
@@ -95,7 +120,8 @@ public enum MarkdownEditing {
         // caret between the markers, ready to type into.
         let body = text.substring(with: range)
         return Edit(
-            text: text.replacingCharacters(in: range, with: marker + body + marker),
+            range: range,
+            replacement: marker + body + marker,
             selection: NSRange(location: range.location + markerLength, length: range.length)
         )
     }
@@ -105,13 +131,13 @@ public enum MarkdownEditing {
     public static func makeLink(in source: String, range: NSRange) -> Edit {
         let text = source as NSString
         guard range.location != NSNotFound, NSMaxRange(range) <= text.length
-        else { return Edit(text: source, selection: range) }
+        else { return .nothing(keeping: range) }
 
-        let label = text.substring(with: range)
-        let replacement = "[\(label)]()"
+        let replacement = "[\(text.substring(with: range))]()"
         return Edit(
-            text: text.replacingCharacters(in: range, with: replacement),
-            // Just inside the parentheses.
+            range: range,
+            replacement: replacement,
+            // Just inside the parentheses, ready for a destination.
             selection: NSRange(
                 location: range.location + (replacement as NSString).length - 1, length: 0
             )
