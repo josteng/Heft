@@ -203,6 +203,80 @@ public enum SelfCheck {
         expect(hiddenText("# Heading"), "# ", "heading hides hashes and space")
         expectTrue(styles("#tag").contains(.tag), "decorator finds tag")
 
+        // MARK: Embed bodies
+        let embedSource = """
+        ---
+        tag: x
+        ---
+        # Title
+
+        Intro.
+
+        ## Section A
+
+        Alpha text. ^alpha
+
+        ### Nested
+
+        Deeper.
+
+        ## Section B
+
+        Beta text.
+        """
+        // A whole-note embed shows the body, never the frontmatter.
+        expectTrue(NoteText.embedBody(of: embedSource, heading: nil, blockID: nil)?
+            .hasPrefix("# Title") == true, "a whole-note embed drops frontmatter")
+        // A section runs to the next heading of the same or higher level, so a
+        // deeper subheading stays inside it.
+        let sectionA = NoteText.embedBody(of: embedSource, heading: "Section A", blockID: nil) ?? ""
+        expectTrue(sectionA.contains("Alpha text") && sectionA.contains("Deeper"),
+                   "a section embed includes its subsections")
+        expectTrue(!sectionA.contains("Beta text"),
+                   "a section embed stops at the next heading of equal level")
+        expect(NoteText.embedBody(of: embedSource, heading: nil, blockID: "alpha") ?? "nil",
+               "Alpha text.", "a block embed shows the line without its anchor")
+        expectTrue(NoteText.embedBody(of: embedSource, heading: "Nowhere", blockID: nil) == nil,
+                   "an embed of a heading that does not exist resolves to nothing")
+
+        // MARK: Link rewriting on rename
+        func repoint(_ source: String, _ oldName: String, _ newPath: String) -> String {
+            WikiLinkParser.rewriteTargets(
+                in: source,
+                matches: { $0.target.lowercased() == oldName.lowercased() },
+                replacement: { WikiLinkParser.retargeted($0.target, to: newPath) }
+            ).text
+        }
+
+        expect(repoint("see [[Old]] here", "Old", "New.md"), "see [[New]] here",
+               "a bare link is repointed")
+        expect(repoint("[[Old|the alias]]", "Old", "New.md"), "[[New|the alias]]",
+               "an alias survives repointing")
+        expect(repoint("[[Old#Section]]", "Old", "New.md"), "[[New#Section]]",
+               "a heading reference survives repointing")
+        expect(repoint("[[Old#^abc123]]", "Old", "New.md"), "[[New#^abc123]]",
+               "a block reference survives repointing")
+        expect(repoint("![[Old.png|500]]", "Old.png", "Renamed.png"), "![[Renamed.png|500]]",
+               "an embed keeps its display width")
+        // Obsidian writes `\|` inside tables. Rebuilding the link from its
+        // parsed parts would flatten that back to a bare pipe and break the row.
+        expect(repoint("| a | ![[Old.png\\|500]] |", "Old.png", "New.png"),
+               "| a | ![[New.png\\|500]] |", "an escaped pipe survives repointing")
+        // Shape is preserved rather than normalised to a full path.
+        expect(repoint("[[sub/Old]]", "sub/Old", "sub/New.md"), "[[sub/New]]",
+               "a path-shaped link stays a path")
+        expect(repoint("[[Old.md]]", "Old.md", "New.md"), "[[New.md]]",
+               "an explicit extension is kept")
+        // A rename must never edit someone's code sample.
+        expect(repoint("```\n[[Old]]\n```", "Old", "New.md"), "```\n[[Old]]\n```",
+               "links inside a fence are left alone")
+        expect(repoint("[[Other]]", "Old", "New.md"), "[[Other]]", "unrelated links are untouched")
+        expect("\(WikiLinkParser.rewriteTargets(in: "[[Old]] and [[Old]]", matches: { $0.target == "Old" }, replacement: { _ in "New" }).count)",
+               "2", "every occurrence is counted")
+        // The bracket-abutting form real vaults contain.
+        expect(repoint("\\[[[Old]]", "Old", "New.md"), "\\[[[New]]",
+               "a bracket abutting a link is not absorbed into the target")
+
         // MARK: Quotes and callouts
         func quotes(_ source: String) -> [QuoteLine] {
             LiveDecorator.decorations(in: source).compactMap {

@@ -434,8 +434,8 @@ final class AppModel: ObservableObject {
 
         do {
             try FileManager.default.moveItem(at: item.url, to: target)
+            let renamedPath = relativePath(of: target)
             if !item.isFolder {
-                let renamedPath = relativePath(of: target)
                 navigationHistory = navigationHistory.map {
                     $0 == item.relativePath ? renamedPath : $0
                 }
@@ -443,16 +443,66 @@ final class AppModel: ObservableObject {
             if wasOpen, let root = vaultRoot, let ref = NoteRef(url: target, vaultRoot: root) {
                 current = ref
             }
-            reload()
+
             status = "Renamed to \(filename)"
+            if !item.isFolder && hasHiddenExtension {
+                let updated = repointLinks(from: item, to: renamedPath)
+                if updated.links > 0 {
+                    status += ", repointed \(updated.links) link\(updated.links == 1 ? "" : "s")"
+                        + " in \(updated.notes) note\(updated.notes == 1 ? "" : "s")"
+                }
+            }
+            reload()
         } catch {
             status = "Rename failed: \(error.localizedDescription)"
         }
-        // Links pointing at the old name are deliberately left alone: rewriting
-        // them across the vault is a bulk edit, not a rename.
-        if !item.isFolder && hasHiddenExtension {
-            status += ". Links to the old name were not updated"
+    }
+
+    /// Rewrites every wikilink that pointed at a just-renamed note.
+    ///
+    /// Driven off the *pre-rename* index, which still maps the old name to the
+    /// old file, so "did this link mean that note" is answered by the same
+    /// resolution the editor was using a moment ago rather than by string
+    /// comparison — which would miss `[[folder/Note]]` and `[[Note.md]]`, and
+    /// would wrongly claim a same-named note in another folder.
+    ///
+    /// Returns how much was touched, for the status line. A folder rename is
+    /// deliberately not handled: it moves many notes at once and belongs to a
+    /// bulk operation with its own confirmation.
+    private func repointLinks(from old: VaultItem, to newRelativePath: String) -> (links: Int, notes: Int) {
+        let sources = Set(index.backlinks(to: old.relativePath).map(\.source.relativePath))
+        guard !sources.isEmpty else { return (0, 0) }
+
+        var totalLinks = 0
+        var touchedNotes = 0
+
+        for path in sources.sorted() {
+            guard let source = index.note(atRelativePath: path) else { continue }
+            // The open note is read from the buffer: it may hold unsaved edits,
+            // and writing the file underneath it would lose them at the next
+            // autosave anyway.
+            let isOpen = current?.relativePath == path
+            guard let original = isOpen ? text : try? String(contentsOf: source.url, encoding: .utf8)
+            else { continue }
+
+            let result = WikiLinkParser.rewriteTargets(
+                in: original,
+                matches: { index.resolve($0, from: source)?.relativePath == old.relativePath },
+                replacement: { WikiLinkParser.retargeted($0.target, to: newRelativePath) }
+            )
+            guard result.count > 0, result.text != original else { continue }
+
+            if isOpen {
+                text = result.text
+                documentGeneration += 1
+            } else {
+                do { try result.text.write(to: source.url, atomically: true, encoding: .utf8) }
+                catch { continue }
+            }
+            totalLinks += result.count
+            touchedNotes += 1
         }
+        return (totalLinks, touchedNotes)
     }
 
     func duplicate(_ item: VaultItem) {

@@ -26,7 +26,10 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case strikethrough
         case highlight
         case inlineCode
-        case wikiLink(target: String, isEmbed: Bool)
+        /// The whole parsed link, not just its target: an embed needs the
+        /// `#Heading` and `#^block` parts to know which slice of the other
+        /// note to transclude.
+        case wikiLink(WikiLink)
         case link(destination: String)
         case tag
         case inlineMath(String)
@@ -154,8 +157,8 @@ public struct Reveal: Equatable, Sendable {
              .table, .thematicBreak, .blockMath, .image:
             true
         // An embed owning its line is drawn as a block, so it behaves like one.
-        case .wikiLink(_, let isEmbed):
-            isEmbed
+        case .wikiLink(let link):
+            link.isEmbed
         case .bold, .italic, .strikethrough, .highlight, .inlineCode,
              .link, .tag, .inlineMath:
             false
@@ -585,9 +588,9 @@ public enum LiveDecorator {
             }
 
             let link = WikiLinkParser.links(in: raw).first
+                ?? WikiLink(target: body, isEmbed: isEmbed)
             result.append(MarkdownDecoration(
-                range: match, syntax: syntax,
-                style: .wikiLink(target: link?.target ?? body, isEmbed: isEmbed)
+                range: match, syntax: syntax, style: .wikiLink(link)
             ))
             protected.append(match)
         }

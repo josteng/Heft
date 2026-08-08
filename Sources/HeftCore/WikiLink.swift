@@ -181,4 +181,136 @@ public enum WikiLinkParser {
         if parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]) { return (w, h) }
         return nil
     }
+
+    // MARK: - Rewriting
+
+    /// Repoints every link in `source` that `matches` accepts, leaving the rest
+    /// of the file untouched.
+    ///
+    /// Only the *target* of a matched link is replaced; its heading, block id,
+    /// alias and embed size are copied through as raw source. That matters more
+    /// than it sounds: rebuilding a link from its parsed parts would normalise
+    /// Obsidian's `\|` table escape into a bare pipe and quietly break every
+    /// table the link appears in.
+    ///
+    /// Fenced code is skipped, so a rename cannot edit someone's code sample.
+    public static func rewriteTargets(
+        in source: String,
+        matches: (WikiLink) -> Bool,
+        replacement: (WikiLink) -> String
+    ) -> (text: String, count: Int) {
+        var lines: [String] = []
+        var count = 0
+        var inFence = false
+        var fenceMarker = ""
+
+        for line in source.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if inFence {
+                if trimmed.hasPrefix(fenceMarker) { inFence = false }
+                lines.append(line)
+                continue
+            }
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                inFence = true
+                fenceMarker = String(trimmed.prefix(3))
+                lines.append(line)
+                continue
+            }
+            let (rewritten, changed) = rewriteLine(line, matches: matches, replacement: replacement)
+            lines.append(rewritten)
+            count += changed
+        }
+        return (lines.joined(separator: "\n"), count)
+    }
+
+    private static func rewriteLine(
+        _ line: String,
+        matches: (WikiLink) -> Bool,
+        replacement: (WikiLink) -> String
+    ) -> (String, Int) {
+        let chars = Array(line)
+        var out = ""
+        var count = 0
+        var i = 0
+
+        while i < chars.count {
+            let isEmbed = chars[i] == "!" && i + 2 < chars.count
+                && chars[i + 1] == "[" && chars[i + 2] == "["
+            let isLink = chars[i] == "[" && i + 1 < chars.count && chars[i + 1] == "["
+
+            guard isEmbed || isLink else {
+                out.append(chars[i])
+                i += 1
+                continue
+            }
+            // Same innermost-pair rule the parser uses, so `\[[[Note]]` is
+            // rewritten on its real link rather than on a bracket run.
+            if isLink {
+                var run = 0
+                while i + run < chars.count, chars[i + run] == "[" { run += 1 }
+                if run > 2 {
+                    let extra = run - 2
+                    out += String(repeating: "[", count: extra)
+                    i += extra
+                    continue
+                }
+            }
+
+            let contentStart = i + (isEmbed ? 3 : 2)
+            guard let close = findClose(chars, from: contentStart) else {
+                out.append(chars[i])
+                i += 1
+                continue
+            }
+            let body = String(chars[contentStart..<close])
+            guard !body.isEmpty else {
+                out.append(chars[i])
+                i += 1
+                continue
+            }
+
+            let link = parse(body: body, isEmbed: isEmbed)
+            if matches(link) {
+                let tail = tailIndex(ofBody: body)
+                out += (isEmbed ? "![[" : "[[") + replacement(link) + String(body[tail...]) + "]]"
+                count += 1
+            } else {
+                out += String(chars[i...(close + 1)])
+            }
+            i = close + 2
+        }
+        return (out, count)
+    }
+
+    /// Where a link body stops naming a file and starts carrying a heading,
+    /// alias or embed size — everything from here on is copied through as-is.
+    ///
+    /// Obsidian escapes the separator as `\|` inside tables. The backslash
+    /// belongs to the separator, not to the filename, so the tail has to start
+    /// before it or a rename eats it and the table row breaks.
+    private static func tailIndex(ofBody body: String) -> String.Index {
+        guard let stop = body.firstIndex(where: { $0 == "#" || $0 == "|" })
+        else { return body.endIndex }
+        guard body[stop] == "|", stop > body.startIndex else { return stop }
+        let before = body.index(before: stop)
+        return body[before] == "\\" ? before : stop
+    }
+
+    /// How a link should be spelled after its target file moves.
+    ///
+    /// The original shape is kept: a bare name stays a bare name, a path stays
+    /// a path, and an explicit `.md` survives. Rewriting everything to a full
+    /// path would also resolve, but it would churn links the rename never
+    /// needed to touch.
+    public static func retargeted(_ old: String, to newRelativePath: String) -> String {
+        // `.md` is the only extension a link may omit. An attachment's
+        // extension is part of its name, so dropping it would break the link.
+        let dropsExtension = (newRelativePath as NSString).pathExtension.lowercased() == "md"
+            && !old.lowercased().hasSuffix(".md")
+        let spelled = dropsExtension
+            ? (newRelativePath as NSString).deletingPathExtension
+            : newRelativePath
+        return old.contains("/") ? spelled : (spelled as NSString).lastPathComponent
+    }
 }

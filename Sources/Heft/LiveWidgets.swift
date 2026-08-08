@@ -23,6 +23,28 @@ enum BlockWidget {
     case table(TableGrid)
     /// One line's slice of a quote bar, or of a callout's tinted card.
     case quote(QuoteLine, indent: CGFloat)
+    /// Another note's content, transcluded by `![[Note]]`.
+    case embed(EmbeddedNote)
+}
+
+/// A transcluded note, already styled and measured so drawing is a straight
+/// paint.
+///
+/// The body is rendered through the same styler the prose uses, but with
+/// widgets turned off. That is a deliberate bound as well as a saving: a note
+/// embedding itself, directly or in a cycle, cannot recurse, because the pass
+/// that would produce the inner embed never runs.
+struct EmbeddedNote {
+    let title: String
+    let body: NSAttributedString
+    let size: CGSize
+    /// True when the note was longer than an embed is allowed to grow, so the
+    /// card can say as much rather than appear to be the whole note.
+    let isTruncated: Bool
+
+    static let padding = CGSize(width: 14, height: 10)
+    /// A fragment cannot scroll, so an embedded note has to stop somewhere.
+    static let maximumHeight: CGFloat = 420
 }
 
 enum CodeBlockEdge: Equatable {
@@ -194,6 +216,82 @@ struct TableGrid {
     }
 }
 
+/// Reads, styles and measures the note behind an `![[Note]]` embed.
+enum EmbedRenderer {
+
+    /// Keyed on the file's modification date as well as its path, so an embed
+    /// updates when the note it shows is edited elsewhere, and costs nothing
+    /// when it is not. Without this the file would be re-read and re-styled on
+    /// every keystroke in the host note.
+    private struct CacheKey: Hashable {
+        let path: String
+        let modified: Date?
+        let heading: String?
+        let blockID: String?
+        let width: CGFloat
+        let fontSize: CGFloat
+        let appearance: String
+    }
+
+    private static var cache: [CacheKey: EmbeddedNote] = [:]
+
+    static func render(
+        link: WikiLink, note: NoteRef, maxWidth: CGFloat,
+        context: RenderContext, fontSize: CGFloat
+    ) -> EmbeddedNote? {
+        let modified = (try? FileManager.default
+            .attributesOfItem(atPath: note.url.path))?[.modificationDate] as? Date
+        let key = CacheKey(
+            path: note.relativePath, modified: modified,
+            heading: link.heading, blockID: link.blockID,
+            width: maxWidth, fontSize: fontSize,
+            appearance: context.appearance?.name.rawValue ?? ""
+        )
+        if let hit = cache[key] { return hit }
+
+        guard let source = try? String(contentsOf: note.url, encoding: .utf8),
+              let body = NoteText.embedBody(
+                of: source, heading: link.heading, blockID: link.blockID
+              ),
+              !body.isEmpty
+        else { return nil }
+
+        let base = NSFont.systemFont(ofSize: fontSize)
+        let storage = NSTextStorage(string: body, attributes: [
+            .font: base,
+            .foregroundColor: NSColor.labelColor,
+        ])
+        // Widgets off: an embedded note is styled, not laid out with its own
+        // tables and pictures, and that is also what stops a cycle of embeds
+        // from recursing.
+        _ = LiveStyler.apply(
+            to: storage, reveal: .none, context: context,
+            baseFont: base, drawsWidgets: false
+        )
+
+        let available = maxWidth - EmbeddedNote.padding.width * 2
+        let measured = storage.boundingRect(
+            with: CGSize(width: max(available, 1), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let natural = ceil(measured.height) + titleHeight + EmbeddedNote.padding.height * 2
+        let embed = EmbeddedNote(
+            title: link.heading.map { "\(note.name) › \($0)" } ?? note.name,
+            body: storage,
+            size: CGSize(width: maxWidth, height: min(natural, EmbeddedNote.maximumHeight)),
+            isTruncated: natural > EmbeddedNote.maximumHeight
+        )
+
+        // Plain eviction: a note holds few embeds, and the key changes on every
+        // window resize, so the map must not grow without bound.
+        if cache.count > 48 { cache.removeAll(keepingCapacity: true) }
+        cache[key] = embed
+        return embed
+    }
+
+    static let titleHeight: CGFloat = 18
+}
+
 /// Renders one table cell's markdown source to an attributed string.
 enum CellText {
     static func render(
@@ -240,6 +338,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         case .blockMath(let image): image.size
         case .image(let image): Self.displaySize(for: image)
         case .table(let grid): grid.size
+        case .embed(let embed): embed.size
         default: nil
         }
     }
@@ -313,6 +412,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             return
         case .table(let grid):
             draw(grid, at: point, in: context)
+            return
+        case .embed(let embed):
+            draw(embed, at: point, in: context)
             return
         default:
             break
@@ -556,6 +658,68 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         context.addPath(clip)
         context.clip()
         paint(image, in: rect, context: context)
+        context.restoreGState()
+    }
+
+    private func draw(_ embed: EmbeddedNote, at point: CGPoint, in context: CGContext) {
+        let frame = CGRect(
+            origin: CGPoint(x: point.x, y: point.y + Self.blockInset), size: embed.size
+        )
+        let outline = CGPath(roundedRect: frame, cornerWidth: 8, cornerHeight: 8, transform: nil)
+
+        context.setFillColor(NSColor.quaternarySystemFill.withAlphaComponent(0.5).cgColor)
+        context.addPath(outline)
+        context.fillPath()
+        context.setStrokeColor(NSColor.separatorColor.cgColor)
+        context.setLineWidth(0.75)
+        context.addPath(outline)
+        context.strokePath()
+
+        let padding = EmbeddedNote.padding
+        withAppKitContext(context) {
+            NSAttributedString(string: embed.title, attributes: [
+                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]).draw(at: CGPoint(x: frame.minX + padding.width, y: frame.minY + padding.height - 3))
+
+            // A note longer than the card is cut off rather than allowed to
+            // paint over the paragraphs below it.
+            context.saveGState()
+            context.addPath(outline)
+            context.clip()
+            embed.body.draw(
+                with: CGRect(
+                    x: frame.minX + padding.width,
+                    y: frame.minY + padding.height + EmbedRenderer.titleHeight,
+                    width: frame.width - padding.width * 2,
+                    height: frame.height - padding.height * 2 - EmbedRenderer.titleHeight
+                ),
+                options: [.usesLineFragmentOrigin, .usesFontLeading]
+            )
+            context.restoreGState()
+        }
+
+        guard embed.isTruncated else { return }
+        // Fade the cut edge, so a clipped line reads as "there is more" rather
+        // than as a rendering fault.
+        context.saveGState()
+        context.addPath(outline)
+        context.clip()
+        if let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [
+                NSColor.textBackgroundColor.withAlphaComponent(0).cgColor,
+                NSColor.textBackgroundColor.cgColor,
+            ] as CFArray,
+            locations: [0, 1]
+        ) {
+            context.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: frame.minX, y: frame.maxY - 34),
+                end: CGPoint(x: frame.minX, y: frame.maxY),
+                options: []
+            )
+        }
         context.restoreGState()
     }
 

@@ -128,6 +128,8 @@ enum HeftMain {
             case .image(let image): "image \(size(image.size))"
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
+            case .embed(let embed):
+                "embed \"\(embed.title)\" \(size(embed.size))\(embed.isTruncated ? " truncated" : "")"
             case .quote(let quote, let indent):
                 "\(quote.rawCallout.map { "callout \($0)" } ?? "quote") depth \(quote.depth) \(quote.edge) indent \(fmt(indent))"
             }

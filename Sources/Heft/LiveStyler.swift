@@ -185,12 +185,22 @@ enum LiveStyler {
             )
             layout.blocks[lineStart] = .image(image)
 
-        case .wikiLink(let target, let isEmbed):
-            guard isEmbed, ownsItsLine(range, text) else { return }
-            let link = WikiLinkParser.links(in: "![[\(target)]]").first
-                ?? WikiLink(target: target, isEmbed: true)
-            guard let hit = context.resolve(link), let image = ImageCache.image(at: hit.url)
+        case .wikiLink(let link):
+            guard link.isEmbed, ownsItsLine(range, text), let hit = context.resolve(link)
             else { return }
+
+            // A markdown target is transcluded; anything else is a picture.
+            if hit.isMarkdown {
+                guard let embed = EmbedRenderer.render(
+                    link: link, note: hit, maxWidth: contentWidth,
+                    context: context, fontSize: base.pointSize - 0.5
+                ) else { return }
+                hideWhole(range, in: storage, text: text, reserving: embed.size.height)
+                layout.blocks[lineStart] = .embed(embed)
+                return
+            }
+
+            guard let image = ImageCache.image(at: hit.url) else { return }
             hideWhole(
                 range, in: storage, text: text,
                 reserving: HeftLayoutFragment.displaySize(for: image).height
@@ -479,17 +489,14 @@ enum LiveStyler {
             monospace(storage, range: range, delta: -1, base: base, color: .systemPink)
             storage.addAttribute(.backgroundColor, value: NSColor.quaternarySystemFill, range: range)
 
-        case .wikiLink(let target, _):
-            let resolved = context.index.resolve(
-                WikiLinkParser.links(in: "[[\(target)]]").first ?? WikiLink(target: target),
-                from: context.current
-            ) != nil
+        case .wikiLink(let link):
+            let resolved = context.index.resolve(link, from: context.current) != nil
             storage.addAttribute(
                 .foregroundColor,
                 value: resolved ? NSColor.controlAccentColor : NSColor.systemOrange,
                 range: range
             )
-            if let url = InlineText.heftURL(target: target) {
+            if let url = InlineText.heftURL(target: link.target) {
                 storage.addAttributes([.link: url, .cursor: NSCursor.pointingHand], range: range)
             }
 

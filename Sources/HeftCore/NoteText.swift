@@ -80,6 +80,41 @@ public enum NoteText {
         return nil
     }
 
+    /// The slice of `source` an embed should show.
+    ///
+    /// `![[Note]]` takes the whole body, `![[Note#Section]]` takes that heading
+    /// and everything under it up to the next heading of the same or higher
+    /// level, and `![[Note#^id]]` takes the single line carrying the block id.
+    /// Returns nil when the reference names something the note does not have,
+    /// so the caller can leave the source visible rather than show an empty box.
+    public static func embedBody(of source: String, heading: String?, blockID: String?) -> String? {
+        let lines = splitFrontmatter(source).body.components(separatedBy: "\n")
+
+        if let blockID {
+            guard let index = lineOfBlockID(blockID, in: lines.joined(separator: "\n"))
+            else { return nil }
+            // The marker is an anchor, not content, so it is not shown.
+            return lines[index]
+                .replacingOccurrences(of: "^" + blockID, with: "")
+                .trimmingCharacters(in: .whitespaces)
+        }
+
+        guard let heading, !heading.isEmpty else {
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let body = lines.joined(separator: "\n")
+        let all = headings(in: body)
+        guard let start = all.first(where: { $0.text.lowercased() == heading.lowercased() })
+        else { return nil }
+
+        let end = all
+            .first { $0.line > start.line && $0.level <= start.level }?.line ?? lines.count
+        return lines[start.line..<end]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// A short plain-text preview, with frontmatter, headings and markers removed.
     public static func excerpt(_ source: String, limit: Int = 140) -> String {
         let body = splitFrontmatter(source).body
