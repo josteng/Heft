@@ -1,0 +1,51 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "srgb:0.353,0.325,0.855,1.0",
+      "srgb:0.451,0.239,0.702,1.0"
+    ]
+  },
+  "fill-specializations" : [
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "srgb:0.192,0.169,0.451,1.0",
+          "srgb:0.243,0.122,0.376,1.0"
+        ]
+      }
+    }
+  ],
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "Spine.svg",
+          "name" : "Spine"
+        },
+        {
+          "image-name" : "Page.svg",
+          "name" : "Page"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : [
+      "iOS",
+      "macOS"
+    ]
+  }
+}

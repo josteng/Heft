@@ -26,15 +26,36 @@ for resource in "$ROOT/.build/$CONFIG"/*.bundle; do
 done
 shopt -u nullglob
 
-# The icon is generated, not checked in as an opaque binary; see make-icon.swift.
-# Regenerated on demand so a fresh clone builds a bundle with an icon.
-if [[ ! -f "$ROOT/Resources/Heft.icns" ]]; then
-    echo "Generating app icon…"
-    swift "$ROOT/Scripts/make-icon.swift"
+# Compile the layered icon. macOS 26 reads Assets.car and picks the light, dark
+# or tinted variant itself; the .icns actool emits alongside it is the fallback
+# for earlier systems. See Resources/Heft.icon/README.md.
+#
+# actool ships with Xcode, not with the Command Line Tools, and this machine's
+# xcode-select may well point at the latter. Finding Xcode through DEVELOPER_DIR
+# keeps that a local detail rather than a system setting the build depends on.
+ICON_KEYS=""
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app ]]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
-cp "$ROOT/Resources/Heft.icns" "$APP/Contents/Resources/Heft.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+if [[ -d "$ROOT/Resources/Heft.icon" ]] && command -v actool >/dev/null \
+   && [[ -n "${DEVELOPER_DIR:-}" ]]; then
+    PARTIAL="$(mktemp -t heft-icon-plist)"
+    actool "$ROOT/Resources/Heft.icon" \
+        --compile "$APP/Contents/Resources" \
+        --platform macosx \
+        --minimum-deployment-target 26.0 \
+        --app-icon Heft \
+        --output-partial-info-plist "$PARTIAL" \
+        --errors --warnings >/dev/null
+    ICON_KEYS='    <key>CFBundleIconFile</key>        <string>Heft</string>
+    <key>CFBundleIconName</key>        <string>Heft</string>'
+    rm -f "$PARTIAL"
+else
+    echo "warning: Xcode not found, building without an app icon" >&2
+fi
+
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -46,7 +67,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>0.1.0</string>
     <key>CFBundleVersion</key>         <string>1</string>
-    <key>CFBundleIconFile</key>        <string>Heft</string>
+$ICON_KEYS
     <key>LSMinimumSystemVersion</key>  <string>26.0</string>
     <key>LSApplicationCategoryType</key> <string>public.app-category.productivity</string>
     <key>NSPrincipalClass</key>        <string>NSApplication</string>
