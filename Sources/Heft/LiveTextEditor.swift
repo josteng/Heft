@@ -453,6 +453,57 @@ final class HeftTextKit2View: NSTextView {
         insertText(marker, replacementRange: selectedRange())
     }
 
+    override func insertTab(_ sender: Any?) {
+        guard adjustListIndent(outdent: false) else {
+            super.insertTab(sender)
+            return
+        }
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        guard adjustListIndent(outdent: true) else {
+            super.insertBacktab(sender)
+            return
+        }
+    }
+
+    /// Adds or removes one CommonMark nesting level on the current list item,
+    /// regardless of where the caret sits in that line.
+    private func adjustListIndent(outdent: Bool) -> Bool {
+        let source = string as NSString
+        let selection = selectedRange()
+        let location = min(selection.location, source.length)
+        let line = source.lineRange(for: NSRange(location: location, length: 0))
+        let value = source.substring(with: line)
+        guard value.range(
+            of: #"^[ \t]*([-*+]|\d+[.)])[ \t]+(\[[ xX]\][ \t]+)?"#,
+            options: .regularExpression
+        ) != nil else { return false }
+
+        let leading = value.prefix { $0 == " " || $0 == "\t" }
+        let depth = leading.reduce(0) { $0 + ($1 == "\t" ? 1 : 0) }
+            + leading.filter { $0 == " " }.count / 2
+        let newDepth = outdent ? max(0, depth - 1) : depth + 1
+        guard newDepth != depth else { return true }
+
+        // Tabs are Heft's canonical list indentation. Replacing the complete
+        // prefix also normalizes older space-indented and mixed-whitespace
+        // items whenever the user explicitly changes their depth.
+        let editRange = NSRange(location: line.location, length: leading.utf16.count)
+        let replacement = String(repeating: "\t", count: newDepth)
+
+        guard shouldChangeText(in: editRange, replacementString: replacement) else { return true }
+        textStorage?.replaceCharacters(in: editRange, with: replacement)
+        didChangeText()
+
+        let delta = replacement.utf16.count - editRange.length
+        setSelectedRange(NSRange(
+            location: max(line.location, selection.location + delta),
+            length: selection.length
+        ))
+        return true
+    }
+
     /// `- `, `* `, `- [ ] `, `3. ` … with indentation, or nil for prose.
     /// A checked task yields an unchecked one.
     static func listMarker(of line: String) -> String? {

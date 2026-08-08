@@ -311,19 +311,40 @@ enum LiveStyler {
         case .listMarker(let kind, let depth):
             let indent = listIndent(depth: depth)
             let marker = text.substring(with: range)
+            let leading = marker.prefix { $0 == " " || $0 == "\t" }
+            let leadingLength = leading.utf16.count
+            let visibleMarker = String(marker.dropFirst(leadingLength))
+            let visibleMarkerWidth = markerWidth(visibleMarker, font: base)
             let list = NSMutableParagraphStyle()
             list.lineSpacing = Theme.lineSpacing
             list.paragraphSpacing = 2
             list.headIndent = indent
             // Collapsed, the marker takes no width, so the first line starts
             // where the wrapped lines do and the glyph is drawn to its left.
-            // Revealed, the real `- [ ] ` reappears and is pulled back into
-            // that same gutter, so the item's text does not jump sideways.
+            // Revealed, only the semantic `- [ ] ` marker reappears. Leading
+            // source indentation stays collapsed because tabs have different
+            // widths in paragraph layout and would shift nested item text.
             list.firstLineHeadIndent = revealed
-                ? max(0, indent - markerWidth(marker, font: base))
+                ? indent - visibleMarkerWidth
                 : indent
+            let tabCount = leading.count(where: { $0 == "\t" })
+            if tabCount > 0 {
+                // A clear, hairline-font tab still advances to a paragraph tab
+                // stop. Anchor private stops just beyond the marker origin so
+                // source tabs occupy the same subpixel width in both states.
+                let markerOrigin = revealed ? indent - visibleMarkerWidth : indent
+                list.tabStops = (1...tabCount).map { index in
+                    NSTextTab(
+                        textAlignment: .left,
+                        location: markerOrigin + CGFloat(index) * 0.25
+                    )
+                }
+            }
             let line = text.lineRange(for: range)
             storage.addAttribute(.paragraphStyle, value: list, range: line)
+            if revealed, leadingLength > 0 {
+                collapse(NSRange(location: range.location, length: leadingLength), in: storage)
+            }
 
             // No glyph while the source is showing: the drawn bullet and the
             // literal `-` would both be visible, which is what the collapsed
