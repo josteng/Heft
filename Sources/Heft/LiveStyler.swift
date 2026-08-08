@@ -140,6 +140,16 @@ enum LiveStyler {
         let lineStart = text.lineRange(for: NSRange(location: range.location, length: 0)).location
 
         switch decoration.style {
+        case .frontmatter:
+            // The fences are markup; only what is between them is properties.
+            let inner = text.substring(with: range)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-\n"))
+            guard let card = PropertiesRenderer.card(
+                yaml: inner, maxWidth: contentWidth, fontSize: base.pointSize - 1
+            ) else { return }
+            hideWhole(range, in: storage, text: text, reserving: card.size.height)
+            layout.blocks[lineStart] = .properties(card)
+
         case .table(let table):
             let grid = TableGrid.measure(
                 table, maxWidth: contentWidth, context: context, fontSize: base.pointSize - 1

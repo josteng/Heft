@@ -25,6 +25,31 @@ enum BlockWidget {
     case quote(QuoteLine, indent: CGFloat)
     /// Another note's content, transcluded by `![[Note]]`.
     case embed(EmbeddedNote)
+    /// YAML frontmatter, drawn as a key/value table.
+    case properties(PropertiesCard)
+}
+
+/// A note's frontmatter, measured as a two-column table.
+///
+/// Drawn rather than styled in place because the useful shape of `tags: [a, b]`
+/// is a row of values under a label, and no run of text attributes turns YAML
+/// into that. Putting the caret anywhere in the block brings the real YAML
+/// back, so it stays editable as the text it actually is.
+struct PropertiesCard {
+    struct Row {
+        let key: NSAttributedString
+        let values: [NSAttributedString]
+        /// True for `tags`, whose values are drawn as pills.
+        let isTagRow: Bool
+    }
+
+    let rows: [Row]
+    let keyColumnWidth: CGFloat
+    let size: CGSize
+
+    static let rowHeight: CGFloat = 24
+    static let padding = CGSize(width: 12, height: 9)
+    static let gutter: CGFloat = 12
 }
 
 /// A transcluded note, already styled and measured so drawing is a straight
@@ -292,6 +317,49 @@ enum EmbedRenderer {
     static let titleHeight: CGFloat = 18
 }
 
+/// Lays a note's frontmatter out as a properties table.
+enum PropertiesRenderer {
+
+    static func card(yaml: String, maxWidth: CGFloat, fontSize: CGFloat) -> PropertiesCard? {
+        let properties = Frontmatter.parse(yaml)
+        guard !properties.isEmpty else { return nil }
+
+        let keyFont = NSFont.systemFont(ofSize: fontSize - 1)
+        let valueFont = NSFont.systemFont(ofSize: fontSize)
+
+        var rows: [PropertiesCard.Row] = []
+        var keyWidth: CGFloat = 0
+
+        for property in properties {
+            let key = NSAttributedString(string: property.key, attributes: [
+                .font: keyFont,
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+            keyWidth = max(keyWidth, ceil(key.size().width))
+
+            let isTagRow = ["tags", "tag"].contains(property.key.lowercased())
+            let items = property.value.items
+            let values = (items.isEmpty ? [property.value.display] : items).map { value in
+                NSAttributedString(string: value, attributes: [
+                    .font: valueFont,
+                    .foregroundColor: isTagRow ? NSColor.systemPurple : NSColor.labelColor,
+                ])
+            }
+            rows.append(PropertiesCard.Row(key: key, values: values, isTagRow: isTagRow))
+        }
+
+        // Cap the key column so one long key cannot squeeze every value out.
+        keyWidth = min(keyWidth, maxWidth * 0.3)
+        let height = CGFloat(rows.count) * PropertiesCard.rowHeight
+            + PropertiesCard.padding.height * 2
+        return PropertiesCard(
+            rows: rows,
+            keyColumnWidth: keyWidth,
+            size: CGSize(width: maxWidth, height: height)
+        )
+    }
+}
+
 /// Renders one table cell's markdown source to an attributed string.
 enum CellText {
     static func render(
@@ -339,6 +407,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         case .image(let image): Self.displaySize(for: image)
         case .table(let grid): grid.size
         case .embed(let embed): embed.size
+        case .properties(let card): card.size
         default: nil
         }
     }
@@ -423,6 +492,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             return
         case .embed(let embed):
             draw(embed, at: point, in: context)
+            return
+        case .properties(let card):
+            draw(card, at: point, in: context)
             return
         default:
             break
@@ -682,6 +754,43 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         context.clip()
         paint(image, in: rect, context: context)
         context.restoreGState()
+    }
+
+    private func draw(_ card: PropertiesCard, at point: CGPoint, in context: CGContext) {
+        let frame = CGRect(
+            origin: CGPoint(x: point.x, y: point.y + Self.blockInset), size: card.size
+        )
+        // A separator underneath rather than a box around: properties are the
+        // note's header, and a card would make them look like content.
+        context.setStrokeColor(NSColor.separatorColor.cgColor)
+        context.setLineWidth(1)
+        context.move(to: CGPoint(x: frame.minX, y: (frame.maxY).rounded() + 0.5))
+        context.addLine(to: CGPoint(x: frame.maxX, y: (frame.maxY).rounded() + 0.5))
+        context.strokePath()
+
+        let padding = PropertiesCard.padding
+        withAppKitContext(context) {
+            for (index, row) in card.rows.enumerated() {
+                let y = frame.minY + padding.height + CGFloat(index) * PropertiesCard.rowHeight
+                row.key.draw(at: CGPoint(x: frame.minX + padding.width, y: y + 3))
+
+                var x = frame.minX + padding.width + card.keyColumnWidth + PropertiesCard.gutter
+                for value in row.values {
+                    let width = ceil(value.size().width)
+                    guard x + width < frame.maxX - padding.width else { break }
+                    if row.isTagRow {
+                        let pill = CGRect(x: x - 6, y: y + 1, width: width + 12, height: 18)
+                        context.setFillColor(NSColor.systemPurple.withAlphaComponent(0.14).cgColor)
+                        context.addPath(CGPath(
+                            roundedRect: pill, cornerWidth: 5, cornerHeight: 5, transform: nil
+                        ))
+                        context.fillPath()
+                    }
+                    value.draw(at: CGPoint(x: x, y: y + 2))
+                    x += width + (row.isTagRow ? 20 : 10)
+                }
+            }
+        }
     }
 
     private func draw(_ embed: EmbeddedNote, at point: CGPoint, in context: CGContext) {

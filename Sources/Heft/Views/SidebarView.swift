@@ -1,15 +1,27 @@
 import HeftCore
 import SwiftUI
 
+/// Which list the sidebar is showing.
+enum SidebarMode: String, CaseIterable, Identifiable {
+    case files, tags
+    var id: String { rawValue }
+    var title: String { self == .files ? "Files" : "Tags" }
+    var symbol: String { self == .files ? "folder" : "number" }
+}
+
 struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @State private var filter = ""
+    @State private var mode: SidebarMode = .files
+    @State private var expandedTags: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
             header
 
-            if filter.isEmpty {
+            if mode == .tags {
+                tagList
+            } else if filter.isEmpty {
                 treeList
             } else {
                 filteredList
@@ -34,7 +46,7 @@ struct SidebarView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                TextField("Filter notes", text: $filter)
+                TextField(mode == .tags ? "Filter tags" : "Filter notes", text: $filter)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                 if !filter.isEmpty {
@@ -48,6 +60,15 @@ struct SidebarView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
+
+            Picker("", selection: $mode) {
+                ForEach(SidebarMode.allCases) { option in
+                    Label(option.title, systemImage: option.symbol).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
 
             // ⌘N exists in the File menu, but nothing in the window showed that
             // making a note was possible.
@@ -95,6 +116,49 @@ struct SidebarView: View {
                     Button("Reveal Vault in Finder") { model.revealInFinder(root) }
                 }
             }
+        }
+    }
+
+    /// Tags, most used first, each expanding to the notes carrying it.
+    private var tagList: some View {
+        let tags = model.index.tags(matching: filter)
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 1) {
+                if tags.isEmpty {
+                    Text(filter.isEmpty ? "No tags in this vault" : "No matching tags")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 20)
+                        .frame(maxWidth: .infinity)
+                }
+                ForEach(tags, id: \.self) { tag in
+                    let isExpanded = expandedTags.contains(tag)
+                    NoteRow(
+                        name: tag,
+                        detail: "\(model.index.noteCount(forTag: tag))",
+                        isSelected: false,
+                        depth: 0,
+                        symbol: "number",
+                        disclosure: isExpanded
+                    ) {
+                        if isExpanded { expandedTags.remove(tag) } else { expandedTags.insert(tag) }
+                    }
+
+                    if isExpanded {
+                        ForEach(model.index.notes(taggedWith: tag)) { note in
+                            NoteRow(
+                                name: note.name,
+                                detail: note.folder,
+                                isSelected: model.current?.relativePath == note.relativePath,
+                                depth: 1,
+                                symbol: "doc.text"
+                            ) { model.open(note) }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 8)
         }
     }
 

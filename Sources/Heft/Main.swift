@@ -128,6 +128,8 @@ enum HeftMain {
             case .image(let image): "image \(size(image.size))"
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
+            case .properties(let card):
+                "properties \(card.rows.count) rows \(size(card.size))"
             case .embed(let embed):
                 "embed \"\(embed.title)\" \(size(embed.size))\(embed.isTruncated ? " truncated" : "")"
             case .quote(let quote, let indent):
@@ -209,6 +211,14 @@ enum HeftMain {
             for (target, count) in unresolved.sorted(by: { $0.value > $1.value }).prefix(12) {
                 print("    \(count)x  \(target)")
             }
+        }
+
+        let tags = index.allTags
+        print("")
+        print("Tags")
+        print("  \(tags.count) distinct, most used:")
+        for tag in tags.prefix(12) {
+            print("    \(index.noteCount(forTag: tag))x  #\(tag)")
         }
 
         let mostLinked = index.notes
