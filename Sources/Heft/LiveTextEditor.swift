@@ -67,6 +67,11 @@ struct LiveTextEditor: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        // With a full-size content window, AppKit overlays this scroll view
+        // beneath the toolbar and computes the initial safe inset for us. The
+        // document starts below the controls but can move behind their native
+        // scroll-edge effect.
+        scrollView.automaticallyAdjustsContentInsets = true
 
         textView.string = text
         nsContext.coordinator.lastGeneration = generation
@@ -530,7 +535,13 @@ final class HeftTextKit2View: NSTextView {
             addSubview(bar)
             formatBar = bar
         }
-        bar.update(for: rect(forSelection: selection), in: self)
+        bar.update(
+            for: rect(forSelection: selection),
+            in: self,
+            allowsSingleLineOnlyFormats: !MarkdownEditing.spansMultipleLines(
+                in: string, range: selection
+            )
+        )
     }
 
     /// Bounding box of a selection in view coordinates.

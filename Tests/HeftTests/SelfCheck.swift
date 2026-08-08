@@ -1,11 +1,9 @@
 import Foundation
+@testable import HeftCore
 
-/// Assertions over the pure logic in HeftCore.
-///
-/// This exists instead of a test target because XCTest and swift-testing both
-/// ship with Xcode, and this project builds against the Command Line Tools
-/// only, where `swift test` cannot run. Invoked by `swift run Heft selftest`.
-/// If a full Xcode is ever installed, these move to a real test target as-is.
+/// Dense assertions over the pure logic in HeftCore. Kept as one reusable
+/// result-producing suite so failures retain their descriptive labels while a
+/// Swift Testing wrapper exposes them to SwiftPM and Xcode.
 public enum SelfCheck {
 
     public struct Result: Sendable {
@@ -247,6 +245,14 @@ public enum SelfCheck {
         expectTrue(styles("==hi==").contains(.highlight), "decorator finds highlight")
         expect(hiddenText("[[Note|Alias]]"), "[[Note|]]", "wikilink hides brackets and alias target")
         expect(hiddenText("# Heading"), "# ", "heading hides hashes and space")
+        expectTrue(styles("#").contains(.heading(level: 1)),
+                   "a lone hash previews an H1 while typing")
+        expectTrue(styles("##").contains(.heading(level: 2)),
+                   "successive hashes preview the heading level immediately")
+        expectTrue(styles("# ").contains(.heading(level: 1)),
+                   "a heading is styled before its first title character")
+        expectTrue(!styles("#tag").contains(.heading(level: 1)),
+                   "a tag is not mistaken for a provisional heading")
         expectTrue(styles("#tag").contains(.tag), "decorator finds tag")
 
         // MARK: Inline formatting
@@ -269,6 +275,45 @@ public enum SelfCheck {
         let empty = MarkdownEditing.toggle(.bold, in: "ab", range: NSRange(location: 1, length: 0))
         expect(empty.applied(to: "ab"), "a****b", "bold on an empty selection inserts a pair")
         expect("\(empty.selection.location)", "3", "the caret lands between the markers")
+
+        let lines = "first line\nsecond line"
+        let multilineBold = MarkdownEditing.toggle(
+            .bold, in: lines, range: NSRange(location: 0, length: (lines as NSString).length)
+        )
+        let boldLines = multilineBold.applied(to: lines)
+        expect(boldLines, "**first line**\n**second line**",
+               "bold formats every selected line as valid markdown")
+        expectTrue(
+            LiveDecorator.decorations(in: boldLines).filter { $0.style == .bold }.count == 2,
+            "both bolded lines render in live mode"
+        )
+        let multilineUnbold = MarkdownEditing.toggle(
+            .bold, in: boldLines, range: multilineBold.selection
+        )
+        expect(multilineUnbold.applied(to: boldLines), lines,
+               "bold removes formatting from every selected line")
+
+        let mixedLines = "**already**\nplain"
+        expect(
+            format(.bold, mixedLines, NSRange(location: 0, length: (mixedLines as NSString).length)),
+            "**already**\n**plain**",
+            "a mixed multiline selection becomes consistently bold"
+        )
+        let spacedLines = " one  \n\ttwo"
+        expect(
+            format(.italic, spacedLines, NSRange(location: 0, length: (spacedLines as NSString).length)),
+            " *one*  \n\t*two*",
+            "multiline formatting leaves surrounding whitespace outside markers"
+        )
+
+        let multilineCode = MarkdownEditing.toggle(
+            .code, in: lines, range: NSRange(location: 0, length: (lines as NSString).length)
+        )
+        expectTrue(multilineCode.isEmpty, "inline code declines a multiline selection")
+        let multilineLink = MarkdownEditing.makeLink(
+            in: lines, range: NSRange(location: 0, length: (lines as NSString).length)
+        )
+        expectTrue(multilineLink.isEmpty, "link declines a multiline selection")
 
         let link = MarkdownEditing.makeLink(in: "see docs", range: NSRange(location: 4, length: 4))
         expect(link.applied(to: "see docs"), "see [docs]()", "a link wraps the selection as its label")
@@ -396,6 +441,8 @@ public enum SelfCheck {
         expect(repoint("[[Other]]", "Old", "New.md"), "[[Other]]", "unrelated links are untouched")
         expect("\(WikiLinkParser.rewriteTargets(in: "[[Old]] and [[Old]]", matches: { $0.target == "Old" }, replacement: { _ in "New" }).count)",
                "2", "every occurrence is counted")
+        expect("\(WikiLinkParser.rewriteTargets(in: "[[Chapter]]", matches: { _ in true }, replacement: { _ in "Chapter" }).count)",
+               "0", "a path move does not count an unchanged bare link")
         // The bracket-abutting form real vaults contain.
         expect(repoint("\\[[[Old]]", "Old", "New.md"), "\\[[[New]]",
                "a bracket abutting a link is not absorbed into the target")

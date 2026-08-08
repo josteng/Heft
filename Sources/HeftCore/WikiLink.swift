@@ -272,8 +272,14 @@ public enum WikiLinkParser {
 
             let link = parse(body: body, isEmbed: isEmbed)
             if matches(link) {
+                let newTarget = replacement(link)
+                guard newTarget != link.target else {
+                    out += String(chars[i...(close + 1)])
+                    i = close + 2
+                    continue
+                }
                 let tail = tailIndex(ofBody: body)
-                out += (isEmbed ? "![[" : "[[") + replacement(link) + String(body[tail...]) + "]]"
+                out += (isEmbed ? "![[" : "[[") + newTarget + String(body[tail...]) + "]]"
                 count += 1
             } else {
                 out += String(chars[i...(close + 1)])

@@ -26,6 +26,19 @@ private enum DailyNotesSetupError: LocalizedError {
     }
 }
 
+struct SaveConflict: Identifiable, Equatable {
+    let id = UUID()
+    let noteName: String
+    let relativePath: String
+    let diskVersionExists: Bool
+}
+
+enum SaveConflictResolution {
+    case keepMine
+    case useDisk
+    case cancel
+}
+
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -108,6 +121,7 @@ final class AppModel: ObservableObject {
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
+    @Published private(set) var saveConflict: SaveConflict?
 
     @Published private var navigationHistory: [String] = []
     @Published private var navigationIndex = -1
@@ -145,6 +159,10 @@ final class AppModel: ObservableObject {
 
     private var saveTask: Task<Void, Never>?
     private var lastKnownModification: Date?
+    /// Exact source last read from or written to disk. Comparing contents,
+    /// rather than timestamps, catches same-tick writes and filesystems with
+    /// coarse modification dates without producing false conflicts.
+    private var lastKnownDiskText: String?
     private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
 
     var dailyNotes: DailyNotes? {
@@ -234,7 +252,10 @@ final class AppModel: ObservableObject {
             ? nil
             : String(chosen.path.dropFirst(root.path.count + 1))
 
-        flushPendingSave()
+        guard flushPendingSave() else {
+            status = "Resolve the save conflict before changing vaults"
+            return
+        }
         if let current { registry.release(current.url, for: workspaceID) }
         scopePath = requestedScope
         attach(to: registry.session(for: root))
@@ -244,6 +265,8 @@ final class AppModel: ObservableObject {
         current = nil
         text = ""
         isDirty = false
+        lastKnownDiskText = nil
+        saveConflict = nil
         navigationHistory = []
         navigationIndex = -1
         if let requestedScope {
@@ -265,8 +288,8 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
     }
 
-    func reload() {
-        session?.reload()
+    func reload(immediately: Bool = false) {
+        session?.reload(immediately: immediately)
     }
 
     /// Picks up edits made elsewhere (another device via iCloud, or Obsidian
@@ -276,8 +299,10 @@ final class AppModel: ObservableObject {
         let attributes = try? FileManager.default.attributesOfItem(atPath: current.url.path)
         let modified = attributes?[.modificationDate] as? Date
         guard modified != lastKnownModification else { return }
-        guard let fresh = try? String(contentsOf: current.url, encoding: .utf8), fresh != text else { return }
+        guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else { return }
         lastKnownModification = modified
+        lastKnownDiskText = fresh
+        guard fresh != text else { return }
         setText(fresh)
     }
 
@@ -316,7 +341,13 @@ final class AppModel: ObservableObject {
         }
 
         let previous = current
-        flushPendingSave()
+        guard flushPendingSave() else {
+            if previous?.url.standardizedFileURL != ref.url.standardizedFileURL {
+                registry.release(ref.url, for: workspaceID)
+            }
+            status = "Resolve the save conflict before opening another note"
+            return
+        }
 
         if let contents = read(ref.url) {
             if recordingNavigation { recordNavigation(to: ref.relativePath) }
@@ -324,8 +355,9 @@ final class AppModel: ObservableObject {
             current = ref
             setText(contents)
             isDirty = false
-            lastKnownModification = (try? FileManager.default
-                .attributesOfItem(atPath: ref.url.path))?[.modificationDate] as? Date
+            lastKnownDiskText = contents
+            saveConflict = nil
+            lastKnownModification = modificationDate(of: ref.url)
             status = ref.relativePath
             revealInTree(ref.relativePath)
             if let previous, previous.url.standardizedFileURL != ref.url.standardizedFileURL {
@@ -524,6 +556,47 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Creates a real, recoverable item immediately, then lets the sidebar put
+    /// its suggested name into inline edit mode. Escape therefore leaves the
+    /// harmless Untitled item behind, matching Finder rather than deleting a
+    /// file as a side effect of cancelling a text field.
+    func createUntitledNote(in directory: URL) -> (path: String, name: String)? {
+        guard let vaultRoot else { return nil }
+        let target = uniqueURL(in: directory, base: "Untitled", extension: "md")
+        do {
+            try "".write(to: target, atomically: true, encoding: .utf8)
+            guard let ref = NoteRef(url: target, vaultRoot: vaultRoot) else { return nil }
+            open(ref)
+            let parentPath = relativePath(of: directory)
+            if !parentPath.isEmpty { expandedFolders.insert(parentPath) }
+            reload(immediately: true)
+            status = "Created \(ref.relativePath)"
+            return (ref.relativePath, ref.name)
+        } catch {
+            status = "Could not create note: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func createUntitledFolder(in parent: URL) -> (path: String, name: String)? {
+        guard vaultRoot != nil else { return nil }
+        let target = uniqueURL(in: parent, base: "Untitled", extension: "")
+        do {
+            try FileManager.default.createDirectory(
+                at: target, withIntermediateDirectories: false
+            )
+            let parentPath = relativePath(of: parent)
+            if !parentPath.isEmpty { expandedFolders.insert(parentPath) }
+            let path = relativePath(of: target)
+            reload(immediately: true)
+            status = "Created \(path)"
+            return (path, target.lastPathComponent)
+        } catch {
+            status = "Could not create folder: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     /// A name not already taken in `directory`, as `Untitled`, `Untitled 1`, …
     private func uniqueURL(in directory: URL, base: String, extension ext: String) -> URL {
         let suffix = ext.isEmpty ? "" : ".\(ext)"
@@ -538,31 +611,35 @@ final class AppModel: ObservableObject {
 
     // MARK: - File operations
 
-    func rename(_ item: VaultItem) {
+    @discardableResult
+    func rename(_ item: VaultItem, to proposedName: String? = nil) -> Bool {
         guard !item.isFolder || !registry.isFocusedByAnotherWindow(item.url, excluding: workspaceID) else {
             status = "Another window is focused on \(item.name); show its entire vault before renaming"
-            return
+            return false
         }
         guard !registry.isClaimedByAnotherWindow(
             item.url, excluding: workspaceID, includingDescendants: item.isFolder
         ) else {
             status = "Close \(item.name) in the other window before renaming it"
-            return
-        }
-        guard item.isFolder || !backlinkSourcesAreOpenElsewhere(for: item.relativePath) else {
-            status = "Close notes linking to \(item.name) in other windows before renaming it"
-            return
+            return false
         }
         // Markdown items display without their extension, so it must not appear
         // in the field and must be put back afterwards.
         let hasHiddenExtension = item.isMarkdown
-        guard let entered = FilePrompt.name(
-            title: "Rename \(item.isFolder ? "Folder" : "Note")",
-            message: item.relativePath, initial: item.name, confirm: "Rename"
-        ) else { return }
+        let entered: String
+        if let proposedName {
+            entered = proposedName
+        } else {
+            guard let prompted = FilePrompt.name(
+                title: "Rename \(item.isFolder ? "Folder" : "Note")",
+                message: item.relativePath, initial: item.name, confirm: "Rename"
+            ) else { return false }
+            entered = prompted
+        }
 
         let cleaned = sanitised(entered)
-        guard !cleaned.isEmpty, cleaned != item.name else { return }
+        guard !cleaned.isEmpty else { return false }
+        guard cleaned != item.name else { return true }
         let filename = hasHiddenExtension && !cleaned.lowercased().hasSuffix(".md")
             ? cleaned + ".md"
             : cleaned
@@ -570,17 +647,21 @@ final class AppModel: ObservableObject {
 
         guard !FileManager.default.fileExists(atPath: target.path) else {
             status = "\(filename) already exists"
-            return
+            return false
         }
 
-        // Renaming the open note would otherwise leave the editor pointed at a
-        // path that no longer exists, and the next autosave would recreate it.
-        let wasOpen = current?.relativePath == item.relativePath
-        if wasOpen { flushPendingSave() }
+        let renamedPath = relativePath(of: target)
+        let changes = pathChanges(for: item, movingTo: renamedPath)
+        let currentOldPath = current?.relativePath
+        if let currentOldPath, changes[currentOldPath] != nil,
+           !flushPendingSave() {
+            status = "Resolve the save conflict before renaming \(item.name)"
+            return false
+        }
+        guard let rewrites = prepareLinkRewrites(for: changes) else { return false }
 
         do {
             try FileManager.default.moveItem(at: item.url, to: target)
-            let renamedPath = relativePath(of: target)
             if item.isFolder, let scopePath,
                scopePath == item.relativePath || scopePath.hasPrefix(item.relativePath + "/") {
                 self.scopePath = renamedPath + String(scopePath.dropFirst(item.relativePath.count))
@@ -588,76 +669,141 @@ final class AppModel: ObservableObject {
                     registry.updateFocus(root: vaultRoot, scopePath: self.scopePath, for: workspaceID)
                 }
             }
-            if !item.isFolder {
-                navigationHistory = navigationHistory.map {
-                    $0 == item.relativePath ? renamedPath : $0
-                }
+            navigationHistory = navigationHistory.map { changes[$0] ?? $0 }
+            for (oldPath, newPath) in changes {
+                session?.replaceRecentPath(oldPath, with: newPath)
             }
-            if wasOpen, let root = vaultRoot, let ref = NoteRef(url: target, vaultRoot: root) {
-                registry.release(item.url, for: workspaceID)
-                _ = registry.claim(target, for: workspaceID)
+            if let currentOldPath, let currentNewPath = changes[currentOldPath],
+               let root = vaultRoot,
+               let ref = NoteRef(url: root.appendingPathComponent(currentNewPath), vaultRoot: root) {
+                registry.release(root.appendingPathComponent(currentOldPath), for: workspaceID)
+                _ = registry.claim(ref.url, for: workspaceID)
                 current = ref
             }
 
             status = "Renamed to \(filename)"
-            if !item.isFolder && hasHiddenExtension {
-                let updated = repointLinks(from: item.relativePath, to: renamedPath)
-                if updated.links > 0 {
-                    status += ", repointed \(updated.links) link\(updated.links == 1 ? "" : "s")"
-                        + " in \(updated.notes) note\(updated.notes == 1 ? "" : "s")"
-                }
+            let updated = applyLinkRewrites(rewrites, after: changes)
+            if updated.links > 0 {
+                status += ", repointed \(updated.links) link\(updated.links == 1 ? "" : "s")"
+                    + " in \(updated.notes) note\(updated.notes == 1 ? "" : "s")"
             }
-            reload()
+            if updated.failures > 0 {
+                status += "; \(updated.failures) note\(updated.failures == 1 ? "" : "s") changed concurrently and was left untouched"
+            }
+            reload(immediately: true)
+            return true
         } catch {
             status = "Rename failed: \(error.localizedDescription)"
+            return false
         }
     }
 
-    /// Rewrites every wikilink that pointed at a just-renamed note.
-    ///
-    /// Driven off the *pre-rename* index, which still maps the old name to the
-    /// old file, so "did this link mean that note" is answered by the same
-    /// resolution the editor was using a moment ago rather than by string
-    /// comparison — which would miss `[[folder/Note]]` and `[[Note.md]]`, and
-    /// would wrongly claim a same-named note in another folder.
-    ///
-    /// Returns how much was touched, for the status line. A folder rename is
-    /// deliberately not handled: it moves many notes at once and belongs to a
-    /// bulk operation with its own confirmation.
-    private func repointLinks(from oldPath: String, to newRelativePath: String) -> (links: Int, notes: Int) {
-        let sources = Set(index.backlinks(to: oldPath).map(\.source.relativePath))
-        guard !sources.isEmpty else { return (0, 0) }
+    private struct LinkRewrite {
+        let source: NoteRef
+        let original: String
+        let rewritten: String
+        let count: Int
+        let usesOpenBuffer: Bool
+    }
 
-        var totalLinks = 0
-        var touchedNotes = 0
+    /// Builds file-level path changes for a note, attachment, or every file
+    /// below a folder. The index is still pre-move here, so link resolution can
+    /// identify intended targets without guessing from filenames.
+    private func pathChanges(for item: VaultItem, movingTo newPath: String) -> [String: String] {
+        guard item.isFolder else { return [item.relativePath: newPath] }
+        return Dictionary(uniqueKeysWithValues: item.flattened().compactMap { descendant in
+            guard !descendant.isFolder else { return nil }
+            let suffix = descendant.relativePath.dropFirst(item.relativePath.count)
+            return (descendant.relativePath, newPath + suffix)
+        })
+    }
+
+    /// Reads and rewrites every source before the move, but performs no writes.
+    /// A source open in another window blocks the operation, because writing
+    /// underneath that window would defeat the editor lease.
+    private func prepareLinkRewrites(for changes: [String: String]) -> [LinkRewrite]? {
+        let sources = Set(changes.keys.flatMap {
+            index.backlinks(to: $0).map(\.source.relativePath)
+        })
+        var plans: [LinkRewrite] = []
 
         for path in sources.sorted() {
             guard let source = index.note(atRelativePath: path) else { continue }
-            // The open note is read from the buffer: it may hold unsaved edits,
-            // and writing the file underneath it would lose them at the next
-            // autosave anyway.
-            let isOpen = current?.relativePath == path
-            guard let original = isOpen ? text : try? String(contentsOf: source.url, encoding: .utf8)
-            else { continue }
+            guard !registry.isClaimedByAnotherWindow(source.url, excluding: workspaceID) else {
+                status = "Close \(source.name) in the other window before moving linked files"
+                return nil
+            }
+            let usesOpenBuffer = current?.relativePath == path
+            guard let original = usesOpenBuffer
+                ? text
+                : try? String(contentsOf: source.url, encoding: .utf8)
+            else {
+                status = "Could not read \(source.relativePath) before updating its links"
+                return nil
+            }
 
             let result = WikiLinkParser.rewriteTargets(
                 in: original,
-                matches: { index.resolve($0, from: source)?.relativePath == oldPath },
-                replacement: { WikiLinkParser.retargeted($0.target, to: newRelativePath) }
+                matches: { link in
+                    guard let old = index.resolve(link, from: source)?.relativePath else {
+                        return false
+                    }
+                    return changes[old] != nil
+                },
+                replacement: { link in
+                    guard let old = index.resolve(link, from: source)?.relativePath,
+                          let new = changes[old]
+                    else { return link.target }
+                    return WikiLinkParser.retargeted(link.target, to: new)
+                }
             )
             guard result.count > 0, result.text != original else { continue }
-
-            if isOpen {
-                text = result.text
-                documentGeneration += 1
-            } else {
-                do { try result.text.write(to: source.url, atomically: true, encoding: .utf8) }
-                catch { continue }
-            }
-            totalLinks += result.count
-            touchedNotes += 1
+            plans.append(LinkRewrite(
+                source: source,
+                original: original,
+                rewritten: result.text,
+                count: result.count,
+                usesOpenBuffer: usesOpenBuffer
+            ))
         }
-        return (totalLinks, touchedNotes)
+        return plans
+    }
+
+    /// Applies prepared rewrites after the move. Sources that moved with a
+    /// folder are addressed by their new path. A final content comparison
+    /// prevents a last-millisecond external edit from being overwritten.
+    private func applyLinkRewrites(
+        _ plans: [LinkRewrite], after changes: [String: String]
+    ) -> (links: Int, notes: Int, failures: Int) {
+        guard let vaultRoot else { return (0, 0, plans.count) }
+        var links = 0
+        var notes = 0
+        var failures = 0
+
+        for plan in plans {
+            if plan.usesOpenBuffer {
+                text = plan.rewritten
+                documentGeneration += 1
+                links += plan.count
+                notes += 1
+                continue
+            }
+
+            let path = changes[plan.source.relativePath] ?? plan.source.relativePath
+            let url = vaultRoot.appendingPathComponent(path)
+            guard (try? String(contentsOf: url, encoding: .utf8)) == plan.original else {
+                failures += 1
+                continue
+            }
+            do {
+                try plan.rewritten.write(to: url, atomically: true, encoding: .utf8)
+                links += plan.count
+                notes += 1
+            } catch {
+                failures += 1
+            }
+        }
+        return (links, notes, failures)
     }
 
     func duplicate(_ item: VaultItem) {
@@ -732,7 +878,7 @@ final class AppModel: ObservableObject {
     func move(_ urls: [URL], into folder: URL) {
         guard let vaultRoot else { return }
         var moved = 0
-        var repointed = (links: 0, notes: 0)
+        var repointed = (links: 0, notes: 0, failures: 0)
 
         for url in urls {
             let name = url.lastPathComponent
@@ -775,12 +921,23 @@ final class AppModel: ObservableObject {
             }
 
             let oldPath = relativePath(of: url)
-            guard isFolder || !backlinkSourcesAreOpenElsewhere(for: oldPath) else {
-                status = "Close notes linking to \(name) in other windows before moving it"
+            let newPath = relativePath(of: destination)
+            let indexedItem = tree?.flattened().first { $0.relativePath == oldPath }
+            guard !isFolder || indexedItem != nil else {
+                status = "Wait for the vault to finish loading before moving \(name)"
                 continue
             }
-            let wasOpen = current?.relativePath == oldPath
-            if wasOpen { flushPendingSave() }
+            let movingItem = indexedItem ?? VaultItem(
+                url: url, relativePath: oldPath, kind: .other, name: name
+            )
+            let changes = pathChanges(for: movingItem, movingTo: newPath)
+            let currentOldPath = current?.relativePath
+            if let currentOldPath, changes[currentOldPath] != nil,
+               !flushPendingSave() {
+                status = "Resolve the save conflict before moving \(name)"
+                continue
+            }
+            guard let rewrites = prepareLinkRewrites(for: changes) else { continue }
 
             do {
                 try FileManager.default.moveItem(at: url, to: destination)
@@ -789,28 +946,30 @@ final class AppModel: ObservableObject {
                 continue
             }
 
-            let newPath = relativePath(of: destination)
             if isFolder, let scopePath,
                scopePath == oldPath || scopePath.hasPrefix(oldPath + "/") {
                 self.scopePath = newPath + String(scopePath.dropFirst(oldPath.count))
                 registry.updateFocus(root: vaultRoot, scopePath: self.scopePath, for: workspaceID)
             }
-            navigationHistory = navigationHistory.map { $0 == oldPath ? newPath : $0 }
-            session?.replaceRecentPath(oldPath, with: newPath)
-            if wasOpen, let ref = NoteRef(url: destination, vaultRoot: vaultRoot) {
-                registry.release(url, for: workspaceID)
-                _ = registry.claim(destination, for: workspaceID)
+            navigationHistory = navigationHistory.map { changes[$0] ?? $0 }
+            for (changedOldPath, changedNewPath) in changes {
+                session?.replaceRecentPath(changedOldPath, with: changedNewPath)
+            }
+            if let currentOldPath, let currentNewPath = changes[currentOldPath],
+               let ref = NoteRef(
+                   url: vaultRoot.appendingPathComponent(currentNewPath), vaultRoot: vaultRoot
+               ) {
+                registry.release(
+                    vaultRoot.appendingPathComponent(currentOldPath), for: workspaceID
+                )
+                _ = registry.claim(ref.url, for: workspaceID)
                 current = ref
             }
 
-            // A link written as a bare name still resolves after a move, so
-            // this usually rewrites nothing; it is the `[[folder/Note]]` form
-            // that would otherwise break.
-            if !isFolder {
-                let result = repointLinks(from: oldPath, to: newPath)
-                repointed.links += result.links
-                repointed.notes += result.notes
-            }
+            let result = applyLinkRewrites(rewrites, after: changes)
+            repointed.links += result.links
+            repointed.notes += result.notes
+            repointed.failures += result.failures
             moved += 1
         }
 
@@ -818,6 +977,9 @@ final class AppModel: ObservableObject {
         status = "Moved \(moved) item\(moved == 1 ? "" : "s") to \(describe(folder))"
         if repointed.links > 0 {
             status += ", repointed \(repointed.links) link\(repointed.links == 1 ? "" : "s")"
+        }
+        if repointed.failures > 0 {
+            status += "; \(repointed.failures) concurrently changed note\(repointed.failures == 1 ? "" : "s") left untouched"
         }
         expandedFolders.insert(relativePath(of: folder))
         reload()
@@ -867,13 +1029,11 @@ final class AppModel: ObservableObject {
 
     private func relativePath(of url: URL) -> String {
         guard let vaultRoot else { return url.lastPathComponent }
-        return url.path.replacingOccurrences(of: vaultRoot.path + "/", with: "")
-    }
-
-    private func backlinkSourcesAreOpenElsewhere(for relativePath: String) -> Bool {
-        index.backlinks(to: relativePath).contains {
-            registry.isClaimedByAnotherWindow($0.source.url, excluding: workspaceID)
-        }
+        let root = vaultRoot.standardizedFileURL.resolvingSymlinksInPath().path
+        let candidate = url.standardizedFileURL.resolvingSymlinksInPath().path
+        if candidate == root { return "" }
+        guard candidate.hasPrefix(root + "/") else { return url.lastPathComponent }
+        return String(candidate.dropFirst(root.count + 1))
     }
 
     private func createFile(at url: URL, contents: String) {
@@ -1046,24 +1206,90 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func flushPendingSave() {
+    @discardableResult
+    func flushPendingSave() -> Bool {
         saveTask?.cancel()
         saveTask = nil
         if isDirty { save() }
+        return !isDirty
     }
 
     func save() {
         guard isDirty, let current else { return }
+
+        let diskExists = FileManager.default.fileExists(atPath: current.url.path)
+        let diskText = diskExists
+            ? (try? String(contentsOf: current.url, encoding: .utf8))
+            : nil
+
+        // Never recreate a file that disappeared, or overwrite an externally
+        // edited note, merely because the autosave timer fired. The buffer
+        // stays intact until the user makes an explicit choice.
+        if !diskExists || diskText != lastKnownDiskText {
+            // Another writer may have produced exactly our buffered text.
+            if diskText == text {
+                lastKnownDiskText = text
+                isDirty = false
+                saveConflict = nil
+                status = "Already saved \(current.relativePath)"
+                return
+            }
+            saveConflict = SaveConflict(
+                noteName: current.name,
+                relativePath: current.relativePath,
+                diskVersionExists: diskExists
+            )
+            status = diskExists
+                ? "Save paused: \(current.name) changed on disk"
+                : "Save paused: \(current.name) was removed from disk"
+            return
+        }
+
+        writeCurrentBuffer()
+    }
+
+    func resolveSaveConflict(_ resolution: SaveConflictResolution) {
+        guard saveConflict != nil, let current else { return }
+        switch resolution {
+        case .keepMine:
+            saveConflict = nil
+            writeCurrentBuffer()
+        case .useDisk:
+            guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else {
+                status = "The disk version of \(current.name) is no longer available"
+                return
+            }
+            saveTask?.cancel()
+            saveTask = nil
+            setText(fresh)
+            isDirty = false
+            lastKnownDiskText = fresh
+            lastKnownModification = modificationDate(of: current.url)
+            saveConflict = nil
+            status = "Loaded the disk version of \(current.relativePath)"
+        case .cancel:
+            saveConflict = nil
+            status = "Save still paused for \(current.relativePath)"
+        }
+    }
+
+    private func writeCurrentBuffer() {
+        guard let current else { return }
         do {
             try text.write(to: current.url, atomically: true, encoding: .utf8)
             isDirty = false
-            lastKnownModification = (try? FileManager.default
-                .attributesOfItem(atPath: current.url.path))?[.modificationDate] as? Date
+            lastKnownDiskText = text
+            lastKnownModification = modificationDate(of: current.url)
+            saveConflict = nil
             status = "Saved \(current.relativePath)"
             reindexIfMetadataChanged(for: current)
         } catch {
             status = "Save failed: \(error.localizedDescription)"
         }
+    }
+
+    private func modificationDate(of url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
     /// Rebuilds the index after Heft's own save, when the note's metadata moved.
@@ -1166,8 +1392,46 @@ final class AppModel: ObservableObject {
     }
 
     func closeWorkspace() {
-        flushPendingSave()
+        if !flushPendingSave() {
+            preserveRecoveryCopy()
+        }
         registry.releaseAll(for: workspaceID)
+    }
+
+    /// A SwiftUI window can disappear before an alert can resolve a save
+    /// conflict. Preserve the local buffer as a plainly named markdown file so
+    /// closing or quitting can never throw away the version the user typed.
+    private func preserveRecoveryCopy() {
+        guard isDirty, let current else { return }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH-mm-ss"
+        let base = "\(current.name) (Heft Recovery \(formatter.string(from: Date())))"
+
+        let sibling = uniqueURL(
+            in: current.url.deletingLastPathComponent(), base: base, extension: "md"
+        )
+        if (try? text.write(to: sibling, atomically: true, encoding: .utf8)) != nil {
+            isDirty = false
+            status = "Preserved unsaved edits in \(sibling.lastPathComponent)"
+            return
+        }
+
+        let support = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first?.appendingPathComponent("Heft/Recovery", isDirectory: true)
+        guard let support else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: support, withIntermediateDirectories: true
+            )
+            let fallback = uniqueURL(in: support, base: base, extension: "md")
+            try text.write(to: fallback, atomically: true, encoding: .utf8)
+            isDirty = false
+            status = "Preserved unsaved edits in \(fallback.path)"
+        } catch {
+            status = "Could not preserve unsaved edits: \(error.localizedDescription)"
+        }
     }
 
     /// Expands every ancestor folder so a note opened from search or the

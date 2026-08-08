@@ -380,7 +380,14 @@ public enum LiveDecorator {
     private static func blockDecorations(_ text: NSString, protected: [NSRange]) -> [MarkdownDecoration] {
         var result: [MarkdownDecoration] = []
 
-        for match in matches(#"(?m)^(#{1,6})[ \t]+\S.*$"#, text, excluding: protected) {
+        // Treat a marker-only line as a provisional heading while it is being
+        // typed. CommonMark needs a following space and content, but waiting
+        // for the first title character makes the editor visibly jump from
+        // body text to H1. This also lets successive # characters preview H1,
+        // H2, and so on immediately; "#tag" remains ordinary tag syntax.
+        for match in matches(
+            #"(?m)^(#{1,6})(?:[ \t]+.*)?$"#, text, excluding: protected
+        ) {
             let line = text.substring(with: match)
             let level = line.prefix { $0 == "#" }.count
             // Hide the hashes and the space that follows them.

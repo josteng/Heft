@@ -21,7 +21,7 @@ open .build/Heft.app        # run as a real app
 ### Command-line tools
 
 ```bash
-swift run Heft selftest                    # assertions over the pure logic
+swift test                                 # core and disposable-vault checks
 swift run Heft stats  <vault>              # read-only index report
 swift run Heft files  <vault>              # list every indexed file
 swift run Heft daily  <vault> [YYYY-MM-DD] # create a daily note, print it
@@ -58,21 +58,26 @@ Swift anyway. See `Apude` for the pattern if that ever changes.
 
 ### Dependencies
 
-Only [swift-markdown](https://github.com/swiftlang/swift-markdown) (Apple,
-cmark-gfm). Obsidian's non-CommonMark syntax is applied to *text nodes* of the
-parsed AST, never by regex over raw source — by that point cmark has already
-isolated code spans and fenced blocks, so a `[[link]]` written inside a code
-sample is structurally out of reach.
+- [swift-markdown](https://github.com/swiftlang/swift-markdown) for CommonMark
+  and GFM parsing.
+- [SwiftMath](https://github.com/mgriebling/SwiftMath) for native LaTeX
+  typesetting.
+- `swift-markdown-engine` for its syntax-highlighting grammars.
+
+Obsidian's non-CommonMark syntax is applied to *text nodes* of the parsed AST,
+never by regex over raw source — by that point cmark has already isolated code
+spans and fenced blocks, so a `[[link]]` written inside a code sample is
+structurally out of reach.
 
 ## What works
 
 - **File tree** with folders, images, PDFs and any other file (Obsidian lets a
-  link point at anything, so everything is indexed).
-- **Editor** — `NSTextView` with markdown syntax highlighting, debounced
-  autosave, find bar.
-- **Preview** — headings, lists, task lists, tables, code blocks with copy,
-  block quotes, Obsidian callouts (`> [!warning]`), `==highlights==`, images.
-- **Source / Split / Preview** modes.
+  link point at anything, so everything is indexed), plus inline creation,
+  rename, drag-and-drop moves, Recent and Tags views.
+- **Live editor** — one continuous `NSTextView` with inline markdown styling,
+  debounced autosave and a find bar. Headings, lists, task lists, tables, code
+  blocks with copy, block quotes, Obsidian callouts (`> [!warning]`),
+  `==highlights==`, images and math render directly in the editing surface.
 - **Wikilinks** — `[[note]]`, `[[note|alias]]`, `[[note#heading]]`,
   `[[note#^block]]`, embeds `![[image.png|400]]`, note transclusion.
   Unresolved links render orange and create the note when clicked.
@@ -83,6 +88,7 @@ sample is structurally out of reach.
   up editable daily-note and template paths, show supported placeholders with
   a live preview, and create an Obsidian-compatible configuration.
 - **Quick open** (⌘O) with fuzzy matching.
+- **Content search** (⇧⌘F) across the focused folder or the full vault.
 - **Command palette** (⌘P) for daily-note settings and window controls such as
   the sidebar, calendar, backlinks, and colorful formatting.
 - **Image paste and drop** into the vault's attachment folder, content-hashed so
@@ -93,6 +99,23 @@ sample is structurally out of reach.
   folder-focused view whose file tree, quick open, tags, recents, and search are
   scoped to that folder. Two windows can edit different notes; opening the same
   note brings its existing editor window forward.
+- **Link-safe file operations** — note and folder rename/move operations update
+  path-qualified wikilinks that resolve to the affected files, including links
+  in notes moved along with a folder.
+
+## Production safety
+
+- Saves are atomic and compare the current file with the exact source Heft
+  originally loaded. If Obsidian, iCloud or another process changes the same
+  note during local editing, autosave pauses and asks which version to keep.
+- An unresolved conflict blocks switching notes or vaults. If a window closes
+  before the conflict is resolved, Heft preserves the local buffer as a
+  timestamped `Heft Recovery` markdown note.
+- Deletion requires confirmation and moves items to the macOS Trash.
+- A note can have only one writable Heft editor. Structural operations are
+  blocked when they would rewrite a source note open in another window.
+- iCloud provides synchronization, not versioned backup. Important vaults
+  should still be covered by Time Machine, Git, or another backup system.
 
 ### Obsidian compatibility
 
@@ -130,14 +153,20 @@ also reports as unresolved).
 
 - **Vim mode.** The vault has `vimMode: true`, so this is wanted. The plan is to
   embed real Neovim via VimR's `NvimView` rather than reimplement modal editing.
-- Graph view, plugins, themes, presentation mode.
-- Live/inline preview (Typora-style); currently source, split or preview.
-- Tag pane, search across note *contents* (quick open matches names and paths).
+- Graph view, plugins and themes.
 
 ## Testing
 
-There is no test target. XCTest and swift-testing both ship with Xcode, and this
-project builds against the Command Line Tools, where `swift test` cannot run.
-The equivalent assertions live in `Sources/HeftCore/SelfCheck.swift` and run via
-`swift run Heft selftest` (47 checks). If a full Xcode is installed later, they
-move to a real test target essentially unchanged.
+Tests use a normal SwiftPM test target with Swift Testing:
+
+```bash
+swift test
+```
+
+The test sources live under `Tests/HeftTests` and currently contain 194
+lower-level checks. They cover parsing, formatting, links and settings, then
+create a UUID-named temporary vault to exercise the mutable app shell:
+autosave, save conflicts, close-time recovery, editor leases, note creation,
+rename and move, and link-safe folder rename/move. The temporary vault is
+removed after every run, and the integration harness preserves the user's
+remembered vault setting. None of the test harness ships in `Heft.app`.

@@ -27,6 +27,13 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
+            // This has to live on the detail column's root. Applying it only
+            // to EditorPane is too late: NavigationSplitView has already
+            // clipped that child to the title-bar safe area.
+            .ignoresSafeArea(.container, edges: .top)
+            // Let macOS choose the native transition between scrolling content
+            // and the floating window controls for the current toolbar state.
+            .scrollEdgeEffectStyle(.automatic, for: .top)
             // The note's name belongs in the toolbar, the way every document
             // app puts it there. It used to sit in a row of its own below,
             // which cost a strip of height and left the toolbar looking empty.
@@ -47,6 +54,36 @@ struct ContentView: View {
         .sheet(isPresented: $model.isVaultSearchPresented) { VaultSearchView() }
         .sheet(isPresented: $model.isDailyNotesSettingsPresented) {
             DailyNotesSettingsView()
+        }
+        .alert(
+            "This Note Changed Outside Heft",
+            isPresented: Binding(
+                get: { model.saveConflict != nil },
+                set: { presented in
+                    if !presented, model.saveConflict != nil {
+                        model.resolveSaveConflict(.cancel)
+                    }
+                }
+            ),
+            presenting: model.saveConflict
+        ) { conflict in
+            Button("Keep My Changes", role: .destructive) {
+                model.resolveSaveConflict(.keepMine)
+            }
+            if conflict.diskVersionExists {
+                Button("Use Disk Version") {
+                    model.resolveSaveConflict(.useDisk)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                model.resolveSaveConflict(.cancel)
+            }
+        } message: { conflict in
+            Text(
+                conflict.diskVersionExists
+                    ? "\(conflict.relativePath) was modified after Heft opened it. Choose which version to keep."
+                    : "\(conflict.relativePath) was removed after Heft opened it. Keeping your changes will recreate it."
+            )
         }
         .onChange(of: model.isPresentationPresented) { _, isPresented in
             if isPresented {
@@ -79,12 +116,22 @@ struct ContentView: View {
 
     @ToolbarContentBuilder
     private var sidebarToolbar: some ToolbarContent {
-        // A sidebar-scoped toolbar item otherwise survives briefly while the
-        // split-view column animates to zero width. AppKit then moves it into
-        // the window toolbar's overflow menu, flashing a trailing » button.
         if model.columnVisibility != .detailOnly {
             ToolbarSpacer(.flexible, placement: .status)
-            ToolbarItem(placement: .status) { WorkspaceScopePicker() }
+        }
+        ToolbarItem(placement: .status) {
+            // Keep the toolbar item's identity stable across a collapse. Fully
+            // removing it made AppKit occasionally forget to restore it when
+            // a very narrow sidebar was reopened. A zero-width item also stays
+            // out of the overflow menu during the closing animation.
+            WorkspaceScopePicker()
+                .frame(width: model.columnVisibility == .detailOnly ? 0 : nil)
+                .opacity(model.columnVisibility == .detailOnly ? 0 : 1)
+                .clipped()
+                .allowsHitTesting(model.columnVisibility != .detailOnly)
+                .accessibilityHidden(model.columnVisibility == .detailOnly)
+        }
+        if model.columnVisibility != .detailOnly {
             ToolbarSpacer(.flexible, placement: .status)
         }
     }
@@ -141,9 +188,18 @@ private struct WindowToolbarConfiguration: NSViewRepresentable {
     }
 
     private func configure(_ window: NSWindow?) {
-        window?.toolbar?.displayMode = .iconOnly
-        window?.toolbar?.allowsDisplayModeCustomization = false
-        if let window { registry.register(window: window, for: workspaceID) }
+        guard let window else { return }
+        window.toolbar?.displayMode = .iconOnly
+        window.toolbar?.allowsDisplayModeCustomization = false
+        // Full-size content lets NSScrollView extend beneath the toolbar and
+        // automatically inset its starting position. Do not also set AppKit's
+        // `titlebarAppearsTransparent`: AppKit explicitly disables that
+        // automatic scroll-view overlap when the property is true. Leaving the
+        // normal toolbar background in place gives it the native translucent
+        // material rather than making the entire title bar fully clear.
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarSeparatorStyle = .none
+        registry.register(window: window, for: workspaceID)
     }
 }
 
@@ -164,10 +220,21 @@ private struct WorkspaceScopePicker: View {
                 }
             }
         } label: {
-            Text("\(model.scopePath == nil ? "All Notes" : model.scopeName)  \(Image(systemName: "chevron.down"))")
-                .font(.system(size: 12, weight: .semibold))
+            // Keep Text as the menu label's semantic content. Menu otherwise
+            // extracts a sibling Image and lays it out as a leading menu icon,
+            // regardless of its position in an HStack.
+            Text(model.scopePath == nil ? "All Notes" : model.scopeName)
                 .lineLimit(1)
-                .frame(minWidth: 76)
+                .padding(.trailing, 13)
+                .overlay(alignment: .trailing) {
+                    // Unlike an SF Symbol interpolated into Text, the overlay
+                    // inherits the inactive-window appearance correctly.
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+            .font(.system(size: 12, weight: .semibold))
+            .frame(minWidth: 76)
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)

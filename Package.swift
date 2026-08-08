@@ -38,9 +38,11 @@ let package = Package(
             path: "Sources/Heft",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        // No test target: XCTest and swift-testing both ship with Xcode, not
-        // with the Command Line Tools this project builds against, so `swift
-        // test` cannot run here. The equivalent assertions live in
-        // HeftCore/SelfCheck.swift and run via `swift run Heft selftest`.
+        .testTarget(
+            name: "HeftTests",
+            dependencies: ["Heft", "HeftCore"],
+            path: "Tests/HeftTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

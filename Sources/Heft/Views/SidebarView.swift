@@ -1,3 +1,4 @@
+import AppKit
 import HeftCore
 import SwiftUI
 
@@ -53,11 +54,21 @@ private enum TagListRow: Identifiable {
     }
 }
 
+private struct SidebarInlineEdit: Equatable {
+    let path: String
+    var name: String
+}
+
 struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @State private var filter = ""
     @State private var mode: SidebarMode = .files
     @State private var expandedTags: Set<String> = []
+    @State private var inlineEdit: SidebarInlineEdit?
+    /// A folder clicked in the file tree becomes the destination for the
+    /// compact create menu. Nil means use the open note's folder, then the
+    /// window's focused root when there is no open note in this scope.
+    @State private var selectedFolderPath: String?
     /// Vault-relative path of the folder a drop would land in, or nil when
     /// nothing is being dragged over the tree.
     ///
@@ -88,6 +99,24 @@ struct SidebarView: View {
         .animation(.snappy(duration: 0.24), value: model.isCalendarVisible)
         .clipped()
         .background(.ultraThinMaterial)
+        .onChange(of: model.scopePath) {
+            selectedFolderPath = nil
+        }
+        .onChange(of: model.tree) { _, tree in
+            if let selectedFolderPath,
+               tree?.flattened().contains(where: {
+                   $0.isFolder && $0.relativePath == selectedFolderPath
+               }) != true {
+                self.selectedFolderPath = nil
+            }
+            // A successful rename keeps showing the edited name until the
+            // rescan replaces the old path. Clearing here avoids flashing the
+            // stale row between the filesystem move and that replacement.
+            if let inlineEdit,
+               tree?.flattened().contains(where: { $0.relativePath == inlineEdit.path }) != true {
+                self.inlineEdit = nil
+            }
+        }
     }
 
     private var header: some View {
@@ -96,44 +125,40 @@ struct SidebarView: View {
             // so reading top to bottom matches what the controls do.
             modePicker
 
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                TextField(model.scopePath == nil ? mode.filterPrompt : "\(mode.filterPrompt) in \(model.scopeName)", text: $filter)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                if !filter.isEmpty {
-                    Button { filter = "" } label: {
-                        Image(systemName: "xmark.circle.fill").font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
-
-            // Creating files belongs to the file tree; in the other lists there
-            // is no folder for a new note to go into. ⌘N still works from the
-            // File menu wherever you are.
-            if mode == .files {
-                HStack(spacing: 4) {
-                    Button { model.createNote() } label: {
-                        Label("New Note", systemImage: "square.and.pencil")
-                            .font(.system(size: 11))
-                    }
-                    .help("New note (⌘N)")
-                    Spacer(minLength: 0)
-                    if let root = model.scopeRoot {
-                        Button { model.createFolder(in: root) } label: {
-                            Image(systemName: "folder.badge.plus").font(.system(size: 11))
+            HStack(spacing: 5) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField(model.scopePath == nil ? mode.filterPrompt : "\(mode.filterPrompt) in \(model.scopeName)", text: $filter)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                    if !filter.isEmpty {
+                        Button { filter = "" } label: {
+                            Image(systemName: "xmark.circle.fill").font(.system(size: 11))
                         }
-                        .help("New folder in \(model.scopeName)")
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tertiary)
                     }
                 }
-                .buttonStyle(.accessoryBar)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
+
+                if mode == .files, model.scopeRoot != nil {
+                    Menu {
+                        Button("New Note") { createNoteAtCreationTarget() }
+                        Button("New Folder") { createFolderAtCreationTarget() }
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Create in \(creationTargetName)")
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -146,7 +171,12 @@ struct SidebarView: View {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if let tree = model.scopedTree {
                     ForEach(tree.children) { child in
-                        TreeRow(item: child, depth: 0, dropTarget: $dropTarget)
+                        TreeRow(
+                            item: child, depth: 0,
+                            dropTarget: $dropTarget,
+                            inlineEdit: $inlineEdit,
+                            selectedFolderPath: $selectedFolderPath
+                        )
                     }
                 }
             }
@@ -156,21 +186,13 @@ struct SidebarView: View {
             // the rest of the time.
             .padding(.top, 8)
             .padding(.bottom, 8)
-            // Fills the scroll view so right-clicking the empty area below the
-            // tree still offers the root-level actions.
-            .frame(maxWidth: .infinity, minHeight: 400, alignment: .top)
-            .contentShape(.rect)
-            .contextMenu {
-                if let root = model.scopeRoot {
-                    Button("New Note…") { model.createNote(in: root) }
-                    Button("New Folder…") { model.createFolder(in: root) }
-                    Divider()
-                    Button(model.scopePath == nil ? "Reveal Vault in Finder" : "Reveal Focused Folder in Finder") {
-                        model.revealInFinder(root)
-                    }
-                }
-            }
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        // This belongs to the viewport, not the lazy content. The tree can be
+        // only a few rows tall; attaching here keeps every blank pixel below it
+        // useful, regardless of window height.
+        .contentShape(.rect)
+        .contextMenu { rootContextActions }
         // Anything in the list that is not a row is the vault root, which is
         // how something gets moved back out of a folder. Attached to the
         // scroll view rather than to its contents so it covers the whole
@@ -202,6 +224,59 @@ struct SidebarView: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    @ViewBuilder
+    private var rootContextActions: some View {
+        if let root = model.scopeRoot {
+            Button("New Note") { beginCreatingNote(in: root) }
+            Button("New Folder") { beginCreatingFolder(in: root) }
+            Divider()
+            Button(model.scopePath == nil ? "Reveal Vault in Finder" : "Reveal Focused Folder in Finder") {
+                model.revealInFinder(root)
+            }
+        }
+    }
+
+    private var creationTarget: URL? {
+        if let selectedFolderPath, let vaultRoot = model.vaultRoot {
+            let selected = vaultRoot.appendingPathComponent(selectedFolderPath, isDirectory: true)
+            if FileManager.default.fileExists(atPath: selected.path) { return selected }
+        }
+        if let current = model.current,
+           model.isInScope(current) {
+            return current.url.deletingLastPathComponent()
+        }
+        return model.scopeRoot
+    }
+
+    private var creationTargetName: String {
+        guard let target = creationTarget else { return model.scopeName }
+        return target == model.scopeRoot ? model.scopeName : target.lastPathComponent
+    }
+
+    private func createNoteAtCreationTarget() {
+        guard let target = creationTarget else { return }
+        beginCreatingNote(in: target)
+    }
+
+    private func createFolderAtCreationTarget() {
+        guard let target = creationTarget else { return }
+        beginCreatingFolder(in: target)
+    }
+
+    private func beginCreatingNote(in folder: URL) {
+        mode = .files
+        filter = ""
+        guard let created = model.createUntitledNote(in: folder) else { return }
+        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name)
+    }
+
+    private func beginCreatingFolder(in folder: URL) {
+        mode = .files
+        filter = ""
+        guard let created = model.createUntitledFolder(in: folder) else { return }
+        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name)
     }
 
     /// Switches which list the sidebar shows.
@@ -266,18 +341,29 @@ struct SidebarView: View {
                             else { expandedTags.insert(name) }
                         }
                     case .note(let note, _):
+                        let item = VaultItem(
+                            url: note.url, relativePath: note.relativePath,
+                            kind: note.kind, name: note.name
+                        )
                         NoteRow(
                             name: note.name,
                             detail: note.folder,
                             isSelected: model.current?.relativePath == note.relativePath,
                             depth: 1,
-                            symbol: "doc.text"
-                        ) { model.open(note) }
+                            symbol: "doc.text",
+                            renameText: renameBinding(for: item),
+                            onRenameCommit: { commitRename(item) },
+                            onRenameCancel: cancelRename
+                        ) {
+                            selectedFolderPath = nil
+                            model.open(note)
+                        }
                         .contextMenu {
-                            FileMenu(item: VaultItem(
-                                url: note.url, relativePath: note.relativePath,
-                                kind: note.kind, name: note.name
-                            ))
+                            FileMenu(
+                                item: item,
+                                onCreateNote: { beginCreatingNote(in: note.url.deletingLastPathComponent()) },
+                                onRename: { beginRename(item) }
+                            )
                         }
                     }
                 }
@@ -310,18 +396,29 @@ struct SidebarView: View {
                     empty(filter.isEmpty ? "Nothing opened yet" : "No matching notes")
                 }
                 ForEach(notes) { note in
+                    let item = VaultItem(
+                        url: note.url, relativePath: note.relativePath,
+                        kind: note.kind, name: note.name
+                    )
                     NoteRow(
                         name: note.name,
                         detail: note.folder,
                         isSelected: model.current?.relativePath == note.relativePath,
                         depth: 0,
-                        symbol: "doc.text"
-                    ) { model.open(note) }
+                        symbol: "doc.text",
+                        renameText: renameBinding(for: item),
+                        onRenameCommit: { commitRename(item) },
+                        onRenameCancel: cancelRename
+                    ) {
+                        selectedFolderPath = nil
+                        model.open(note)
+                    }
                     .contextMenu {
-                        FileMenu(item: VaultItem(
-                            url: note.url, relativePath: note.relativePath,
-                            kind: note.kind, name: note.name
-                        ))
+                        FileMenu(
+                            item: item,
+                            onCreateNote: { beginCreatingNote(in: note.url.deletingLastPathComponent()) },
+                            onRename: { beginRename(item) }
+                        )
                     }
                 }
             }
@@ -343,25 +440,61 @@ struct SidebarView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(matches) { note in
+                    let item = VaultItem(
+                        url: note.url, relativePath: note.relativePath,
+                        kind: note.kind, name: note.name
+                    )
                     NoteRow(
                         name: note.name,
                         detail: note.folder,
                         isSelected: model.current?.relativePath == note.relativePath,
                         depth: 0,
-                        symbol: "doc.text"
-                    ) { model.open(note) }
+                        symbol: "doc.text",
+                        renameText: renameBinding(for: item),
+                        onRenameCommit: { commitRename(item) },
+                        onRenameCancel: cancelRename
+                    ) {
+                        selectedFolderPath = nil
+                        model.open(note)
+                    }
                     // Search results get the same menu; the tree's `VaultItem`
                     // is not to hand here, so it is rebuilt from the hit.
                     .contextMenu {
-                        FileMenu(item: VaultItem(
-                            url: note.url, relativePath: note.relativePath,
-                            kind: note.kind, name: note.name
-                        ))
+                        FileMenu(
+                            item: item,
+                            onCreateNote: { beginCreatingNote(in: note.url.deletingLastPathComponent()) },
+                            onRename: { beginRename(item) }
+                        )
                     }
                 }
             }
             .padding(.horizontal, 6)
             .padding(.bottom, 8)
+        }
+        .contentShape(.rect)
+        .contextMenu { rootContextActions }
+    }
+
+    private func renameBinding(for item: VaultItem) -> Binding<String>? {
+        guard inlineEdit?.path == item.relativePath else { return nil }
+        return Binding(
+            get: { inlineEdit?.name ?? item.name },
+            set: { inlineEdit?.name = $0 }
+        )
+    }
+
+    private func beginRename(_ item: VaultItem) {
+        inlineEdit = SidebarInlineEdit(path: item.relativePath, name: item.name)
+    }
+
+    private func cancelRename() {
+        inlineEdit = nil
+    }
+
+    private func commitRename(_ item: VaultItem) {
+        guard let edit = inlineEdit, edit.path == item.relativePath else { return }
+        if edit.name == item.name || !model.rename(item, to: edit.name) {
+            inlineEdit = nil
         }
     }
 }
@@ -371,6 +504,8 @@ private struct TreeRow: View {
     let item: VaultItem
     let depth: Int
     @Binding var dropTarget: String?
+    @Binding var inlineEdit: SidebarInlineEdit?
+    @Binding var selectedFolderPath: String?
 
     @State private var springLoad: Task<Void, Never>?
 
@@ -393,16 +528,27 @@ private struct TreeRow: View {
             NoteRow(
                 name: item.name,
                 detail: nil,
-                isSelected: false,
+                isSelected: selectedFolderPath == item.relativePath,
                 depth: depth,
                 symbol: isExpanded ? "folder.fill" : "folder",
                 disclosure: isExpanded,
-                isDropTargeted: dropTarget == item.relativePath
+                isDropTargeted: dropTarget == item.relativePath,
+                renameText: renameBinding,
+                onRenameCommit: commitRename,
+                onRenameCancel: cancelRename
             ) {
+                selectedFolderPath = item.relativePath
                 if isExpanded { model.expandedFolders.remove(item.relativePath) }
                 else { model.expandedFolders.insert(item.relativePath) }
             }
-            .contextMenu { FolderMenu(item: item) }
+            .contextMenu {
+                FolderMenu(
+                    item: item,
+                    onCreateNote: { beginCreatingNote(in: item.url) },
+                    onCreateFolder: { beginCreatingFolder(in: item.url) },
+                    onRename: beginRename
+                )
+            }
             .draggable(item.url)
             .dropDestination(for: URL.self) { urls, _ in
                 dropTarget = nil
@@ -423,19 +569,37 @@ private struct TreeRow: View {
 
             if isExpanded {
                 ForEach(item.children) { child in
-                    TreeRow(item: child, depth: depth + 1, dropTarget: $dropTarget)
+                    TreeRow(
+                        item: child, depth: depth + 1,
+                        dropTarget: $dropTarget,
+                        inlineEdit: $inlineEdit,
+                        selectedFolderPath: $selectedFolderPath
+                    )
                 }
             }
         } else {
             NoteRow(
                 name: item.name,
                 detail: nil,
-                isSelected: model.current?.relativePath == item.relativePath,
+                isSelected: selectedFolderPath == nil
+                    && model.current?.relativePath == item.relativePath,
                 depth: depth,
                 symbol: symbol(for: item.kind),
-                isDimmed: item.needsDownload
-            ) { model.open(item: item) }
-            .contextMenu { FileMenu(item: item) }
+                isDimmed: item.needsDownload,
+                renameText: renameBinding,
+                onRenameCommit: commitRename,
+                onRenameCancel: cancelRename
+            ) {
+                selectedFolderPath = nil
+                model.open(item: item)
+            }
+            .contextMenu {
+                FileMenu(
+                    item: item,
+                    onCreateNote: { beginCreatingNote(in: destination) },
+                    onRename: beginRename
+                )
+            }
             .draggable(item.url)
             // Dropping onto a file means "put it here, beside this" — the row
             // itself is not the destination, its folder is. So the drop is
@@ -448,6 +612,40 @@ private struct TreeRow: View {
                 dropTarget = targeted ? destinationPath : nil
             }
         }
+    }
+
+    private var renameBinding: Binding<String>? {
+        guard inlineEdit?.path == item.relativePath else { return nil }
+        return Binding(
+            get: { inlineEdit?.name ?? item.name },
+            set: { inlineEdit?.name = $0 }
+        )
+    }
+
+    private func beginRename() {
+        inlineEdit = SidebarInlineEdit(path: item.relativePath, name: item.name)
+    }
+
+    private func cancelRename() {
+        guard inlineEdit?.path == item.relativePath else { return }
+        inlineEdit = nil
+    }
+
+    private func commitRename() {
+        guard let edit = inlineEdit, edit.path == item.relativePath else { return }
+        if edit.name == item.name || !model.rename(item, to: edit.name) {
+            inlineEdit = nil
+        }
+    }
+
+    private func beginCreatingNote(in folder: URL) {
+        guard let created = model.createUntitledNote(in: folder) else { return }
+        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name)
+    }
+
+    private func beginCreatingFolder(in folder: URL) {
+        guard let created = model.createUntitledFolder(in: folder) else { return }
+        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name)
     }
 
     private func symbol(for kind: VaultItem.Kind) -> String {
@@ -467,6 +665,8 @@ private struct TreeRow: View {
 private struct FileMenu: View {
     @EnvironmentObject private var model: AppModel
     let item: VaultItem
+    var onCreateNote: (() -> Void)? = nil
+    var onRename: (() -> Void)? = nil
 
     var body: some View {
         Button("Open") { model.open(item: item) }
@@ -474,8 +674,14 @@ private struct FileMenu: View {
             Button("Open in Default App") { NSWorkspace.shared.open(item.url) }
         }
         Divider()
-        Button("New Note Here…") { model.createNote(in: item.url.deletingLastPathComponent()) }
-        Button("Rename…") { model.rename(item) }
+        Button("New Note Here") {
+            if let onCreateNote { onCreateNote() }
+            else { model.createNote(in: item.url.deletingLastPathComponent()) }
+        }
+        Button("Rename") {
+            if let onRename { onRename() }
+            else { model.rename(item) }
+        }
         Button("Move to…") { model.promptToMove(item) }
         Button("Duplicate") { model.duplicate(item) }
         Divider()
@@ -502,6 +708,9 @@ private struct FolderMenu: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
     let item: VaultItem
+    let onCreateNote: () -> Void
+    let onCreateFolder: () -> Void
+    let onRename: () -> Void
 
     var body: some View {
         Button("Focus This Window on \"\(item.name)\"") { model.setScope(to: item) }
@@ -509,10 +718,10 @@ private struct FolderMenu: View {
             openWindow(value: model.descriptor(scopePath: item.relativePath))
         }
         Divider()
-        Button("New Note…") { model.createNote(in: item.url) }
-        Button("New Folder…") { model.createFolder(in: item.url) }
+        Button("New Note") { onCreateNote() }
+        Button("New Folder") { onCreateFolder() }
         Divider()
-        Button("Rename…") { model.rename(item) }
+        Button("Rename") { onRename() }
         Button("Move to…") { model.promptToMove(item) }
         Button("Copy Path") { model.copyToPasteboard(item.relativePath, describedAs: "path") }
         Button("Reveal in Finder") { model.revealInFinder(item.url) }
@@ -530,65 +739,113 @@ private struct NoteRow: View {
     var disclosure: Bool? = nil
     var isDimmed: Bool = false
     var isDropTargeted: Bool = false
+    var renameText: Binding<String>? = nil
+    var onRenameCommit: (() -> Void)? = nil
+    var onRenameCancel: (() -> Void)? = nil
     let action: () -> Void
 
     @State private var isHovering = false
+    @State private var didFinishRename = false
+    @FocusState private var isRenameFocused: Bool
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                if let disclosure {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(disclosure ? 90 : 0))
-                        .frame(width: 10)
-                }
-                Image(systemName: symbol)
-                    .font(.system(size: 11))
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-                    .frame(width: 14)
+        Group {
+            if let renameText {
+                rowContents(renameText: renameText)
+                    .task {
+                        didFinishRename = false
+                        // A context menu temporarily owns the window's first
+                        // responder. Wait until its closing animation has
+                        // completed before claiming focus for the field.
+                        try? await Task.sleep(for: .milliseconds(100))
+                        guard !Task.isCancelled else { return }
+                        isRenameFocused = true
+                        await Task.yield()
+                        NSApp.sendAction(
+                            #selector(NSText.selectAll(_:)), to: nil, from: nil
+                        )
+                    }
+                    .onChange(of: isRenameFocused) { oldValue, newValue in
+                        if oldValue && !newValue { finishRename(commit: true) }
+                    }
+            } else {
+                Button(action: action) { rowContents(renameText: nil) }
+                    .buttonStyle(.plain)
+            }
+        }
+        .onHover { isHovering = $0 }
+    }
+
+    private func rowContents(renameText: Binding<String>?) -> some View {
+        HStack(spacing: 5) {
+            if let disclosure {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(disclosure ? 90 : 0))
+                    .frame(width: 10)
+            }
+            Image(systemName: symbol)
+                .font(.system(size: 11))
+                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .frame(width: 14)
+            if let renameText {
+                TextField("Name", text: renameText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused($isRenameFocused)
+                    .onSubmit { finishRename(commit: true) }
+                    .onExitCommand { finishRename(commit: false) }
+            } else {
                 Text(name)
                     .font(.system(size: 12))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if let detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                // iCloud has evicted this file's contents; opening it downloads first.
-                if isDimmed {
-                    Image(systemName: "icloud.and.arrow.down")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
             }
-            .padding(.leading, CGFloat(depth) * 12 + 6)
-            .padding(.trailing, 6)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                if isDropTargeted {
-                    // Outlined rather than filled, so it reads as "into here"
-                    // rather than as a selection.
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(Color.accentColor, lineWidth: 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.12))
-                        )
-                } else if isSelected {
-                    RoundedRectangle(cornerRadius: 5).fill(Color.accentColor)
-                } else if isHovering {
-                    RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
-                }
+            if renameText == nil, let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
-            .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-            .contentShape(.rect)
+            Spacer(minLength: 0)
+            // iCloud has evicted this file's contents; opening it downloads first.
+            if isDimmed {
+                Image(systemName: "icloud.and.arrow.down")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
+        .padding(.leading, CGFloat(depth) * 12 + 6)
+        .padding(.trailing, 6)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if isDropTargeted {
+                // Outlined rather than filled, so it reads as "into here"
+                // rather than as a selection.
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.12))
+                    )
+            } else if isSelected {
+                RoundedRectangle(cornerRadius: 5).fill(Color.accentColor)
+            } else if isHovering {
+                RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
+            }
+        }
+        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .contentShape(.rect)
+    }
+
+    private func finishRename(commit: Bool) {
+        guard !didFinishRename else { return }
+        didFinishRename = true
+        if commit {
+            onRenameCommit?()
+        } else {
+            onRenameCancel?()
+        }
     }
 }

@@ -15,6 +15,8 @@ final class FormatBar: NSView {
 
     private let stack = NSStackView()
     private let background = NSVisualEffectView()
+    private var formatButtons: [InlineFormat: NSButton] = [:]
+    private var linkButton: NSButton?
 
     static let height: CGFloat = 32
     /// Gap between the bar and the top of the selected text.
@@ -51,14 +53,18 @@ final class FormatBar: NSView {
         addSubview(stack)
 
         for format in InlineFormat.allCases {
-            stack.addArrangedSubview(button(
+            let formatButton = button(
                 symbol: format.symbol, help: format.title, action: #selector(pick(_:)), tag: index(of: format)
-            ))
+            )
+            formatButtons[format] = formatButton
+            stack.addArrangedSubview(formatButton)
         }
         stack.addArrangedSubview(separator())
-        stack.addArrangedSubview(button(
+        let link = button(
             symbol: "link", help: "Link", action: #selector(pickLink), tag: -1
-        ))
+        )
+        linkButton = link
+        stack.addArrangedSubview(link)
 
         stack.frame = NSRect(x: 0, y: 0, width: stack.fittingSize.width, height: Self.height)
         setFrameSize(NSSize(width: stack.fittingSize.width, height: Self.height))
@@ -122,11 +128,23 @@ final class FormatBar: NSView {
 
     /// Places the bar above `selectionRect`, or hides it when there is nothing
     /// to format.
-    func update(for selectionRect: CGRect?, in textView: NSTextView) {
+    func update(
+        for selectionRect: CGRect?, in textView: NSTextView,
+        allowsSingleLineOnlyFormats: Bool
+    ) {
         guard let selectionRect, selectionRect.width > 0 || selectionRect.height > 0 else {
             isHidden = true
             return
         }
+
+        formatButtons[.code]?.isEnabled = allowsSingleLineOnlyFormats
+        formatButtons[.code]?.toolTip = allowsSingleLineOnlyFormats
+            ? InlineFormat.code.title
+            : "Inline code is only available for a single line"
+        linkButton?.isEnabled = allowsSingleLineOnlyFormats
+        linkButton?.toolTip = allowsSingleLineOnlyFormats
+            ? "Link"
+            : "Links are only available for a single line"
 
         let size = NSSize(width: stack.fittingSize.width, height: Self.height)
         var origin = CGPoint(

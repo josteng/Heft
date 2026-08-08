@@ -62,12 +62,12 @@ final class VaultSession: ObservableObject {
     }
 
     /// Coalesced because iCloud and atomic saves arrive as event bursts.
-    func reload() {
+    func reload(immediately: Bool = false) {
         isLoading = true
         reloadTask?.cancel()
         let root = root
         reloadTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
+            if !immediately { try? await Task.sleep(for: .milliseconds(400)) }
             guard !Task.isCancelled else { return }
             let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings) in
                 let tree = VaultScanner.scan(root: root)

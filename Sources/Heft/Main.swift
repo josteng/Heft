@@ -3,17 +3,12 @@ import HeftCore
 import SwiftUI
 
 /// Custom entry point rather than `@main` on the `App` type, so the binary can
-/// also run its self-check headlessly (`swift run Heft selftest`) without
-/// spinning up a window server connection.
+/// also provide headless vault diagnostics without starting the windowed app.
 @main
 enum HeftMain {
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
 
-        if arguments.contains("selftest") {
-            runSelfCheck()
-            return
-        }
         if arguments.first == "stats", arguments.count > 1 {
             runStats(vaultPath: arguments[1])
             return
@@ -271,14 +266,4 @@ enum HeftMain {
         exit(0)
     }
 
-    private static func runSelfCheck() {
-        let result = SelfCheck.run()
-        if result.ok {
-            print("✓ \(result.passed) checks passed")
-            exit(0)
-        }
-        print("✗ \(result.failures.count) failed, \(result.passed) passed\n")
-        for failure in result.failures { print("  • \(failure)") }
-        exit(1)
-    }
 }

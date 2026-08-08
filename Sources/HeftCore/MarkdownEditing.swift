@@ -80,10 +80,92 @@ public enum MarkdownEditing {
         _ format: InlineFormat, in source: String, range: NSRange
     ) -> Edit {
         let text = source as NSString
-        let marker = format.marker
-        let markerLength = (marker as NSString).length
         guard range.location != NSNotFound, NSMaxRange(range) <= text.length
         else { return .nothing(keeping: range) }
+
+        guard spansMultipleLines(in: source, range: range) else {
+            return toggleSingle(format, in: text, range: range)
+        }
+
+        // Backticks are deliberately line-local. Wrapping each selected line
+        // as code would silently turn a paragraph selection into several
+        // unrelated snippets; a fenced block is a different command entirely.
+        guard format != .code else { return .nothing(keeping: range) }
+
+        let ranges = nonWhitespaceLineSegments(in: text, selection: range)
+        guard !ranges.isEmpty else { return .nothing(keeping: range) }
+
+        // "Toggle" across a mixed selection behaves like a native style
+        // command: add the style everywhere unless every selected line already
+        // has it, in which case remove it everywhere.
+        let removals = ranges.map { removal(of: format, in: text, range: $0) }
+        let removeEverywhere = removals.allSatisfy { $0 != nil }
+        var edits: [Edit] = []
+        for (index, segment) in ranges.enumerated() {
+            if removeEverywhere {
+                if let edit = removals[index] { edits.append(edit) }
+            } else if removals[index] == nil {
+                edits.append(wrapping(format, text.substring(with: segment), at: segment))
+            }
+        }
+        guard !edits.isEmpty else { return .nothing(keeping: range) }
+
+        // NSTextView applies one replacement so the whole operation remains a
+        // single undo step. Include the original selection in the union so its
+        // line breaks and any already-formatted lines stay selected afterward.
+        let start = min(range.location, edits.map(\.range.location).min() ?? range.location)
+        let end = max(NSMaxRange(range), edits.map { NSMaxRange($0.range) }.max() ?? NSMaxRange(range))
+        let union = NSRange(location: start, length: end - start)
+        var replacement = text.substring(with: union)
+        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
+            let local = NSRange(
+                location: edit.range.location - union.location,
+                length: edit.range.length
+            )
+            replacement = (replacement as NSString).replacingCharacters(
+                in: local, with: edit.replacement
+            )
+        }
+        return Edit(
+            range: union,
+            replacement: replacement,
+            selection: NSRange(location: union.location, length: (replacement as NSString).length)
+        )
+    }
+
+    /// Whether a selection contains a hard line boundary. Shared with the UI
+    /// so it can disable formats that Markdown cannot represent across lines.
+    public static func spansMultipleLines(in source: String, range: NSRange) -> Bool {
+        let text = source as NSString
+        guard range.location != NSNotFound, range.length > 0,
+              NSMaxRange(range) <= text.length else { return false }
+        return text.rangeOfCharacter(from: .newlines, options: [], range: range).location != NSNotFound
+    }
+
+    private static func toggleSingle(
+        _ format: InlineFormat, in text: NSString, range: NSRange
+    ) -> Edit {
+        if let edit = removal(of: format, in: text, range: range) { return edit }
+        return wrapping(format, text.substring(with: range), at: range)
+    }
+
+    private static func wrapping(_ format: InlineFormat, _ body: String, at range: NSRange) -> Edit {
+        let marker = format.marker
+        let markerLength = (marker as NSString).length
+        return Edit(
+            range: range,
+            replacement: marker + body + marker,
+            selection: NSRange(location: range.location + markerLength, length: range.length)
+        )
+    }
+
+    /// Returns the unwrapping edit when the selected text either includes its
+    /// markers or has a matching pair immediately outside it.
+    private static func removal(
+        of format: InlineFormat, in text: NSString, range: NSRange
+    ) -> Edit? {
+        let marker = format.marker
+        let markerLength = (marker as NSString).length
 
         // The selection carries the markers: `**bold**` selected whole.
         if range.length >= markerLength * 2 {
@@ -115,15 +197,39 @@ public enum MarkdownEditing {
                 selection: NSRange(location: before.location, length: range.length)
             )
         }
+        return nil
+    }
 
-        // Otherwise wrap. An empty selection produces an empty pair with the
-        // caret between the markers, ready to type into.
-        let body = text.substring(with: range)
-        return Edit(
-            range: range,
-            replacement: marker + body + marker,
-            selection: NSRange(location: range.location + markerLength, length: range.length)
-        )
+    /// The nonempty piece of every selected line. Horizontal whitespace stays
+    /// outside markers, because `** text **` is not valid emphasis Markdown.
+    private static func nonWhitespaceLineSegments(
+        in text: NSString, selection: NSRange
+    ) -> [NSRange] {
+        var result: [NSRange] = []
+        let selectionEnd = NSMaxRange(selection)
+        var segmentStart = selection.location
+
+        while segmentStart <= selectionEnd {
+            let remaining = NSRange(
+                location: segmentStart, length: selectionEnd - segmentStart
+            )
+            let newline = text.rangeOfCharacter(from: .newlines, options: [], range: remaining)
+            let segmentEnd = newline.location == NSNotFound ? selectionEnd : newline.location
+            var lower = segmentStart
+            var upper = segmentEnd
+            while lower < upper, isHorizontalWhitespace(text.character(at: lower)) { lower += 1 }
+            while upper > lower, isHorizontalWhitespace(text.character(at: upper - 1)) { upper -= 1 }
+            if upper > lower {
+                result.append(NSRange(location: lower, length: upper - lower))
+            }
+            guard newline.location != NSNotFound else { break }
+            segmentStart = NSMaxRange(newline)
+        }
+        return result
+    }
+
+    private static func isHorizontalWhitespace(_ character: unichar) -> Bool {
+        character == 0x20 || character == 0x09
     }
 
     /// Wraps the selection in a link, putting the caret where the destination
@@ -132,6 +238,9 @@ public enum MarkdownEditing {
         let text = source as NSString
         guard range.location != NSNotFound, NSMaxRange(range) <= text.length
         else { return .nothing(keeping: range) }
+        guard !spansMultipleLines(in: source, range: range) else {
+            return .nothing(keeping: range)
+        }
 
         let replacement = "[\(text.substring(with: range))]()"
         return Edit(

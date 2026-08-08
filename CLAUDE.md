@@ -9,7 +9,7 @@ Obsidian vault unmodified, including its `.obsidian/` config.
 swift build                                     # compile
 Scripts/bundle.sh debug                         # assemble .build/Heft.app (dock icon + menu bar)
 Scripts/install.sh [--launch]                   # release build into /Applications
-swift run Heft selftest                         # assertions over the pure logic
+swift test                                      # core and disposable-vault integration checks
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
@@ -23,7 +23,8 @@ Two targets:
   the vault scanner, moment.js date formatting, live-mode decorations.
 - `Heft`: the macOS shell. SwiftUI chrome around an `NSTextView`.
 
-The only dependencies are Apple's swift-markdown (cmark-gfm) and SwiftMath (LaTeX).
+The dependencies are Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and
+swift-markdown-engine for its syntax-highlighting grammars.
 
 Vault-wide scanning, indexing, settings, recents, and file watching live in a
 shared `VaultSession`. Each window owns a separate `AppModel` for its open note,
@@ -51,7 +52,7 @@ Markup comes back at two different granularities, which is most of what makes th
 surface feel like Obsidian: block markup (heading hashes, list and quote markers,
 fences, tables) reveals when the caret is anywhere on its line, while inline spans
 (`**bold**`, `$math$`, links) reveal only when the caret is inside that span. The
-policy lives in `Reveal` in HeftCore, so it is covered by the selftest.
+policy lives in `Reveal` in HeftCore, so it is covered by the test suite.
 
 Three files carry it:
 
@@ -65,10 +66,8 @@ Three files carry it:
   So `xcodebuild`, `actool` and friends fail with "requires Xcode" until
   `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` is set — which
   `Scripts/bundle.sh` does for itself rather than changing the machine globally.
-  This project predates that install and still keeps its assertions in
-  `Sources/HeftCore/SelfCheck.swift` (`swift run Heft selftest`) rather than an
-  XCTest target; a real test target is now possible, and would be a fair
-  refactor, but the CLI form also works headlessly and on machines without Xcode.
+  Tests live in `Tests/HeftTests` and therefore also need that `DEVELOPER_DIR`
+  when the selected Command Line Tools and installed SDK do not match.
 - **A dynamic system colour resolves the moment you call `withAlphaComponent`,**
   using whatever appearance is current then — not the one you are drawing in.
   `quaternarySystemFill.withAlphaComponent(0.6)` painted a near-white slab
