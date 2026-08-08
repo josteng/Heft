@@ -505,7 +505,7 @@ final class AppModel: ObservableObject {
 
             status = "Renamed to \(filename)"
             if !item.isFolder && hasHiddenExtension {
-                let updated = repointLinks(from: item, to: renamedPath)
+                let updated = repointLinks(from: item.relativePath, to: renamedPath)
                 if updated.links > 0 {
                     status += ", repointed \(updated.links) link\(updated.links == 1 ? "" : "s")"
                         + " in \(updated.notes) note\(updated.notes == 1 ? "" : "s")"
@@ -528,8 +528,8 @@ final class AppModel: ObservableObject {
     /// Returns how much was touched, for the status line. A folder rename is
     /// deliberately not handled: it moves many notes at once and belongs to a
     /// bulk operation with its own confirmation.
-    private func repointLinks(from old: VaultItem, to newRelativePath: String) -> (links: Int, notes: Int) {
-        let sources = Set(index.backlinks(to: old.relativePath).map(\.source.relativePath))
+    private func repointLinks(from oldPath: String, to newRelativePath: String) -> (links: Int, notes: Int) {
+        let sources = Set(index.backlinks(to: oldPath).map(\.source.relativePath))
         guard !sources.isEmpty else { return (0, 0) }
 
         var totalLinks = 0
@@ -546,7 +546,7 @@ final class AppModel: ObservableObject {
 
             let result = WikiLinkParser.rewriteTargets(
                 in: original,
-                matches: { index.resolve($0, from: source)?.relativePath == old.relativePath },
+                matches: { index.resolve($0, from: source)?.relativePath == oldPath },
                 replacement: { WikiLinkParser.retargeted($0.target, to: newRelativePath) }
             )
             guard result.count > 0, result.text != original else { continue }
@@ -610,6 +610,108 @@ final class AppModel: ObservableObject {
         } catch {
             status = "Delete failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Moves notes, attachments or folders into `folder`.
+    ///
+    /// The tree is sorted, never hand-ordered, so a drop only ever means "put
+    /// this inside that" — there is no position to insert at. That is what
+    /// keeps drag and drop here small: no drop indicators between rows, no
+    /// ordering to persist.
+    func move(_ urls: [URL], into folder: URL) {
+        guard let vaultRoot else { return }
+        var moved = 0
+        var repointed = (links: 0, notes: 0)
+
+        for url in urls {
+            let name = url.lastPathComponent
+            let destination = folder.appendingPathComponent(name)
+            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+
+            // A drop can carry anything Finder had on the pasteboard. Only
+            // things already in the vault are moved: pulling a file in from
+            // elsewhere would take it out of wherever the user keeps it, which
+            // is not what dragging something onto a note list should mean.
+            guard url.standardizedFileURL.path.hasPrefix(vaultRoot.standardizedFileURL.path + "/")
+            else {
+                status = "\(name) is outside the vault"
+                continue
+            }
+
+            // Already there.
+            guard url.deletingLastPathComponent().standardizedFileURL != folder.standardizedFileURL
+            else { continue }
+            // Into itself, or into its own descendant: the move would delete it.
+            guard !isFolder || !folder.path.hasPrefix(url.path + "/") else {
+                status = "Cannot move \(name) inside itself"
+                continue
+            }
+            guard !FileManager.default.fileExists(atPath: destination.path) else {
+                status = "\(name) already exists in \(describe(folder))"
+                continue
+            }
+
+            let oldPath = relativePath(of: url)
+            let wasOpen = current?.relativePath == oldPath
+            if wasOpen { flushPendingSave() }
+
+            do {
+                try FileManager.default.moveItem(at: url, to: destination)
+            } catch {
+                status = "Could not move \(name): \(error.localizedDescription)"
+                continue
+            }
+
+            let newPath = relativePath(of: destination)
+            navigationHistory = navigationHistory.map { $0 == oldPath ? newPath : $0 }
+            recentPaths = recentPaths.map { $0 == oldPath ? newPath : $0 }
+            if wasOpen, let ref = NoteRef(url: destination, vaultRoot: vaultRoot) {
+                current = ref
+            }
+
+            // A link written as a bare name still resolves after a move, so
+            // this usually rewrites nothing; it is the `[[folder/Note]]` form
+            // that would otherwise break.
+            if !isFolder {
+                let result = repointLinks(from: oldPath, to: newPath)
+                repointed.links += result.links
+                repointed.notes += result.notes
+            }
+            moved += 1
+        }
+
+        guard moved > 0 else { return }
+        status = "Moved \(moved) item\(moved == 1 ? "" : "s") to \(describe(folder))"
+        if repointed.links > 0 {
+            status += ", repointed \(repointed.links) link\(repointed.links == 1 ? "" : "s")"
+        }
+        expandedFolders.insert(relativePath(of: folder))
+        reload()
+    }
+
+    /// Picks a destination folder and moves `item` into it.
+    ///
+    /// Drag and drop is the quicker way, but it needs both ends visible at
+    /// once; moving into a collapsed corner of a large vault is easier chosen
+    /// from a list.
+    func promptToMove(_ item: VaultItem) {
+        guard let vaultRoot else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = item.url.deletingLastPathComponent()
+        panel.prompt = "Move"
+        panel.message = "Choose a folder inside the vault to move \(item.name) into."
+        guard panel.runModal() == .OK, let target = panel.url else { return }
+
+        let root = vaultRoot.standardizedFileURL.path
+        let chosen = target.standardizedFileURL.path
+        guard chosen == root || chosen.hasPrefix(root + "/") else {
+            status = "That folder is outside the vault"
+            return
+        }
+        move([item.url], into: target)
     }
 
     func revealInFinder(_ url: URL) {

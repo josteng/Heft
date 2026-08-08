@@ -58,6 +58,14 @@ struct SidebarView: View {
     @State private var filter = ""
     @State private var mode: SidebarMode = .files
     @State private var expandedTags: Set<String> = []
+    /// Vault-relative path of the folder a drop would land in, or nil when
+    /// nothing is being dragged over the tree.
+    ///
+    /// Held here rather than per row because the row under the pointer is
+    /// often *not* the row that should light up: hovering a file means "drop
+    /// beside it", so its enclosing folder is what highlights, exactly as
+    /// Finder does it.
+    @State private var dropTarget: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -138,11 +146,15 @@ struct SidebarView: View {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if let tree = model.tree {
                     ForEach(tree.children) { child in
-                        TreeRow(item: child, depth: 0)
+                        TreeRow(item: child, depth: 0, dropTarget: $dropTarget)
                     }
                 }
             }
             .padding(.horizontal, 6)
+            // Leaves room above the first row for the drop highlight to sit
+            // clear of it, and gives the list a little air under the header
+            // the rest of the time.
+            .padding(.top, 8)
             .padding(.bottom, 8)
             // Fills the scroll view so right-clicking the empty area below the
             // tree still offers the root-level actions.
@@ -155,6 +167,37 @@ struct SidebarView: View {
                     Divider()
                     Button("Reveal Vault in Finder") { model.revealInFinder(root) }
                 }
+            }
+        }
+        // Anything in the list that is not a row is the vault root, which is
+        // how something gets moved back out of a folder. Attached to the
+        // scroll view rather than to its contents so it covers the whole
+        // visible area: the contents stop where the tree stops, and a drop
+        // zone that ends halfway down the empty space is one you have to aim
+        // at. Rows sit above this and take their own drops first.
+        .dropDestination(for: URL.self) { urls, _ in
+            dropTarget = nil
+            guard let root = model.vaultRoot else { return false }
+            model.move(urls, into: root)
+            return true
+        } isTargeted: { targeted in
+            dropTarget = targeted ? "" : nil
+        }
+        .overlay {
+            if dropTarget == "" {
+                // A wash rather than a hard outline. At this size a 2pt accent
+                // border round the whole sidebar reads as an error state.
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.accentColor.opacity(0.10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1.5)
+                    )
+                    // Inset less than the rows are, so the border always falls
+                    // in the gap around them rather than across a row.
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 2)
+                    .allowsHitTesting(false)
             }
         }
     }
@@ -325,8 +368,23 @@ private struct TreeRow: View {
     @EnvironmentObject private var model: AppModel
     let item: VaultItem
     let depth: Int
+    @Binding var dropTarget: String?
+
+    @State private var springLoad: Task<Void, Never>?
 
     private var isExpanded: Bool { model.expandedFolders.contains(item.relativePath) }
+
+    /// The folder a drop on this row lands in: a folder takes the drop itself,
+    /// a file passes it to whatever folder it sits in.
+    private var destination: URL {
+        item.isFolder ? item.url : item.url.deletingLastPathComponent()
+    }
+
+    private var destinationPath: String {
+        if item.isFolder { return item.relativePath }
+        let parts = item.relativePath.split(separator: "/")
+        return parts.count > 1 ? parts.dropLast().joined(separator: "/") : ""
+    }
 
     var body: some View {
         if item.isFolder {
@@ -336,16 +394,34 @@ private struct TreeRow: View {
                 isSelected: false,
                 depth: depth,
                 symbol: isExpanded ? "folder.fill" : "folder",
-                disclosure: isExpanded
+                disclosure: isExpanded,
+                isDropTargeted: dropTarget == item.relativePath
             ) {
                 if isExpanded { model.expandedFolders.remove(item.relativePath) }
                 else { model.expandedFolders.insert(item.relativePath) }
             }
             .contextMenu { FolderMenu(item: item) }
+            .draggable(item.url)
+            .dropDestination(for: URL.self) { urls, _ in
+                dropTarget = nil
+                model.move(urls, into: item.url)
+                return true
+            } isTargeted: { targeted in
+                dropTarget = targeted ? item.relativePath : nil
+                springLoad?.cancel()
+                guard targeted, !isExpanded else { return }
+                // Spring loading: hovering a closed folder opens it, so a file
+                // can be dropped somewhere nested without letting go first.
+                springLoad = Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    guard !Task.isCancelled else { return }
+                    _ = model.expandedFolders.insert(item.relativePath)
+                }
+            }
 
             if isExpanded {
                 ForEach(item.children) { child in
-                    TreeRow(item: child, depth: depth + 1)
+                    TreeRow(item: child, depth: depth + 1, dropTarget: $dropTarget)
                 }
             }
         } else {
@@ -358,6 +434,17 @@ private struct TreeRow: View {
                 isDimmed: item.needsDownload
             ) { model.open(item: item) }
             .contextMenu { FileMenu(item: item) }
+            .draggable(item.url)
+            // Dropping onto a file means "put it here, beside this" — the row
+            // itself is not the destination, its folder is. So the drop is
+            // accepted, but the highlight goes to the enclosing folder.
+            .dropDestination(for: URL.self) { urls, _ in
+                dropTarget = nil
+                model.move(urls, into: destination)
+                return true
+            } isTargeted: { targeted in
+                dropTarget = targeted ? destinationPath : nil
+            }
         }
     }
 
@@ -387,6 +474,7 @@ private struct FileMenu: View {
         Divider()
         Button("New Note Here…") { model.createNote(in: item.url.deletingLastPathComponent()) }
         Button("Rename…") { model.rename(item) }
+        Button("Move to…") { model.promptToMove(item) }
         Button("Duplicate") { model.duplicate(item) }
         Divider()
         // The vault-relative path is what a link needs; the absolute one is
@@ -417,6 +505,7 @@ private struct FolderMenu: View {
         Button("New Folder…") { model.createFolder(in: item.url) }
         Divider()
         Button("Rename…") { model.rename(item) }
+        Button("Move to…") { model.promptToMove(item) }
         Button("Copy Path") { model.copyToPasteboard(item.relativePath, describedAs: "path") }
         Button("Reveal in Finder") { model.revealInFinder(item.url) }
         Divider()
@@ -432,6 +521,7 @@ private struct NoteRow: View {
     let symbol: String
     var disclosure: Bool? = nil
     var isDimmed: Bool = false
+    var isDropTargeted: Bool = false
     let action: () -> Void
 
     @State private var isHovering = false
@@ -473,7 +563,15 @@ private struct NoteRow: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                if isSelected {
+                if isDropTargeted {
+                    // Outlined rather than filled, so it reads as "into here"
+                    // rather than as a selection.
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.12))
+                        )
+                } else if isSelected {
                     RoundedRectangle(cornerRadius: 5).fill(Color.accentColor)
                 } else if isHovering {
                     RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
