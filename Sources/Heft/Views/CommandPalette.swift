@@ -1,69 +1,89 @@
 import SwiftUI
 
-/// Commands exposed through the searchable palette. Keeping metadata and
-/// execution together makes adding a command a single, reviewable change.
-enum AppCommand: String, CaseIterable, Identifiable {
-    case startPresentation
-    case openToday
-    case toggleColorfulEmphasis
-    case toggleCalendar
+struct AppCommandShortcut {
+    let key: KeyEquivalent
+    let modifiers: EventModifiers
+    let display: String
 
-    var id: String { rawValue }
+    static let openToday = Self(
+        key: "t", modifiers: [.command, .shift], display: "⇧⌘T"
+    )
+    static let toggleCalendar = Self(
+        key: "d", modifiers: [.command, .shift], display: "⇧⌘D"
+    )
+}
 
-    var title: String {
-        switch self {
-        case .startPresentation: "Start presentation"
-        case .openToday: "Open today's note"
-        case .toggleColorfulEmphasis: "Toggle colorful formatting"
-        case .toggleCalendar: "Toggle calendar"
-        }
+/// One command owns all of its palette metadata and behaviour. Adding a
+/// command is one entry in `registry`, rather than edits to parallel switches.
+struct AppCommand: Identifiable {
+    let id: String
+    let title: String
+    let symbol: String
+    let searchTerms: String
+    let shortcut: AppCommandShortcut?
+    private let enabled: @MainActor (AppModel) -> Bool
+    private let action: @MainActor (AppModel) -> Void
+
+    init(
+        id: String,
+        title: String,
+        symbol: String,
+        searchTerms: String,
+        shortcut: AppCommandShortcut? = nil,
+        enabled: @escaping @MainActor (AppModel) -> Bool = { _ in true },
+        action: @escaping @MainActor (AppModel) -> Void
+    ) {
+        self.id = id
+        self.title = title
+        self.symbol = symbol
+        self.searchTerms = searchTerms
+        self.shortcut = shortcut
+        self.enabled = enabled
+        self.action = action
     }
 
-    var symbol: String {
-        switch self {
-        case .startPresentation: "play.rectangle"
-        case .openToday: "calendar.badge.clock"
-        case .toggleColorfulEmphasis: "paintpalette"
-        case .toggleCalendar: "calendar"
-        }
-    }
+    static let registry: [Self] = [
+        Self(
+            id: "startPresentation",
+            title: "Start presentation",
+            symbol: "play.rectangle",
+            searchTerms: "slides present slideshow deck current note",
+            enabled: { $0.current != nil },
+            action: { $0.isPresentationPresented = true }
+        ),
+        Self(
+            id: "openToday",
+            title: "Open today's note",
+            symbol: "calendar.badge.clock",
+            searchTerms: "daily today note open",
+            shortcut: .openToday,
+            action: { $0.openDailyNote(for: Date()) }
+        ),
+        Self(
+            id: "toggleColorfulEmphasis",
+            title: "Toggle colorful formatting",
+            symbol: "paintpalette",
+            searchTerms: "heading bars bold italic color formatting appearance",
+            action: { $0.isColorfulFormattingEnabled.toggle() }
+        ),
+        Self(
+            id: "toggleCalendar",
+            title: "Toggle calendar",
+            symbol: "calendar",
+            searchTerms: "calendar show hide toggle sidebar",
+            shortcut: .toggleCalendar,
+            action: { $0.isCalendarVisible.toggle() }
+        ),
+    ]
 
-    private var searchTerms: String {
-        switch self {
-        case .startPresentation: "slides present slideshow deck current note"
-        case .openToday: "daily today note open"
-        case .toggleColorfulEmphasis: "heading bars bold italic color formatting appearance"
-        case .toggleCalendar: "calendar show hide toggle sidebar"
-        }
-    }
-
-    @MainActor
-    func isEnabled(on model: AppModel) -> Bool {
-        switch self {
-        case .startPresentation: model.current != nil
-        case .openToday, .toggleColorfulEmphasis, .toggleCalendar: true
-        }
-    }
+    @MainActor func isEnabled(on model: AppModel) -> Bool { enabled(model) }
 
     func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty || "\(title) \(searchTerms)".localizedCaseInsensitiveContains(query)
     }
 
-    @MainActor
-    func perform(on model: AppModel) {
-        switch self {
-        case .startPresentation:
-            guard model.current != nil else { return }
-            model.isPresentationPresented = true
-        case .openToday:
-            model.openDailyNote(for: Date())
-        case .toggleColorfulEmphasis:
-            model.isColorfulFormattingEnabled.toggle()
-        case .toggleCalendar:
-            model.isCalendarVisible.toggle()
-        }
-    }
+    @MainActor func perform(on model: AppModel) { action(model) }
 }
 
 struct CommandPaletteView: View {
@@ -74,7 +94,7 @@ struct CommandPaletteView: View {
     @FocusState private var isFocused: Bool
 
     private var results: [AppCommand] {
-        AppCommand.allCases.filter { $0.matches(query) }
+        AppCommand.registry.filter { $0.matches(query) }
     }
 
     var body: some View {
@@ -147,6 +167,15 @@ private struct CommandRow: View {
             Text(command.title)
                 .font(.system(size: 13))
             Spacer(minLength: 8)
+            if let shortcut = command.shortcut {
+                Text(shortcut.display)
+                    .font(.system(size: 11))
+                    .foregroundStyle(
+                        isSelected
+                            ? AnyShapeStyle(.white.opacity(0.75))
+                            : AnyShapeStyle(.tertiary)
+                    )
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

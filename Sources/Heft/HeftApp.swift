@@ -37,7 +37,10 @@ struct HeftCommands: Commands {
             Button("New Note…") { model.createNote() }
                 .keyboardShortcut("n", modifiers: .command)
             Button("Today's Daily Note") { model.openDailyNote(for: Date()) }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .keyboardShortcut(
+                    AppCommandShortcut.openToday.key,
+                    modifiers: AppCommandShortcut.openToday.modifiers
+                )
             Divider()
             Button("Open Vault…") { model.promptForVault() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
@@ -69,7 +72,10 @@ struct HeftCommands: Commands {
             }
             .keyboardShortcut("s", modifiers: [.control, .command])
             Toggle("Show Calendar", isOn: $model.isCalendarVisible)
-                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .keyboardShortcut(
+                    AppCommandShortcut.toggleCalendar.key,
+                    modifiers: AppCommandShortcut.toggleCalendar.modifiers
+                )
             Toggle("Colorful Formatting", isOn: $model.isColorfulFormattingEnabled)
             Toggle("Show Backlinks", isOn: $model.isInspectorVisible)
                 .keyboardShortcut("b", modifiers: [.command, .option])
