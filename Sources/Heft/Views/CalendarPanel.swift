@@ -2,7 +2,7 @@ import HeftCore
 import SwiftUI
 
 /// Month grid over the vault's daily notes. A filled dot means the note
-/// exists; clicking an empty day creates it from the configured template.
+/// exists; clicking an empty day offers to create it from the configured template.
 struct CalendarPanel: View {
     @EnvironmentObject private var model: AppModel
 
@@ -27,22 +27,12 @@ struct CalendarPanel: View {
     }
 
     private var header: some View {
-        HStack(spacing: 4) {
-            Button { shiftMonth(-1) } label: {
-                Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-            // Doubles as the way back to the current month, which is what the
-            // removed Today button was mostly used for. ⇧⌘T opens the note.
-            Button { goToCurrentMonth() } label: {
-                Text(MomentFormat.format(model.calendarMonth, pattern: "MMMM YYYY"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .contentTransition(.numericText())
-            }
-            .buttonStyle(.plain)
-            .help("Jump to this month")
+        HStack(spacing: 5) {
+            Text(MomentFormat.format(model.calendarMonth, pattern: "MMMM YYYY"))
+                .font(.system(size: 12, weight: .semibold))
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .padding(.leading, 6)
 
             if model.settings.dailyNoteTemplate == nil {
                 Image(systemName: "exclamationmark.triangle")
@@ -50,12 +40,32 @@ struct CalendarPanel: View {
                     .foregroundStyle(.tertiary)
                     .help("No daily-note template configured in this vault; new notes get a plain heading.")
             }
-            Spacer()
 
-            Button { shiftMonth(1) } label: {
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+            Spacer(minLength: 6)
+
+            Button { shiftMonth(-1) } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 15, height: 18)
             }
             .buttonStyle(.plain)
+            .help("Previous month")
+
+            Button { goToCurrentMonth() } label: {
+                Text("Today")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("Jump to this month")
+
+            Button { shiftMonth(1) } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 15, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("Next month")
         }
         .foregroundStyle(.secondary)
     }
@@ -120,10 +130,10 @@ struct CalendarPanel: View {
     /// Opening a padding day follows it into its own month, so the grid does
     /// not end up showing a selected day that is not really part of it.
     private func open(_ day: CalendarDay) {
+        guard model.openDailyNote(for: day.date) else { return }
         if !day.isInMonth {
             withAnimation(.snappy(duration: 0.18)) { model.calendarMonth = day.date }
         }
-        model.openDailyNote(for: day.date)
     }
 
     private func goToCurrentMonth() {

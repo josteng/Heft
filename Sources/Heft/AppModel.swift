@@ -260,14 +260,29 @@ final class AppModel: ObservableObject {
             if target.isMarkdown { open(target) } else { NSWorkspace.shared.open(target.url) }
             return
         }
-        // Obsidian creates an unresolved note on click; mirror that, placing it
-        // beside the current note when the link carried no explicit folder.
+        // An unresolved link proposes a note beside the current one when it
+        // carries no explicit folder. Creation remains explicit: a stray click
+        // must never add a file to the vault.
         let name = link.target
         guard !name.isEmpty else { return }
         let relative = name.hasSuffix(".md") ? name : name + ".md"
         let target = name.contains("/")
             ? vaultRoot.appendingPathComponent(relative)
             : (current?.url.deletingLastPathComponent() ?? vaultRoot).appendingPathComponent(relative)
+
+        // The index rebuild is asynchronous, so a newly appeared file may
+        // already exist on disk even when resolution above has not caught up.
+        if FileManager.default.fileExists(atPath: target.path) {
+            if let ref = NoteRef(url: target, vaultRoot: vaultRoot) { open(ref) }
+            return
+        }
+
+        let title = (target.lastPathComponent as NSString).deletingPathExtension
+        guard FilePrompt.confirm(
+            title: "Create Note?",
+            message: "\(title) does not exist. Create it at \(relativePath(of: target))?",
+            confirm: "Create Note"
+        ) else { return }
 
         createFile(at: target, contents: "# \((relative as NSString).deletingPathExtension)\n\n")
     }
@@ -485,14 +500,31 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func openDailyNote(for date: Date) {
-        guard let daily = dailyNotes, let vaultRoot else { promptForVault(); return }
+    @discardableResult
+    func openDailyNote(for date: Date) -> Bool {
+        guard let daily = dailyNotes, let vaultRoot else {
+            promptForVault()
+            return false
+        }
+
+        let exists = daily.exists(for: date)
+        if !exists {
+            guard FilePrompt.confirm(
+                title: "Create Daily Note?",
+                message: "No daily note exists for \(date.formatted(date: .long, time: .omitted)). Create it at \(daily.relativePath(for: date))?",
+                confirm: "Create Note"
+            ) else { return false }
+        }
+
         do {
             let url = try daily.ensureNote(for: date)
-            if let ref = NoteRef(url: url, vaultRoot: vaultRoot) { open(ref) }
-            reload()
+            guard let ref = NoteRef(url: url, vaultRoot: vaultRoot) else { return false }
+            open(ref)
+            if !exists { reload() }
+            return true
         } catch {
             status = "Could not create daily note: \(error.localizedDescription)"
+            return false
         }
     }
 

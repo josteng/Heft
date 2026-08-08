@@ -66,7 +66,7 @@ enum Theme {
     static let blockEditorFont = NSFont.systemFont(ofSize: bodySize)
 
     static let linkColor = Color.accentColor
-    /// Links pointing at a note that does not exist yet; clicking one creates it.
+    /// Links pointing at a note that does not exist yet; clicking one offers to create it.
     static let unresolvedLinkColor = Color.orange
     static let codeBackground = Color(nsColor: .quaternarySystemFill)
     static let tagColor = Color.purple

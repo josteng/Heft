@@ -16,10 +16,15 @@ struct SidebarView: View {
             }
 
             if model.isCalendarVisible {
-                Divider()
-                CalendarPanel()
+                VStack(spacing: 0) {
+                    Divider()
+                    CalendarPanel()
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .animation(.snappy(duration: 0.24), value: model.isCalendarVisible)
+        .clipped()
         .background(.ultraThinMaterial)
     }
 
