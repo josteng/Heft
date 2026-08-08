@@ -53,6 +53,14 @@ enum AppIntegrationCheck {
             "two hashes receive H2 metrics immediately"
         )
 
+        let completionEditor = HeftTextKit2View(usingTextLayoutManager: true)
+        completionEditor.string = "["
+        completionEditor.setSelectedRange(NSRange(location: 1, length: 0))
+        completionEditor.insertText("[", replacementRange: completionEditor.selectedRange())
+        expect(completionEditor.string == "[[]]", "typing [[ adds closing brackets")
+        expect(completionEditor.selectedRange().location == 2,
+               "auto-paired wikilink leaves the caret inside")
+
         let manager = FileManager.default
         let root = manager.temporaryDirectory
             .appendingPathComponent("heft-integration-\(UUID().uuidString)", isDirectory: true)
@@ -170,6 +178,20 @@ enum AppIntegrationCheck {
         )
         let indexed = await waitUntil { files.tree != nil && files.index.notes.count >= 5 }
         expect(indexed, "the disposable vault finishes indexing")
+
+        let popupEditor = HeftTextKit2View(usingTextLayoutManager: true)
+        popupEditor.frame = NSRect(x: 0, y: 0, width: 700, height: 500)
+        popupEditor.textContainerInset = NSSize(width: 28, height: 28)
+        popupEditor.completionIndex = files.index
+        let popupScroll = NSScrollView(frame: popupEditor.frame)
+        popupScroll.documentView = popupEditor
+        popupEditor.string = "["
+        popupEditor.setSelectedRange(NSRange(location: 1, length: 0))
+        popupEditor.insertText("[", replacementRange: popupEditor.selectedRange())
+        expect(
+            popupEditor.subviews.contains { $0 is WikiCompletionPanel && !$0.isHidden },
+            "typing [[ presents its completion panel"
+        )
 
         let beforeCapture = files.current?.relativePath
         let firstCapture = "Remember the useful thing"

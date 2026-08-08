@@ -85,7 +85,8 @@ structurally out of reach.
   `==highlights==`, images and math render directly in the editing surface.
 - **Wikilinks** — `[[note]]`, `[[note|alias]]`, `[[note#heading]]`,
   `[[note#^block]]`, embeds `![[image.png|400]]`, note transclusion.
-  Unresolved links render orange and create the note when clicked.
+  Typing `[[` or `![[` opens filename completion and auto-pairs the closing
+  brackets. Unresolved links render orange and create the note when clicked.
 - **Backlinks** panel with the referencing line as context, plus unresolved
   outgoing links.
 - **Calendar** with a dot per existing daily note; clicking a day creates it

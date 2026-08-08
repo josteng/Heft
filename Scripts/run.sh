@@ -55,9 +55,13 @@ if [[ -n "$VAULT" ]]; then
 fi
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then
-    open -a "$APP" --args "${ARGS[@]}"
+    # Passing the app bundle itself opens this exact build. `open -a "$APP"`
+    # lets Launch Services resolve by bundle identity and may silently reuse an
+    # older /Applications/Heft.app, which makes a freshly built feature appear
+    # to be missing.
+    open "$APP" --args "${ARGS[@]}"
 else
-    open -a "$APP"
+    open "$APP"
 fi
 
 echo "Launched Heft (${CONFIG})${VAULT:+ on $VAULT}"

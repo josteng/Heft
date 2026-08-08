@@ -804,7 +804,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         )
         let outline = CGPath(roundedRect: frame, cornerWidth: 8, cornerHeight: 8, transform: nil)
 
-        context.setFillColor(NSColor.quaternarySystemFill.withAlphaComponent(0.5).cgColor)
+        // Semantic fills already carry a deliberately low, appearance-aware
+        // alpha. `withAlphaComponent(0.5)` replaced that alpha with 50%, which
+        // made the card glaring white in dark mode and charcoal in light mode.
+        context.setFillColor(NSColor.quaternarySystemFill.cgColor)
         context.addPath(outline)
         context.fillPath()
         context.setStrokeColor(NSColor.separatorColor.cgColor)

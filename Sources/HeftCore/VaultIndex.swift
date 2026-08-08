@@ -231,6 +231,60 @@ public final class VaultIndex: @unchecked Sendable {
         byPath[path.lowercased()]
     }
 
+    /// Filename candidates for an inline `[[…]]` / `![[…]]` completion.
+    /// Embeds additionally offer files Heft can actually present inline.
+    public func linkSuggestions(
+        matching query: String, forEmbed: Bool, limit: Int = 8
+    ) -> [NoteRef] {
+        let candidates = forEmbed
+            ? allFiles.filter { $0.isMarkdown || $0.kind == .image || $0.kind == .pdf }
+            : notes
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else {
+            return Array(candidates.sorted(by: suggestionOrder).prefix(limit))
+        }
+
+        var scored: [(ref: NoteRef, score: Int)] = []
+        for ref in candidates {
+            let name = ref.name.lowercased()
+            let path = ref.relativePath.lowercased()
+            let score: Int
+            if name == q { score = 500 }
+            else if name.hasPrefix(q) { score = 400 }
+            else if name.contains(q) { score = 300 }
+            else if path.contains(q) { score = 220 }
+            else if let fuzzy = FuzzyMatch.score(query: q, candidate: name),
+                    fuzzy >= max(36, q.count * 16) {
+                score = 100 + fuzzy
+            } else { continue }
+            scored.append((ref, score))
+        }
+        return scored.sorted { left, right in
+            left.score == right.score
+                ? suggestionOrder(left.ref, right.ref)
+                : left.score > right.score
+        }
+        .prefix(limit)
+        .map(\.ref)
+    }
+
+    /// Uses a short basename when it resolves uniquely, otherwise a path.
+    /// Markdown paths omit `.md`, matching Obsidian's normal link spelling.
+    public func linkDestination(for ref: NoteRef) -> String {
+        let key = ref.name.lowercased()
+        let sameName = byName[key] ?? []
+        guard sameName.count > 1 else { return ref.name }
+        return ref.isMarkdown
+            ? (ref.relativePath as NSString).deletingPathExtension
+            : ref.relativePath
+    }
+
+    private func suggestionOrder(_ left: NoteRef, _ right: NoteRef) -> Bool {
+        let nameOrder = left.name.localizedStandardCompare(right.name)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return left.relativePath.localizedStandardCompare(right.relativePath) == .orderedAscending
+    }
+
     // MARK: Tags
 
     /// Every tag in the vault, most used first, then alphabetically.

@@ -736,6 +736,80 @@ public enum SelfCheck {
         let loose = FuzzyMatch.score(query: "eee", candidate: "2026-05-19 thesis meeting") ?? 0
         expectTrue(loose < max(36, 3 * 16), "loose repeated letters stay below threshold")
 
+        // MARK: Wikilink completion
+        func completion(_ source: String, after needle: String) -> WikiCompletionContext? {
+            let text = source as NSString
+            let range = text.range(of: needle)
+            return WikiCompletionContext.detect(
+                in: source,
+                selection: NSRange(location: NSMaxRange(range), length: 0)
+            )
+        }
+        let linkContext = completion("See [[The]] later", after: "The")
+        expect(linkContext?.query ?? "nil", "The", "completion reads a closed-link query")
+        expectTrue(linkContext?.isEmbed == false, "plain wikilink completion is not an embed")
+        expectTrue(linkContext?.hasClosingBrackets == true, "completion sees auto-paired brackets")
+
+        let embedContext = completion("![[chart.png]]", after: "chart")
+        expectTrue(embedContext?.isEmbed == true, "embed completion detects its bang")
+        expect(embedContext?.query ?? "nil", "chart", "embed completion reads its query")
+        expectTrue(completion("[[Note|alias]]", after: "alias") == nil,
+                   "filename completion stops after an alias separator")
+        expectTrue(completion("[[Note#Heading]]", after: "Heading") == nil,
+                   "filename completion stops inside a heading fragment")
+
+        if let context = completion("🙂 [[The]]", after: "The") {
+            let edit = context.accepting("Thesis")
+            let mutable = NSMutableString(string: "🙂 [[The]]")
+            mutable.replaceCharacters(in: edit.range, with: edit.replacement)
+            expect(mutable as String, "🙂 [[Thesis]]", "completion replaces UTF-16 query safely")
+            expect("\(edit.selection.location)", "13", "caret lands after completed link")
+        } else {
+            expectTrue(false, "completion survives non-BMP text before its link")
+        }
+
+        if let context = completion("[[The", after: "The") {
+            let edit = context.accepting("Thesis")
+            let mutable = NSMutableString(string: "[[The")
+            mutable.replaceCharacters(in: edit.range, with: edit.replacement)
+            expect(mutable as String, "[[Thesis]]", "completion closes an unfinished link")
+        } else {
+            expectTrue(false, "unfinished wikilink offers completion")
+        }
+
+        let fakeRoot = URL(fileURLWithPath: "/private/tmp/heft-link-completion")
+        func fake(_ path: String, _ kind: VaultItem.Kind) -> VaultItem {
+            let name = kind == .markdown
+                ? (path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+                : (path as NSString).lastPathComponent
+            return VaultItem(
+                url: fakeRoot.appendingPathComponent(path), relativePath: path,
+                kind: kind, name: name
+            )
+        }
+        let completionTree = VaultItem(
+            url: fakeRoot, relativePath: "", kind: .folder, name: "Vault",
+            children: [
+                fake("Alpha.md", .markdown),
+                fake("Thesis/Meeting.md", .markdown),
+                fake("Archive/Meeting.md", .markdown),
+                fake("Figures/chart.png", .image),
+            ]
+        )
+        let completionIndex = VaultIndex.build(root: completionTree)
+        expect(completionIndex.linkSuggestions(matching: "alp", forEmbed: false).first?.name ?? "nil",
+               "Alpha", "completion fuzzy-finds a note")
+        expectTrue(!completionIndex.linkSuggestions(matching: "chart", forEmbed: false)
+            .contains(where: { $0.name == "chart.png" }), "plain links suggest notes only")
+        expectTrue(completionIndex.linkSuggestions(matching: "chart", forEmbed: true)
+            .contains(where: { $0.name == "chart.png" }), "embeds suggest presentable attachments")
+        if let meeting = completionIndex.linkSuggestions(matching: "meeting", forEmbed: false).first {
+            expectTrue(completionIndex.linkDestination(for: meeting).contains("/Meeting"),
+                       "duplicate note names insert a disambiguating path")
+        } else {
+            expectTrue(false, "duplicate meeting notes are suggested")
+        }
+
         return r
     }
 }

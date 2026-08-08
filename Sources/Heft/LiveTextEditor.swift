@@ -57,6 +57,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.linkTextAttributes = [:]
         textView.delegate = nsContext.coordinator
         textView.onAttachment = onAttachment
+        textView.completionIndex = context.index
         textView.textContainer?.widthTracksTextView = true
         // The delegate hands each paragraph its widgets; without it tables,
         // formulae, images and list glyphs have nothing to draw them.
@@ -95,6 +96,8 @@ struct LiveTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? HeftTextKit2View else { return }
         nsContext.coordinator.parent = self
         textView.onAttachment = onAttachment
+        textView.completionIndex = context.index
+        textView.updateLinkCompletion(allowStart: false)
 
         // `string` includes the input method's marked text, while the SwiftUI
         // binding only represents committed source. Comparing and replacing
@@ -155,6 +158,7 @@ struct LiveTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            (textView as? HeftTextKit2View)?.updateLinkCompletion(allowStart: true)
             scheduleRestyle(textView)
         }
 
@@ -167,6 +171,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // same set of spans changes nothing on screen, and restyling there
             // would put a stutter into every arrow key.
             (textView as? HeftTextKit2View)?.updateFormatBar()
+            (textView as? HeftTextKit2View)?.updateLinkCompletion(allowStart: false)
 
             guard !NSEqualRanges(line, reveal.line)
                 || spanSignature(for: selection) != revealedSpans
@@ -402,11 +407,17 @@ extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
 final class HeftTextKit2View: NSTextView {
     var onAttachment: ((NSPasteboard) -> String?)?
     var onFirstResponderChange: ((Bool) -> Void)?
+    var completionIndex = VaultIndex.empty
     /// Called when the usable width changes. Tables are measured against it, so
     /// a stale width leaves columns squeezed; the first layout in particular
     /// happens after the initial restyle, when the container is still zero.
     var onNeedsRestyle: (() -> Void)?
     private var lastWidth: CGFloat = 0
+    private var completionPanel: WikiCompletionPanel?
+    private var completionItems: [WikiCompletionItem] = []
+    private var completionSelection = 0
+    private var completionIsActive = false
+    private var completionQuery = ""
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -416,7 +427,10 @@ final class HeftTextKit2View: NSTextView {
 
     override func resignFirstResponder() -> Bool {
         let accepted = super.resignFirstResponder()
-        if accepted { onFirstResponderChange?(false) }
+        if accepted {
+            dismissLinkCompletion()
+            onFirstResponderChange?(false)
+        }
         return accepted
     }
 
@@ -455,6 +469,7 @@ final class HeftTextKit2View: NSTextView {
     var onTrackingEnded: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
+        dismissLinkCompletion()
         if event.clickCount == 1, toggleTask(at: convert(event.locationInWindow, from: nil)) {
             return
         }
@@ -504,6 +519,43 @@ final class HeftTextKit2View: NSTextView {
             return
         }
         pasteAsPlainText(sender)
+    }
+
+    /// Auto-pairs the second `[` so the caret remains inside `[[]]`, matching
+    /// the completion flow in Obsidian. Existing closers are never duplicated.
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        let inserted = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
+        let selection = selectedRange()
+        if inserted == "[", selection.length == 0, selection.location > 0 {
+            let source = string as NSString
+            let previous = source.substring(with: NSRange(location: selection.location - 1, length: 1))
+            let remaining = NSRange(
+                location: selection.location,
+                length: min(2, source.length - selection.location)
+            )
+            let alreadyClosed = remaining.length == 2 && source.substring(with: remaining) == "]]"
+            if previous == "[", !alreadyClosed {
+                completionIsActive = true
+                super.insertText("[]]", replacementRange: replacementRange)
+                setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+                updateLinkCompletion(allowStart: true)
+                return
+            }
+        }
+        super.insertText(insertString, replacementRange: replacementRange)
+    }
+
+    override func moveUp(_ sender: Any?) {
+        guard moveLinkCompletion(-1) else { super.moveUp(sender); return }
+    }
+
+    override func moveDown(_ sender: Any?) {
+        guard moveLinkCompletion(1) else { super.moveDown(sender); return }
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        guard completionIsActive else { super.cancelOperation(sender); return }
+        dismissLinkCompletion()
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
@@ -595,6 +647,7 @@ final class HeftTextKit2View: NSTextView {
     /// left empty — the behaviour every editor has and the block version never
     /// got right.
     override func insertNewline(_ sender: Any?) {
+        if acceptLinkCompletion() { return }
         let text = string as NSString
         let caret = selectedRange()
         let line = text.substring(with: text.lineRange(for: NSRange(location: caret.location, length: 0)))
@@ -623,6 +676,7 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func insertTab(_ sender: Any?) {
+        if acceptLinkCompletion() { return }
         guard adjustListIndent(outdent: false) else {
             super.insertTab(sender)
             return
@@ -634,6 +688,100 @@ final class HeftTextKit2View: NSTextView {
             super.insertBacktab(sender)
             return
         }
+    }
+
+    func updateLinkCompletion(allowStart: Bool) {
+        guard let context = WikiCompletionContext.detect(
+            in: string, selection: selectedRange()
+        ) else {
+            dismissLinkCompletion()
+            return
+        }
+        if !completionIsActive {
+            guard allowStart, context.query.isEmpty else { return }
+            completionIsActive = true
+        }
+        if completionQuery != context.query {
+            completionQuery = context.query
+            completionSelection = 0
+        }
+
+        let refs = completionIndex.linkSuggestions(
+            matching: context.query, forEmbed: context.isEmbed
+        )
+        completionItems = refs.map {
+            WikiCompletionItem(ref: $0, destination: completionIndex.linkDestination(for: $0))
+        }
+        completionSelection = min(completionSelection, max(0, completionItems.count - 1))
+        guard !completionItems.isEmpty, let anchor = completionAnchor() else {
+            completionPanel?.dismiss()
+            return
+        }
+
+        let panel: WikiCompletionPanel
+        if let existing = completionPanel {
+            panel = existing
+        } else {
+            panel = WikiCompletionPanel()
+            panel.onPick = { [weak self] index in self?.acceptLinkCompletion(at: index) }
+            addSubview(panel)
+            completionPanel = panel
+        }
+        panel.show(
+            items: completionItems, selected: completionSelection,
+            below: anchor, in: self
+        )
+    }
+
+    private func moveLinkCompletion(_ delta: Int) -> Bool {
+        guard completionIsActive, !completionItems.isEmpty else { return false }
+        completionSelection = min(max(completionSelection + delta, 0), completionItems.count - 1)
+        updateLinkCompletion(allowStart: false)
+        return true
+    }
+
+    @discardableResult
+    private func acceptLinkCompletion() -> Bool {
+        acceptLinkCompletion(at: completionSelection)
+    }
+
+    @discardableResult
+    private func acceptLinkCompletion(at index: Int) -> Bool {
+        guard completionIsActive, completionItems.indices.contains(index),
+              let context = WikiCompletionContext.detect(in: string, selection: selectedRange())
+        else { return false }
+        let edit = context.accepting(completionItems[index].destination)
+        completionIsActive = false
+        completionPanel?.dismiss()
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return true }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+        didChangeText()
+        setSelectedRange(edit.selection)
+        return true
+    }
+
+    private func dismissLinkCompletion() {
+        completionIsActive = false
+        completionItems = []
+        completionSelection = 0
+        completionQuery = ""
+        completionPanel?.dismiss()
+    }
+
+    private func completionAnchor() -> NSRect? {
+        let caret = selectedRange().location
+        let length = (string as NSString).length
+        guard length > 0 else { return nil }
+        // A zero-length range does not reliably produce a TextKit 2 selection
+        // segment, and `firstRect(forCharacterRange:)` may return an empty
+        // screen rect while SwiftUI is updating the window. Anchor to the glyph
+        // immediately before the caret instead, then use its trailing edge as
+        // the insertion point.
+        let character = NSRange(location: max(0, min(caret - 1, length - 1)), length: 1)
+        guard var anchor = rect(forSelection: character) else { return nil }
+        anchor.origin.x = anchor.maxX
+        anchor.size.width = 1
+        return anchor
     }
 
     /// Adds or removes one CommonMark nesting level on the current list item,
