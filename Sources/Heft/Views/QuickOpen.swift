@@ -23,6 +23,7 @@ struct QuickOpenView: View {
                     .onKeyPress(.upArrow) { move(-1); return .handled }
                     .onKeyPress(.downArrow) { move(1); return .handled }
                     .onChange(of: query) { selection = 0 }
+                PaletteDismissButton(query: $query) { dismiss() }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)

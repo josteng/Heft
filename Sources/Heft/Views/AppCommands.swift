@@ -108,6 +108,7 @@ struct CommandPaletteView: View {
                     .focused($isFocused)
                     .onSubmit(runSelection)
                     .onChange(of: query) { selection = 0 }
+                PaletteDismissButton(query: $query) { dismiss() }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)

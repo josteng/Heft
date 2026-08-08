@@ -47,14 +47,7 @@ struct VaultSearchView: View {
                     selection = 0
                     response = emptyResponse(for: "")
                 }
-                if !query.isEmpty {
-                    Button { query = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Clear search")
-                }
+                PaletteDismissButton(query: $query) { dismiss() }
                 if isSearching {
                     ProgressView().controlSize(.small)
                 } else if !query.isEmpty {
