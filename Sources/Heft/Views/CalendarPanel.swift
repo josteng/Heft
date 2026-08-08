@@ -5,6 +5,7 @@ import SwiftUI
 /// exists; clicking an empty day offers to create it from the configured template.
 struct CalendarPanel: View {
     @EnvironmentObject private var model: AppModel
+    @State private var isWarningPresented = false
 
     /// ISO calendar so weeks start on Monday, matching the vault's `YYYY-[W]WW`
     /// weekly notes.
@@ -34,11 +35,25 @@ struct CalendarPanel: View {
                 .lineLimit(1)
                 .padding(.leading, 6)
 
-            if model.settings.dailyNoteTemplate == nil {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .help("No daily-note template configured in this vault; new notes get a plain heading.")
+            if calendarWarning != nil {
+                Button { isWarningPresented.toggle() } label: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .help("Calendar warning")
+                .popover(isPresented: $isWarningPresented, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Calendar warning").font(.headline)
+                        Text(calendarWarning ?? "")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(width: 280, alignment: .leading)
+                    .padding(14)
+                }
             }
 
             Spacer(minLength: 6)
@@ -68,6 +83,17 @@ struct CalendarPanel: View {
             .help("Next month")
         }
         .foregroundStyle(.secondary)
+    }
+
+    private var calendarWarning: String? {
+        var warnings: [String] = []
+        if !model.dailyNotesAreInScope {
+            warnings.append("This window is focused on \(model.scopeName), but the vault's daily notes are outside that folder. Opening a day may leave this workspace scope.")
+        }
+        if model.settings.dailyNoteTemplate == nil {
+            warnings.append("No daily-note template is configured in this vault. New daily notes receive a plain heading.")
+        }
+        return warnings.isEmpty ? nil : warnings.joined(separator: "\n\n")
     }
 
     private var weekdayLabels: some View {

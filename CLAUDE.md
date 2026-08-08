@@ -9,7 +9,7 @@ Obsidian vault unmodified, including its `.obsidian/` config.
 swift build                                     # compile
 Scripts/bundle.sh debug                         # assemble .build/Heft.app (dock icon + menu bar)
 Scripts/install.sh [--launch]                   # release build into /Applications
-swift run Heft selftest                         # 152 assertions over the pure logic
+swift run Heft selftest                         # assertions over the pure logic
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
@@ -24,6 +24,12 @@ Two targets:
 - `Heft`: the macOS shell. SwiftUI chrome around an `NSTextView`.
 
 The only dependencies are Apple's swift-markdown (cmark-gfm) and SwiftMath (LaTeX).
+
+Vault-wide scanning, indexing, settings, recents, and file watching live in a
+shared `VaultSession`. Each window owns a separate `AppModel` for its open note,
+navigation, folder focus, and visible panels. A focused folder scopes browsing
+and search without turning that folder into another vault; multiple windows can
+therefore show different parts of one vault without duplicate watchers or indexes.
 
 ### The editing surface
 
@@ -121,8 +127,7 @@ Three files carry it:
 - Callout folding (`[!note]-`) parses and hides the marker but does not fold.
 - Renaming a *folder* does not repoint path-shaped links into it; renaming a
   note does.
-- One `AppModel` is shared by the whole app, so every window shows the same
-  note. Multi-window and native tabbing need per-window state first.
+- Native tabbing is not customized; workspace windows are independent windows.
 - Deferred: Vim editing (the plan is embedding real Neovim via VimR's `NvimView`,
   not reimplementing modal editing), graph view, plugins, settings UI.
 

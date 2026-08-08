@@ -91,7 +91,7 @@ struct SidebarView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             // The picker comes first: it decides what the field below filters,
             // so reading top to bottom matches what the controls do.
             modePicker
@@ -100,7 +100,7 @@ struct SidebarView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                TextField(mode.filterPrompt, text: $filter)
+                TextField(model.scopePath == nil ? mode.filterPrompt : "\(mode.filterPrompt) in \(model.scopeName)", text: $filter)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                 if !filter.isEmpty {
@@ -126,11 +126,11 @@ struct SidebarView: View {
                     }
                     .help("New note (⌘N)")
                     Spacer(minLength: 0)
-                    if let root = model.vaultRoot {
+                    if let root = model.scopeRoot {
                         Button { model.createFolder(in: root) } label: {
                             Image(systemName: "folder.badge.plus").font(.system(size: 11))
                         }
-                        .help("New folder at the vault root")
+                        .help("New folder in \(model.scopeName)")
                     }
                 }
                 .buttonStyle(.accessoryBar)
@@ -144,7 +144,7 @@ struct SidebarView: View {
     private var treeList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
-                if let tree = model.tree {
+                if let tree = model.scopedTree {
                     ForEach(tree.children) { child in
                         TreeRow(item: child, depth: 0, dropTarget: $dropTarget)
                     }
@@ -161,11 +161,13 @@ struct SidebarView: View {
             .frame(maxWidth: .infinity, minHeight: 400, alignment: .top)
             .contentShape(.rect)
             .contextMenu {
-                if let root = model.vaultRoot {
+                if let root = model.scopeRoot {
                     Button("New Note…") { model.createNote(in: root) }
                     Button("New Folder…") { model.createFolder(in: root) }
                     Divider()
-                    Button("Reveal Vault in Finder") { model.revealInFinder(root) }
+                    Button(model.scopePath == nil ? "Reveal Vault in Finder" : "Reveal Focused Folder in Finder") {
+                        model.revealInFinder(root)
+                    }
                 }
             }
         }
@@ -177,7 +179,7 @@ struct SidebarView: View {
         // at. Rows sit above this and take their own drops first.
         .dropDestination(for: URL.self) { urls, _ in
             dropTarget = nil
-            guard let root = model.vaultRoot else { return false }
+            guard let root = model.scopeRoot else { return false }
             model.move(urls, into: root)
             return true
         } isTargeted: { targeted in
@@ -287,8 +289,8 @@ struct SidebarView: View {
 
     private var tagRows: [TagListRow] {
         var rows: [TagListRow] = []
-        for tag in model.index.tags(matching: filter) {
-            let notes = model.index.notes(taggedWith: tag)
+        for tag in model.scopedTags(matching: filter) {
+            let notes = model.scopedNotes(taggedWith: tag)
             let isExpanded = expandedTags.contains(tag)
             rows.append(.tag(name: tag, count: notes.count, isExpanded: isExpanded))
             guard isExpanded else { continue }
@@ -337,7 +339,7 @@ struct SidebarView: View {
     }
 
     private var filteredList: some View {
-        let matches = model.index.search(filter, limit: 200)
+        let matches = model.searchNotes(filter, limit: 200)
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 ForEach(matches) { note in
@@ -498,9 +500,15 @@ private struct FileMenu: View {
 /// specific folder rather than beside whatever happens to be open.
 private struct FolderMenu: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
     let item: VaultItem
 
     var body: some View {
+        Button("Focus This Window on \"\(item.name)\"") { model.setScope(to: item) }
+        Button("Open \"\(item.name)\" in New Window") {
+            openWindow(value: model.descriptor(scopePath: item.relativePath))
+        }
+        Divider()
         Button("New Note…") { model.createNote(in: item.url) }
         Button("New Folder…") { model.createFolder(in: item.url) }
         Divider()

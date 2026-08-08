@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var registry: VaultRegistry
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         NavigationSplitView(columnVisibility: $model.columnVisibility) {
@@ -11,6 +12,9 @@ struct ContentView: View {
                 // The minimum has to clear the traffic lights and sidebar
                 // toggle, or the toolbar starts dropping items into overflow.
                 .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 380)
+                // A toolbar contributed by the sidebar lands in the title-bar
+                // region above that column, not in the detail pane.
+                .toolbar { sidebarToolbar }
         } detail: {
             Group {
                 if model.vaultRoot == nil {
@@ -34,11 +38,17 @@ struct ContentView: View {
                 .inspectorColumnWidth(min: 220, ideal: 280, max: 420)
         }
         .toolbar { toolbarContent }
+        .background(WindowToolbarConfiguration(registry: registry, workspaceID: model.workspaceID))
         .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
         .sheet(isPresented: $model.isCommandPalettePresented) { CommandPaletteView() }
         .sheet(isPresented: $model.isVaultSearchPresented) { VaultSearchView() }
         .onChange(of: model.isPresentationPresented) { _, isPresented in
-            if isPresented { openWindow(id: "presentation") }
+            if isPresented {
+                registry.presentationModel = model
+                openWindow(id: "presentation")
+            } else if registry.presentationModel === model {
+                registry.presentationModel = nil
+            }
         }
         // Wikilinks in the rendered preview come back through this handler;
         // anything not addressed to Heft falls through to the browser.
@@ -51,18 +61,27 @@ struct ContentView: View {
     /// captions its title.
     private var subtitle: String {
         guard let current = model.current else {
-            return model.vaultRoot == nil ? "" : "\(model.index.notes.count) notes"
+            return model.vaultRoot == nil ? "" : "\(model.scopedNotes.count) notes · \(model.scopeName)"
         }
         let folder = current.folder
         let where_ = folder.isEmpty ? "Vault root" : folder
-        return model.isDirty ? "\(where_) · Edited" : where_
+        var parts = [where_]
+        if !model.isInScope(current) { parts.append("Outside \(model.scopeName)") }
+        if model.isDirty { parts.append("Edited") }
+        return parts.joined(separator: " · ")
+    }
+
+    @ToolbarContentBuilder
+    private var sidebarToolbar: some ToolbarContent {
+        ToolbarSpacer(.flexible, placement: .status)
+        ToolbarItem(placement: .status) { WorkspaceScopePicker() }
+        ToolbarSpacer(.flexible, placement: .status)
     }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // A flexible centre item restores what the removed mode picker used to
-        // provide: something between the leading buttons and these, pushing
-        // them back to the trailing edge.
+        // Keeps detail actions at the trailing edge without putting workspace
+        // scope in the centre of the document pane.
         ToolbarItem(placement: .principal) { Spacer() }
 
         ToolbarItem(placement: .primaryAction) {
@@ -90,6 +109,61 @@ struct ContentView: View {
             }
             .help("Toggle backlinks (⌥⌘B)")
         }
+    }
+}
+
+/// SwiftUI opts modern toolbars into a display-mode context menu by default.
+/// Heft's toolbar has purpose-built icon controls and a custom scope picker,
+/// so "Icon and Text" is neither meaningful nor a layout the app supports.
+private struct WindowToolbarConfiguration: NSViewRepresentable {
+    let registry: VaultRegistry
+    let workspaceID: UUID
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { configure(view.window) }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async { configure(view.window) }
+    }
+
+    private func configure(_ window: NSWindow?) {
+        window?.toolbar?.displayMode = .iconOnly
+        window?.toolbar?.allowsDisplayModeCustomization = false
+        if let window { registry.register(window: window, for: workspaceID) }
+    }
+}
+
+/// The window's browsing boundary belongs in the title bar: it describes the
+/// whole workspace, while the sidebar below is free to describe its contents.
+private struct WorkspaceScopePicker: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        Menu {
+            Button("Entire Vault") { model.showEntireVault() }
+                .disabled(model.scopePath == nil)
+            Button("Choose Folder…") { model.promptForScope() }
+            if model.scopePath != nil {
+                Divider()
+                Button("Reveal Focused Folder in Finder") {
+                    if let root = model.scopeRoot { model.revealInFinder(root) }
+                }
+            }
+        } label: {
+            Text("\(model.scopePath == nil ? "All Notes" : model.scopeName)  \(Image(systemName: "chevron.down"))")
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+                .frame(minWidth: 76)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .menuIndicator(.hidden)
+        .controlSize(.small)
+        .fixedSize()
+        .help(model.scopePath.map { "\(model.vaultName) / \($0)" } ?? model.vaultName)
     }
 }
 
@@ -405,12 +479,14 @@ private struct EmptySelectionView: View {
             Image(systemName: "doc.text")
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.tertiary)
-            Text("\(model.index.notes.count) notes")
+            Text("\(model.scopedNotes.count) notes in \(model.scopeName)")
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
             HStack {
                 Button("Quick Open…") { model.isQuickOpenPresented = true }
-                Button("Today's Note") { model.openDailyNote(for: Date()) }
+                if model.dailyNotesAreInScope {
+                    Button("Today's Note") { model.openDailyNote(for: Date()) }
+                }
             }
         }
     }

@@ -42,6 +42,11 @@ Keeping the core UI-free makes it testable without a UI, and makes a future iOS
 target (or a Skip-transpiled Android one) a question of writing a new shell
 rather than untangling logic from views.
 
+Within the macOS shell, one `VaultSession` shares the scanner, index, settings,
+recents, and FSEvents watcher for a vault. Every window has its own `AppModel`,
+open note, navigation state, folder focus, and panel visibility. Folder focus is
+a view boundary—not a second vault—so links still resolve against the full vault.
+
 ### Why not Kotlin Multiplatform
 
 Considered, and rejected for this app specifically. Almost nothing here is
@@ -80,6 +85,10 @@ sample is structurally out of reach.
   pasting the same screenshot twice does not create a second file.
 - **Live reload** via FSEvents; external edits appear without clobbering unsaved
   local changes.
+- **Multiple windows** over the same or different vaults, with an optional
+  folder-focused view whose file tree, quick open, tags, recents, and search are
+  scoped to that folder. Two windows can edit different notes; opening the same
+  note brings its existing editor window forward.
 
 ### Obsidian compatibility
 
@@ -105,8 +114,9 @@ also reports as unresolved).
 |---|---|
 | ⌘O | Quick open |
 | ⌘N | New note |
+| ⇧⌘N | New window |
 | ⇧⌘T | Today's daily note |
-| ⇧⌘O | Open vault |
+| ⇧⌘O | Open vault in new window |
 | ⇧⌘D | Toggle calendar |
 | ⌥⌘B | Toggle backlinks |
 

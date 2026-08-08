@@ -7,11 +7,43 @@ import SwiftUI
 final class AppModel: ObservableObject {
 
     // MARK: Vault state
-    @Published private(set) var vaultRoot: URL?
-    @Published private(set) var settings = ObsidianSettings()
-    @Published private(set) var tree: VaultItem?
-    @Published private(set) var index = VaultIndex.empty
-    @Published private(set) var isLoading = false
+    let workspaceID: UUID
+    private let registry: VaultRegistry
+    private var session: VaultSession?
+    private var sessionChangeSubscription: AnyCancellable?
+    private var diskChangeSubscription: AnyCancellable?
+
+    var vaultRoot: URL? { session?.root }
+    var settings: ObsidianSettings { session?.settings ?? ObsidianSettings() }
+    var tree: VaultItem? { session?.tree }
+    var index: VaultIndex { session?.index ?? .empty }
+    var isLoading: Bool { session?.isLoading ?? false }
+
+    /// Nil means the entire vault. A non-empty path is a view boundary only:
+    /// link resolution and the underlying index remain vault-wide.
+    @Published private(set) var scopePath: String?
+
+    var scopeRoot: URL? {
+        guard let root = vaultRoot else { return nil }
+        guard let scopePath else { return root }
+        return root.appendingPathComponent(scopePath, isDirectory: true)
+    }
+
+    var scopeName: String { scopePath?.split(separator: "/").last.map(String.init) ?? "Entire Vault" }
+    var vaultName: String { vaultRoot?.lastPathComponent ?? "Heft" }
+
+    var scopedTree: VaultItem? {
+        guard let tree else { return nil }
+        guard let scopePath else { return tree }
+        return tree.flattened().first { $0.isFolder && $0.relativePath == scopePath }
+    }
+
+    var scopedNotes: [NoteRef] { index.notes.filter(isInScope) }
+
+    func isInScope(_ note: NoteRef) -> Bool {
+        guard let scopePath else { return true }
+        return note.relativePath.hasPrefix(scopePath + "/")
+    }
 
     // MARK: Open document
     @Published private(set) var current: NoteRef?
@@ -54,16 +86,14 @@ final class AppModel: ObservableObject {
 
     @Published private var navigationHistory: [String] = []
     @Published private var navigationIndex = -1
-    /// Most recently opened first, newest visit wins. Backs the palette's
-    /// empty state, where a list of what was just being worked on is far more
-    /// useful than the first dozen notes in alphabetical order.
-    @Published private(set) var recentPaths: [String] = []
     /// Line the editor should jump to once the note is open, 1-based. Consumed
     /// by the editor, which clears it.
     @Published var pendingLineReveal: Int?
 
     var recentNotes: [NoteRef] {
-        recentPaths.compactMap { index.note(atRelativePath: $0) }
+        (session?.recentPaths ?? [])
+            .compactMap { index.note(atRelativePath: $0) }
+            .filter(isInScope)
     }
 
     var canNavigateBack: Bool { navigationIndex > 0 }
@@ -88,36 +118,59 @@ final class AppModel: ObservableObject {
         findNavigationGeneration += 1
     }
 
-    private var watcher: VaultWatcher?
     private var saveTask: Task<Void, Never>?
-    private var reloadTask: Task<Void, Never>?
     private var lastKnownModification: Date?
-    private static let vaultPathKey = "dev.stenglein.Heft.vaultPath"
     private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
 
     var dailyNotes: DailyNotes? {
         vaultRoot.map { DailyNotes(vaultRoot: $0, settings: settings) }
     }
 
-    init() {
+    /// Whether the configured daily-note path lives below this window's
+    /// focused folder. The calendar can still be enabled manually when false.
+    var dailyNotesAreInScope: Bool {
+        guard let scopePath else { return true }
+        guard let dailyNotes else { return false }
+        return dailyNotes.relativePath(for: Date()).hasPrefix(scopePath + "/")
+    }
+
+    init(registry: VaultRegistry, descriptor: WorkspaceDescriptor? = nil) {
+        self.registry = registry
+        workspaceID = descriptor?.id ?? UUID()
+        scopePath = descriptor?.scopePath
         isColorfulFormattingEnabled = UserDefaults.standard.bool(forKey: Self.colorfulFormattingKey)
         // `--vault <path>` and `--open <relative-path>` let a launch go
         // straight to a known state, which is how the app gets driven during
         // development without clicking through it.
         let arguments = CommandLine.arguments
         var launchVault: URL?
-        if let index = arguments.firstIndex(of: "--vault"), index + 1 < arguments.count {
+        if let path = descriptor?.vaultPath {
+            launchVault = URL(fileURLWithPath: path)
+        } else if let index = arguments.firstIndex(of: "--vault"), index + 1 < arguments.count {
             launchVault = URL(fileURLWithPath: (arguments[index + 1] as NSString).expandingTildeInPath)
-        } else if let saved = UserDefaults.standard.string(forKey: Self.vaultPathKey) {
-            launchVault = URL(fileURLWithPath: saved)
+        } else {
+            launchVault = registry.lastVaultURL
         }
 
         if let launchVault, FileManager.default.fileExists(atPath: launchVault.path) {
             openVault(at: launchVault)
+            if let requestedScope = descriptor?.scopePath {
+                let folder = launchVault.appendingPathComponent(requestedScope, isDirectory: true)
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
+                   isDirectory.boolValue {
+                    scopePath = requestedScope
+                    registry.updateFocus(root: launchVault, scopePath: requestedScope, for: workspaceID)
+                }
+            }
         }
 
-        if let index = arguments.firstIndex(of: "--open"), index + 1 < arguments.count {
-            let relative = arguments[index + 1]
+        isCalendarVisible = descriptor?.calendarVisible ?? dailyNotesAreInScope
+
+        let requestedNote = descriptor?.notePath ?? arguments.firstIndex(of: "--open").flatMap {
+            $0 + 1 < arguments.count ? arguments[$0 + 1] : nil
+        }
+        if let relative = requestedNote {
             // The index builds asynchronously, so resolve against the file
             // system rather than waiting on it.
             if let root = vaultRoot {
@@ -145,10 +198,21 @@ final class AppModel: ObservableObject {
     }
 
     func openVault(at url: URL) {
-        watcher?.stop()
-        vaultRoot = url
-        settings = ObsidianSettings.load(vaultRoot: url)
-        UserDefaults.standard.set(url.path, forKey: Self.vaultPathKey)
+        let chosen = url.standardizedFileURL
+        if let nested = registry.activeSession(nestedInside: chosen) {
+            status = "Close \(nested.root.lastPathComponent) before opening its parent as a vault"
+            return
+        }
+        let containing = registry.activeSession(containing: chosen)
+        let root = containing?.root ?? chosen
+        let requestedScope: String? = chosen.path == root.path
+            ? nil
+            : String(chosen.path.dropFirst(root.path.count + 1))
+
+        flushPendingSave()
+        if let current { registry.release(current.url, for: workspaceID) }
+        scopePath = requestedScope
+        attach(to: registry.session(for: root))
 
         // Obsidian's own vim setting is a reasonable default for the editor,
         // even though modal editing itself is not implemented yet.
@@ -157,43 +221,27 @@ final class AppModel: ObservableObject {
         isDirty = false
         navigationHistory = []
         navigationIndex = -1
-        loadRecents()
-
-        reload()
-        watcher = VaultWatcher(root: url) { [weak self] in self?.vaultDidChangeOnDisk() }
-    }
-
-    /// Rescans and reindexes off the main thread.
-    ///
-    /// Coalesced, because a rebuild reads *every* note in the vault to
-    /// reconstruct the link and tag graph, and the events that ask for one
-    /// arrive in bursts: saving a note, or iCloud bringing a folder down,
-    /// produces a stream of them. Without the delay each burst ran the whole
-    /// scan several times over.
-    func reload() {
-        guard let root = vaultRoot else { return }
-        isLoading = true
-        reloadTask?.cancel()
-        reloadTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-
-            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex) in
-                let tree = VaultScanner.scan(root: root)
-                return (tree, VaultIndex.build(root: tree))
-            }.value
-
-            guard !Task.isCancelled, let self else { return }
-            self.tree = scanned.0
-            self.index = scanned.1
-            self.isLoading = false
-            if self.current == nil { self.status = "\(scanned.1.notes.count) notes" }
+        if let requestedScope {
+            status = "Focused on \(requestedScope)"
+        } else {
+            status = "Opening \(root.lastPathComponent)…"
         }
     }
 
-    private func vaultDidChangeOnDisk() {
-        reload()
-        reloadCurrentIfChangedExternally()
+    private func attach(to session: VaultSession) {
+        self.session = session
+        registry.updateFocus(root: session.root, scopePath: scopePath, for: workspaceID)
+        sessionChangeSubscription = session.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        diskChangeSubscription = session.$diskChangeGeneration.dropFirst().sink { [weak self] _ in
+            self?.reloadCurrentIfChangedExternally()
+        }
+        objectWillChange.send()
+    }
+
+    func reload() {
+        session?.reload()
     }
 
     /// Picks up edits made elsewhere (another device via iCloud, or Obsidian
@@ -222,26 +270,7 @@ final class AppModel: ObservableObject {
     }
 
     private func recordRecent(_ relativePath: String) {
-        recentPaths.removeAll { $0 == relativePath }
-        recentPaths.insert(relativePath, at: 0)
-        if recentPaths.count > 40 { recentPaths.removeLast(recentPaths.count - 40) }
-        // Persisted per vault: a recents list that empties on every launch is
-        // not one, and the first thing wanted after opening the app is usually
-        // whatever was being worked on before it closed.
-        guard let key = recentsKey else { return }
-        UserDefaults.standard.set(recentPaths, forKey: key)
-    }
-
-    private var recentsKey: String? {
-        vaultRoot.map { "dev.stenglein.Heft.recents.\($0.path)" }
-    }
-
-    private func loadRecents() {
-        guard let key = recentsKey else {
-            recentPaths = []
-            return
-        }
-        recentPaths = UserDefaults.standard.stringArray(forKey: key) ?? []
+        session?.recordRecent(relativePath)
     }
 
     private func open(_ ref: NoteRef, recordingNavigation: Bool) {
@@ -249,6 +278,19 @@ final class AppModel: ObservableObject {
             NSWorkspace.shared.open(ref.url)
             return
         }
+        if current?.url.standardizedFileURL != ref.url.standardizedFileURL,
+           !registry.claim(ref.url, for: workspaceID) {
+            if !registry.focusWindowEditing(ref.url) {
+                // The old window disappeared between the failed claim and the
+                // focus attempt. Its stale lease has now been removed; retry.
+                open(ref, recordingNavigation: recordingNavigation)
+                return
+            }
+            status = "Focused the window already editing \(ref.name)"
+            return
+        }
+
+        let previous = current
         flushPendingSave()
 
         if let contents = read(ref.url) {
@@ -261,7 +303,13 @@ final class AppModel: ObservableObject {
                 .attributesOfItem(atPath: ref.url.path))?[.modificationDate] as? Date
             status = ref.relativePath
             revealInTree(ref.relativePath)
+            if let previous, previous.url.standardizedFileURL != ref.url.standardizedFileURL {
+                registry.release(previous.url, for: workspaceID)
+            }
         } else {
+            if previous?.url.standardizedFileURL != ref.url.standardizedFileURL {
+                registry.release(ref.url, for: workspaceID)
+            }
             status = "Could not read \(ref.name)"
         }
     }
@@ -400,7 +448,7 @@ final class AppModel: ObservableObject {
     /// with no obvious way to name it leaves the note unlinkable.
     func createNote(in folder: URL? = nil) {
         guard let vaultRoot else { promptForVault(); return }
-        let directory = folder ?? current?.url.deletingLastPathComponent() ?? vaultRoot
+        let directory = folder ?? current?.url.deletingLastPathComponent() ?? scopeRoot ?? vaultRoot
         // Pre-filled and selected, so Return alone still gives the old
         // behaviour and typing replaces it.
         let suggestion = (uniqueURL(in: directory, base: "Untitled", extension: "md")
@@ -466,6 +514,20 @@ final class AppModel: ObservableObject {
     // MARK: - File operations
 
     func rename(_ item: VaultItem) {
+        guard !item.isFolder || !registry.isFocusedByAnotherWindow(item.url, excluding: workspaceID) else {
+            status = "Another window is focused on \(item.name); show its entire vault before renaming"
+            return
+        }
+        guard !registry.isClaimedByAnotherWindow(
+            item.url, excluding: workspaceID, includingDescendants: item.isFolder
+        ) else {
+            status = "Close \(item.name) in the other window before renaming it"
+            return
+        }
+        guard item.isFolder || !backlinkSourcesAreOpenElsewhere(for: item.relativePath) else {
+            status = "Close notes linking to \(item.name) in other windows before renaming it"
+            return
+        }
         // Markdown items display without their extension, so it must not appear
         // in the field and must be put back afterwards.
         let hasHiddenExtension = item.isMarkdown
@@ -494,12 +556,21 @@ final class AppModel: ObservableObject {
         do {
             try FileManager.default.moveItem(at: item.url, to: target)
             let renamedPath = relativePath(of: target)
+            if item.isFolder, let scopePath,
+               scopePath == item.relativePath || scopePath.hasPrefix(item.relativePath + "/") {
+                self.scopePath = renamedPath + String(scopePath.dropFirst(item.relativePath.count))
+                if let vaultRoot {
+                    registry.updateFocus(root: vaultRoot, scopePath: self.scopePath, for: workspaceID)
+                }
+            }
             if !item.isFolder {
                 navigationHistory = navigationHistory.map {
                     $0 == item.relativePath ? renamedPath : $0
                 }
             }
             if wasOpen, let root = vaultRoot, let ref = NoteRef(url: target, vaultRoot: root) {
+                registry.release(item.url, for: workspaceID)
+                _ = registry.claim(target, for: workspaceID)
                 current = ref
             }
 
@@ -583,6 +654,16 @@ final class AppModel: ObservableObject {
     /// Moves to the Trash rather than unlinking, so a mis-click stays
     /// recoverable, and confirms first because this is the user's real vault.
     func delete(_ item: VaultItem) {
+        guard !item.isFolder || !registry.isFocusedByAnotherWindow(item.url, excluding: workspaceID) else {
+            status = "Another window is focused on \(item.name); show its entire vault before deleting"
+            return
+        }
+        guard !registry.isClaimedByAnotherWindow(
+            item.url, excluding: workspaceID, includingDescendants: item.isFolder
+        ) else {
+            status = "Close \(item.name) in the other window before moving it to the Trash"
+            return
+        }
         let count = item.isFolder ? item.flattened().filter { !$0.isFolder }.count : 0
         let detail = item.isFolder
             ? "The folder and its \(count) file\(count == 1 ? "" : "s") will be moved to the Trash."
@@ -597,6 +678,7 @@ final class AppModel: ObservableObject {
             // back out after it has gone.
             saveTask?.cancel()
             saveTask = nil
+            if let current { registry.release(current.url, for: workspaceID) }
             current = nil
             setText("")
             isDirty = false
@@ -605,6 +687,10 @@ final class AppModel: ObservableObject {
         var trashed: NSURL?
         do {
             try FileManager.default.trashItem(at: item.url, resultingItemURL: &trashed)
+            if item.isFolder, let scopePath,
+               scopePath == item.relativePath || scopePath.hasPrefix(item.relativePath + "/") {
+                showEntireVault()
+            }
             reload()
             status = "Moved \(item.name) to the Trash"
         } catch {
@@ -627,6 +713,18 @@ final class AppModel: ObservableObject {
             let name = url.lastPathComponent
             let destination = folder.appendingPathComponent(name)
             let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+
+            guard !isFolder || !registry.isFocusedByAnotherWindow(url, excluding: workspaceID) else {
+                status = "Another window is focused on \(name); show its entire vault before moving it"
+                continue
+            }
+
+            guard !registry.isClaimedByAnotherWindow(
+                url, excluding: workspaceID, includingDescendants: isFolder
+            ) else {
+                status = "Close \(name) in the other window before moving it"
+                continue
+            }
 
             // A drop can carry anything Finder had on the pasteboard. Only
             // things already in the vault are moved: pulling a file in from
@@ -652,6 +750,10 @@ final class AppModel: ObservableObject {
             }
 
             let oldPath = relativePath(of: url)
+            guard isFolder || !backlinkSourcesAreOpenElsewhere(for: oldPath) else {
+                status = "Close notes linking to \(name) in other windows before moving it"
+                continue
+            }
             let wasOpen = current?.relativePath == oldPath
             if wasOpen { flushPendingSave() }
 
@@ -663,9 +765,16 @@ final class AppModel: ObservableObject {
             }
 
             let newPath = relativePath(of: destination)
+            if isFolder, let scopePath,
+               scopePath == oldPath || scopePath.hasPrefix(oldPath + "/") {
+                self.scopePath = newPath + String(scopePath.dropFirst(oldPath.count))
+                registry.updateFocus(root: vaultRoot, scopePath: self.scopePath, for: workspaceID)
+            }
             navigationHistory = navigationHistory.map { $0 == oldPath ? newPath : $0 }
-            recentPaths = recentPaths.map { $0 == oldPath ? newPath : $0 }
+            session?.replaceRecentPath(oldPath, with: newPath)
             if wasOpen, let ref = NoteRef(url: destination, vaultRoot: vaultRoot) {
+                registry.release(url, for: workspaceID)
+                _ = registry.claim(destination, for: workspaceID)
                 current = ref
             }
 
@@ -736,6 +845,12 @@ final class AppModel: ObservableObject {
         return url.path.replacingOccurrences(of: vaultRoot.path + "/", with: "")
     }
 
+    private func backlinkSourcesAreOpenElsewhere(for relativePath: String) -> Bool {
+        index.backlinks(to: relativePath).contains {
+            registry.isClaimedByAnotherWindow($0.source.url, excluding: workspaceID)
+        }
+    }
+
     private func createFile(at url: URL, contents: String) {
         guard let vaultRoot else { return }
         do {
@@ -797,17 +912,17 @@ final class AppModel: ObservableObject {
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(700))
             guard !Task.isCancelled else { return }
-            await self?.save()
+            self?.save()
         }
     }
 
     func flushPendingSave() {
         saveTask?.cancel()
         saveTask = nil
-        if isDirty { Task { await save() } }
+        if isDirty { save() }
     }
 
-    func save() async {
+    func save() {
         guard isDirty, let current else { return }
         do {
             try text.write(to: current.url, atomically: true, encoding: .utf8)
@@ -846,6 +961,84 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Tree helpers
+
+    func setScope(to folder: VaultItem?) {
+        guard folder == nil || folder?.isFolder == true else { return }
+        scopePath = folder?.relativePath
+        if let vaultRoot { registry.updateFocus(root: vaultRoot, scopePath: scopePath, for: workspaceID) }
+        expandedFolders = []
+        status = folder.map { "Focused on \($0.relativePath)" } ?? "Showing the entire vault"
+    }
+
+    func promptForScope() {
+        guard let vaultRoot else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = scopeRoot ?? vaultRoot
+        panel.prompt = "Focus"
+        panel.message = "Choose a folder inside \(vaultName)."
+        guard panel.runModal() == .OK, let chosen = panel.url else { return }
+        let rootPath = vaultRoot.standardizedFileURL.path
+        let chosenPath = chosen.standardizedFileURL.path
+        guard chosenPath == rootPath || chosenPath.hasPrefix(rootPath + "/") else {
+            status = "That folder is outside \(vaultName)"
+            return
+        }
+        if chosenPath == rootPath {
+            showEntireVault()
+            return
+        }
+        let relative = String(chosenPath.dropFirst(rootPath.count + 1))
+        guard let folder = tree?.flattened().first(where: {
+            $0.isFolder && $0.relativePath == relative
+        }) else {
+            status = "That folder is not available in the vault yet"
+            return
+        }
+        setScope(to: folder)
+    }
+
+    func showEntireVault() {
+        setScope(to: nil)
+    }
+
+    func searchNotes(_ query: String, limit: Int = 50) -> [NoteRef] {
+        let candidates = index.search(query, limit: max(index.notes.count, limit))
+        return Array(candidates.filter(isInScope).prefix(limit))
+    }
+
+    func scopedNotes(taggedWith tag: String) -> [NoteRef] {
+        index.notes(taggedWith: tag).filter(isInScope)
+    }
+
+    func scopedTags(matching query: String) -> [String] {
+        index.tags(matching: query).filter { !scopedNotes(taggedWith: $0).isEmpty }
+    }
+
+    func descriptor(scopePath: String? = nil, notePath: String? = nil) -> WorkspaceDescriptor {
+        WorkspaceDescriptor(
+            vaultPath: vaultRoot?.path,
+            scopePath: scopePath,
+            notePath: notePath
+        )
+    }
+
+    var restorationDescriptor: WorkspaceDescriptor {
+        WorkspaceDescriptor(
+            id: workspaceID,
+            vaultPath: vaultRoot?.path,
+            scopePath: scopePath,
+            notePath: current?.relativePath,
+            calendarVisible: isCalendarVisible
+        )
+    }
+
+    func closeWorkspace() {
+        flushPendingSave()
+        registry.releaseAll(for: workspaceID)
+    }
 
     /// Expands every ancestor folder so a note opened from search or the
     /// calendar becomes visible in the sidebar.

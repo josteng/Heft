@@ -29,6 +29,7 @@ struct VaultSearchView: View {
     )
     @State private var selection = 0
     @State private var isSearching = false
+    @State private var searchesEntireVault = false
 
     var body: some View {
         let visible = visibleResponse
@@ -48,6 +49,15 @@ struct VaultSearchView: View {
                     response = emptyResponse(for: "")
                 }
                 PaletteDismissButton(query: $query) { dismiss() }
+                if model.scopePath != nil {
+                    Button { searchesEntireVault.toggle(); selection = 0 } label: {
+                        Image(systemName: searchesEntireVault ? "globe" : "scope")
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(searchesEntireVault ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .help(searchesEntireVault ? "Searching the entire vault" : "Searching \(model.scopeName)")
+                }
                 if isSearching {
                     ProgressView().controlSize(.small)
                 } else if !query.isEmpty {
@@ -91,7 +101,7 @@ struct VaultSearchView: View {
         .frame(width: 680)
         .background(.regularMaterial)
         .onKeyPress(.escape) { dismiss(); return .handled }
-        .task(id: query) { await search() }
+        .task(id: "\(query)|\(searchesEntireVault)") { await search() }
     }
 
     private func summary(for response: VaultSearchResponse) -> String {
@@ -118,7 +128,7 @@ struct VaultSearchView: View {
         guard !Task.isCancelled,
               query.trimmingCharacters(in: .whitespacesAndNewlines) == term
         else { return }
-        let notes = model.index.notes
+        let notes = searchesEntireVault ? model.index.notes : model.scopedNotes
         let result = await Task.detached(priority: .userInitiated) {
             searchVault(notes: notes, query: term)
         }.value

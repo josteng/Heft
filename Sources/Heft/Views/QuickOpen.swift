@@ -7,15 +7,18 @@ struct QuickOpenView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var selection = 0
+    @State private var searchesEntireVault = false
     @FocusState private var isFocused: Bool
 
-    private var results: [NoteRef] { model.index.search(query, limit: 60) }
+    private var results: [NoteRef] {
+        searchesEntireVault ? model.index.search(query, limit: 60) : model.searchNotes(query, limit: 60)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search notes", text: $query)
+                TextField(model.scopePath == nil || searchesEntireVault ? "Search notes" : "Search \(model.scopeName)", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 16))
                     .focused($isFocused)
@@ -24,6 +27,15 @@ struct QuickOpenView: View {
                     .onKeyPress(.downArrow) { move(1); return .handled }
                     .onChange(of: query) { selection = 0 }
                 PaletteDismissButton(query: $query) { dismiss() }
+                if model.scopePath != nil {
+                    Button { searchesEntireVault.toggle(); selection = 0 } label: {
+                        Image(systemName: searchesEntireVault ? "globe" : "scope")
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(searchesEntireVault ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .help(searchesEntireVault ? "Searching the entire vault" : "Searching \(model.scopeName)")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)

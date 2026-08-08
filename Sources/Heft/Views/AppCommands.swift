@@ -57,6 +57,7 @@ struct AppCommand: Identifiable {
             symbol: "calendar.badge.clock",
             searchTerms: "daily today note open",
             shortcut: .openToday,
+            enabled: { $0.dailyNotesAreInScope },
             action: { $0.openDailyNote(for: Date()) }
         ),
         Self(
