@@ -208,6 +208,14 @@ public enum SelfCheck {
         expectTrue(styles(fenced).contains(where: { if case .codeBlock = $0 { true } else { false } }),
                    "decorator finds fenced code")
         expectTrue(!styles(fenced).contains(.bold), "no inline styling inside a fence")
+        let unfinishedFence = LiveDecorator.decorations(in: "```python\nprint(1)")
+        expectTrue(unfinishedFence.contains(where: {
+            $0.style == .codeBlock(language: "python") && !$0.syntax.isEmpty
+        }), "unfinished fenced code keeps its language and opening marker")
+        let mixedFences = LiveDecorator.decorations(in: "```text\ndone\n```\n\n```swift\nlet x = 1")
+        expectTrue(mixedFences.contains(where: {
+            $0.style == .codeBlock(language: "swift")
+        }), "unfinished fence after a completed block is detected")
         expectTrue(!styles("`**x**`").contains(.bold), "no inline styling inside a code span")
 
         // Math, and the currency false positive it must avoid.

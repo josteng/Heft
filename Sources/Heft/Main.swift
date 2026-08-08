@@ -119,6 +119,8 @@ enum HeftMain {
             let described: String = switch layout.blocks[offset]! {
             case .list(let glyph, let indent, _): "list \(glyph) indent \(indent)"
             case .headingAccent(let level): "heading accent h\(level)"
+            case .codeBlock(let edge, let language):
+                "code block \(edge)\(language.map { " \($0)" } ?? "")"
             case .thematicBreak: "thematic break"
             case .blockMath(let image): "block math \(size(image.size))"
             case .image(let image): "image \(size(image.size))"

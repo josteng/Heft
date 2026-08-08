@@ -330,7 +330,7 @@ private struct CodeBlockView: View {
             .opacity(language == nil && !didCopy ? 0.5 : 1)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
+                Text(CodeSyntaxHighlighting.attributed(code: code, language: language))
                     .font(Theme.mono(scale: fontScale))
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)

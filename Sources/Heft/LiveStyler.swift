@@ -270,18 +270,41 @@ enum LiveStyler {
                 .foregroundColor: NSColor.tertiaryLabelColor,
             ], range: range)
 
-        case .codeBlock:
+        case .codeBlock(let language):
             let code = NSMutableParagraphStyle()
             code.lineSpacing = 2
             code.firstLineHeadIndent = 10
             code.headIndent = 10
             code.paragraphSpacingBefore = 0
+            code.minimumLineHeight = base.pointSize * 1.55
             storage.addAttributes([
                 .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 1, weight: .regular),
                 .foregroundColor: NSColor.secondaryLabelColor,
-                .backgroundColor: NSColor.quaternarySystemFill,
                 .paragraphStyle: code,
             ], range: range)
+            if decoration.syntax.count >= 2, let closing = decoration.syntax.last {
+                let footer = code.mutableCopy() as! NSMutableParagraphStyle
+                // Keep the opening fence at normal line height so revealing
+                // its literal source cannot resize the block. Balance that
+                // header space below the code through the closing-fence row.
+                footer.minimumLineHeight = base.pointSize * 2.05
+                let closingLocation = max(closing.location, NSMaxRange(closing) - 1)
+                storage.addAttribute(
+                    .paragraphStyle, value: footer,
+                    range: text.lineRange(for: NSRange(location: closingLocation, length: 0))
+                )
+            }
+            CodeSyntaxHighlighting.apply(
+                to: storage, decoration: decoration, language: language
+            )
+            if drawsWidgets {
+                addCodeBlockWidgets(
+                    decoration: decoration,
+                    language: revealed ? nil : language,
+                    text: text,
+                    layout: &layout
+                )
+            }
 
         case .table:
             // Only seen when the caret is inside: the table shows as source.
@@ -434,6 +457,35 @@ enum LiveStyler {
     /// Width the literal marker occupies once it is visible again.
     private static func markerWidth(_ marker: String, font: NSFont) -> CGFloat {
         NSAttributedString(string: marker, attributes: [.font: font]).size().width
+    }
+
+    private static func addCodeBlockWidgets(
+        decoration: MarkdownDecoration,
+        language: String?,
+        text: NSString,
+        layout: inout LiveLayout
+    ) {
+        var starts: [Int] = []
+        var location = decoration.range.location
+        let end = NSMaxRange(decoration.range)
+        repeat {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            starts.append(line.location)
+            let next = NSMaxRange(line)
+            guard next > location, next < end else { break }
+            location = next
+        } while location <= end
+
+        for (index, start) in starts.enumerated() {
+            let edge: CodeBlockEdge
+            if starts.count == 1 { edge = .only }
+            else if index == 0 { edge = .first }
+            else if index == starts.count - 1 { edge = .last }
+            else { edge = .middle }
+            layout.blocks[start] = .codeBlock(
+                edge: edge, language: index == 0 ? language : nil
+            )
+        }
     }
 
     /// `1.` / `12)` taken off the front of a matched ordered-list marker.

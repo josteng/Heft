@@ -34,6 +34,7 @@ let package = Package(
                 "HeftCore",
                 "SwiftMath",
                 .product(name: "MarkdownEngine", package: "swift-markdown-engine"),
+                .product(name: "MarkdownEngineCodeBlocks", package: "swift-markdown-engine"),
                 .product(name: "MarkdownEngineLatex", package: "swift-markdown-engine"),
             ],
             path: "Sources/Heft",

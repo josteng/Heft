@@ -94,9 +94,19 @@ public enum LiveDecorator {
             protected.append(match)
         }
         // An unterminated fence still needs protecting, or the rest of the file
-        // gets styled as prose while the user is mid-typing a code block.
-        for match in matches(#"(?m)^[ \t]*(```|~~~)[^\n]*\n[\s\S]*\z"#, text, excluding: protected) {
-            result.append(MarkdownDecoration(range: match, style: .codeBlock(language: nil)))
+        // gets styled as prose while the user is mid-typing a code block. Find
+        // its opening independently: a greedy opening-to-EOF regex starts at
+        // the first *completed* block and is then rejected as overlapping it.
+        if let opening = matches(
+            #"(?m)^[ \t]*(```|~~~)[^\n]*\n"#, text, excluding: protected
+        ).first {
+            let match = NSRange(
+                location: opening.location, length: text.length - opening.location
+            )
+            result.append(MarkdownDecoration(
+                range: match, syntax: [opening],
+                style: .codeBlock(language: languageOfFence(match, text))
+            ))
             protected.append(match)
         }
 
@@ -430,18 +440,20 @@ public enum LiveDecorator {
 
     /// The opening fence line and the closing fence, which live mode hides.
     private static func fenceSyntaxRanges(_ range: NSRange, _ text: NSString) -> [NSRange] {
-        var syntax: [NSRange] = []
-        let firstLineEnd = text.range(of: "\n", options: [], range: range)
-        if firstLineEnd.location != NSNotFound {
-            syntax.append(NSRange(
-                location: range.location,
-                length: firstLineEnd.location - range.location + 1
-            ))
-        }
+        var syntax = openingFenceSyntaxRange(range, text).map { [$0] } ?? []
         if let lastNewline = lastIndexOfNewline(in: range, text) {
             syntax.append(NSRange(location: lastNewline, length: NSMaxRange(range) - lastNewline))
         }
         return syntax
+    }
+
+    private static func openingFenceSyntaxRange(_ range: NSRange, _ text: NSString) -> NSRange? {
+        let firstLineEnd = text.range(of: "\n", options: [], range: range)
+        guard firstLineEnd.location != NSNotFound else { return nil }
+        return NSRange(
+            location: range.location,
+            length: firstLineEnd.location - range.location + 1
+        )
     }
 
     private static func lastIndexOfNewline(in range: NSRange, _ text: NSString) -> Int? {

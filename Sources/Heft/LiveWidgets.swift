@@ -15,11 +15,19 @@ enum BlockWidget {
     case list(glyph: ListGlyph, indent: CGFloat, fontSize: CGFloat)
     /// A compact, level-coloured indicator beside a heading.
     case headingAccent(level: Int)
+    case codeBlock(edge: CodeBlockEdge, language: String?)
     case thematicBreak
     case blockMath(NSImage)
     case image(NSImage)
     /// Drawn as a grid; the widget owns every line of the table.
     case table(TableGrid)
+}
+
+enum CodeBlockEdge: Equatable {
+    case only
+    case first
+    case middle
+    case last
 }
 
 enum ListGlyph {
@@ -251,6 +259,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ))
         case .headingAccent:
             bounds = bounds.union(CGRect(x: -16, y: 0, width: bounds.width + 16, height: bounds.height))
+        case .codeBlock:
+            bounds = bounds.union(CGRect(
+                x: -10, y: -1, width: containerWidth, height: bounds.height + 2
+            ))
         case .list:
             bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
         default:
@@ -273,6 +285,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     }
 
     private func drawContents(at point: CGPoint, in context: CGContext) {
+        if case .codeBlock(let edge, let language) = widget {
+            drawCodeBlockBackground(edge: edge, language: language, at: point, in: context)
+        }
         switch widget {
         case .blockMath(let image):
             // The source is fully collapsed, so there is no text to draw.
@@ -302,6 +317,95 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         }
 
         for item in inlineMath { drawInline(item, at: point, in: context) }
+    }
+
+    private func drawCodeBlockBackground(
+        edge: CodeBlockEdge,
+        language: String?,
+        at point: CGPoint,
+        in context: CGContext
+    ) {
+        guard let line = textLineFragments.first else { return }
+        let radius: CGFloat = 7
+        let rect = CGRect(
+            x: point.x - 10,
+            y: point.y,
+            width: containerWidth,
+            height: max(line.typographicBounds.height, layoutFragmentFrame.height)
+        )
+
+        context.saveGState()
+        context.setFillColor(NSColor.quaternarySystemFill.cgColor)
+        switch edge {
+        case .only:
+            let path = CGPath(
+                roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil
+            )
+            context.addPath(path)
+            context.fillPath()
+            context.setStrokeColor(NSColor.separatorColor.cgColor)
+            context.setLineWidth(0.75)
+            context.addPath(path)
+            context.strokePath()
+        case .first:
+            paintCodeBlockEdge(
+                roundedRect: CGRect(
+                    x: rect.minX, y: rect.minY,
+                    width: rect.width, height: rect.height + radius
+                ), clippedTo: rect, in: context
+            )
+        case .middle:
+            context.fill(rect)
+            strokeCodeBlockSides(of: rect, in: context)
+        case .last:
+            paintCodeBlockEdge(
+                roundedRect: CGRect(
+                    x: rect.minX, y: rect.minY - radius,
+                    width: rect.width, height: rect.height + radius
+                ), clippedTo: rect, in: context
+            )
+        }
+        context.restoreGState()
+
+        guard (edge == .first || edge == .only), let language, !language.isEmpty else { return }
+        let label = NSAttributedString(string: language.uppercased(), attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ])
+        let size = label.size()
+        withAppKitContext(context) {
+            label.draw(at: CGPoint(x: rect.maxX - size.width - 9, y: rect.minY + 5))
+        }
+    }
+
+    private func paintCodeBlockEdge(
+        roundedRect: CGRect,
+        clippedTo clip: CGRect,
+        in context: CGContext
+    ) {
+        let path = CGPath(
+            roundedRect: roundedRect, cornerWidth: 7, cornerHeight: 7, transform: nil
+        )
+        context.saveGState()
+        context.clip(to: clip)
+        context.addPath(path)
+        context.fillPath()
+        context.setStrokeColor(NSColor.separatorColor.cgColor)
+        context.setLineWidth(0.75)
+        context.addPath(path)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private func strokeCodeBlockSides(of rect: CGRect, in context: CGContext) {
+        context.setStrokeColor(NSColor.separatorColor.cgColor)
+        context.setLineWidth(0.75)
+        context.beginPath()
+        context.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        context.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        context.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        context.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        context.strokePath()
     }
 
     // MARK: Blocks

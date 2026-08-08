@@ -48,6 +48,9 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticTextCompletionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
         textView.usesFindBar = false
         textView.insertionPointColor = .controlAccentColor
         textView.textContainerInset = NSSize(width: 28, height: 28)
@@ -87,6 +90,11 @@ struct LiveTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? HeftTextKit2View else { return }
         nsContext.coordinator.parent = self
         textView.onAttachment = onAttachment
+
+        // `string` includes the input method's marked text, while the SwiftUI
+        // binding only represents committed source. Comparing and replacing
+        // them mid-composition discards the next dead-key character.
+        guard !textView.hasMarkedText() else { return }
 
         if let findSelection,
            nsContext.coordinator.lastFindGeneration != findSelection.generation {
@@ -190,7 +198,11 @@ struct LiveTextEditor: NSViewRepresentable {
         private func scheduleRestyle(_ textView: NSTextView) {
             restyleTask?.cancel()
             restyleTask = Task { @MainActor [weak textView] in
-                try? await Task.sleep(for: .milliseconds(90))
+                // Coalesce AppKit's notifications from one edit without
+                // postponing styling until the user stops typing. In
+                // particular, fenced code should gain token colours as each
+                // token is entered.
+                try? await Task.sleep(for: .milliseconds(16))
                 guard !Task.isCancelled, let textView else { return }
                 self.restyle(textView)
             }
@@ -201,6 +213,20 @@ struct LiveTextEditor: NSViewRepresentable {
         ///   caret movement asks for `.revealedLines` and gets no jump.
         func restyle(_ textView: NSTextView, scope: InvalidationScope = .whole) {
             guard let storage = textView.textStorage else { return }
+
+            // Dead keys and IMEs keep an in-progress composition as marked
+            // text. Rewriting attributes or invalidating layout during that
+            // session makes AppKit abandon the composition and can move the
+            // caret to another line. Retry once the input method has committed.
+            if textView.hasMarkedText() {
+                restyleTask?.cancel()
+                restyleTask = Task { @MainActor [weak textView] in
+                    try? await Task.sleep(for: .milliseconds(60))
+                    guard !Task.isCancelled, let textView else { return }
+                    self.restyle(textView, scope: scope)
+                }
+                return
+            }
 
             // Nothing may touch attributes or layout while a drag is tracking,
             // whatever asked for it: SwiftUI can call `updateNSView` at any
