@@ -8,7 +8,8 @@ Obsidian vault unmodified, including its `.obsidian/` config.
 ```bash
 swift build                                     # compile
 Scripts/bundle.sh debug                         # assemble .build/Heft.app (dock icon + menu bar)
-swift run Heft selftest                         # 87 assertions over the pure logic
+Scripts/install.sh [--launch]                   # release build into /Applications
+swift run Heft selftest                         # 152 assertions over the pure logic
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
@@ -34,10 +35,17 @@ keep their place in every offset, but get a hairline font and a clear colour. Th
 buffer therefore always equals the file byte-for-byte, and selecting across hidden
 markup copies real source. Nothing is ever rewritten to make it render.
 
-Anything no text attribute can express (tables, LaTeX, image embeds, list bullets,
+Anything no text attribute can express (tables, LaTeX, image embeds, note
+transclusions, frontmatter properties, quote and callout cards, list bullets,
 checkboxes, heading rules, thematic breaks) is collapsed and then painted by the
 `NSTextLayoutFragment` subclass in `LiveWidgets.swift`. That subclassability is the
 whole reason the editor is on TextKit 2 rather than 1.
+
+Markup comes back at two different granularities, which is most of what makes the
+surface feel like Obsidian: block markup (heading hashes, list and quote markers,
+fences, tables) reveals when the caret is anywhere on its line, while inline spans
+(`**bold**`, `$math$`, links) reveal only when the caret is inside that span. The
+policy lives in `Reveal` in HeftCore, so it is covered by the selftest.
 
 Three files carry it:
 
@@ -47,9 +55,23 @@ Three files carry it:
 
 ## Gotchas, all of them hard-won
 
-- **No Xcode on this machine**, only Command Line Tools, so `swift test` cannot run:
-  XCTest and swift-testing both ship with Xcode. Assertions live in
-  `Sources/HeftCore/SelfCheck.swift` and run via `swift run Heft selftest`.
+- **Xcode 26.6 is installed, but `xcode-select` points at the Command Line Tools.**
+  So `xcodebuild`, `actool` and friends fail with "requires Xcode" until
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` is set — which
+  `Scripts/bundle.sh` does for itself rather than changing the machine globally.
+  This project predates that install and still keeps its assertions in
+  `Sources/HeftCore/SelfCheck.swift` (`swift run Heft selftest`) rather than an
+  XCTest target; a real test target is now possible, and would be a fair
+  refactor, but the CLI form also works headlessly and on machines without Xcode.
+- **A dynamic system colour resolves the moment you call `withAlphaComponent`,**
+  using whatever appearance is current then — not the one you are drawing in.
+  `quaternarySystemFill.withAlphaComponent(0.6)` painted a near-white slab
+  behind dark-mode blockquotes. Use such colours as they come, or resolve them
+  explicitly through `RenderContext.resolved(_:)`.
+- **`paragraphSpacingBefore` lands inside the layout fragment; `paragraphSpacing`
+  does not.** So a block drawn across several paragraphs gets its top padding
+  for free and has to paint its bottom padding into the reserved gap below,
+  extending `renderingSurfaceBounds` to match.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
 - **Obsidian templates use moment.js tokens, which collide with ICU.** moment `DD` is
@@ -88,11 +110,27 @@ Three files carry it:
 
 ## Known gaps
 
-- Renaming a note does not update wikilinks pointing at the old name.
 - Embed display widths are ignored: `![[img.png|700]]` renders at natural size,
   capped at 460pt.
+- A transcluded note is styled but gets no widgets of its own, so a table or
+  picture inside an embed shows as source. This is also the recursion guard.
+- An embedded note is clipped at 420pt and faded, because a layout fragment
+  cannot scroll.
+- Lists and headings inside a `>` block are not detected: the block matchers are
+  anchored to the start of the line, so `> - item` is quoted text, not a list.
+- Callout folding (`[!note]-`) parses and hides the marker but does not fold.
+- Renaming a *folder* does not repoint path-shaped links into it; renaming a
+  note does.
+- One `AppModel` is shared by the whole app, so every window shows the same
+  note. Multi-window and native tabbing need per-window state first.
 - Deferred: Vim editing (the plan is embedding real Neovim via VimR's `NvimView`,
-  not reimplementing modal editing), graph view, plugins, full-text search.
+  not reimplementing modal editing), graph view, plugins, settings UI.
+
+## The icon
+
+`Resources/Heft.icon` is a layered macOS 26 icon, compiled by `actool` during
+bundling into `Assets.car` plus an `.icns` fallback. Its format is undocumented
+and was reverse engineered; see `Resources/Heft.icon/README.md` before editing.
 
 ## Decisions already made
 
