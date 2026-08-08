@@ -78,6 +78,14 @@ final class AppModel: ObservableObject {
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
 
+    @Published private var navigationHistory: [String] = []
+    @Published private var navigationIndex = -1
+
+    var canNavigateBack: Bool { navigationIndex > 0 }
+    var canNavigateForward: Bool {
+        navigationIndex >= 0 && navigationIndex + 1 < navigationHistory.count
+    }
+
     func showFind() {
         isFindPresented = true
         findFocusGeneration += 1
@@ -161,6 +169,8 @@ final class AppModel: ObservableObject {
         current = nil
         text = ""
         isDirty = false
+        navigationHistory = []
+        navigationIndex = -1
 
         reload()
         watcher = VaultWatcher(root: url) { [weak self] in self?.vaultDidChangeOnDisk() }
@@ -203,6 +213,10 @@ final class AppModel: ObservableObject {
     // MARK: - Opening notes
 
     func open(_ ref: NoteRef) {
+        open(ref, recordingNavigation: true)
+    }
+
+    private func open(_ ref: NoteRef, recordingNavigation: Bool) {
         guard ref.isMarkdown else {
             NSWorkspace.shared.open(ref.url)
             return
@@ -210,6 +224,7 @@ final class AppModel: ObservableObject {
         flushPendingSave()
 
         if let contents = read(ref.url) {
+            if recordingNavigation { recordNavigation(to: ref.relativePath) }
             current = ref
             setText(contents)
             isDirty = false
@@ -219,6 +234,56 @@ final class AppModel: ObservableObject {
             revealInTree(ref.relativePath)
         } else {
             status = "Could not read \(ref.name)"
+        }
+    }
+
+    func navigateBack() {
+        navigateHistory(by: -1)
+    }
+
+    func navigateForward() {
+        navigateHistory(by: 1)
+    }
+
+    private func recordNavigation(to relativePath: String) {
+        guard current?.relativePath != relativePath else { return }
+
+        // A rename can update `current` directly. Reconcile the active entry
+        // before branching so Back returns to the renamed note, not its stale
+        // path.
+        if navigationHistory.indices.contains(navigationIndex), let current {
+            navigationHistory[navigationIndex] = current.relativePath
+        }
+
+        if navigationIndex + 1 < navigationHistory.count {
+            navigationHistory.removeSubrange((navigationIndex + 1)...)
+        }
+        navigationHistory.append(relativePath)
+        navigationIndex = navigationHistory.count - 1
+
+        // Keep years of routine navigation from growing without bound.
+        if navigationHistory.count > 200 {
+            let overflow = navigationHistory.count - 200
+            navigationHistory.removeFirst(overflow)
+            navigationIndex -= overflow
+        }
+    }
+
+    private func navigateHistory(by offset: Int) {
+        guard offset == -1 || offset == 1, let vaultRoot else { return }
+        var candidate = navigationIndex + offset
+
+        while navigationHistory.indices.contains(candidate) {
+            let url = vaultRoot.appendingPathComponent(navigationHistory[candidate])
+            if FileManager.default.fileExists(atPath: url.path),
+               let ref = NoteRef(url: url, vaultRoot: vaultRoot) {
+                open(ref, recordingNavigation: false)
+                if current?.relativePath == ref.relativePath {
+                    navigationIndex = candidate
+                    return
+                }
+            }
+            candidate += offset
         }
     }
 
@@ -399,6 +464,12 @@ final class AppModel: ObservableObject {
 
         do {
             try FileManager.default.moveItem(at: item.url, to: target)
+            if !item.isFolder {
+                let renamedPath = relativePath(of: target)
+                navigationHistory = navigationHistory.map {
+                    $0 == item.relativePath ? renamedPath : $0
+                }
+            }
             if wasOpen, let root = vaultRoot, let ref = NoteRef(url: target, vaultRoot: root) {
                 current = ref
             }

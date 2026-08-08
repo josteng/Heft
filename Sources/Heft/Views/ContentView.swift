@@ -66,6 +66,25 @@ struct ContentView: View {
         ToolbarItem(placement: .principal) { Spacer() }
 
         ToolbarItem(placement: .primaryAction) {
+            ControlGroup {
+                Button { model.navigateBack() } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .disabled(!model.canNavigateBack)
+                .help("Back (⌘[)")
+                .keyboardShortcut("[", modifiers: .command)
+
+                Button { model.navigateForward() } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(!model.canNavigateForward)
+                .help("Forward (⌘])")
+                .keyboardShortcut("]", modifiers: .command)
+            }
+            .controlGroupStyle(.navigation)
+        }
+
+        ToolbarItem(placement: .primaryAction) {
             Button { model.isInspectorVisible.toggle() } label: {
                 Image(systemName: "link")
             }
