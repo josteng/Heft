@@ -26,6 +26,14 @@ for resource in "$ROOT/.build/$CONFIG"/*.bundle; do
 done
 shopt -u nullglob
 
+# The icon is generated, not checked in as an opaque binary; see make-icon.swift.
+# Regenerated on demand so a fresh clone builds a bundle with an icon.
+if [[ ! -f "$ROOT/Resources/Heft.icns" ]]; then
+    echo "Generating app icon…"
+    swift "$ROOT/Scripts/make-icon.swift"
+fi
+cp "$ROOT/Resources/Heft.icns" "$APP/Contents/Resources/Heft.icns"
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,10 +46,27 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>0.1.0</string>
     <key>CFBundleVersion</key>         <string>1</string>
+    <key>CFBundleIconFile</key>        <string>Heft</string>
     <key>LSMinimumSystemVersion</key>  <string>26.0</string>
+    <key>LSApplicationCategoryType</key> <string>public.app-category.productivity</string>
     <key>NSPrincipalClass</key>        <string>NSApplication</string>
     <key>NSHighResolutionCapable</key> <true/>
     <key>NSSupportsAutomaticTermination</key> <true/>
+    <!-- Declared as an editor of markdown so Finder offers Heft in Open With
+         and the app can be made the default for .md files. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>     <string>Markdown Document</string>
+            <key>CFBundleTypeRole</key>     <string>Editor</string>
+            <key>LSHandlerRank</key>        <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.daringfireball.markdown</string>
+                <string>public.plain-text</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST
