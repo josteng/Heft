@@ -95,7 +95,7 @@ enum AppIntegrationCheck {
         // The pill behind a tag is drawn by the layout fragment rather than
         // set as a background attribute, so it is the layout that has to
         // carry it, and in the tag's own colour.
-        func tagPill(_ source: String, context: RenderContext) -> (NSRange, NSColor, NSFont, CGRect, CGFloat)? {
+        func tagPill(_ source: String, context: RenderContext) -> (NSRange, NSColor, NSFont, CGRect)? {
             let storage = NSTextStorage(string: source)
             let layout = LiveStyler.apply(to: storage, reveal: .none, context: context)
             return layout.inlineTags.values.first?.first

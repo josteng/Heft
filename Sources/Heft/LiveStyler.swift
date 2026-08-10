@@ -584,19 +584,38 @@ enum LiveStyler {
             storage.addAttribute(.foregroundColor, value: context.tagColor, range: range)
 
             // The pill is drawn wider than its text, and drawing alone
-            // reserves no room, so without this it laps over the spaces on
-            // either side and all but touches the words next to it. Kerning
-            // the neighbouring space widens it by as much as the pill
-            // overhangs, which puts the overhang in space that now exists.
-            // Only against a space: at the very start of a line there is
-            // nothing to widen, and a tag butted against punctuation is
-            // better overlapping slightly than shoved out of alignment.
-            for neighbour in [range.location - 1, NSMaxRange(range)] {
-                guard neighbour >= 0, neighbour < storage.length else { continue }
-                let spot = NSRange(location: neighbour, length: 1)
-                guard text.substring(with: spot) == " " else { continue }
-                storage.addAttribute(.kern, value: HeftLayoutFragment.tagPadding, range: spot)
+            // reserves no room, so without extra space it laps over the
+            // spaces either side and all but touches the neighbouring words.
+            // Kerning opens that room — but never on the character
+            // immediately before one whose position matters, because TextKit
+            // reports that next character a couple of points to the left of
+            // where it actually draws. The error does not accumulate; only
+            // the character right after a kerned one is affected.
+            //
+            // So the gap in front is opened *before* the space rather than on
+            // it, leaving the tag's own reported position exact for placing
+            // the pill. The gap behind goes on the tag's last character
+            // rather than on the space after it, which leaves the caret
+            // sitting where the next typed character will actually land.
+            // Kerning that space instead put the gap after it: the caret
+            // stopped short of the following letter, and the gap only
+            // appeared once something was typed, since a line's trailing
+            // whitespace has no width to widen.
+            func kern(at location: Int) {
+                guard location >= 0, location < storage.length else { return }
+                storage.addAttribute(
+                    .kern, value: HeftLayoutFragment.tagPadding,
+                    range: NSRange(location: location, length: 1)
+                )
             }
+            func isSpace(at location: Int) -> Bool {
+                guard location >= 0, location < storage.length else { return false }
+                return text.substring(with: NSRange(location: location, length: 1)) == " "
+            }
+            // Only against a space: a tag butted against punctuation is
+            // better overlapping it slightly than shoving it out of place.
+            if isSpace(at: range.location - 1) { kern(at: range.location - 2) }
+            if isSpace(at: NSMaxRange(range)) { kern(at: NSMaxRange(range) - 1) }
 
             // Where the tag's ink actually falls inside the space its glyphs
             // advance through. Centring the pill on the advance box instead
@@ -610,8 +629,7 @@ enum LiveStyler {
             )
             let lineStart = text.lineRange(for: NSRange(location: range.location, length: 0)).location
             layout.inlineTags[lineStart, default: []].append(
-                (range, context.tagColor, font, CTLineGetImageBounds(line, nil),
-                 CTLineGetTypographicBounds(line, nil, nil, nil))
+                (range, context.tagColor, font, CTLineGetImageBounds(line, nil))
             )
 
         case .inlineMath, .blockMath:

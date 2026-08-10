@@ -124,10 +124,17 @@ Three files carry it:
   (`headingAccent`, `checkbox`, tag pills all do). Reading
   `AppearanceSettings.shared` inside `draw` bypasses the restyle-on-change
   fingerprint in `LiveTextEditor`, so open windows keep the old colour.
-- **`locationForCharacter(at:)` under-reports a position after a kerned
-  character** by a couple of points, an attribute-run boundary falling right
-  there. Tag pills widen the space in front of a tag for room, so they anchor
-  on the character *after* the tag and work backwards from its advance width.
+- **`locationForCharacter(at:)` under-reports the character immediately after a
+  kerned one** by a couple of points, an attribute-run boundary falling right
+  there. The error does not accumulate: the character after *that* is exact.
+  Tag pills kern for the room they overhang into, so they take care never to
+  kern the character before one that matters — the gap in front of a tag opens
+  before the preceding space (leaving the tag's own position exact to place the
+  pill from), and the gap behind goes on the tag's last character rather than
+  the space after it (leaving the caret where the next typed character lands;
+  kerning that space stranded the caret short of the following letter, and the
+  gap only appeared once something was typed, trailing whitespace having no
+  width to widen).
 
 ## Known gaps
 

@@ -104,8 +104,7 @@ struct LiveLayout {
     /// Tag pills drawn behind their own text, keyed the same way. The colour
     /// travels with the range because it is resolved from the render context
     /// while styling, which is where the user's setting is in scope.
-    var inlineTags: [Int: [(range: NSRange, color: NSColor, font: NSFont, ink: CGRect,
-                            advance: CGFloat)]] = [:]
+    var inlineTags: [Int: [(range: NSRange, color: NSColor, font: NSFont, ink: CGRect)]] = [:]
     /// Ranges of the inline spans that reveal on the caret rather than on their
     /// line. The editor keeps these to tell an ordinary cursor move apart from
     /// one that crosses into or out of a span and so needs a restyle.
@@ -408,8 +407,7 @@ enum CellText {
 final class HeftLayoutFragment: NSTextLayoutFragment {
     var widget: BlockWidget?
     var inlineMath: [(location: Int, image: NSImage)] = []
-    var inlineTags: [(range: NSRange, color: NSColor, font: NSFont, ink: CGRect,
-                      advance: CGFloat)] = []
+    var inlineTags: [(range: NSRange, color: NSColor, font: NSFont, ink: CGRect)] = []
     var elementStart = 0
 
     /// Vertical breathing room around a drawn block. `LiveStyler` adds twice
@@ -1070,7 +1068,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     /// The rounded capsule behind a `#tag`, which is Obsidian's treatment and
     /// cannot be had from a `.backgroundColor` attribute.
     private func drawTagPill(
-        _ tag: (range: NSRange, color: NSColor, font: NSFont, ink: CGRect, advance: CGFloat),
+        _ tag: (range: NSRange, color: NSColor, font: NSFont, ink: CGRect),
         at point: CGPoint, in context: CGContext
     ) {
         let start = tag.range.location - elementStart
@@ -1088,24 +1086,6 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             let leading = line.locationForCharacter(at: start).x
             guard tag.ink.width > 0 else { return }
 
-            // Anchored to the character *after* the tag where there is one.
-            //
-            // `LiveStyler` widens the space in front of a tag to make room for
-            // the pill, and the first character after a widened space comes
-            // back from `locationForCharacter` a couple of points left of
-            // where it is actually drawn — an attribute-run boundary falls
-            // exactly there. Measured: a tag opening a line, with no space in
-            // front to widen, lands dead centre, while the same tag mid
-            // sentence sat 2pt left. The character after the tag is far enough
-            // past that boundary to be reported correctly, so the pill is
-            // placed from its right edge back.
-            let end = NSMaxRange(tag.range) - elementStart
-            let inkStart: CGFloat = if end < NSMaxRange(lineRange) {
-                line.locationForCharacter(at: end).x - tag.advance + tag.ink.minX
-            } else {
-                leading + tag.ink.minX
-            }
-
             // Horizontally the pill hugs the ink, not the advance box the
             // glyphs sit in: `#` has a wider side bearing than most letters
             // end with, so a pill on the advance box looks shifted left.
@@ -1119,7 +1099,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             let bounds = line.typographicBounds
             let baseline = point.y + bounds.minY + line.glyphOrigin.y
             let rect = CGRect(
-                x: point.x + bounds.minX + inkStart - Self.tagPadding,
+                x: point.x + bounds.minX + leading + tag.ink.minX - Self.tagPadding,
                 y: baseline - tag.font.ascender - Self.tagInset,
                 width: tag.ink.width + Self.tagPadding * 2,
                 height: tag.font.ascender - tag.font.descender + Self.tagInset * 2
