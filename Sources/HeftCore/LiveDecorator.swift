@@ -56,6 +56,23 @@ public struct MarkdownDecoration: Sendable, Equatable {
         self.revealRange = revealRange
         self.style = style
     }
+
+    /// The same construct, moved along the document.
+    ///
+    /// Inserting a character above a decoration moves it without changing it,
+    /// and `RestyleScope` shifts the previous pass's decorations by that much
+    /// to see which ones really are unchanged and can keep their styling.
+    public func shifted(by delta: Int) -> MarkdownDecoration {
+        func move(_ range: NSRange) -> NSRange {
+            NSRange(location: range.location + delta, length: range.length)
+        }
+        return MarkdownDecoration(
+            range: move(range),
+            syntax: syntax.map(move),
+            revealRange: revealRange.map(move),
+            style: style
+        )
+    }
 }
 
 /// A GFM table reduced to raw cell text plus column alignment.
@@ -199,6 +216,63 @@ public struct Reveal: Equatable, Sendable {
     }
 }
 
+/// The ranges no further pattern may match inside, kept sorted and merged.
+///
+/// Every construct found protects its own span, so by the time inline spans are
+/// matched the set holds one entry per heading, list marker, quote marker and
+/// code span in the note. Testing each new candidate against all of them in
+/// turn made decoration quadratic in the size of the document, which is what
+/// made a long note noticeably slower to type in than a short one. Union
+/// membership is the only question ever asked of this set, so overlapping and
+/// abutting ranges merge on the way in and a binary search answers it.
+struct ProtectedRanges {
+    private var ranges: [NSRange] = []
+
+    init() {}
+
+    /// True when `candidate` overlaps any protected range. Zero-length
+    /// candidates never do, matching the intersection test this replaced.
+    func intersects(_ candidate: NSRange) -> Bool {
+        guard candidate.length > 0, !ranges.isEmpty else { return false }
+        // The first range that could reach past the candidate's start.
+        var low = 0
+        var high = ranges.count
+        while low < high {
+            let mid = (low + high) / 2
+            if NSMaxRange(ranges[mid]) <= candidate.location { low = mid + 1 } else { high = mid }
+        }
+        guard low < ranges.count else { return false }
+        return ranges[low].location < NSMaxRange(candidate)
+    }
+
+    mutating func insert(_ range: NSRange) {
+        guard range.length > 0 else { return }
+        var low = 0
+        var high = ranges.count
+        while low < high {
+            let mid = (low + high) / 2
+            if NSMaxRange(ranges[mid]) < range.location { low = mid + 1 } else { high = mid }
+        }
+        // `low` is the first range that touches or follows the new one; absorb
+        // every range it reaches, so the array stays disjoint and sorted.
+        var start = range.location
+        var end = NSMaxRange(range)
+        var last = low
+        while last < ranges.count, ranges[last].location <= end {
+            start = min(start, ranges[last].location)
+            end = max(end, NSMaxRange(ranges[last]))
+            last += 1
+        }
+        ranges.replaceSubrange(low..<last, with: [
+            NSRange(location: start, length: end - start),
+        ])
+    }
+
+    mutating func insert(contentsOf newRanges: [NSRange]) {
+        for range in newRanges { insert(range) }
+    }
+}
+
 public enum LiveDecorator {
 
     /// Finds every construct worth styling. Emitted roughly outermost-first so a
@@ -209,11 +283,11 @@ public enum LiveDecorator {
 
         // Code regions are computed first and everything else is excluded from
         // them, so `**not bold**` inside a fence stays literal.
-        var protected: [NSRange] = []
+        var protected = ProtectedRanges()
 
         if let fm = firstMatch(#"\A---\n[\s\S]*?\n---"#, text) {
             result.append(MarkdownDecoration(range: fm, style: .frontmatter))
-            protected.append(fm)
+            protected.insert(fm)
         }
 
         for match in matches(#"(?m)^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$"#, text, excluding: protected) {
@@ -221,7 +295,7 @@ public enum LiveDecorator {
             result.append(MarkdownDecoration(
                 range: match, syntax: fenceSyntaxRanges(match, text), style: .codeBlock(language: language)
             ))
-            protected.append(match)
+            protected.insert(match)
         }
         // An unterminated fence still needs protecting, or the rest of the file
         // gets styled as prose while the user is mid-typing a code block. Find
@@ -237,7 +311,7 @@ public enum LiveDecorator {
                 range: match, syntax: [opening],
                 style: .codeBlock(language: languageOfFence(match, text))
             ))
-            protected.append(match)
+            protected.insert(match)
         }
 
         // Tables claim their lines whole: the editor draws a grid rather than
@@ -245,7 +319,7 @@ public enum LiveDecorator {
         for match in matches(tablePattern, text, excluding: protected) {
             guard let layout = parseTable(text.substring(with: match)) else { continue }
             result.append(MarkdownDecoration(range: match, style: .table(layout)))
-            protected.append(match)
+            protected.insert(match)
         }
 
         // HTML comments are metadata, not visible prose. Keep them in the
@@ -257,7 +331,7 @@ public enum LiveDecorator {
                 syntax: [match],
                 style: .comment
             ))
-            protected.append(match)
+            protected.insert(match)
         }
 
         // Block constructs are found *before* any inline span is protected.
@@ -270,7 +344,7 @@ public enum LiveDecorator {
 
         // Marker characters themselves are off limits to inline matching, so a
         // task's `[ ]` can never be read as a link label.
-        protected.append(contentsOf: blocks.flatMap(\.syntax))
+        protected.insert(contentsOf: blocks.flatMap(\.syntax))
 
         // Block math before inline, so `$$x$$` is not read as two empty `$$`.
         for match in matches(#"\$\$[\s\S]+?\$\$"#, text, excluding: protected) {
@@ -289,7 +363,7 @@ public enum LiveDecorator {
                          NSRange(location: NSMaxRange(match) - 2, length: 2)],
                 style: style
             ))
-            protected.append(match)
+            protected.insert(match)
         }
 
         for match in matches(#"`[^`\n]+`"#, text, excluding: protected) {
@@ -299,7 +373,7 @@ public enum LiveDecorator {
                          NSRange(location: NSMaxRange(match) - 1, length: 1)],
                 style: .inlineCode
             ))
-            protected.append(match)
+            protected.insert(match)
         }
 
         // Inline math. Requires non-space just inside the delimiters so prices
@@ -313,7 +387,7 @@ public enum LiveDecorator {
                          NSRange(location: NSMaxRange(match) - 1, length: 1)],
                 style: .inlineMath(text.substring(with: inner))
             ))
-            protected.append(match)
+            protected.insert(match)
         }
 
         // Block constructs were already collected above, before inline spans
@@ -399,7 +473,7 @@ public enum LiveDecorator {
 
     // MARK: - Block constructs
 
-    private static func blockDecorations(_ text: NSString, protected: [NSRange]) -> [MarkdownDecoration] {
+    private static func blockDecorations(_ text: NSString, protected: ProtectedRanges) -> [MarkdownDecoration] {
         var result: [MarkdownDecoration] = []
 
         // Treat a marker-only line as a provisional heading while it is being
@@ -434,9 +508,13 @@ public enum LiveDecorator {
             // Obsidian and CommonMark produce.
             let depth = leading.reduce(0) { $0 + ($1 == "\t" ? 1 : 0) } + (leading.filter { $0 == " " }.count / 2)
 
+            // Scanned rather than matched with `\[[ xX]\]`, for the same reason
+            // quote markers are: this is once per list item, and building a
+            // regular expression each time costs more than the whole document
+            // scan that found the item.
             let kind: ListMarkerKind
-            if let box = marker.range(of: #"\[[ xX]\]"#, options: .regularExpression) {
-                kind = .task(checked: marker[box].lowercased().contains("x"))
+            if let box = checkboxState(in: marker) {
+                kind = .task(checked: box)
             } else if marker.contains(where: \.isNumber) {
                 kind = .ordered
             } else {
@@ -476,7 +554,7 @@ public enum LiveDecorator {
     /// to happen first: a line cannot know whether it rounds the top of a
     /// callout, sits in its middle, or closes it without seeing its neighbours.
     private static func quoteDecorations(
-        _ text: NSString, protected: [NSRange]
+        _ text: NSString, protected: ProtectedRanges
     ) -> [MarkdownDecoration] {
         var runs: [[NSRange]] = []
         var run: [NSRange] = []
@@ -502,8 +580,7 @@ public enum LiveDecorator {
                 location: lines[0].location,
                 length: NSMaxRange(lines[lines.count - 1]) - lines[0].location
             )
-            guard !protected.contains(where: { NSIntersectionRange($0, span).length > 0 })
-            else { continue }
+            guard !protected.intersects(span) else { continue }
 
             // Only the block's opening line can declare a callout, and it
             // applies to every line beneath it.
@@ -548,17 +625,44 @@ public enum LiveDecorator {
     }
 
     /// The `> ` (or `>>`, `> > `) prefix of a quote line, or nil for prose.
+    ///
+    /// Scanned by hand rather than matched with `^[ \t]*(?:>[ \t]?)+`, because
+    /// this runs on every line of the document and `range(of:options:)` builds
+    /// a fresh `NSRegularExpression` on every call. Quote detection alone was
+    /// most of the cost of decorating a long note.
     private static func markerRange(inQuoteLine line: NSRange, _ text: NSString) -> NSRange? {
         guard line.length > 0 else { return nil }
-        let source = text.substring(with: line)
-        guard let found = source.range(
-            of: #"^[ \t]*(?:>[ \t]?)+"#, options: .regularExpression
-        ) else { return nil }
-        // The pattern is anchored, so the marker starts where the line does and
-        // only its length has to be converted into UTF-16 units.
-        return NSRange(
-            location: line.location, length: (String(source[found]) as NSString).length
-        )
+        let end = NSMaxRange(line)
+        var index = line.location
+        while index < end, isBlank(text.character(at: index)) { index += 1 }
+        guard index < end, text.character(at: index) == UInt16(62) else { return nil }  // ">"
+        while index < end, text.character(at: index) == UInt16(62) {
+            index += 1
+            // One optional space or tab per marker, exactly as the pattern's
+            // `[ \t]?` allows — never two, or `>  indented` would lose a space.
+            if index < end, isBlank(text.character(at: index)) { index += 1 }
+        }
+        return NSRange(location: line.location, length: index - line.location)
+    }
+
+    private static func isBlank(_ character: unichar) -> Bool {
+        character == UInt16(32) || character == UInt16(9)
+    }
+
+    /// Whether a list marker carries a `[ ]`, `[x]` or `[X]` box, and whether
+    /// it is ticked. Nil when the marker is a plain bullet or numeral.
+    private static func checkboxState(in marker: String) -> Bool? {
+        let source = marker as NSString
+        guard source.length >= 3 else { return nil }
+        for index in 0...(source.length - 3) where source.character(at: index) == UInt16(91) {
+            guard source.character(at: index + 2) == UInt16(93) else { continue }
+            switch source.character(at: index + 1) {
+            case UInt16(32): return false
+            case UInt16(120), UInt16(88): return true
+            default: continue
+            }
+        }
+        return nil
     }
 
     private static func depth(ofMarker marker: NSRange, _ text: NSString) -> Int {
@@ -595,7 +699,7 @@ public enum LiveDecorator {
 
     // MARK: - Inline constructs
 
-    private static func inlineDecorations(_ text: NSString, protected initial: [NSRange]) -> [MarkdownDecoration] {
+    private static func inlineDecorations(_ text: NSString, protected initial: ProtectedRanges) -> [MarkdownDecoration] {
         var result: [MarkdownDecoration] = []
         var protected = initial
 
@@ -641,7 +745,7 @@ public enum LiveDecorator {
             result.append(MarkdownDecoration(
                 range: match, syntax: syntax, style: .wikiLink(link)
             ))
-            protected.append(match)
+            protected.insert(match)
         }
 
         // Images before links: `![alt](x.png)` contains a valid link match, and
@@ -654,7 +758,7 @@ public enum LiveDecorator {
             result.append(MarkdownDecoration(
                 range: match, syntax: [match], style: .image(source: source, alt: alt)
             ))
-            protected.append(match)
+            protected.insert(match)
         }
 
         for match in matches(#"\[([^\]\n]*)\]\(([^)\n]+)\)"#, text, excluding: protected) {
@@ -697,13 +801,13 @@ public enum LiveDecorator {
         return made
     }
 
-    private static func matches(_ pattern: String, _ text: NSString, excluding: [NSRange] = []) -> [NSRange] {
+    private static func matches(
+        _ pattern: String, _ text: NSString, excluding: ProtectedRanges = ProtectedRanges()
+    ) -> [NSRange] {
         let full = NSRange(location: 0, length: text.length)
         return regex(pattern).matches(in: text as String, range: full)
             .map(\.range)
-            .filter { candidate in
-                !excluding.contains { NSIntersectionRange($0, candidate).length > 0 }
-            }
+            .filter { !excluding.intersects($0) }
     }
 
     private static func firstMatch(_ pattern: String, _ text: NSString) -> NSRange? {
