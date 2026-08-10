@@ -190,21 +190,15 @@ struct HeftCommands: Commands {
         panel.directoryURL = model?.vaultRoot?.deletingLastPathComponent()
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        if let containing = registry.activeSession(containing: url) {
-            let root = containing.root.path
-            let chosen = url.standardizedFileURL.path
-            let scope = chosen == root ? nil : String(chosen.dropFirst(root.count + 1))
-            openWindow(value: WorkspaceDescriptor(vaultPath: root, scopePath: scope))
-            return
-        }
-        if let nested = registry.activeSession(nestedInside: url) {
+        switch registry.resolveOpen(for: url) {
+        case .open(let descriptor):
+            openWindow(value: descriptor)
+        case .overlapping(let vaultName):
             let alert = NSAlert()
             alert.messageText = "That folder contains an open vault"
-            alert.informativeText = "Close \(nested.root.lastPathComponent) before opening its parent as a separate vault. Overlapping vaults can race while indexing and editing."
+            alert.informativeText = "Close \(vaultName) before opening its parent as a separate vault. Overlapping vaults can race while indexing and editing."
             alert.alertStyle = .warning
             alert.runModal()
-            return
         }
-        openWindow(value: WorkspaceDescriptor(vaultPath: url.path))
     }
 }

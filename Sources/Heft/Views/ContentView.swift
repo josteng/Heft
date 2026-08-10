@@ -88,6 +88,25 @@ struct ContentView: View {
                     : "\(conflict.relativePath) was removed after Heft opened it. Keeping your changes will recreate it."
             )
         }
+        .alert(
+            "That Folder Isn't in \(model.vaultName)",
+            isPresented: Binding(
+                get: { model.pendingOutsideVaultFolder != nil },
+                set: { presented in if !presented { model.pendingOutsideVaultFolder = nil } }
+            ),
+            presenting: model.pendingOutsideVaultFolder
+        ) { url in
+            Button("Open as New Vault") {
+                openAsNewVault(url)
+                model.pendingOutsideVaultFolder = nil
+            }
+            Button("Cancel", role: .cancel) { model.pendingOutsideVaultFolder = nil }
+        } message: { url in
+            Text(
+                "\(url.lastPathComponent) is outside \(model.vaultName), so it can't be a focus "
+                    + "folder here. Open it as its own vault in a new window instead?"
+            )
+        }
         .onChange(of: model.isPresentationPresented) { _, isPresented in
             if isPresented {
                 registry.presentationModel = model
@@ -115,6 +134,19 @@ struct ContentView: View {
         if !model.isInScope(current) { parts.append("Outside \(model.scopeName)") }
         if model.isDirty { parts.append("Edited") }
         return parts.joined(separator: " · ")
+    }
+
+    private func openAsNewVault(_ url: URL) {
+        switch registry.resolveOpen(for: url) {
+        case .open(let descriptor):
+            openWindow(value: descriptor)
+        case .overlapping(let vaultName):
+            let alert = NSAlert()
+            alert.messageText = "That folder contains an open vault"
+            alert.informativeText = "Close \(vaultName) before opening its parent as a separate vault. Overlapping vaults can race while indexing and editing."
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
     }
 
     @ToolbarContentBuilder

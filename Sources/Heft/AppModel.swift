@@ -124,6 +124,10 @@ final class AppModel: ObservableObject {
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
     @Published private(set) var saveConflict: SaveConflict?
+    /// Set when `promptForScope()`'s folder panel returns a folder outside
+    /// the current vault. That can't become a focus folder, so the picker
+    /// offers to open it as its own vault instead of failing silently.
+    @Published var pendingOutsideVaultFolder: URL?
 
     @Published private var navigationHistory: [String] = []
     @Published private var navigationIndex = -1
@@ -1446,7 +1450,7 @@ final class AppModel: ObservableObject {
         let rootPath = vaultRoot.standardizedFileURL.path
         let chosenPath = chosen.standardizedFileURL.path
         guard chosenPath == rootPath || chosenPath.hasPrefix(rootPath + "/") else {
-            status = "That folder is outside \(vaultName)"
+            pendingOutsideVaultFolder = chosen
             return
         }
         if chosenPath == rootPath {

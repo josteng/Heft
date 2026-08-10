@@ -154,6 +154,28 @@ final class VaultRegistry: ObservableObject {
         }
     }
 
+    enum VaultOpenResolution {
+        case open(WorkspaceDescriptor)
+        case overlapping(vaultName: String)
+    }
+
+    /// Shared by every "open this folder as a vault" entry point (the File
+    /// menu's Open Vault in New Window, and the toolbar scope picker falling
+    /// back to it for a folder outside the current vault) so they agree on
+    /// reusing an already-open containing vault versus refusing a nested one.
+    func resolveOpen(for url: URL) -> VaultOpenResolution {
+        let chosen = url.standardizedFileURL
+        if let containing = activeSession(containing: chosen) {
+            let root = containing.root.path
+            let scope = chosen.path == root ? nil : String(chosen.path.dropFirst(root.count + 1))
+            return .open(WorkspaceDescriptor(vaultPath: root, scopePath: scope))
+        }
+        if let nested = activeSession(nestedInside: chosen) {
+            return .overlapping(vaultName: nested.root.lastPathComponent)
+        }
+        return .open(WorkspaceDescriptor(vaultPath: chosen.path))
+    }
+
     func claim(_ url: URL, for owner: UUID) -> Bool {
         let path = url.standardizedFileURL.path
         if let current = documentOwners[path], current != owner { return false }
