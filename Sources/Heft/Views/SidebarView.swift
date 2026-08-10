@@ -60,6 +60,8 @@ private struct SidebarInlineEdit: Equatable {
 }
 
 struct SidebarView: View {
+    @Environment(\.appAccent) private var accent
+
     @EnvironmentObject private var model: AppModel
     @State private var filter = ""
     @State private var mode: SidebarMode = .files
@@ -212,10 +214,10 @@ struct SidebarView: View {
                 // A wash rather than a hard outline. At this size a 2pt accent
                 // border round the whole sidebar reads as an error state.
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.accentColor.opacity(0.10))
+                    .fill(accent.opacity(0.10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1.5)
+                            .strokeBorder(accent.opacity(0.55), lineWidth: 1.5)
                     )
                     // Inset less than the rows are, so the border always falls
                     // in the gap around them rather than across a row.
@@ -731,6 +733,8 @@ private struct FolderMenu: View {
 }
 
 private struct NoteRow: View {
+    @Environment(\.appAccent) private var accent
+
     let name: String
     let detail: String?
     let isSelected: Bool
@@ -825,12 +829,12 @@ private struct NoteRow: View {
                 // Outlined rather than filled, so it reads as "into here"
                 // rather than as a selection.
                 RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .strokeBorder(accent, lineWidth: 2)
                     .background(
-                        RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.12))
+                        RoundedRectangle(cornerRadius: 5).fill(accent.opacity(0.12))
                     )
             } else if isSelected {
-                RoundedRectangle(cornerRadius: 5).fill(Color.accentColor)
+                RoundedRectangle(cornerRadius: 5).fill(accent)
             } else if isHovering {
                 RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
             }

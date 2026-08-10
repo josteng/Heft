@@ -77,6 +77,8 @@ struct QuickOpenView: View {
 }
 
 private struct ResultRow: View {
+    @Environment(\.appAccent) private var accent
+
     let note: NoteRef
     let isSelected: Bool
 
@@ -101,7 +103,7 @@ private struct ResultRow: View {
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            if isSelected { RoundedRectangle(cornerRadius: 6).fill(Color.accentColor) }
+            if isSelected { RoundedRectangle(cornerRadius: 6).fill(accent) }
         }
         .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .contentShape(.rect)

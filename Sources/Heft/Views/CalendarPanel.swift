@@ -454,6 +454,8 @@ struct DailyNotesSettingsView: View {
 }
 
 private struct DayCell: View {
+    @Environment(\.appAccent) private var accent
+
     let date: Date
     let isToday: Bool
     let isSelected: Bool
@@ -471,7 +473,7 @@ private struct DayCell: View {
                     .monospacedDigit()
                     .foregroundStyle(isOutsideMonth ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.primary))
                 Circle()
-                    .fill(hasNote ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.clear))
+                    .fill(hasNote ? AnyShapeStyle(accent) : AnyShapeStyle(.clear))
                     // A padding day's note still gets a dot, but a faint one:
                     // it belongs to a month that is not on screen.
                     .opacity(isOutsideMonth ? 0.4 : 1)
@@ -481,14 +483,14 @@ private struct DayCell: View {
             .frame(height: 22)
             .background {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.25))
+                    RoundedRectangle(cornerRadius: 4).fill(accent.opacity(0.25))
                 } else if isHovering {
                     RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08))
                 }
             }
             .overlay {
                 if isToday {
-                    RoundedRectangle(cornerRadius: 4).stroke(Color.accentColor, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 4).stroke(accent, lineWidth: 1)
                 }
             }
             .contentShape(.rect)

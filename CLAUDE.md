@@ -112,6 +112,22 @@ Three files carry it:
 - **Real-vault syntax that breaks naive parsers:** Obsidian writes `\|` for a literal
   pipe inside tables (`![[chart.png\|500]]`), and brackets can abut links
   (`\[[[Paper Name]]`), where the link is the innermost pair.
+- **`.tint()` does not reach `Color.accentColor`.** It steers stock controls,
+  but a view filling a shape with `Color.accentColor` keeps resolving to the
+  *system* accent, so the calendar dots and sidebar selection ignored the
+  Appearance setting. Views that paint their own highlight read
+  `@Environment(\.appAccent)`; `AppAccent` in `AppearanceSettings.swift` sets
+  both, at each scene root. AppKit views (`WikiCompletionPanel`) are outside
+  SwiftUI's environment entirely and read `AppearanceSettings.shared`.
+- **A custom colour used by a fragment must be resolved at style time**, in
+  `LiveStyler` where `RenderContext` is in scope, and travel with the widget
+  (`headingAccent`, `checkbox`, tag pills all do). Reading
+  `AppearanceSettings.shared` inside `draw` bypasses the restyle-on-change
+  fingerprint in `LiveTextEditor`, so open windows keep the old colour.
+- **`locationForCharacter(at:)` under-reports a position after a kerned
+  character** by a couple of points, an attribute-run boundary falling right
+  there. Tag pills widen the space in front of a tag for room, so they anchor
+  on the character *after* the tag and work backwards from its advance width.
 
 ## Known gaps
 

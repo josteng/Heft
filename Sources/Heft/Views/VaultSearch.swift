@@ -155,6 +155,8 @@ struct VaultSearchView: View {
 }
 
 private struct VaultSearchRow: View {
+    @Environment(\.appAccent) private var accent
+
     let hit: VaultSearchHit
     let query: String
     let isSelected: Bool
@@ -190,7 +192,7 @@ private struct VaultSearchRow: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            if isSelected { RoundedRectangle(cornerRadius: 6).fill(Color.accentColor) }
+            if isSelected { RoundedRectangle(cornerRadius: 6).fill(accent) }
         }
         .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .contentShape(.rect)
@@ -211,7 +213,7 @@ private struct VaultSearchRow: View {
               let lower = AttributedString.Index(range.lowerBound, within: result),
               let upper = AttributedString.Index(range.upperBound, within: result) {
             result[lower..<upper].font = .system(size: 12, weight: .bold)
-            if !isSelected { result[lower..<upper].foregroundColor = .accentColor }
+            if !isSelected { result[lower..<upper].foregroundColor = accent }
             cursor = range.upperBound
         }
         return Text(result)

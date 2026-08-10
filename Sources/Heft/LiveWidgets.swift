@@ -88,7 +88,11 @@ enum CodeBlockEdge: Equatable {
 enum ListGlyph {
     case bullet
     case ordered(String)
-    case checkbox(Bool)
+    /// The accent is resolved at style time, where `RenderContext` is in
+    /// scope, for the same reason `headingAccent` carries its colour: reading
+    /// `AppearanceSettings` here instead would sidestep the restyle-on-change
+    /// path and leave open windows showing the old colour.
+    case checkbox(Bool, accent: NSColor)
 }
 
 /// Widget placement for one restyle pass, keyed by the document offset of the
@@ -97,6 +101,11 @@ struct LiveLayout {
     var blocks: [Int: BlockWidget] = [:]
     /// Formulae drawn inside a line, keyed by that line's start offset.
     var inlineMath: [Int: [(location: Int, image: NSImage)]] = [:]
+    /// Tag pills drawn behind their own text, keyed the same way. The colour
+    /// travels with the range because it is resolved from the render context
+    /// while styling, which is where the user's setting is in scope.
+    var inlineTags: [Int: [(range: NSRange, color: NSColor, font: NSFont, ink: CGRect,
+                            advance: CGFloat)]] = [:]
     /// Ranges of the inline spans that reveal on the caret rather than on their
     /// line. The editor keeps these to tell an ordinary cursor move apart from
     /// one that crosses into or out of a span and so needs a restyle.
@@ -109,7 +118,8 @@ struct LiveLayout {
     var signature: String {
         let blockKeys = blocks.keys.sorted().map(String.init).joined(separator: ",")
         let mathKeys = inlineMath.map { "\($0.key):\($0.value.count)" }.sorted().joined(separator: ",")
-        return blockKeys + "|" + mathKeys
+        let tagKeys = inlineTags.map { "\($0.key):\($0.value.count)" }.sorted().joined(separator: ",")
+        return blockKeys + "|" + mathKeys + "|" + tagKeys
     }
 }
 
@@ -398,6 +408,8 @@ enum CellText {
 final class HeftLayoutFragment: NSTextLayoutFragment {
     var widget: BlockWidget?
     var inlineMath: [(location: Int, image: NSImage)] = []
+    var inlineTags: [(range: NSRange, color: NSColor, font: NSFont, ink: CGRect,
+                      advance: CGFloat)] = []
     var elementStart = 0
 
     /// Vertical breathing room around a drawn block. `LiveStyler` adds twice
@@ -457,6 +469,11 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         default:
             break
         }
+        // A tag pill is wider than the glyphs it sits behind, and the clip is
+        // sized to the glyphs, so without this the rounded ends are shaved off.
+        if !inlineTags.isEmpty {
+            bounds = bounds.insetBy(dx: -(Self.tagPadding + 1), dy: -(Self.tagInset + 1))
+        }
         return bounds
     }
 
@@ -502,6 +519,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         default:
             break
         }
+
+        // Behind the glyphs, so it has to precede the text, not follow it.
+        for tag in inlineTags { drawTagPill(tag, at: point, in: context) }
 
         super.draw(at: point, in: context)
 
@@ -960,7 +980,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
                 ))
             }
 
-        case .checkbox(let checked):
+        case .checkbox(let checked, let accent):
             let side: CGFloat = 13
             let box = CGRect(
                 x: markerCentre - side / 2, y: centreY - side / 2,
@@ -968,7 +988,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             )
             let path = CGPath(roundedRect: box, cornerWidth: 3.5, cornerHeight: 3.5, transform: nil)
             if checked {
-                context.setFillColor(NSColor.controlAccentColor.cgColor)
+                context.setFillColor(accent.cgColor)
                 context.addPath(path)
                 context.fillPath()
                 context.setStrokeColor(NSColor.white.cgColor)
@@ -1036,6 +1056,85 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
                 y: baseline - size.height + max(2, size.height * 0.24)
             )
             paint(item.image, in: CGRect(origin: origin, size: size), context: context)
+            return
+        }
+    }
+
+    /// Horizontal room between a tag's text and the end of its pill, and how
+    /// far the pill extends past the text's ascender and descender.
+    /// `LiveStyler` kerns the neighbouring spaces by `tagPadding` so the pill
+    /// has that room to overhang into, so the two must agree.
+    static let tagPadding: CGFloat = 5
+    private static let tagInset: CGFloat = 1.5
+
+    /// The rounded capsule behind a `#tag`, which is Obsidian's treatment and
+    /// cannot be had from a `.backgroundColor` attribute.
+    private func drawTagPill(
+        _ tag: (range: NSRange, color: NSColor, font: NSFont, ink: CGRect, advance: CGFloat),
+        at point: CGPoint, in context: CGContext
+    ) {
+        let start = tag.range.location - elementStart
+        guard start >= 0 else { return }
+
+        for line in textLineFragments {
+            let lineRange = line.characterRange
+            guard start >= lineRange.location, start < NSMaxRange(lineRange) else { continue }
+
+            // A tag has no spaces in it and so never wraps: it ends on the
+            // line it starts on, and its width is the ink measured at style
+            // time. Taking the width from the *next* character's position
+            // instead would have to clamp at a line's last character, and
+            // would silently come out short for a tag that ends a line.
+            let leading = line.locationForCharacter(at: start).x
+            guard tag.ink.width > 0 else { return }
+
+            // Anchored to the character *after* the tag where there is one.
+            //
+            // `LiveStyler` widens the space in front of a tag to make room for
+            // the pill, and the first character after a widened space comes
+            // back from `locationForCharacter` a couple of points left of
+            // where it is actually drawn — an attribute-run boundary falls
+            // exactly there. Measured: a tag opening a line, with no space in
+            // front to widen, lands dead centre, while the same tag mid
+            // sentence sat 2pt left. The character after the tag is far enough
+            // past that boundary to be reported correctly, so the pill is
+            // placed from its right edge back.
+            let end = NSMaxRange(tag.range) - elementStart
+            let inkStart: CGFloat = if end < NSMaxRange(lineRange) {
+                line.locationForCharacter(at: end).x - tag.advance + tag.ink.minX
+            } else {
+                leading + tag.ink.minX
+            }
+
+            // Horizontally the pill hugs the ink, not the advance box the
+            // glyphs sit in: `#` has a wider side bearing than most letters
+            // end with, so a pill on the advance box looks shifted left.
+            //
+            // Vertically it is sized off the font instead, and deliberately:
+            // ascender to descender is the same band for every tag, whereas
+            // ink is not, and pills that changed height depending on whether
+            // the word happened to contain a `p` would be worse than
+            // slightly uneven ones. A line box is no good either, being
+            // taller than its glyphs with the text sitting at the bottom.
+            let bounds = line.typographicBounds
+            let baseline = point.y + bounds.minY + line.glyphOrigin.y
+            let rect = CGRect(
+                x: point.x + bounds.minX + inkStart - Self.tagPadding,
+                y: baseline - tag.font.ascender - Self.tagInset,
+                width: tag.ink.width + Self.tagPadding * 2,
+                height: tag.font.ascender - tag.font.descender + Self.tagInset * 2
+            )
+            // Safe to resolve here, unlike at styling time: `draw(at:in:)` has
+            // already made the view's appearance current.
+            context.setFillColor(
+                tag.color.withAlphaComponent(Theme.tagBackgroundOpacity).cgColor
+            )
+            context.addPath(CGPath(
+                roundedRect: rect,
+                cornerWidth: rect.height / 2, cornerHeight: rect.height / 2,
+                transform: nil
+            ))
+            context.fillPath()
             return
         }
     }

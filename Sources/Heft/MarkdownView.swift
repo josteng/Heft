@@ -281,6 +281,7 @@ private struct TransclusionView: View {
                         colorfulFormatting: context.colorfulFormatting,
                         accentColor: context.accentColor,
                         linkColor: context.linkColor,
+                tagColor: context.tagColor,
                         codeColor: context.codeColor,
                         boldColor: context.boldColor,
                         italicColor: context.italicColor,

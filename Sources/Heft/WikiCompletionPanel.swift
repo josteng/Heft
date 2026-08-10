@@ -115,7 +115,13 @@ private final class WikiCompletionRow: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
-        layer?.backgroundColor = selected ? NSColor.controlAccentColor.cgColor : nil
+        // Read straight from the settings rather than tinted by the
+        // environment: this row is AppKit, so the scene's `appAccentTint` does
+        // not reach it. The panel is rebuilt each time it opens, so it picks
+        // up a changed accent without needing to observe anything.
+        layer?.backgroundColor = selected
+            ? AppearanceSettings.shared.accentColor.cgColor
+            : nil
 
         icon.image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .medium))

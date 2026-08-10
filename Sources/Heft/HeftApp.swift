@@ -25,6 +25,7 @@ struct HeftApp: App {
         WindowGroup("Heft", for: WorkspaceDescriptor.self) { $descriptor in
             WorkspaceSceneRoot(descriptor: $descriptor)
                 .environmentObject(registry)
+                .appAccentTint()
         }
         .windowToolbarStyle(.unified(showsTitle: true))
         .defaultSize(width: 1500, height: 950)
@@ -32,7 +33,7 @@ struct HeftApp: App {
 
         Window("Presentation", id: "presentation") {
             if let model = registry.presentationModel {
-                PresentationView().environmentObject(model)
+                PresentationView().environmentObject(model).appAccentTint()
             } else {
                 ContentUnavailableView("No Presentation", systemImage: "play.rectangle")
             }
@@ -40,7 +41,7 @@ struct HeftApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 720)
 
-        Settings { SettingsWindow() }
+        Settings { SettingsWindow().appAccentTint() }
     }
 }
 

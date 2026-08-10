@@ -15,6 +15,7 @@ struct RenderContext {
     /// same values `AppearanceSettings` falls back to when nothing is set.
     var accentColor: NSColor = AppearanceSettings.defaultAccentColor
     var linkColor: NSColor = AppearanceSettings.defaultAccentColor
+    var tagColor: NSColor = AppearanceSettings.defaultAccentColor
     var codeColor: NSColor = AppearanceSettings.defaultCodeColor
     var boldColor: NSColor = AppearanceSettings.defaultBoldColor
     var italicColor: NSColor = AppearanceSettings.defaultItalicColor
@@ -223,8 +224,15 @@ enum InlineText {
                 case .tag(let name):
                     var run = AttributedString("#\(name)")
                     run.font = baseFont
-                    run.foregroundColor = Theme.tagColor
-                    run.backgroundColor = Theme.tagBackground
+                    run.foregroundColor = Color(nsColor: context.tagColor)
+                    // Square-cornered, unlike the live surface's rounded
+                    // pill: an `AttributedString` background is a plain
+                    // rectangle, and the only way round that is to break the
+                    // tag out into its own view, which would take it out of
+                    // the text flow and stop the paragraph wrapping through
+                    // it.
+                    run.backgroundColor = Color(nsColor: context.tagColor)
+                        .opacity(Theme.tagBackgroundOpacity)
                     buffer += run
 
                 case .softBreak:

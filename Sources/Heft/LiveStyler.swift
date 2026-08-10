@@ -510,7 +510,7 @@ enum LiveStyler {
             if drawsWidgets, !revealed {
                 let glyph: ListGlyph = switch kind {
                 case .bullet: .bullet
-                case .task(let checked): .checkbox(checked)
+                case .task(let checked): .checkbox(checked, accent: context.accentColor)
                 case .ordered: .ordered(orderedLabel(marker))
                 }
                 layout.blocks[line.location] = .list(
@@ -577,10 +577,42 @@ enum LiveStyler {
             storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: range)
 
         case .tag:
-            storage.addAttributes([
-                .foregroundColor: NSColor.systemPurple,
-                .backgroundColor: NSColor.systemPurple.withAlphaComponent(0.14),
-            ], range: range)
+            // The pill behind it is drawn by the layout fragment, not set as
+            // a `.backgroundColor`: that attribute can only ever paint a
+            // square-cornered box tight around the glyphs, and a tag wants
+            // Obsidian's rounded capsule with a little room inside it.
+            storage.addAttribute(.foregroundColor, value: context.tagColor, range: range)
+
+            // The pill is drawn wider than its text, and drawing alone
+            // reserves no room, so without this it laps over the spaces on
+            // either side and all but touches the words next to it. Kerning
+            // the neighbouring space widens it by as much as the pill
+            // overhangs, which puts the overhang in space that now exists.
+            // Only against a space: at the very start of a line there is
+            // nothing to widen, and a tag butted against punctuation is
+            // better overlapping slightly than shoved out of alignment.
+            for neighbour in [range.location - 1, NSMaxRange(range)] {
+                guard neighbour >= 0, neighbour < storage.length else { continue }
+                let spot = NSRange(location: neighbour, length: 1)
+                guard text.substring(with: spot) == " " else { continue }
+                storage.addAttribute(.kern, value: HeftLayoutFragment.tagPadding, range: spot)
+            }
+
+            // Where the tag's ink actually falls inside the space its glyphs
+            // advance through. Centring the pill on the advance box instead
+            // left it visibly skewed: `#` carries a wider side bearing than
+            // most letters end with, so the drawn text sits right of that
+            // box's centre. Ink bounds are what the eye is judging.
+            let font = (storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont)
+                ?? base
+            let line = CTLineCreateWithAttributedString(
+                NSAttributedString(string: text.substring(with: range), attributes: [.font: font])
+            )
+            let lineStart = text.lineRange(for: NSRange(location: range.location, length: 0)).location
+            layout.inlineTags[lineStart, default: []].append(
+                (range, context.tagColor, font, CTLineGetImageBounds(line, nil),
+                 CTLineGetTypographicBounds(line, nil, nil, nil))
+            )
 
         case .inlineMath, .blockMath:
             monospace(storage, range: range, delta: -1, base: base, color: .systemTeal)

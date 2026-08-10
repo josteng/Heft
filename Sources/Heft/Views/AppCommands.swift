@@ -210,6 +210,8 @@ struct CommandPaletteView: View {
 }
 
 private struct CommandRow: View {
+    @Environment(\.appAccent) private var accent
+
     let command: AppCommand
     let title: String
     let isSelected: Bool
@@ -237,7 +239,7 @@ private struct CommandRow: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            if isSelected { RoundedRectangle(cornerRadius: 6).fill(Color.accentColor) }
+            if isSelected { RoundedRectangle(cornerRadius: 6).fill(accent) }
         }
         .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .opacity(isEnabled ? 1 : 0.45)

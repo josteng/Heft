@@ -299,6 +299,7 @@ struct EditorPane: View {
             colorfulFormatting: appearance.colorfulFormattingEnabled,
             accentColor: appearance.accentColor,
             linkColor: appearance.linkColor,
+            tagColor: appearance.tagColor,
             codeColor: appearance.codeColor,
             boldColor: appearance.boldColor,
             italicColor: appearance.italicColor,

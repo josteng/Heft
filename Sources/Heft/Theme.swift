@@ -74,8 +74,9 @@ enum Theme {
     // `RenderContext.accentColor`/`boldColor`/`italicColor` instead of a
     // fixed constant here.
     static let codeBackground = Color(nsColor: .quaternarySystemFill)
-    static let tagColor = Color.purple
-    static let tagBackground = Color.purple.opacity(0.14)
+    /// How strongly a tag's own colour tints the pill behind it. Shared by
+    /// the live surface and the reading view so the two match.
+    static let tagBackgroundOpacity = 0.14
     static let highlightBackground = Color.yellow.opacity(0.30)
 
     // Heading accent colours are user-customisable via the Appearance

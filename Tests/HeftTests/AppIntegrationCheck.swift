@@ -64,7 +64,8 @@ enum AppIntegrationCheck {
 
         let customContext = RenderContext(
             index: .empty, current: nil, vaultRoot: nil, colorfulFormatting: true,
-            accentColor: .systemBlue, linkColor: .systemIndigo, codeColor: .systemBrown,
+            accentColor: .systemBlue, linkColor: .systemIndigo, tagColor: .systemTeal,
+            codeColor: .systemBrown,
             boldColor: .systemGreen, italicColor: .systemPurple,
             headingColors: [.black, .darkGray, .gray, .lightGray, .white, .clear]
         )
@@ -84,6 +85,30 @@ enum AppIntegrationCheck {
             foregroundColor("[[Nowhere]]", at: 2, context: customContext)
                 == NSColor.systemIndigo.withAlphaComponent(0.55),
             "link colour dims correctly for an unresolved link, independent of accent colour"
+        )
+
+        expect(
+            foregroundColor("#project", at: 3, context: customContext) == NSColor.systemTeal,
+            "a custom tag colour from Appearance settings reaches the live surface"
+        )
+
+        // The pill behind a tag is drawn by the layout fragment rather than
+        // set as a background attribute, so it is the layout that has to
+        // carry it, and in the tag's own colour.
+        func tagPill(_ source: String, context: RenderContext) -> (NSRange, NSColor, NSFont, CGRect, CGFloat)? {
+            let storage = NSTextStorage(string: source)
+            let layout = LiveStyler.apply(to: storage, reveal: .none, context: context)
+            return layout.inlineTags.values.first?.first
+        }
+        let pill = tagPill("see #project here", context: customContext)
+        expect(pill?.1 == NSColor.systemTeal, "a tag pill is drawn in the tag colour")
+        expect(
+            pill.map { NSMaxRange($0.0) <= 12 && $0.0.location == 4 } ?? false,
+            "the tag pill covers the tag itself, not the words around it"
+        )
+        expect(
+            tagPill("nothing to see here", context: customContext) == nil,
+            "no tag pill is drawn for a line without a tag"
         )
 
         func headingAccentColor(_ source: String, context: RenderContext) -> NSColor? {

@@ -118,7 +118,7 @@ struct LiveTextEditor: NSViewRepresentable {
         // disk. Without this an embed styled before the index arrived stays an
         // unresolved orange filename instead of becoming a picture.
         let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-            + "\(context.colorfulFormatting)/\(context.accentColor)/\(context.linkColor)/"
+            + "\(context.colorfulFormatting)/\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
             + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/\(context.headingColors)"
         if nsContext.coordinator.indexFingerprint != fingerprint {
             nsContext.coordinator.indexFingerprint = fingerprint
@@ -402,6 +402,7 @@ extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
         fragment.elementStart = start
         fragment.widget = layout.blocks[start]
         fragment.inlineMath = layout.inlineMath[start] ?? []
+        fragment.inlineTags = layout.inlineTags[start] ?? []
         return fragment
     }
 }

@@ -21,6 +21,7 @@ struct PresentationView: View {
             colorfulFormatting: appearance.colorfulFormattingEnabled,
             accentColor: appearance.accentColor,
             linkColor: appearance.linkColor,
+            tagColor: appearance.tagColor,
             codeColor: appearance.codeColor,
             boldColor: appearance.boldColor,
             italicColor: appearance.italicColor,
@@ -93,13 +94,15 @@ struct PresentationView: View {
 }
 
 private struct ProgressBar: View {
+    @Environment(\.appAccent) private var accent
+
     let value: Double
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Color.primary.opacity(0.12)
-                Color.accentColor
+                accent
                     .frame(width: geometry.size.width * value)
                     .animation(.easeInOut(duration: 0.42), value: value)
             }

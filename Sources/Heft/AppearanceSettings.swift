@@ -32,6 +32,12 @@ final class AppearanceSettings: ObservableObject {
     @Published var customLinkColor: NSColor? {
         didSet { Self.persist(customLinkColor, key: Self.linkKey) }
     }
+    /// Falls back to the accent colour for the same reason links do: a tag is
+    /// something to click through, and reads as one when it shares their
+    /// colour.
+    @Published var customTagColor: NSColor? {
+        didSet { Self.persist(customTagColor, key: Self.tagKey) }
+    }
     @Published var customCodeColor: NSColor? {
         didSet { Self.persist(customCodeColor, key: Self.codeKey) }
     }
@@ -63,6 +69,7 @@ final class AppearanceSettings: ObservableObject {
 
     var accentColor: NSColor { customAccentColor ?? Self.defaultAccentColor }
     var linkColor: NSColor { customLinkColor ?? accentColor }
+    var tagColor: NSColor { customTagColor ?? accentColor }
     var codeColor: NSColor { customCodeColor ?? Self.defaultCodeColor }
     var boldColor: NSColor { customBoldColor ?? Self.defaultBoldColor }
     var italicColor: NSColor { customItalicColor ?? Self.defaultItalicColor }
@@ -78,6 +85,7 @@ final class AppearanceSettings: ObservableObject {
 
     private static let accentKey = "dev.stenglein.Heft.appearance.accentColor"
     private static let linkKey = "dev.stenglein.Heft.appearance.linkColor"
+    private static let tagKey = "dev.stenglein.Heft.appearance.tagColor"
     private static let codeKey = "dev.stenglein.Heft.appearance.codeColor"
     private static let boldKey = "dev.stenglein.Heft.appearance.boldColor"
     private static let italicKey = "dev.stenglein.Heft.appearance.italicColor"
@@ -89,6 +97,7 @@ final class AppearanceSettings: ObservableObject {
     private init() {
         customAccentColor = Self.load(Self.accentKey)
         customLinkColor = Self.load(Self.linkKey)
+        customTagColor = Self.load(Self.tagKey)
         customCodeColor = Self.load(Self.codeKey)
         customBoldColor = Self.load(Self.boldKey)
         customItalicColor = Self.load(Self.italicKey)
@@ -116,6 +125,47 @@ final class AppearanceSettings: ObservableObject {
     }
 }
 
+/// Applies the chosen accent colour to a whole scene.
+///
+/// SwiftUI resolves `Color.accentColor` and every stock control's highlight
+/// from the environment, so tinting once at a scene's root reaches the
+/// calendar, the sidebar's selection, Quick Open, search and the rest without
+/// each of them having to know the setting exists. Only drawing that bypasses
+/// SwiftUI — the AppKit completion panel, the editor's own widgets — has to
+/// read `AppearanceSettings` for itself.
+/// The accent colour to paint with, for views that draw their own highlight
+/// rather than letting a stock control do it.
+///
+/// `.tint` alone was not enough: it steers stock controls, but SwiftUI's
+/// `Color.accentColor` kept resolving to the *system* accent, so the calendar
+/// dots and the sidebar's selection ignored the setting. Views that fill a
+/// shape themselves read this instead of `Color.accentColor`.
+private struct AppAccentKey: EnvironmentKey {
+    static let defaultValue = Color(nsColor: AppearanceSettings.defaultAccentColor)
+}
+
+extension EnvironmentValues {
+    var appAccent: Color {
+        get { self[AppAccentKey.self] }
+        set { self[AppAccentKey.self] = newValue }
+    }
+}
+
+private struct AppAccent: ViewModifier {
+    @ObservedObject private var appearance = AppearanceSettings.shared
+
+    func body(content: Content) -> some View {
+        let accent = Color(nsColor: appearance.accentColor)
+        return content.tint(accent).environment(\.appAccent, accent)
+    }
+}
+
+extension View {
+    /// Tints this scene with the user's accent colour. Belongs at a scene
+    /// root; anywhere deeper and the views above it keep the system accent.
+    func appAccentTint() -> some View { modifier(AppAccent()) }
+}
+
 /// The app-wide Settings scene's root (⌘,). Per-vault configuration (Daily
 /// Notes) is deliberately not a tab here — it stays the per-window sheet it
 /// always was, on `AppModel` — since this scene has no reliable way to know
@@ -135,7 +185,7 @@ struct SettingsWindow: View {
             AppearanceSettingsView()
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(width: 620)
+        .frame(width: 630)
     }
 }
 
@@ -150,36 +200,49 @@ struct AppearanceSettingsView: View {
         // from the other two. A `Grid` shares one column width across every
         // `GridRow`, and the fixed frames below keep every swatch and every
         // Reset button the same size regardless of its row's text length.
-        VStack(alignment: .leading, spacing: 20) {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
-                colorRow(
-                    "Accent Color",
-                    detail: "The caret and checkboxes. Follows your macOS accent colour, "
-                        + "not a fixed colour, unless set here.",
-                    color: settableBinding(current: appearance.accentColor) { appearance.customAccentColor = $0 },
-                    isCustom: appearance.customAccentColor != nil,
-                    reset: { appearance.customAccentColor = nil },
-                    resetHelp: "Follow your macOS accent colour again"
-                )
-                colorRow(
-                    "Link Color",
-                    detail: "Defaults to Accent Color above; set here to use a different "
-                        + "colour just for links.",
-                    color: settableBinding(current: appearance.linkColor) { appearance.customLinkColor = $0 },
-                    isCustom: appearance.customLinkColor != nil,
-                    reset: { appearance.customLinkColor = nil },
-                    resetHelp: "Follow Accent Color again"
-                )
-                colorRow(
-                    "Code Color",
-                    detail: "For inline `code` spans.",
-                    color: settableBinding(current: appearance.codeColor) { appearance.customCodeColor = $0 },
-                    isCustom: appearance.customCodeColor != nil,
-                    reset: { appearance.customCodeColor = nil },
-                    resetHelp: "Reset to pink"
-                )
-            }
+        // One `Grid` for every row, not two, so the label column — and
+        // therefore where every swatch starts — is sized from all six rows
+        // together. Two separate `Grid`s here previously sized their label
+        // columns independently, so Bold/Italic/Heading (short labels)
+        // drifted away from Reset compared to Accent/Link/Code (long ones).
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+            colorRow(
+                "Accent Color",
+                detail: "The caret and checkboxes. Follows your macOS accent colour, "
+                    + "not a fixed colour, unless set here.",
+                color: settableBinding(current: appearance.accentColor) { appearance.customAccentColor = $0 },
+                isCustom: appearance.customAccentColor != nil,
+                reset: { appearance.customAccentColor = nil },
+                resetHelp: "Follow your macOS accent colour again"
+            )
+            colorRow(
+                "Link Color",
+                detail: "Defaults to Accent Color above; set here to use a different "
+                    + "colour just for links.",
+                color: settableBinding(current: appearance.linkColor) { appearance.customLinkColor = $0 },
+                isCustom: appearance.customLinkColor != nil,
+                reset: { appearance.customLinkColor = nil },
+                resetHelp: "Follow Accent Color again"
+            )
+            colorRow(
+                "Tag Color",
+                detail: "For #tags and the pill behind them. Defaults to Accent Color above.",
+                color: settableBinding(current: appearance.tagColor) { appearance.customTagColor = $0 },
+                isCustom: appearance.customTagColor != nil,
+                reset: { appearance.customTagColor = nil },
+                resetHelp: "Follow Accent Color again"
+            )
+            colorRow(
+                "Code Color",
+                detail: "For inline `code` spans.",
+                color: settableBinding(current: appearance.codeColor) { appearance.customCodeColor = $0 },
+                isCustom: appearance.customCodeColor != nil,
+                reset: { appearance.customCodeColor = nil },
+                resetHelp: "Reset to pink"
+            )
 
+            // A view given directly to `Grid`, not wrapped in `GridRow`,
+            // spans every column automatically.
             Divider()
 
             Toggle(isOn: $appearance.colorfulFormattingEnabled) {
@@ -192,7 +255,7 @@ struct AppearanceSettingsView: View {
             }
             .toggleStyle(.checkbox)
 
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+            Group {
                 colorRow(
                     "Bold Color",
                     detail: "For **bold** text.",
@@ -219,7 +282,7 @@ struct AppearanceSettingsView: View {
             .opacity(appearance.colorfulFormattingEnabled ? 1 : 0.4)
         }
         .padding(20)
-        .frame(width: 620, alignment: .leading)
+        .frame(width: 630, alignment: .leading)
     }
 
     /// `ColorPicker` can round-trip a dynamic system colour to a concrete
@@ -250,16 +313,28 @@ struct AppearanceSettingsView: View {
         reset: @escaping () -> Void, resetHelp: String
     ) -> some View {
         GridRow {
+            // A fixed width, not `maxWidth: .infinity`: an infinitely
+            // flexible column makes the whole `Grid` stretch to fill this
+            // pane's outer frame, and since the text itself does not need
+            // that much room, the swatch column it pushed the label column's
+            // *allocated* width to be far wider than the *visible* text,
+            // leaving a dead gap before the swatch that had nothing to do
+            // with wrapping.
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(detail).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: Self.labelColumnWidth, alignment: .leading)
 
+            // Right-anchored rather than a plain fixed frame: the shared
+            // swatch column is as wide as the heading-colour pill, which is
+            // wider than one swatch, and it should still sit next to Reset
+            // rather than float at the column's left edge.
             ColorPicker("", selection: color, supportsOpacity: false)
                 .labelsHidden()
                 .frame(width: 44, height: 22)
+                .frame(width: Self.swatchColumnWidth, alignment: .trailing)
 
             Button("Reset", action: reset)
                 .disabled(!isCustom)
@@ -268,12 +343,33 @@ struct AppearanceSettingsView: View {
         }
     }
 
+    /// Fixed widths for both non-Reset columns, shared by `colorRow` and
+    /// `headingColorsRow`: see the comment in `colorRow` for why these are
+    /// not `maxWidth: .infinity`. `swatchColumnWidth` fits the six-segment
+    /// heading pill (6 × 30pt segments + 5 × 1pt gaps) with a little slack.
+    private static let labelColumnWidth: CGFloat = 300
+    private static let swatchColumnWidth: CGFloat = 190
+
+    /// A heading segment, plus the border around the whole pill, comes to
+    /// the same 18pt of colour inside a 3pt band that a single swatch above
+    /// draws, so the pill reads as one more control in the same column
+    /// rather than a differently built thing of its own kind. Six segments
+    /// and their border stay inside `swatchColumnWidth`.
+    private static let headingSegmentWidth: CGFloat = 29
+    private static let headingSegmentHeight: CGFloat = 18
+    private static let headingBorderWidth: CGFloat = 3
+    private static let headingSeparatorWidth: CGFloat = 2
+
+    /// A colour well darkens the outermost 1pt of its fill by about 8%, on
+    /// all four sides — measured off a screenshot of one, not guessed. The
+    /// pill reproduces it so its segments are shaded like every other
+    /// swatch in the column instead of looking flatly printed.
+    private static let edgeShadingOpacity: Double = 0.08
+    private static let edgeShadingWidth: CGFloat = 1
+
     /// Six full rows for h1–h6 would dwarf everything else in this pane, so
     /// this is one row of small swatches instead, with a single Reset that
-    /// clears all six back to the built-in rainbow at once. Needs the wider
-    /// window (`SettingsWindow`'s 620pt, up from 420pt) to give six swatches
-    /// real spacing without crowding Reset — they looked cramped at the
-    /// narrower width even before adding a sixth colour to the row.
+    /// clears all six back to the built-in rainbow at once.
     @ViewBuilder
     private func headingColorsRow() -> some View {
         GridRow {
@@ -283,9 +379,16 @@ struct AppearanceSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: Self.labelColumnWidth, alignment: .leading)
 
-            HStack(spacing: 8) {
+            // One connected pill — rounded at the two outer ends, square
+            // where segments meet — rather than six independent swatches,
+            // since h1–h6 read as one sequence, not six unrelated choices.
+            // A 1pt gap keeps each segment's click target legible without
+            // breaking the pill silhouette. Right-anchored, like the single
+            // swatches above, so it sits next to Reset instead of floating
+            // at the shared column's left edge.
+            HStack(spacing: Self.headingSeparatorWidth) {
                 ForEach(1...6, id: \.self) { level in
                     ColorPicker(
                         "",
@@ -297,15 +400,88 @@ struct AppearanceSettingsView: View {
                         supportsOpacity: false
                     )
                     .labelsHidden()
-                    .frame(width: 22, height: 22)
-                    // `ColorPicker`'s native swatch is a pill shape that
-                    // ignores this frame and bleeds into neighbouring space,
-                    // so six of them touch regardless of HStack spacing.
-                    // Clipping stops the bleed and lets the spacing show.
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .frame(width: Self.headingSegmentWidth, height: Self.headingSegmentHeight)
+                    // Each picker draws its own bordered pill, which is the
+                    // chrome a single swatch above wants and a segment of a
+                    // shared pill does not: six of them stacked up as six
+                    // borders. At this size the well fills the segment and
+                    // the clip takes that chrome off, leaving flat colour
+                    // and a control that is still a stock colour well
+                    // opening the stock panel.
+                    .clipShape(Rectangle())
                     .help("Heading \(level)")
                 }
             }
+            // The rounded ends are cut from the whole row rather than from
+            // its first and last segment: rounding the end segments meant
+            // two radii that had to agree, and the row is taller than a
+            // 22pt swatch (that native chrome again), so its capsule bowed
+            // wider than the segments' own corners and bared a crescent at
+            // each end.
+            // Divides the segments in the same grey as the border, rather
+            // than letting the pane show through, so the pill is one
+            // control with rules in it and not six chips that happen to sit
+            // in a row. The rules stay a step narrower than the border,
+            // which is how a segmented control divides itself.
+            // Shades each segment's edge where it meets a separator, in the
+            // 1pt of 8% black a colour well darkens its own fill edge by.
+            //
+            // It has to be drawn from out here, over the whole row, rather
+            // than by each segment over itself: a colour well is an AppKit
+            // control, and a `.overlay` hung on one composites underneath
+            // it, so a segment cannot draw on top of its own fill. An
+            // overlay on the row draws above all six. Hence the geometry is
+            // restated here instead of just aligning to each segment.
+            .overlay {
+                HStack(spacing: 0) {
+                    ForEach(1...6, id: \.self) { level in
+                        HStack(spacing: 0) {
+                            Color.black
+                                .opacity(level == 1 ? 0 : Self.edgeShadingOpacity)
+                                .frame(width: Self.edgeShadingWidth)
+                            Spacer(minLength: 0)
+                            Color.black
+                                .opacity(level == 6 ? 0 : Self.edgeShadingOpacity)
+                                .frame(width: Self.edgeShadingWidth)
+                        }
+                        .frame(width: Self.headingSegmentWidth)
+
+                        if level < 6 {
+                            Color.clear.frame(width: Self.headingSeparatorWidth)
+                        }
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .background(.separator)
+            .frame(height: Self.headingSegmentHeight)
+            .clipShape(Capsule())
+            // Top, bottom and the two curved ends of the same 1pt shading
+            // the segments carry between themselves, so the fill is ringed
+            // by it on every side exactly as a colour well's fill is.
+            .overlay(
+                Capsule().strokeBorder(
+                    Color.black.opacity(Self.edgeShadingOpacity),
+                    lineWidth: Self.edgeShadingWidth
+                )
+            )
+            // The border goes around the outside of the colours, not over
+            // them. `strokeBorder` draws inside its shape, so stroking the
+            // capsule the colours are clipped to put the grey straight onto
+            // saturated red and purple at the two ends, where it vanished.
+            // Padding first strokes a slightly larger capsule (a uniform
+            // offset of a capsule is another capsule), so the border sits
+            // on the pane's own background the whole way round and never
+            // has to out-contrast a fill.
+            //
+            // The width matches what a colour well actually draws, read off
+            // a screenshot rather than guessed: a 3pt band, hard against
+            // the fill, in exactly the grey `separator` already resolves
+            // to. Padding and line width are equal so the border fills that
+            // band entirely, leaving no gap the single swatches don't have.
+            .padding(Self.headingBorderWidth)
+            .overlay(Capsule().strokeBorder(.separator, lineWidth: Self.headingBorderWidth))
+            .frame(width: Self.swatchColumnWidth, alignment: .trailing)
 
             Button("Reset", action: appearance.resetHeadingColors)
                 .disabled(!appearance.hasCustomHeadingColor)
