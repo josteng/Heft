@@ -52,7 +52,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = false
         textView.isAutomaticDataDetectionEnabled = false
         textView.usesFindBar = false
-        textView.insertionPointColor = .controlAccentColor
+        textView.insertionPointColor = context.accentColor
         textView.textContainerInset = NSSize(width: 28, height: 28)
         textView.linkTextAttributes = [:]
         textView.delegate = nsContext.coordinator
@@ -97,6 +97,7 @@ struct LiveTextEditor: NSViewRepresentable {
         nsContext.coordinator.parent = self
         textView.onAttachment = onAttachment
         textView.completionIndex = context.index
+        textView.insertionPointColor = context.accentColor
         textView.updateLinkCompletion(allowStart: false)
 
         // `string` includes the input method's marked text, while the SwiftUI
@@ -116,7 +117,9 @@ struct LiveTextEditor: NSViewRepresentable {
         // after the first restyle and is rebuilt whenever the vault changes on
         // disk. Without this an embed styled before the index arrived stays an
         // unresolved orange filename instead of becoming a picture.
-        let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/\(context.colorfulFormatting)"
+        let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
+            + "\(context.colorfulFormatting)/\(context.accentColor)/\(context.linkColor)/"
+            + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/\(context.headingColors)"
         if nsContext.coordinator.indexFingerprint != fingerprint {
             nsContext.coordinator.indexFingerprint = fingerprint
             nsContext.coordinator.restyle(textView)

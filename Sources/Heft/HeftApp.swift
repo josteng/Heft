@@ -39,6 +39,8 @@ struct HeftApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 720)
+
+        Settings { SettingsWindow() }
     }
 }
 
@@ -85,6 +87,7 @@ struct HeftCommands: Commands {
     let registry: VaultRegistry
     @FocusedValue(\.workspaceModel) private var model
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var appearance = AppearanceSettings.shared
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -167,7 +170,7 @@ struct HeftCommands: Commands {
                     AppCommandShortcut.toggleCalendar.key,
                     modifiers: AppCommandShortcut.toggleCalendar.modifiers
                 )
-            Toggle("Colorful Formatting", isOn: binding(\.isColorfulFormattingEnabled))
+            Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
             Toggle("Show Backlinks", isOn: binding(\.isInspectorVisible))
                 .keyboardShortcut("b", modifiers: [.command, .option])
         }

@@ -4,6 +4,7 @@ import SwiftUI
 /// Incoming links to the open note, plus its unresolved outgoing links.
 struct BacklinksPanel: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var appearance = AppearanceSettings.shared
 
     private var backlinks: [Backlink] {
         guard let current = model.current else { return [] }
@@ -55,7 +56,7 @@ struct BacklinksPanel: View {
                                 .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(Theme.unresolvedLinkColor)
+                            .foregroundStyle(Color(nsColor: appearance.linkColor.withAlphaComponent(0.55)))
                             .help("Create this note")
                         }
                     }
@@ -97,6 +98,7 @@ struct BacklinksPanel: View {
 
 private struct BacklinkGroup: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var appearance = AppearanceSettings.shared
     let note: NoteRef
     let links: [Backlink]
 
@@ -139,7 +141,7 @@ private struct BacklinkGroup: View {
             guard case .link(let link) = segment else { continue }
             let needle = link.displayText
             guard !needle.isEmpty, let range = attributed.range(of: needle) else { continue }
-            attributed[range].foregroundColor = .accentColor
+            attributed[range].foregroundColor = Color(nsColor: appearance.linkColor)
             attributed[range].font = .system(size: 11, weight: .medium)
         }
         return attributed

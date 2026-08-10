@@ -69,37 +69,18 @@ enum Theme {
     /// rendered block for its source does not visibly reflow the page.
     static let blockEditorFont = NSFont.systemFont(ofSize: bodySize)
 
-    static let linkColor = Color.accentColor
-    /// Links pointing at a note that does not exist yet; clicking one offers to create it.
-    static let unresolvedLinkColor = Color.orange
+    // Link, unresolved-link, bold, and italic colours are user-customisable
+    // via the Appearance settings pane; see `AppearanceSettings` and
+    // `RenderContext.accentColor`/`boldColor`/`italicColor` instead of a
+    // fixed constant here.
     static let codeBackground = Color(nsColor: .quaternarySystemFill)
     static let tagColor = Color.purple
     static let tagBackground = Color.purple.opacity(0.14)
     static let highlightBackground = Color.yellow.opacity(0.30)
-    static let emphasisColor = Color.orange
-    static let strongColor = Color.red
 
-    static func headingAccent(_ level: Int) -> Color {
-        switch level {
-        case 1: .red
-        case 2: .orange
-        case 3: .yellow
-        case 4: .green
-        case 5: .blue
-        default: .purple
-        }
-    }
-
-    static func headingAccentNSColor(_ level: Int) -> NSColor {
-        switch level {
-        case 1: .systemRed
-        case 2: .systemOrange
-        case 3: .systemYellow
-        case 4: .systemGreen
-        case 5: .systemBlue
-        default: .systemPurple
-        }
-    }
+    // Heading accent colours are user-customisable via the Appearance
+    // settings pane; see `AppearanceSettings.headingColor(_:)` and
+    // `RenderContext.headingColor(_:)` instead of a fixed switch here.
 
     /// AppKit twin of `calloutTint`, for the editor's own drawing. A callout
     /// whose kind Obsidian does not know still gets a card, in grey.

@@ -11,6 +11,21 @@ struct RenderContext {
     /// Mirrors the vault's Obsidian setting; see `ObsidianSettings`.
     var strictLineBreaks: Bool = false
     var colorfulFormatting: Bool = false
+    /// User-customisable via the Appearance settings pane; default to the
+    /// same values `AppearanceSettings` falls back to when nothing is set.
+    var accentColor: NSColor = AppearanceSettings.defaultAccentColor
+    var linkColor: NSColor = AppearanceSettings.defaultAccentColor
+    var codeColor: NSColor = AppearanceSettings.defaultCodeColor
+    var boldColor: NSColor = AppearanceSettings.defaultBoldColor
+    var italicColor: NSColor = AppearanceSettings.defaultItalicColor
+    /// h1 through h6, in order.
+    var headingColors: [NSColor] = AppearanceSettings.defaultHeadingColors
+
+    /// - Parameter level: 1-based heading level, as written in Markdown (h1…h6+).
+    func headingColor(_ level: Int) -> NSColor {
+        let index = min(max(level, 1), headingColors.count) - 1
+        return headingColors[index]
+    }
     /// The appearance the surface is actually drawn in.
     ///
     /// System colours are dynamic, and resolving one *outside* a drawing
@@ -133,9 +148,7 @@ enum InlineText {
             for inline in list {
                 switch inline {
                 case .text(let s):
-                    buffer += styled(
-                        s, style, baseFont, colorfulFormatting: context.colorfulFormatting
-                    )
+                    buffer += styled(s, style, baseFont, context: context)
 
                 case .emphasis(let c):
                     append(c, style.with(italic: true))
@@ -150,22 +163,23 @@ enum InlineText {
                     var run = AttributedString(s)
                     run.font = Theme.mono(scale: fontScale)
                     run.backgroundColor = Theme.codeBackground
+                    run.foregroundColor = Color(nsColor: context.codeColor)
                     if let link = style.link { run.link = link }
                     buffer += run
 
                 case .link(let destination, let children):
                     let url = destination.flatMap { URL(string: $0) }
-                    append(children, style.with(link: url, color: Theme.linkColor))
+                    append(children, style.with(link: url, color: Color(nsColor: context.linkColor)))
 
                 case .wikiLink(let link):
                     let resolved = context.resolve(link)
                     let url = heftURL(target: linkTarget(link))
+                    let linkColor = resolved == nil
+                        ? Color(nsColor: context.linkColor.withAlphaComponent(0.55))
+                        : Color(nsColor: context.linkColor)
                     append(
                         [.text(link.displayText)],
-                        style.with(
-                            link: url,
-                            color: resolved == nil ? Theme.unresolvedLinkColor : Theme.linkColor
-                        )
+                        style.with(link: url, color: linkColor)
                     )
 
                 case .image(let source, let alt):
@@ -173,12 +187,7 @@ enum InlineText {
                         flush()
                         pieces.append(.image(url: url, width: nil, height: nil, alt: alt))
                     } else {
-                        buffer += styled(
-                            alt.isEmpty ? "🖼︎" : alt,
-                            style,
-                            baseFont,
-                            colorfulFormatting: context.colorfulFormatting
-                        )
+                        buffer += styled(alt.isEmpty ? "🖼︎" : alt, style, baseFont, context: context)
                     }
 
                 case .embed(let link):
@@ -199,7 +208,7 @@ enum InlineText {
                             display ? "$$\(latex)$$" : "$\(latex)$",
                             style.with(highlight: false),
                             Theme.mono(scale: fontScale),
-                            colorfulFormatting: context.colorfulFormatting
+                            context: context
                         )
                         continue
                     }
@@ -287,7 +296,7 @@ enum InlineText {
         _ string: String,
         _ style: Style,
         _ baseFont: Font,
-        colorfulFormatting: Bool
+        context: RenderContext
     ) -> AttributedString {
         var run = AttributedString(string)
         var font = baseFont
@@ -298,10 +307,10 @@ enum InlineText {
         if style.highlight { run.backgroundColor = Theme.highlightBackground }
         if let color = style.color {
             run.foregroundColor = color
-        } else if colorfulFormatting, style.bold {
-            run.foregroundColor = Theme.strongColor
-        } else if colorfulFormatting, style.italic {
-            run.foregroundColor = Theme.emphasisColor
+        } else if context.colorfulFormatting, style.bold {
+            run.foregroundColor = Color(nsColor: context.boldColor)
+        } else if context.colorfulFormatting, style.italic {
+            run.foregroundColor = Color(nsColor: context.italicColor)
         }
         if let link = style.link { run.link = link }
         return run

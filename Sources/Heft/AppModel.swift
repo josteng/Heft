@@ -113,13 +113,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var findNavigationGeneration = 0
     @Published private(set) var findNavigationDirection = 1
     @Published var isPresentationPresented = false
-    @Published var isColorfulFormattingEnabled = false {
-        didSet {
-            UserDefaults.standard.set(
-                isColorfulFormattingEnabled, forKey: Self.colorfulFormattingKey
-            )
-        }
-    }
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
@@ -170,7 +163,6 @@ final class AppModel: ObservableObject {
     /// rather than timestamps, catches same-tick writes and filesystems with
     /// coarse modification dates without producing false conflicts.
     private var lastKnownDiskText: String?
-    private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
 
     var dailyNotes: DailyNotes? {
         vaultRoot.map { DailyNotes(vaultRoot: $0, settings: settings) }
@@ -188,7 +180,6 @@ final class AppModel: ObservableObject {
         self.registry = registry
         workspaceID = descriptor?.id ?? UUID()
         scopePath = descriptor?.scopePath
-        isColorfulFormattingEnabled = UserDefaults.standard.bool(forKey: Self.colorfulFormattingKey)
         // `--vault <path>` and `--open <relative-path>` let a launch go
         // straight to a known state, which is how the app gets driven during
         // development without clicking through it.

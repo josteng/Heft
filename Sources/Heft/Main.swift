@@ -116,7 +116,7 @@ enum HeftMain {
             let described: String = switch layout.blocks[offset]! {
             case .list(let glyph, let markerOffset, _):
                 "list \(glyph) marker offset \(markerOffset)"
-            case .headingAccent(let level): "heading accent h\(level)"
+            case .headingAccent(let level, _): "heading accent h\(level)"
             case .codeBlock(let edge, let language):
                 "code block \(edge)\(language.map { " \($0)" } ?? "")"
             case .thematicBreak: "thematic break"

@@ -13,8 +13,12 @@ import HeftCore
 enum BlockWidget {
     /// A drawn bullet, numeral or checkbox in the gutter of a list line.
     case list(glyph: ListGlyph, markerOffset: CGFloat, fontSize: CGFloat)
-    /// A compact, level-coloured indicator beside a heading.
-    case headingAccent(level: Int)
+    /// A compact, level-coloured indicator beside a heading. The colour is
+    /// resolved once at style time, when `RenderContext` is in scope, rather
+    /// than re-read from `AppearanceSettings` on every draw: that keeps a
+    /// colour change picked up by the same restyle-on-change path every
+    /// other custom colour already uses, instead of a second, untracked one.
+    case headingAccent(level: Int, color: NSColor)
     case codeBlock(edge: CodeBlockEdge, language: String?)
     case thematicBreak
     case blockMath(NSImage)
@@ -504,8 +508,8 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         switch widget {
         case .list(let glyph, let markerOffset, let fontSize):
             draw(glyph, markerOffset: markerOffset, fontSize: fontSize, at: point, in: context)
-        case .headingAccent(let level):
-            drawHeadingAccent(level: level, at: point, in: context)
+        case .headingAccent(_, let color):
+            drawHeadingAccent(color: color, at: point, in: context)
         case .thematicBreak:
             drawThematicBreak(at: point, in: context)
         default:
@@ -984,7 +988,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         }
     }
 
-    private func drawHeadingAccent(level: Int, at point: CGPoint, in context: CGContext) {
+    private func drawHeadingAccent(color: NSColor, at point: CGPoint, in context: CGContext) {
         guard let line = textLineFragments.first else { return }
         let lineBounds = line.typographicBounds
         let height = max(8, lineBounds.height - 8)
@@ -994,7 +998,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             width: 3,
             height: height
         )
-        context.setFillColor(Theme.headingAccentNSColor(level).cgColor)
+        context.setFillColor(color.cgColor)
         context.addPath(CGPath(roundedRect: rect, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
         context.fillPath()
     }

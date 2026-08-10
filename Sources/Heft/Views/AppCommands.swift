@@ -103,10 +103,10 @@ struct AppCommand: Identifiable {
             title: "Toggle colorful formatting",
             symbol: "paintpalette",
             searchTerms: "heading bars bold italic color formatting appearance",
-            displayTitle: { $0.isColorfulFormattingEnabled
+            displayTitle: { _ in AppearanceSettings.shared.colorfulFormattingEnabled
                 ? "Turn off colorful formatting"
                 : "Turn on colorful formatting" },
-            action: { $0.isColorfulFormattingEnabled.toggle() }
+            action: { _ in AppearanceSettings.shared.colorfulFormattingEnabled.toggle() }
         ),
         Self(
             id: "toggleCalendar",

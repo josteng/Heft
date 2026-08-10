@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PresentationView: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var appearance = AppearanceSettings.shared
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var slideIndex = 0
     @FocusState private var hasKeyboardFocus: Bool
@@ -17,7 +18,13 @@ struct PresentationView: View {
             index: model.index,
             current: model.current,
             vaultRoot: model.vaultRoot,
-            colorfulFormatting: model.isColorfulFormattingEnabled
+            colorfulFormatting: appearance.colorfulFormattingEnabled,
+            accentColor: appearance.accentColor,
+            linkColor: appearance.linkColor,
+            codeColor: appearance.codeColor,
+            boldColor: appearance.boldColor,
+            italicColor: appearance.italicColor,
+            headingColors: (1...6).map { appearance.headingColor($0) }
         )
     }
 

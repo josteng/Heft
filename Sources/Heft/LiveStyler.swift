@@ -393,7 +393,8 @@ enum LiveStyler {
                 .paragraphStyle: heading,
             ], range: text.lineRange(for: range))
             if drawsWidgets, context.colorfulFormatting {
-                layout.blocks[text.lineRange(for: range).location] = .headingAccent(level: level)
+                layout.blocks[text.lineRange(for: range).location] =
+                    .headingAccent(level: level, color: context.headingColor(level))
             }
 
         case .quoteLine(let quote):
@@ -531,12 +532,12 @@ enum LiveStyler {
         case .bold:
             addTrait(.boldFontMask, to: storage, range: range, base: base)
             if context.colorfulFormatting {
-                storage.addAttribute(.foregroundColor, value: NSColor.systemRed, range: range)
+                storage.addAttribute(.foregroundColor, value: context.boldColor, range: range)
             }
         case .italic:
             addTrait(.italicFontMask, to: storage, range: range, base: base)
             if context.colorfulFormatting {
-                storage.addAttribute(.foregroundColor, value: NSColor.systemOrange, range: range)
+                storage.addAttribute(.foregroundColor, value: context.italicColor, range: range)
             }
         case .strikethrough:
             storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
@@ -548,14 +549,18 @@ enum LiveStyler {
         case .inlineCode:
             // Size comes from whatever font is already there, so inline code
             // inside a heading stays heading-sized.
-            monospace(storage, range: range, delta: -1, base: base, color: .systemPink)
+            monospace(storage, range: range, delta: -1, base: base, color: context.codeColor)
             storage.addAttribute(.backgroundColor, value: NSColor.quaternarySystemFill, range: range)
 
         case .wikiLink(let link):
             let resolved = context.index.resolve(link, from: context.current) != nil
+            // Same hue either way, so a broken link still reads as a link
+            // rather than jumping to an unrelated colour (that used to be
+            // `.systemOrange`, which is also the colourful-italic colour, so
+            // a link like `*[[missing]]*` looked like plain italic text).
             storage.addAttribute(
                 .foregroundColor,
-                value: resolved ? NSColor.controlAccentColor : NSColor.systemOrange,
+                value: resolved ? context.linkColor : context.linkColor.withAlphaComponent(0.55),
                 range: range
             )
             if let url = InlineText.heftURL(target: link.target) {
@@ -563,7 +568,7 @@ enum LiveStyler {
             }
 
         case .link(let destination):
-            storage.addAttribute(.foregroundColor, value: NSColor.controlAccentColor, range: range)
+            storage.addAttribute(.foregroundColor, value: context.linkColor, range: range)
             if let url = URL(string: destination), url.scheme != nil {
                 storage.addAttributes([.link: url, .cursor: NSCursor.pointingHand], range: range)
             }

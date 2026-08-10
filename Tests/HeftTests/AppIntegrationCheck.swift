@@ -43,6 +43,65 @@ enum AppIntegrationCheck {
             guard storage.length > 0 else { return nil }
             return (storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize
         }
+        func foregroundColor(
+            _ source: String, at location: Int, context: RenderContext
+        ) -> NSColor? {
+            let storage = NSTextStorage(string: source)
+            _ = LiveStyler.apply(to: storage, reveal: .none, context: context)
+            return storage.attribute(.foregroundColor, at: location, effectiveRange: nil) as? NSColor
+        }
+
+        // Regression check for the collision where an unresolved wikilink and
+        // colourful-italic text were both plain `.systemOrange`: overriding
+        // orange with identical orange looked exactly like no override at
+        // all. Unresolved should stay the same hue as resolved, just dimmed.
+        let defaultContext = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let unresolvedLink = foregroundColor("[[Nowhere]]", at: 2, context: defaultContext)
+        expect(
+            unresolvedLink == defaultContext.linkColor.withAlphaComponent(0.55),
+            "an unresolved wikilink is the link colour, dimmed, not an unrelated hue"
+        )
+
+        let customContext = RenderContext(
+            index: .empty, current: nil, vaultRoot: nil, colorfulFormatting: true,
+            accentColor: .systemBlue, linkColor: .systemIndigo, codeColor: .systemBrown,
+            boldColor: .systemGreen, italicColor: .systemPurple,
+            headingColors: [.black, .darkGray, .gray, .lightGray, .white, .clear]
+        )
+        expect(
+            foregroundColor("**bold**", at: 2, context: customContext) == NSColor.systemGreen,
+            "a custom bold colour from Appearance settings reaches the live surface"
+        )
+        expect(
+            foregroundColor("*italic*", at: 1, context: customContext) == NSColor.systemPurple,
+            "a custom italic colour from Appearance settings reaches the live surface"
+        )
+        expect(
+            foregroundColor("`code`", at: 1, context: customContext) == NSColor.systemBrown,
+            "a custom code colour from Appearance settings reaches the live surface"
+        )
+        expect(
+            foregroundColor("[[Nowhere]]", at: 2, context: customContext)
+                == NSColor.systemIndigo.withAlphaComponent(0.55),
+            "link colour dims correctly for an unresolved link, independent of accent colour"
+        )
+
+        func headingAccentColor(_ source: String, context: RenderContext) -> NSColor? {
+            let storage = NSTextStorage(string: source)
+            let layout = LiveStyler.apply(to: storage, reveal: .none, context: context)
+            for widget in layout.blocks.values {
+                if case .headingAccent(_, let color) = widget { return color }
+            }
+            return nil
+        }
+        expect(
+            headingAccentColor("# Heading", context: customContext) == NSColor.black,
+            "a custom h1 colour from Appearance settings reaches the heading accent bar"
+        )
+        expect(
+            headingAccentColor("# Heading", context: defaultContext) == nil,
+            "no heading accent bar is drawn with colourful formatting off"
+        )
 
         expect(
             liveFontSize("#") == LiveStyler.headingSize(1),

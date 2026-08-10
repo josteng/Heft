@@ -79,7 +79,7 @@ private struct BlockView: View {
             .overlay(alignment: Alignment(horizontal: .leading, vertical: .headingBaseline)) {
                 if context.colorfulFormatting {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Theme.headingAccent(level))
+                        .fill(Color(nsColor: context.headingColor(level)))
                         .frame(
                             width: 3,
                             height: Theme.headingCapHeight(level, scale: fontScale)
@@ -278,7 +278,13 @@ private struct TransclusionView: View {
                         index: context.index,
                         current: ref,
                         vaultRoot: context.vaultRoot,
-                        colorfulFormatting: context.colorfulFormatting
+                        colorfulFormatting: context.colorfulFormatting,
+                        accentColor: context.accentColor,
+                        linkColor: context.linkColor,
+                        codeColor: context.codeColor,
+                        boldColor: context.boldColor,
+                        italicColor: context.italicColor,
+                        headingColors: context.headingColors
                     ),
                     embedDepth: embedDepth + 1
                 )
@@ -419,7 +425,9 @@ private struct ListView: View {
     private func marker(for item: MDListItem, at offset: Int) -> some View {
         if let checked = item.checked {
             Image(systemName: checked ? "checkmark.square.fill" : "square")
-                .foregroundStyle(checked ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                .foregroundStyle(
+                    checked ? AnyShapeStyle(Color(nsColor: context.accentColor)) : AnyShapeStyle(.secondary)
+                )
                 .font(.system(size: Theme.bodySize * fontScale))
         } else if ordered {
             Text("\(start + offset).")
