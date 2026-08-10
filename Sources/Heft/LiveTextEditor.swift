@@ -134,6 +134,7 @@ struct LiveTextEditor: NSViewRepresentable {
             nsContext.coordinator.lastGeneration = generation
             if textView.string != text {
                 textView.string = text
+                nsContext.coordinator.resetStyling()
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
                 textView.scroll(.zero)
             }
@@ -141,6 +142,7 @@ struct LiveTextEditor: NSViewRepresentable {
         } else if textView.string != text {
             let selection = textView.selectedRange()
             textView.string = text
+            nsContext.coordinator.resetStyling()
             textView.setSelectedRange(NSRange(
                 location: min(selection.location, (text as NSString).length), length: 0
             ))
@@ -157,9 +159,22 @@ struct LiveTextEditor: NSViewRepresentable {
         private var reveal = Reveal.none
         private var revealedSpans = ""
         private var needsRevealRestyle = false
-        private var pendingScope: InvalidationScope = .revealedLines
         private var restyleTask: Task<Void, Never>?
         private var revealsSelection = true
+        /// What the storage's attributes currently represent, and the settings
+        /// they were produced under. Together they are what makes a restyle
+        /// incremental: the next one only has to touch where these disagree
+        /// with the document in front of it.
+        private var styled: RestyleScope.Snapshot?
+        private var styleKey = ""
+
+        /// Forgets that the storage is styled at all, forcing the next restyle
+        /// to do the whole document.
+        ///
+        /// Assigning `NSTextView.string` replaces the storage's contents *and*
+        /// drops every attribute on the floor, so the next pass cannot assume
+        /// anything it did not rewrite is still styled.
+        func resetStyling() { styled = nil }
 
         init(_ parent: LiveTextEditor) { self.parent = parent }
 
@@ -190,7 +205,7 @@ struct LiveTextEditor: NSViewRepresentable {
             else { return }
 
             // Never mid-drag: see `HeftTextKit2View.isTrackingMouse`.
-            restyle(textView, scope: .revealedLines)
+            restyle(textView)
         }
 
         /// Which revealable spans a caret sits inside, as a comparable key.
@@ -205,9 +220,7 @@ struct LiveTextEditor: NSViewRepresentable {
         func trackingEnded(_ textView: NSTextView) {
             guard needsRevealRestyle else { return }
             needsRevealRestyle = false
-            let scope = pendingScope
-            pendingScope = .revealedLines
-            restyle(textView, scope: scope)
+            restyle(textView)
         }
 
         func selectFindResult(_ match: NSRange, in textView: NSTextView) {
@@ -246,10 +259,17 @@ struct LiveTextEditor: NSViewRepresentable {
             }
         }
 
-        /// - Parameter scope: which fragments must be rebuilt afterwards.
-        ///   Relaying out the whole document moves the scroll position, so
-        ///   caret movement asks for `.revealedLines` and gets no jump.
-        func restyle(_ textView: NSTextView, scope: InvalidationScope = .whole) {
+        /// Brings the storage's attributes back in line with its text and the
+        /// caret, touching as little as it can get away with.
+        ///
+        /// Every keystroke used to re-decorate, re-attribute and re-lay out the
+        /// whole note — twice, since the edit and the caret move that came with
+        /// it each asked for one. On a long note that was tens of milliseconds
+        /// of main thread before the character could be drawn. Now the previous
+        /// pass is kept and diffed against this one, and only where the two
+        /// disagree is rewritten; the rest keeps its attributes, and with them
+        /// its layout.
+        func restyle(_ textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
 
             // Dead keys and IMEs keep an in-progress composition as marked
@@ -261,7 +281,7 @@ struct LiveTextEditor: NSViewRepresentable {
                 restyleTask = Task { @MainActor [weak textView] in
                     try? await Task.sleep(for: .milliseconds(60))
                     guard !Task.isCancelled, let textView else { return }
-                    self.restyle(textView, scope: scope)
+                    self.restyle(textView)
                 }
                 return
             }
@@ -270,65 +290,112 @@ struct LiveTextEditor: NSViewRepresentable {
             // whatever asked for it: SwiftUI can call `updateNSView` at any
             // moment, including from inside the loop.
             if (textView as? HeftTextKit2View)?.isTrackingMouse == true {
-                pendingScope = pendingScope == .whole || scope == .whole ? .whole : .revealedLines
                 needsRevealRestyle = true
                 return
             }
 
             let selection = textView.selectedRange()
-            let previouslyRevealed = reveal.line
-            reveal = revealsSelection
-                ? Reveal(selection: selection, in: textView.string as NSString)
-                : .none
+            let source = textView.string as NSString
+            reveal = revealsSelection ? Reveal(selection: selection, in: source) : .none
 
             let width = textView.textContainer?.size.width ?? Theme.contentMaxWidth
-            let previous = layout.signature
             // Formulae bake their colour into a bitmap, so the styler has to be
             // told which appearance the view is actually drawn in rather than
             // resolving `labelColor` against whatever is current.
             var context = parent.context
             context.appearance = textView.effectiveAppearance
+            let key = Self.styleKey(context: context, width: width)
+
+            // Cheapest exit of all, and the common one: the debounced restyle
+            // arriving after the caret's has already styled this exact state.
+            // Taken before decorating, because decorating is the expensive part.
+            if let styled, styleKey == key, styled.reveal == reveal,
+               styled.source.isEqual(to: source as String) {
+                updateTypingAttributes(for: selection, in: textView)
+                (textView as? HeftTextKit2View)?.updateFormatBar()
+                return
+            }
+
+            // Moving the caret changes what is revealed, not what is there, so
+            // the previous parse still describes the document exactly. Worth
+            // the check on its own: decorating a long note costs more than
+            // every other part of an arrow key put together.
+            let decorations: [MarkdownDecoration]
+            if let styled, styled.source.isEqual(to: source as String) {
+                decorations = styled.decorations
+            } else {
+                decorations = LiveDecorator.decorations(in: source as String)
+            }
+            let snapshot = RestyleScope.Snapshot(
+                source: source, decorations: decorations, reveal: reveal
+            )
+            // Anything the styler reads besides the document — colours, the
+            // link index, the usable width — invalidates the lot when it moves,
+            // and no part of the previous pass can be kept.
+            let comparable = styleKey == key ? styled : nil
+            let scope = comparable.map { RestyleScope.scope(from: $0, to: snapshot) }
+            styleKey = key
+            styled = snapshot
+
+            if let scope, scope.isEmpty {
+                // The decorations moved with the text but nothing about them
+                // changed, so what is on screen is already right.
+                revealedSpans = spanSignature(for: selection)
+                updateTypingAttributes(for: selection, in: textView)
+                (textView as? HeftTextKit2View)?.updateFormatBar()
+                restyleTask?.cancel()
+                return
+            }
+
+            let previous = layout.signature
             layout = LiveStyler.apply(
                 to: storage,
                 reveal: reveal,
                 context: context,
-                contentWidth: max(240, width - 8)
+                contentWidth: max(240, width - 8),
+                decorations: decorations,
+                incremental: scope.map {
+                    LiveStyler.Incremental(dirty: $0.dirty, edit: $0.edit, previous: layout)
+                }
             )
             // Recorded after styling: the span list is only known once the
             // decorator has run over the current text.
             revealedSpans = spanSignature(for: selection)
             updateTypingAttributes(for: selection, in: textView)
 
-            switch scope {
-            case .revealedLines:
-                if layout.signature != previous,
-                   let manager = textView.textLayoutManager,
-                   let content = manager.textContentManager {
-                    // A multi-line widget such as a table belongs to its first
-                    // paragraph. A find match can select a later row, so
-                    // invalidating only that row would leave the old widget
-                    // painted over the newly revealed source.
-                    manager.invalidateLayout(for: content.documentRange)
-                } else {
-                    // Ordinary caret movement only changes the line it left
-                    // and the one it entered, avoiding a full reflow.
-                    invalidate(previouslyRevealed, in: textView)
-                    invalidate(reveal.line, in: textView)
-                }
-            case .whole:
+            if let scope {
+                // A widget belongs to the first paragraph of the construct it
+                // draws, and the rewritten attributes already invalidate those
+                // paragraphs. Asking explicitly is what guarantees the layout
+                // manager comes back for a fragment whose *widget* changed
+                // while its text did not — a table gaining a row, say.
+                for range in scope.dirty { invalidate(range, in: textView) }
+            } else if layout.signature != previous,
+                      let manager = textView.textLayoutManager,
+                      let content = manager.textContentManager {
                 // Editing inside a paragraph already invalidates it, so a full
                 // relayout is only needed when widgets appear or disappear.
-                if layout.signature != previous,
-                   let manager = textView.textLayoutManager,
-                   let content = manager.textContentManager {
-                    manager.invalidateLayout(for: content.documentRange)
-                }
+                manager.invalidateLayout(for: content.documentRange)
             }
 
             settleLayout(textView)
             textView.scrollRangeToVisible(selection)
             // Revealing markup reflows the line, so the bar's anchor moves.
             (textView as? HeftTextKit2View)?.updateFormatBar()
+            // This pass styled whatever is in the storage now, so a restyle
+            // queued by the edit that led here has nothing left to do.
+            restyleTask?.cancel()
+        }
+
+        /// Everything a restyle depends on that is not the document itself.
+        /// When any of it moves, no part of the previous pass can be kept.
+        private static func styleKey(context: RenderContext, width: CGFloat) -> String {
+            "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
+                + "\(context.colorfulFormatting)/\(context.strictLineBreaks)/\(width)/"
+                + "\(context.appearance?.name.rawValue ?? "")/"
+                + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
+                + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/"
+                + "\(context.headingColors)"
         }
 
         private func updateTypingAttributes(for selection: NSRange, in textView: NSTextView) {
@@ -373,8 +440,6 @@ struct LiveTextEditor: NSViewRepresentable {
             else { return }
             manager.ensureLayout(for: content.documentRange)
         }
-
-        enum InvalidationScope { case whole, revealedLines }
 
         private func invalidate(_ range: NSRange, in textView: NSTextView) {
             guard range.location != NSNotFound, range.length > 0,

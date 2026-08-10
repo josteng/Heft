@@ -1,6 +1,51 @@
 import AppKit
 import HeftCore
 
+/// Where a styling pass sends the attributes it produces.
+///
+/// An incremental restyle has to run every decoration through the styler,
+/// because the `LiveLayout` it builds describes widgets for the whole document
+/// and TextKit can ask for any fragment at any time. What it must *not* do is
+/// write outside the ranges that actually changed: setting an attribute — even
+/// to the value already there — throws away the layout for that range, and
+/// re-laying out the whole note is precisely the per-keystroke cost being
+/// removed. So the passes are written once, against this, and the decorations
+/// whose styling is already correct simply drop what they produce.
+///
+/// Reads go straight through: outside the dirty ranges the storage still holds
+/// the previous pass's attributes, which are by definition the right ones.
+final class StyleSink {
+    let storage: NSTextStorage
+    var writes = true
+
+    init(_ storage: NSTextStorage) { self.storage = storage }
+
+    var length: Int { storage.length }
+
+    func attribute(
+        _ name: NSAttributedString.Key, at location: Int, effectiveRange: NSRangePointer?
+    ) -> Any? {
+        storage.attribute(name, at: location, effectiveRange: effectiveRange)
+    }
+
+    func enumerateAttribute(
+        _ name: NSAttributedString.Key, in range: NSRange,
+        using block: (Any?, NSRange, UnsafeMutablePointer<ObjCBool>) -> Void
+    ) {
+        storage.enumerateAttribute(name, in: range, using: block)
+    }
+
+    func addAttribute(_ name: NSAttributedString.Key, value: Any, range: NSRange) {
+        guard writes else { return }
+        storage.addAttribute(name, value: value, range: range)
+    }
+
+    func addAttributes(_ attributes: [NSAttributedString.Key: Any], range: NSRange) {
+        guard writes else { return }
+        storage.addAttributes(attributes, range: range)
+    }
+}
+
 /// Turns `LiveDecorator` output into text attributes, plus a `LiveLayout`
 /// describing what the layout fragments must draw.
 ///
@@ -29,6 +74,19 @@ enum LiveStyler {
     /// glyph is drawn in the gutter to the left.
     static func listIndent(depth: Int) -> CGFloat { 26 + CGFloat(depth) * 22 }
 
+    /// - Parameters:
+    ///   - decorations: the parse of `storage`'s text, when the caller already
+    ///     has it. It needs one to work out `dirty`, and parsing twice per
+    ///     keystroke is exactly the sort of waste this scoping exists to remove.
+    ///   - dirty: the only ranges this pass may write to, or nil for the whole
+    ///     document. Every decoration is either wholly inside one of them or
+    ///     wholly outside all of them — `RestyleScope` guarantees it — so the
+    ///     ranges can be reset to base attributes and rebuilt from scratch,
+    ///     while everything else keeps the attributes, and the layout, it has.
+    ///
+    ///     The returned `LiveLayout` still describes the *whole* document
+    ///     either way: a layout fragment can be rebuilt by TextKit at any
+    ///     moment, anywhere, and it asks this for the widgets to draw.
     @discardableResult
     static func apply(
         to storage: NSTextStorage,
@@ -36,26 +94,48 @@ enum LiveStyler {
         context: RenderContext,
         baseFont: NSFont = Theme.liveFont,
         drawsWidgets: Bool = true,
-        contentWidth: CGFloat = Theme.contentMaxWidth
+        contentWidth: CGFloat = Theme.contentMaxWidth,
+        decorations precomputed: [MarkdownDecoration]? = nil,
+        incremental: Incremental? = nil
     ) -> LiveLayout {
         let source = storage.string
         let text = source as NSString
         let full = NSRange(location: 0, length: storage.length)
 
         let body = bodyParagraphStyle()
+        let decorations = precomputed ?? LiveDecorator.decorations(in: source)
+        let scope = (incremental?.dirty ?? [full]).compactMap { range -> NSRange? in
+            let clamped = NSIntersectionRange(range, full)
+            return clamped.length > 0 ? clamped : nil
+        }
+        /// Whether this pass has anything to do for a decoration at all. The
+        /// ones it says no to are the ones whose styling is already in the
+        /// storage and whose widgets are carried over below.
+        func writes(_ range: NSRange) -> Bool {
+            guard incremental != nil else { return true }
+            return scope.contains { NSIntersectionRange($0, range).length > 0 }
+        }
 
+        let sink = StyleSink(storage)
         storage.beginEditing()
         defer { storage.endEditing() }
 
-        storage.setAttributes([
-            .font: baseFont,
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: body,
-        ], range: full)
-        styleEmptyBodyLines(in: storage, text: text)
+        for range in scope {
+            storage.setAttributes([
+                .font: baseFont,
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: body,
+            ], range: range)
+            styleEmptyBodyLines(in: storage, text: text, within: range)
+        }
 
-        let decorations = LiveDecorator.decorations(in: source)
-        var layout = LiveLayout()
+        // Widgets on paragraphs this pass is not touching are exactly the ones
+        // it drew last time, moved along by however much the edit displaced
+        // them. Re-deriving them instead would mean measuring every table and
+        // typesetting every formula in the note on each keystroke.
+        var layout = incremental.map {
+            carryOver($0.previous, edit: $0.edit, dirty: scope)
+        } ?? LiveLayout()
 
         // The caret has to be able to re-enter a span it just left, so the
         // ranges that reveal on the caret alone are reported back to the
@@ -65,9 +145,10 @@ enum LiveStyler {
             .filter { !Reveal.revealsWithItsLine($0.style) }
             .map { $0.revealRange ?? $0.range }
 
-        for decoration in decorations {
+        for decoration in decorations where writes(decoration.range) {
+            sink.writes = true
             style(
-                decoration, in: storage, base: baseFont, body: body,
+                decoration, in: sink, base: baseFont, body: body,
                 context: context, layout: &layout, drawsWidgets: drawsWidgets,
                 revealed: reveal.reveals(decoration)
             )
@@ -75,9 +156,10 @@ enum LiveStyler {
 
         // Second pass so collapsing always wins over the styling above.
         for decoration in decorations {
-            guard !reveal.reveals(decoration) else { continue }
+            guard !reveal.reveals(decoration), writes(decoration.range) else { continue }
+            sink.writes = true
             for range in decoration.syntax where range.length > 0 && NSMaxRange(range) <= storage.length {
-                collapse(range, in: storage)
+                collapse(range, in: sink)
             }
         }
 
@@ -86,14 +168,65 @@ enum LiveStyler {
         // Third pass: constructs the editor draws instead of showing. They are
         // hidden whole, not just at their markers, so this cannot run until
         // every attribute above is settled.
-        for decoration in decorations {
+        for decoration in decorations where writes(decoration.range) {
             guard !reveal.reveals(decoration) else { continue }
+            sink.writes = true
             widget(
-                decoration, in: storage, text: text, base: baseFont,
+                decoration, in: sink, text: text, base: baseFont,
                 context: context, layout: &layout, contentWidth: contentWidth
             )
         }
 
+        return layout
+    }
+
+    /// What one incremental pass needs to know about the one before it.
+    struct Incremental {
+        /// The only ranges the pass may write to.
+        let dirty: [NSRange]
+        /// How the text moved, so carried-over widgets move with it.
+        let edit: SourceEdit
+        /// The widgets the previous pass produced.
+        let previous: LiveLayout
+    }
+
+    /// The previous pass's widgets, shifted by the edit and stripped of
+    /// anything sitting on a paragraph this pass is about to rebuild.
+    ///
+    /// Keys and the locations inside the entries are absolute document
+    /// offsets, so both move. Anything landing inside the edit itself is on a
+    /// changed line and therefore dropped: `RestyleScope` guarantees a
+    /// decoration is wholly inside the dirty ranges or wholly outside them, so
+    /// no widget can be half carried and half rebuilt.
+    private static func carryOver(
+        _ previous: LiveLayout, edit: SourceEdit, dirty: [NSRange]
+    ) -> LiveLayout {
+        func moved(_ location: Int) -> Int { edit.mapStart(location) }
+        func rebuilt(_ location: Int) -> Bool {
+            dirty.contains { NSLocationInRange(location, $0) }
+        }
+
+        var layout = LiveLayout()
+        for (start, widget) in previous.blocks {
+            let start = moved(start)
+            guard !rebuilt(start) else { continue }
+            layout.blocks[start] = widget
+        }
+        for (start, items) in previous.inlineMath {
+            let start = moved(start)
+            guard !rebuilt(start) else { continue }
+            layout.inlineMath[start] = items.map { (moved($0.location), $0.image) }
+        }
+        for (start, tags) in previous.inlineTags {
+            let start = moved(start)
+            guard !rebuilt(start) else { continue }
+            layout.inlineTags[start] = tags.map {
+                (
+                    NSRange(location: moved($0.range.location), length: $0.range.length),
+                    $0.color, $0.font, $0.ink
+                )
+            }
+        }
         return layout
     }
 
@@ -112,11 +245,13 @@ enum LiveStyler {
         return body
     }
 
-    private static func styleEmptyBodyLines(in storage: NSTextStorage, text: NSString) {
-        guard text.length > 0 else { return }
+    private static func styleEmptyBodyLines(
+        in storage: NSTextStorage, text: NSString, within: NSRange
+    ) {
+        guard text.length > 0, within.length > 0 else { return }
         let compact = bodyParagraphStyle(compactEmptyLine: true)
-        var location = 0
-        while location < text.length {
+        var location = within.location
+        while location < NSMaxRange(within) {
             let line = text.lineRange(for: NSRange(location: location, length: 0))
             let contents = text.substring(with: line)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -133,7 +268,7 @@ enum LiveStyler {
 
     private static func widget(
         _ decoration: MarkdownDecoration,
-        in storage: NSTextStorage,
+        in storage: StyleSink,
         text: NSString,
         base: NSFont,
         context: RenderContext,
@@ -255,7 +390,7 @@ enum LiveStyler {
     /// the layout manager has to honour, so the space is really there and the
     /// drawing cannot be clipped to a hairline.
     private static func hideWhole(
-        _ range: NSRange, in storage: NSTextStorage, text: NSString, reserving height: CGFloat
+        _ range: NSRange, in storage: StyleSink, text: NSString, reserving height: CGFloat
     ) {
         collapse(range, in: storage)
         let lines = text.lineRange(for: range)
@@ -280,7 +415,7 @@ enum LiveStyler {
     }
 
     private static func growLineHeight(
-        to height: CGFloat, forLineAt location: Int, in storage: NSTextStorage, text: NSString
+        to height: CGFloat, forLineAt location: Int, in storage: StyleSink, text: NSString
     ) {
         let line = text.lineRange(for: NSRange(location: location, length: 0))
         guard line.length > 0 else { return }
@@ -291,14 +426,14 @@ enum LiveStyler {
         storage.addAttribute(.paragraphStyle, value: style, range: line)
     }
 
-    private static func fontSize(at location: Int, in storage: NSTextStorage, fallback: NSFont) -> CGFloat {
+    private static func fontSize(at location: Int, in storage: StyleSink, fallback: NSFont) -> CGFloat {
         guard location < storage.length,
               let font = storage.attribute(.font, at: location, effectiveRange: nil) as? NSFont
         else { return fallback.pointSize }
         return font.pointSize
     }
 
-    private static func collapse(_ range: NSRange, in storage: NSTextStorage) {
+    private static func collapse(_ range: NSRange, in storage: StyleSink) {
         storage.addAttributes([
             .font: NSFont.systemFont(ofSize: 0.01),
             .foregroundColor: NSColor.clear,
@@ -310,7 +445,7 @@ enum LiveStyler {
 
     private static func style(
         _ decoration: MarkdownDecoration,
-        in storage: NSTextStorage,
+        in storage: StyleSink,
         base: NSFont,
         body: NSMutableParagraphStyle,
         context: RenderContext,
@@ -320,7 +455,7 @@ enum LiveStyler {
     ) {
         let range = decoration.range
         guard range.location >= 0, NSMaxRange(range) <= storage.length else { return }
-        let text = storage.string as NSString
+        let text = storage.storage.string as NSString
 
         switch decoration.style {
         case .frontmatter:
@@ -362,9 +497,11 @@ enum LiveStyler {
                     range: text.lineRange(for: NSRange(location: closingLocation, length: 0))
                 )
             }
-            CodeSyntaxHighlighting.apply(
-                to: storage, decoration: decoration, language: language
-            )
+            if storage.writes {
+                CodeSyntaxHighlighting.apply(
+                    to: storage.storage, decoration: decoration, language: language
+                )
+            }
             if drawsWidgets {
                 addCodeBlockWidgets(
                     decoration: decoration,
@@ -707,7 +844,7 @@ enum LiveStyler {
     }
 
     private static func monospace(
-        _ storage: NSTextStorage, range: NSRange, delta: CGFloat, base: NSFont, color: NSColor
+        _ storage: StyleSink, range: NSRange, delta: CGFloat, base: NSFont, color: NSColor
     ) {
         storage.enumerateAttribute(.font, in: range) { value, subrange, _ in
             let size = ((value as? NSFont) ?? base).pointSize
@@ -721,7 +858,7 @@ enum LiveStyler {
     }
 
     private static func addTrait(
-        _ trait: NSFontTraitMask, to storage: NSTextStorage, range: NSRange, base: NSFont
+        _ trait: NSFontTraitMask, to storage: StyleSink, range: NSRange, base: NSFont
     ) {
         storage.enumerateAttribute(.font, in: range) { value, subrange, _ in
             let font = (value as? NSFont) ?? base

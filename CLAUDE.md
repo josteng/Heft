@@ -9,7 +9,7 @@ existing Obsidian vault unmodified, including its `.obsidian/` config.
 Scripts/run.sh [vault] [note]                   # Xcode build, then launch
 Scripts/bundle.sh debug                         # Xcode build without launching
 Scripts/install.sh [--install-only]             # release install; launches by default
-swift test                                      # core and disposable-vault integration checks
+swift test                                      # core, live-surface, and disposable-vault checks
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
@@ -54,11 +54,46 @@ fences, tables) reveals when the caret is anywhere on its line, while inline spa
 (`**bold**`, `$math$`, links) reveal only when the caret is inside that span. The
 policy lives in `Reveal` in HeftCore, so it is covered by the test suite.
 
-Three files carry it:
+Four files carry it:
 
 - `LiveDecorator` (in HeftCore): what to style and where. Pure, testable.
+- `RestyleScope` (in HeftCore): how much of that has to be redone. Pure, testable.
 - `LiveStyler`: turns decorations into attributes, and decides which widgets to draw.
 - `LiveWidgets`: measures tables and draws every widget.
+
+### Restyling only what changed
+
+A keystroke used to re-decorate, re-attribute and re-lay out the whole note —
+twice, because the edit and the caret move that came with it each asked for a
+pass. That was ~34ms of main thread per character on a 20KB note and ~90ms on a
+50KB one, before the character could be drawn.
+
+The styled result is a pure function of (decorations, their reveal state, the
+text they cover), so two passes differ exactly where that input differs.
+`RestyleScope` diffs the previous pass's snapshot against the current one — a
+common-prefix/suffix scan for the edit, then the previous decorations shifted by
+it and matched against the new ones — and returns the ranges that really moved.
+Everything else keeps its attributes, and with them its layout.
+
+Two invariants make it safe, and both are load-bearing:
+
+- The dirty ranges are **line-aligned**, and every decoration is either wholly
+  inside one or wholly outside all of them (`normalize` grows the set to a
+  fixpoint to guarantee it). So the styler resets those ranges to base
+  attributes and rebuilds every decoration touching them, with nothing left
+  half-styled at a boundary.
+- The returned `LiveLayout` still describes the **whole** document, because
+  TextKit can rebuild any fragment at any time and asks it for the widgets.
+  Widgets outside the dirty ranges are carried over from the previous pass and
+  shifted by the edit rather than re-measured.
+
+`Tests/HeftTests/IncrementalStylingCheck.swift` is what makes this maintainable:
+it runs edit scripts through both an incrementally styled buffer and a
+from-scratch one and compares every attribute on every character, through the
+plain styler and through a real `HeftTextKit2View` + coordinator. Any change to
+`LiveDecorator`, `LiveStyler` or `RestyleScope` should be run against it — it
+caught two genuine bugs that render as "spacing is wrong after Return" and
+"styling silently stops updating", neither of which any other test noticed.
 
 ### Typing substitutions
 
@@ -138,6 +173,24 @@ answer for one position.
   `layoutFragmentFrame`.** Line height is ordinary paragraph geometry the layout
   manager must honour; the frame override did not survive contact with reality and
   the widgets rendered as hairlines.
+- **Writing an attribute discards TextKit's layout for that range, even when
+  the value written is the one already there.** Measured: on a 20KB note,
+  `ensureLayout` costs 0.4ms when the layout is valid and 18ms after the styler
+  has rewritten every attribute to an identical value. This is the whole reason
+  restyling is scoped; it is also the trap to remember before adding a
+  "just set it again, it's cheap" write to `LiveStyler`.
+- **`NSTextStorage.string` hands back its live backing store, and bridging it
+  through `as NSString` can hand back that same mutable object.** Keeping one
+  as a snapshot of "what the document looked like last time" means it silently
+  becomes the current text on the next keystroke; `RestyleScope.Snapshot`
+  therefore copies. Symptom when it does not: the diff compares the document
+  against itself, finds nothing changed, and the surface stops restyling
+  entirely.
+- **`String.range(of:options:.regularExpression)` builds a fresh
+  `NSRegularExpression` every call.** Fine once, ruinous per line: quote-marker
+  detection alone was most of the cost of decorating a long note. The
+  document-wide sweeps go through the cached `regex(_:)`; anything per line or
+  per match is scanned by hand.
 - **Lay the document out eagerly** (`ensureLayout`) after every restyle. TextKit 2
   estimates the height of regions it has not reached, assuming ordinary lines. This
   editor's fragments are nothing like ordinary (a six-line table is one 148pt
