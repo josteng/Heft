@@ -846,6 +846,240 @@ public enum SelfCheck {
             expectTrue(false, "duplicate meeting notes are suggested")
         }
 
+        // MARK: Smart typography
+        //
+        // Every case is stated the way it is typed: `typed` is the document
+        // right after a character landed, with the caret at its end.
+        func substituted(
+            _ typed: String, _ config: SmartTypographyConfig = .default, caret: Int? = nil
+        ) -> String {
+            let text = typed as NSString
+            let at = caret ?? text.length
+            guard let edit = SmartTypography.substitution(in: typed, caret: at, config: config)
+            else { return typed }
+            return text.replacingCharacters(in: edit.range, with: edit.replacement)
+        }
+
+        expect(substituted("a ->"), "a \u{2192}", "-> becomes an arrow")
+        expect(substituted("a <-"), "a \u{2190}", "<- becomes an arrow")
+        expect(substituted("wait..."), "wait\u{2026}", "... becomes an ellipsis")
+        expect(substituted("a--"), "a\u{2013}", "-- becomes an en dash")
+        expect(substituted("a\u{2013}-"), "a\u{2014}", "a third dash upgrades to an em dash")
+        expect(substituted("a\u{2014}-"), "a---", "a fourth dash gives literal --- back")
+        expect(substituted("x >="), "x \u{2265}", ">= becomes ≥")
+        expect(substituted("x /="), "x \u{2260}", "/= becomes ≠")
+        expect(substituted("x !="), "x \u{2260}", "!= becomes ≠")
+        expect(substituted("x ~="), "x \u{2248}", "~= becomes ≈")
+        expect(substituted("x =>"), "x \u{21D2}", "=> becomes ⇒")
+        // The three-character arrows arrive as chains: the first two
+        // characters have already been replaced by the time the third lands.
+        expect(substituted("a \u{2190}>"), "a \u{2194}", "<-> becomes ↔")
+        expect(substituted("a \u{2264}>"), "a \u{21D4}", "<=> becomes ⇔")
+        expect(substituted("a \u{2013}>"), "a \u{27F6}", "--> becomes a long arrow")
+        expect(substituted("(c)"), "\u{00A9}", "(c) becomes ©")
+        expect(substituted("(tm)"), "\u{2122}", "(tm) becomes ™")
+        expect(substituted("(deg)"), "\u{00B0}", "(deg) becomes °")
+        expect(substituted("5 +-"), "5 \u{00B1}", "+- becomes ±")
+        expect(substituted("f(c)"), "f(c)", "(c) never fires inside a word")
+        expect(substituted("say \"", .default, caret: 5), "say \u{201C}", "a quote after a space opens")
+        expect(substituted("say \"hi\""), "say \"hi\u{201D}", "a quote after a letter closes")
+        expect(substituted("it'"), "it\u{2019}", "an apostrophe curls")
+        expect(substituted("about 1/2"), "about \u{00BD}", "1/2 becomes ½")
+        expect(substituted("about 1/10"), "about \u{2152}", "1/10 becomes ⅒")
+        expect(substituted("<<"), "\u{00AB}", "<< opens a guillemet even at the line start")
+
+        // Markup that shares a trigger with a rule.
+        expect(substituted("---"), "---", "--- at the start of a line stays frontmatter")
+        expect(substituted("- --"), "- --", "a dashes-only line is never touched")
+        expect(substituted(">>"), ">>", ">> at the start of a line stays a nested quote")
+        expect(substituted("he said >>"), "he said \u{00BB}", ">> in prose is a guillemet")
+        expect(substituted("31/2"), "31/2", "a fraction needs a word boundary")
+
+        // Contexts where nothing may fire.
+        expect(substituted("`a ->`", .default, caret: 5), "`a ->`", "no substitution in inline code")
+        expect(substituted("```\na ->"), "```\na ->", "no substitution in a code fence")
+        expect(substituted("---\ntitle: a ->"), "---\ntitle: a ->",
+               "no substitution in frontmatter")
+        expect(substituted("$a ->"), "$a ->", "no substitution in inline math")
+        expect(substituted("$$\na ->"), "$$\na ->", "no substitution in a math block")
+        expect(substituted("[[Note ->"), "[[Note ->", "no substitution inside a wiki link")
+        expect(substituted("[a](./x ->"), "[a](./x ->", "no substitution in a link destination")
+        expect(substituted("#project--"), "#project--", "no substitution inside a tag")
+        expect(substituted("https://x.dev/a--"), "https://x.dev/a--", "no substitution inside a URL")
+        // A closed span puts the caret back in prose.
+        expect(substituted("`code` a ->"), "`code` a \u{2192}", "after a closed code span it fires")
+
+        // Groups switch off individually; custom rules stand on their own.
+        let noFractions = SmartTypographyConfig(
+            enabledGroups: Set(SmartTypographyGroup.allCases).subtracting([.fractions])
+        )
+        expect(substituted("about 1/2", noFractions), "about 1/2", "a disabled group does nothing")
+        expect(substituted("a ->", noFractions), "a \u{2192}", "other groups still fire")
+        expect(substituted("a ->", .off), "a ->", "the master switch turns everything off")
+
+        let custom = SmartTypographyConfig(
+            enabledGroups: [],
+            custom: [
+                CustomSubstitution(trigger: ";shrug", replacement: "\u{00AF}\\_(\u{30C4})_/\u{00AF}"),
+                CustomSubstitution(trigger: "adr", replacement: "address"),
+                CustomSubstitution(trigger: "off", replacement: "no", isEnabled: false),
+            ]
+        )
+        expect(substituted("well ;shrug", custom), "well \u{00AF}\\_(\u{30C4})_/\u{00AF}",
+               "a custom replacement fires")
+        expect(substituted("my adr", custom), "my address", "a word trigger fires at a word start")
+        expect(substituted("padr", custom), "padr", "a word trigger never fires inside a word")
+        expect(substituted("off", custom), "off", "a disabled custom rule does nothing")
+
+        // Word-end firing, the macOS text-replacement behaviour.
+        func afterWord(
+            _ typed: String, _ config: SmartTypographyConfig, endingWord: Bool = false
+        ) -> String {
+            let text = typed as NSString
+            guard let edit = SmartTypography.substitution(
+                in: typed, caret: text.length, config: config, endingWord: endingWord
+            ) else { return typed }
+            return text.replacingCharacters(in: edit.range, with: edit.replacement)
+        }
+
+        let delayed = SmartTypographyConfig(
+            enabledGroups: [],
+            custom: [
+                CustomSubstitution(
+                    trigger: "omw", replacement: "On my way!", firing: .afterWord
+                )
+            ]
+        )
+        expect(afterWord("omw", delayed), "omw", "an after-a-space rule waits for the space")
+        expect(afterWord("omw ", delayed), "On my way! ", "the space fires it and is kept")
+        expect(afterWord("omw,", delayed), "On my way!,", "punctuation ends a word too")
+        expect(afterWord("omw", delayed, endingWord: true), "On my way!",
+               "Return ends a word without typing anything")
+        expect(afterWord("homw ", delayed), "homw ", "an after-a-space rule respects word starts")
+        expect(afterWord("`omw ", delayed), "`omw ", "an after-a-space rule respects context")
+        expect(afterWord("a ->", .default, endingWord: true), "a ->",
+               "Return never re-fires an immediate rule")
+
+        // Placeholders in a replacement, which the plugin this borrows from
+        // has no equivalent for.
+        let snippets = SmartTypographyConfig(
+            enabledGroups: [],
+            custom: [
+                CustomSubstitution(trigger: ";today", replacement: "[[{{date:YYYY-MM-DD}}]]"),
+                CustomSubstitution(trigger: ";me", replacement: "{{title}}"),
+                CustomSubstitution(
+                    trigger: ";cb", replacement: "```\n{{caret}}\n```"
+                ),
+            ]
+        )
+        let expansion = SubstitutionExpansion(date: day, noteTitle: "Meeting")
+        func snippet(_ typed: String) -> TextSubstitution? {
+            SmartTypography.substitution(
+                in: typed, caret: (typed as NSString).length, config: snippets, expansion: expansion
+            )
+        }
+        expect(snippet(";today")?.replacement ?? "nil", "[[2026-08-07]]",
+               "a replacement expands date placeholders")
+        expect(snippet(";me")?.replacement ?? "nil", "Meeting",
+               "a replacement expands the note title")
+        if let block = snippet(";cb") {
+            expect(block.replacement, "```\n\n```", "the caret marker is taken out of the text")
+            expect("\(block.caretOffset)", "4", "the caret lands where the marker was")
+        } else {
+            expectTrue(false, "a snippet with a caret marker produces an edit")
+        }
+
+        // Every library entry must actually work when added: a typo in a
+        // placeholder name is invisible in the pane and only shows up as
+        // literal `{{…}}` in somebody's note.
+        expectTrue(
+            Set(SmartTypography.library.map(\.trigger)).count == SmartTypography.library.count,
+            "library triggers are unique"
+        )
+        for example in SmartTypography.library {
+            let config = SmartTypographyConfig(enabledGroups: [], custom: [example.rule()])
+            let typed = "note " + example.trigger
+            guard let edit = SmartTypography.substitution(
+                in: typed, caret: (typed as NSString).length, config: config, expansion: expansion
+            ) else {
+                expectTrue(false, "library entry \(example.trigger) fires")
+                continue
+            }
+            expectTrue(
+                !edit.replacement.contains("{{") && !edit.replacement.contains("}}"),
+                "library entry \(example.trigger) leaves no unexpanded placeholder"
+            )
+            expectTrue(
+                !edit.replacement.isEmpty && edit.replacement != example.trigger,
+                "library entry \(example.trigger) produces something"
+            )
+            expectTrue(
+                edit.caretOffset <= (edit.replacement as NSString).length,
+                "library entry \(example.trigger) puts the caret inside its replacement"
+            )
+        }
+        // Typed one character at a time, with every built-in group on: a
+        // trigger whose prefix is itself a rule never survives being typed.
+        // `<<foo` would become `«foo` at the second character and the rule
+        // would never fire, which no whole-string test can see.
+        for example in SmartTypography.library {
+            let config = SmartTypographyConfig(custom: [example.rule()])
+            var typed = ""
+            for character in example.trigger {
+                typed.append(character)
+                if let edit = SmartTypography.substitution(
+                    in: typed, caret: (typed as NSString).length,
+                    config: config, expansion: expansion
+                ) {
+                    typed = (typed as NSString).replacingCharacters(
+                        in: edit.range, with: edit.replacement
+                    )
+                }
+            }
+            expect(
+                typed,
+                SmartTypography.expand(example.replacement, expansion).text,
+                "typing \(example.trigger) one character at a time expands it"
+            )
+        }
+
+        // The two that matter most, checked against their exact output.
+        let today = SmartTypographyConfig(
+            enabledGroups: [],
+            custom: SmartTypography.library
+                .filter { $0.trigger == "+today" || $0.trigger == "+week" }
+                .map { $0.rule() }
+        )
+        expect(
+            SmartTypography.substitution(
+                in: "+today", caret: 6, config: today, expansion: expansion
+            )?.replacement ?? "nil",
+            "[[2026-08-07]]",
+            "the library's daily-note link resolves to today's note"
+        )
+        expect(
+            SmartTypography.substitution(
+                in: "+week", caret: 5, config: today, expansion: expansion
+            )?.replacement ?? "nil",
+            "[[2026-W32]]",
+            "the library's weekly link uses the ISO week, not week-of-month"
+        )
+
+        // A custom rule wins over a built-in with the same trigger.
+        let overridden = SmartTypographyConfig(
+            custom: [CustomSubstitution(trigger: "->", replacement: "\u{21D2}")]
+        )
+        expect(substituted("a ->", overridden), "a \u{21D2}", "a custom rule overrides a built-in")
+
+        // What backspace has to put back.
+        if let edit = SmartTypography.substitution(in: "a ->", caret: 4, config: .default) {
+            expect(edit.original, "->", "a substitution remembers what was typed")
+            expect("\(edit.caret)", "3", "the caret lands after the replacement")
+            expect("\(edit.replacedRange.length)", "1", "the replaced range is the new text")
+        } else {
+            expectTrue(false, "arrow substitution produces an edit")
+        }
+
         return r
     }
 }

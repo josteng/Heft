@@ -60,6 +60,57 @@ Three files carry it:
 - `LiveStyler`: turns decorations into attributes, and decides which widgets to draw.
 - `LiveWidgets`: measures tables and draws every widget.
 
+### Typing substitutions
+
+`SmartTypography` in HeftCore is the Obsidian Smart Typography equivalent, plus
+what that plugin has no answer for: `->` becomes `→` as you type, `--` an en
+dash, `...` an ellipsis, quotes curl. It is a pure function of (document,
+caret) run *after* a character lands, so a rule is just "this text now ends at
+the caret" and no rule needs to know which key triggered it. Eight groups
+(quotes, dashes, ellipsis, arrows, guillemets, comparisons, symbols, fractions)
+switch on and off individually, all on by default, and the same engine runs the
+user's own `trigger → replacement` table. `TypingSettings` is the app-wide
+store and the Typing tab in Settings; `HeftTextKit2View.applySubstitution` is
+the one call site, and its `deleteBackward` puts the typed text back when
+backspace comes straight after a substitution.
+
+Three things go beyond the plugin, and they are what make the table a snippet
+expander rather than a second set of arrows:
+
+- **Firing** is per rule. `.immediately` replaces as soon as the trigger is
+  complete; `.afterWord` waits for a space, a punctuation mark, or Return, the
+  way macOS text replacement does, and is the default for new rules because a
+  word-shaped trigger that fires the instant it completes goes off inside
+  longer words. The delimiter is replaced along with the trigger and re-emitted
+  unchanged, which is what keeps the caret after it and lets one backspace undo
+  both. Return reaches the engine through `insertNewline` with
+  `endingWord: true`, where only `.afterWord` rules may fire — anything
+  immediate already had its chance.
+- **Placeholders** in a replacement go through `MomentFormat.expandTemplate`,
+  and are documented by the same copyable `PlaceholderReference` list the
+  daily-note sheet uses, since they are the same tokens and two lists would
+  read as two systems. `SmartTypography.library` offers ready-made rules
+  (today's daily-note link, a timed log entry, a code block) through an "Add
+  from Library" menu rather than seeding them into a fresh install: they
+  arrive as ordinary editable rows, and are the fastest way to see what the
+  placeholders do. A test fires every one of them, because a mistyped
+  placeholder is invisible in the pane and only shows up as literal `{{…}}` in
+  a note.
+  so `{{date:YYYY-MM-DD}}`, `{{time:HH:mm}}` and `{{title}}` mean the same
+  thing they do in a daily-note template. `{{caret}}` is Heft's own: the engine
+  strips it and reports its offset in `TextSubstitution.caretOffset`, so a
+  snippet can leave the caret inside the fence it just wrote.
+- **Chained rules.** `<->`, `<=>` and `-->` are matched as `←>`, `≤>` and `–>`,
+  because by the time the third character arrives the first two have already
+  been replaced. They match what is on screen, not what was typed, and must
+  stay ordered before the two-character rules that would otherwise claim the
+  same suffix.
+
+Nothing fires inside code, math, frontmatter, wiki links, link destinations,
+tags or URLs — `SmartTypography.allowsSubstitution` is a cheap own scan rather
+than a `LiveDecorator` pass, because it runs on every keystroke and only has to
+answer for one position.
+
 ## Gotchas, all of them hard-won
 
 - **Xcode 26.6 is installed, but `xcode-select` points at the Command Line Tools.**
@@ -109,6 +160,21 @@ Three files carry it:
 - **Calendar visibility belongs in the View menu, not the window toolbar.** The
   `Show Calendar` command also has the `⇧⌘D` shortcut. Leave the system-provided
   `NavigationSplitView` sidebar toggle untouched.
+- **macOS's own substitutions stay off** (`isAutomaticQuoteSubstitutionEnabled`
+  and friends in `makeNSView`). They know nothing about markdown and would curl
+  the quotes inside a code fence. `SmartTypography` is their replacement, and
+  turning any of them back on would put two engines on the same keystroke.
+- **`TypingSettings` stores the *disabled* substitution groups, not the
+  enabled ones.** Storing what is on means a group added in a later version is
+  absent from every settings file written before it existed, so it arrives
+  switched off for exactly the people who have already visited the pane. An
+  opt-out list records "everything, unless you said otherwise", which is the
+  actual default. The one-time migration from the old format subtracts from
+  `legacyKnownGroups` rather than from `allCases`, for the same reason.
+- **A typing substitution must not fire on anything but a typed character.**
+  `insertText` is also how paste, drag, attachment insertion and link
+  completion put text in, so `applySubstitution` insists on a single character
+  into a collapsed selection. A pasted `-->` is quoted material, not typing.
 - **Real-vault syntax that breaks naive parsers:** Obsidian writes `\|` for a literal
   pipe inside tables (`![[chart.png\|500]]`), and brackets can abut links
   (`\[[[Paper Name]]`), where the link is the innermost pair.

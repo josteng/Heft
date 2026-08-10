@@ -231,21 +231,13 @@ struct DailyNotesSettingsView: View {
 
     """
 
-    private struct Placeholder: Identifiable {
-        let token: String
-        let meaning: String
-        var id: String { token }
-    }
-
-    private let placeholders: [Placeholder] = [
-        Placeholder(token: "{{title}}", meaning: "Daily note filename"),
-        Placeholder(token: "{{date}}", meaning: "Date using the filename format"),
-        Placeholder(token: "{{time}}", meaning: "Current time, such as 14:30"),
-        Placeholder(token: "{{date:dddd}}", meaning: "Full weekday, such as Friday"),
-        Placeholder(token: "{{date:MMMM Do YYYY}}", meaning: "Long date, such as August 8th 2026"),
-        Placeholder(token: "{{date:GGGG-[W]WW}}", meaning: "ISO week, such as 2026-W32"),
-        Placeholder(token: "{{time:h:mm A}}", meaning: "12-hour time, such as 2:30 PM"),
-    ]
+    /// `{{title}}` and `{{date}}` mean something specific to a daily note, so
+    /// they are described here rather than taken from the shared list.
+    private let placeholders: [PlaceholderToken] =
+        [
+            PlaceholderToken(token: "{{title}}", meaning: "Daily note filename"),
+            PlaceholderToken(token: "{{date}}", meaning: "Date using the filename format"),
+        ] + PlaceholderReference.dateTokens.filter { $0.token != "{{date}}" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -365,35 +357,11 @@ struct DailyNotesSettingsView: View {
     }
 
     private var variableReference: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("Template Variables")
-                .font(.headline)
-            ForEach(placeholders) { placeholder in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(placeholder.token)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(width: 180, alignment: .leading)
-                    Text(placeholder.meaning)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 6)
-                    Button { copy(placeholder.token) } label: {
-                        Image(systemName: copiedVariable == placeholder.token
-                              ? "checkmark"
-                              : "doc.on.doc")
-                            .frame(width: 14, height: 14)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Copy \(placeholder.token)")
-                }
-            }
-            Divider()
-            Text("Moment-style tokens: YYYY/YY year, MMMM/MMM/MM/M month, DD/D/Do day, dddd/ddd weekday, GGGG and WW/W ISO week, and HH/h/mm/ss/A time. Put literal text in brackets, as in [W].")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        PlaceholderReference(
+            title: "Template Variables",
+            tokens: placeholders,
+            footnote: PlaceholderReference.momentTokenFootnote
+        )
         .frame(width: 470, alignment: .leading)
         .padding(14)
     }

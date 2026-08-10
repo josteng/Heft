@@ -93,6 +93,20 @@ structurally out of reach.
   from the vault's configured template. If none exists, the calendar can set
   up editable daily-note and template paths, show supported placeholders with
   a live preview, and create an Obsidian-compatible configuration.
+- **Typing substitutions** — `->` becomes `→`, `--` an en dash, `...` an
+  ellipsis, quotes curl, `<->` and `<=>` become `↔` and `⇔`, `!=` becomes `≠`,
+  `(c)` becomes `©`, and `1/2` becomes `½`, as you type. Backspace right after
+  one puts back what you typed. Settings (⌘,) has a Typing tab where each of
+  the eight groups can be switched off and your own `trigger → replacement`
+  pairs added. Each of those fires either immediately or once the word is ended
+  by a space, punctuation or Return, as macOS text replacement does, and its
+  text can carry `{{date:…}}`, `{{time:…}}` and `{{title}}` like a daily-note
+  template plus `{{caret}}` for where the caret should land — so a trigger can
+  expand into a whole code fence with the caret already inside it. An "Add from
+  Library" menu offers ready-made ones — today's daily-note link, this week's
+  note, a timed log entry, a task, a code block, a table, a callout — which
+  arrive as ordinary rows you can edit. Nothing is replaced inside code, math,
+  frontmatter, links, tags or URLs.
 - **Quick open** (⌘O) with fuzzy matching.
 - **Content search** (⇧⌘F) across the focused folder or the full vault.
 - **Command palette** (⌘P) for daily-note settings and window controls such as

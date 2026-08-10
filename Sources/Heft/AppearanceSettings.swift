@@ -184,6 +184,8 @@ struct SettingsWindow: View {
         TabView {
             AppearanceSettingsView()
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
+            TypingSettingsView()
+                .tabItem { Label("Typing", systemImage: "keyboard") }
         }
         .frame(width: 630)
     }

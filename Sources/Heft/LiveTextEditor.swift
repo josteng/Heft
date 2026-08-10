@@ -58,6 +58,9 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.delegate = nsContext.coordinator
         textView.onAttachment = onAttachment
         textView.completionIndex = context.index
+        // Also set here, not only in `updateNSView`: a note typed into before
+        // SwiftUI's first update pass would expand `{{title}}` to nothing.
+        textView.noteTitle = context.current?.name ?? ""
         textView.textContainer?.widthTracksTextView = true
         // The delegate hands each paragraph its widgets; without it tables,
         // formulae, images and list glyphs have nothing to draw them.
@@ -98,6 +101,8 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onAttachment = onAttachment
         textView.completionIndex = context.index
         textView.insertionPointColor = context.accentColor
+        // What `{{title}}` in a custom replacement expands to.
+        textView.noteTitle = context.current?.name ?? ""
         textView.updateLinkCompletion(allowStart: false)
 
         // `string` includes the input method's marked text, while the SwiftUI
@@ -175,6 +180,10 @@ struct LiveTextEditor: NSViewRepresentable {
             // would put a stutter into every arrow key.
             (textView as? HeftTextKit2View)?.updateFormatBar()
             (textView as? HeftTextKit2View)?.updateLinkCompletion(allowStart: false)
+            // Backspace only reverts a substitution while the caret has not
+            // left it. Moving away — by key, by click, or by anything else
+            // that lands here — makes the next backspace an ordinary delete.
+            (textView as? HeftTextKit2View)?.forgetSubstitution()
 
             guard !NSEqualRanges(line, reveal.line)
                 || spanSignature(for: selection) != revealedSpans
@@ -598,6 +607,85 @@ final class HeftTextKit2View: NSTextView {
             }
         }
         super.insertText(insertString, replacementRange: replacementRange)
+        applySubstitution(after: inserted)
+    }
+
+    /// The substitution the caret is sitting just after, and what it replaced.
+    ///
+    /// Cleared by `didChangeText`, so every other edit in this class drops it
+    /// without having to remember to, and by a selection change, so it only
+    /// ever survives for as long as the caret stays put.
+    private var pendingSubstitution: TextSubstitution?
+
+    /// The open note's title, for `{{title}}` in a custom replacement.
+    var noteTitle: String = ""
+
+    func forgetSubstitution() { pendingSubstitution = nil }
+
+    override func didChangeText() {
+        pendingSubstitution = nil
+        super.didChangeText()
+    }
+
+    /// Runs the smart-typography rules over the text now in front of the
+    /// caret, replacing it when one matches.
+    ///
+    /// Only for text the user typed: a single character, into a collapsed
+    /// selection. Paste, drag, and completion all arrive through this same
+    /// method and must not be rewritten — a pasted `-->` is quoted material.
+    private func applySubstitution(after inserted: String?) {
+        guard let inserted, inserted.count == 1, !completionIsActive else { return }
+        applySubstitution()
+    }
+
+    /// - Parameter endingWord: Return was pressed, which ends a word without
+    ///   typing anything, so only "after a space" rules can still fire.
+    @discardableResult
+    private func applySubstitution(endingWord: Bool = false) -> Bool {
+        let selection = selectedRange()
+        guard selection.length == 0 else { return false }
+        guard let substitution = SmartTypography.substitution(
+            in: string, caret: selection.location, config: TypingSettings.shared.config,
+            expansion: SubstitutionExpansion(noteTitle: noteTitle), endingWord: endingWord
+        ) else { return false }
+
+        guard shouldChangeText(in: substitution.range, replacementString: substitution.replacement)
+        else { return false }
+        textStorage?.replaceCharacters(in: substitution.range, with: substitution.replacement)
+        didChangeText()
+        setSelectedRange(NSRange(location: substitution.caret, length: 0))
+        // After both, since each of them clears it.
+        pendingSubstitution = substitution
+        return true
+    }
+
+    /// Backspace immediately after a substitution puts back what was typed,
+    /// rather than deleting the character the substitution produced. It is the
+    /// escape hatch for the one time in a hundred that `->` really did mean
+    /// `->`, and it is what Obsidian's Smart Typography does.
+    override func deleteBackward(_ sender: Any?) {
+        guard let substitution = pendingSubstitution else {
+            super.deleteBackward(sender)
+            return
+        }
+        pendingSubstitution = nil
+
+        let text = string as NSString
+        let replaced = substitution.replacedRange
+        let selection = selectedRange()
+        guard selection.length == 0, selection.location == substitution.caret,
+              NSMaxRange(replaced) <= text.length,
+              text.substring(with: replaced) == substitution.replacement,
+              shouldChangeText(in: replaced, replacementString: substitution.original)
+        else {
+            super.deleteBackward(sender)
+            return
+        }
+        textStorage?.replaceCharacters(in: replaced, with: substitution.original)
+        didChangeText()
+        setSelectedRange(NSRange(
+            location: replaced.location + (substitution.original as NSString).length, length: 0
+        ))
     }
 
     override func moveUp(_ sender: Any?) {
@@ -703,6 +791,10 @@ final class HeftTextKit2View: NSTextView {
     /// got right.
     override func insertNewline(_ sender: Any?) {
         if acceptLinkCompletion() { return }
+        // Return ends a word, so an "after a space" replacement gets its turn
+        // before the line does — and the newline still happens, exactly as it
+        // does in macOS text replacement.
+        applySubstitution(endingWord: true)
         let text = string as NSString
         let caret = selectedRange()
         let line = text.substring(with: text.lineRange(for: NSRange(location: caret.location, length: 0)))

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import HeftCore
+import SwiftUI
 @testable import Heft
 
 /// End-to-end checks over the mutable app shell.
@@ -472,6 +473,149 @@ enum AppIntegrationCheck {
                 .contains("[[Archive/Research/Chapter]]") == true,
             "folder move repoints links inside the moved folder"
         )
+
+        // Typing substitutions, through the text view rather than the engine:
+        // that the rules are right is `SelfCheck`'s job, that the editor calls
+        // them and that backspace reverts one is this one's.
+        let typing = TypingSettings.shared
+        let previousEnabled = typing.substitutionsEnabled
+        let previousGroups = typing.enabledGroups
+        let previousRules = typing.customRules
+        typing.substitutionsEnabled = true
+        typing.enabledGroups = Set(SmartTypographyGroup.allCases)
+        typing.customRules = []
+        defer {
+            typing.substitutionsEnabled = previousEnabled
+            typing.enabledGroups = previousGroups
+            typing.customRules = previousRules
+        }
+
+        let editor = HeftTextKit2View(usingTextLayoutManager: true)
+        editor.isEditable = true
+        editor.isRichText = false
+        func type(_ characters: String) {
+            for character in characters {
+                editor.insertText(String(character), replacementRange: editor.selectedRange())
+            }
+        }
+
+        type("a -> b")
+        expectEqual(editor.string, "a \u{2192} b", "typing -> in the editor gives an arrow")
+
+        editor.string = ""
+        type("x ->")
+        editor.deleteBackward(nil)
+        expectEqual(editor.string, "x ->", "backspace puts back what was typed")
+        editor.deleteBackward(nil)
+        expectEqual(editor.string, "x -", "a second backspace deletes normally")
+
+        editor.string = ""
+        type("`a ->")
+        expectEqual(editor.string, "`a ->", "the editor leaves inline code alone")
+
+        editor.string = ""
+        editor.insertText("a -> b", replacementRange: editor.selectedRange())
+        expectEqual(editor.string, "a -> b", "pasted text is never substituted")
+
+        editor.string = ""
+        typing.substitutionsEnabled = false
+        type("a ->")
+        expectEqual(editor.string, "a ->", "the setting switches the editor's rules off")
+        typing.substitutionsEnabled = true
+
+        // Word-end firing and snippets, which only the editor can show off:
+        // the built-ins are switched off so nothing else can claim a trigger.
+        typing.enabledGroups = []
+        typing.customRules = [
+            CustomSubstitution(trigger: "omw", replacement: "On my way!", firing: .afterWord),
+            CustomSubstitution(trigger: ";cb", replacement: "```\n{{caret}}\n```"),
+        ]
+
+        editor.string = ""
+        type("omw")
+        expectEqual(editor.string, "omw", "an after-a-space rule waits for the space")
+        type(" ")
+        expectEqual(editor.string, "On my way! ", "the space fires it and stays where it was typed")
+
+        editor.string = ""
+        type("omw")
+        editor.insertNewline(nil)
+        expectEqual(editor.string, "On my way!\n", "Return fires an after-a-space rule too")
+
+        editor.string = ""
+        type(";cb")
+        expectEqual(editor.string, "```\n\n```", "a snippet expands its placeholders")
+        expect(editor.selectedRange().location == 4, "the caret lands where {{caret}} was")
+
+        typing.enabledGroups = Set(SmartTypographyGroup.allCases)
+
+        // The settings pane, hosted rather than clicked: enough to catch a
+        // pane that collapses to nothing or refuses to build its rule rows,
+        // which is what a SwiftUI mistake here actually looks like.
+        let pane = NSHostingView(rootView: TypingSettingsView())
+        pane.layoutSubtreeIfNeeded()
+        let paneSize = pane.fittingSize
+        expect(paneSize.width >= 600, "the Typing pane is as wide as the Settings window")
+        expect(paneSize.height > 300, "the Typing pane lays out its groups and rules")
+
+        // Many rules must scroll inside the table rather than make the pane —
+        // and with it the Settings window — grow without limit.
+        func paneHeight(rules: Int) -> CGFloat {
+            typing.customRules = (0..<rules).map {
+                CustomSubstitution(trigger: ";t\($0)", replacement: "rule \($0)")
+            }
+            let view = NSHostingView(rootView: TypingSettingsView())
+            view.layoutSubtreeIfNeeded()
+            return view.fittingSize.height
+        }
+        let forty = paneHeight(rules: 40)
+        let hundred = paneHeight(rules: 100)
+        expect(
+            forty == hundred,
+            "the pane stops growing and scrolls instead (\(forty)pt vs \(hundred)pt)"
+        )
+        expect(
+            forty > paneSize.height,
+            "the pane does grow with rules until it reaches that cap"
+        )
+        typing.customRules = []
+
+        // Every group is on unless it was explicitly switched off — including
+        // groups that did not exist when the settings were last written, which
+        // is why the disabled set is what gets stored.
+        expect(
+            TypingSettings.groups(disabled: nil, legacyEnabled: nil)
+                == Set(SmartTypographyGroup.allCases),
+            "a fresh install has every group on"
+        )
+        expect(
+            TypingSettings.groups(disabled: ["fractions"], legacyEnabled: nil)
+                == Set(SmartTypographyGroup.allCases).subtracting([.fractions]),
+            "a switched-off group stays off"
+        )
+        expect(
+            TypingSettings.groups(disabled: [], legacyEnabled: nil)
+                == Set(SmartTypographyGroup.allCases),
+            "an empty disabled list is every group on"
+        )
+        expect(
+            TypingSettings.groups(disabled: nil, legacyEnabled: ["arrows", "dashes"])
+                .contains(.symbols),
+            "a group added after the settings were written arrives switched on"
+        )
+        expect(
+            !TypingSettings.groups(disabled: nil, legacyEnabled: ["arrows", "dashes"])
+                .contains(.fractions),
+            "upgrading keeps what the user had switched off"
+        )
+
+        // A rule stored before per-rule firing existed must still decode.
+        let legacy = Data(
+            #"[{"id":"\#(UUID().uuidString)","trigger":";x","replacement":"y","isEnabled":true}]"#
+                .utf8
+        )
+        let decoded = try? JSONDecoder().decode([CustomSubstitution].self, from: legacy)
+        expect(decoded?.first?.firing == .immediately, "an older stored rule still decodes")
 
         files.closeWorkspace()
         return result
