@@ -255,25 +255,23 @@ private struct WorkspaceScopePicker: View {
                 }
             }
         } label: {
-            // Keep Text as the menu label's semantic content. Menu otherwise
-            // extracts a sibling Image and lays it out as a leading menu icon,
-            // regardless of its position in an HStack.
+            // Text alone, and the chevron left to the system.
+            //
+            // A hand-drawn one had to go: an `Image` anywhere in a toolbar
+            // menu's label — even inside an overlay, positioned trailing — is
+            // hoisted out and re-laid as a *leading* menu icon, tinted with
+            // the accent colour. So the chevron sat on the wrong side and
+            // turned yellow the moment the accent did. The built-in indicator
+            // is trailing and label-coloured, which is what it should have
+            // looked like all along.
             Text(model.scopePath == nil ? "All Notes" : model.scopeName)
                 .lineLimit(1)
-                .padding(.trailing, 13)
-                .overlay(alignment: .trailing) {
-                    // Unlike an SF Symbol interpolated into Text, the overlay
-                    // inherits the inactive-window appearance correctly.
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.secondary)
-                }
-            .font(.system(size: 12, weight: .semibold))
-            .frame(minWidth: 76)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(minWidth: 76)
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
-        .menuIndicator(.hidden)
+        .menuIndicator(.visible)
         .controlSize(.small)
         .fixedSize()
         .help(model.scopePath.map { "\(model.vaultName) / \($0)" } ?? model.vaultName)

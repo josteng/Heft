@@ -128,7 +128,7 @@ struct CalendarPanel: View {
                     date: day.date,
                     isToday: calendar.isDateInToday(day.date),
                     isSelected: isOpen(day.date),
-                    hasNote: hasNote(day.date),
+                    note: note(for: day.date),
                     isOutsideMonth: !day.isInMonth
                 ) {
                     open(day)
@@ -186,11 +186,12 @@ struct CalendarPanel: View {
         ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
     }
 
-    /// Checked against the in-memory index rather than the filesystem: this
-    /// runs for every visible day on every redraw.
-    private func hasNote(_ date: Date) -> Bool {
-        guard let daily = model.dailyNotes else { return false }
-        return model.index.note(atRelativePath: daily.relativePath(for: date)) != nil
+    /// Looked up in the in-memory index rather than on the filesystem: this
+    /// runs for every visible day on every redraw. The day's own menu needs
+    /// the note itself, not just whether there is one.
+    private func note(for date: Date) -> NoteRef? {
+        guard let daily = model.dailyNotes else { return nil }
+        return model.index.note(atRelativePath: daily.relativePath(for: date))
     }
 
     private func isOpen(_ date: Date) -> Bool {
@@ -459,7 +460,7 @@ private struct DayCell: View {
     let date: Date
     let isToday: Bool
     let isSelected: Bool
-    let hasNote: Bool
+    let note: NoteRef?
     var isOutsideMonth = false
     let action: () -> Void
 
@@ -473,7 +474,7 @@ private struct DayCell: View {
                     .monospacedDigit()
                     .foregroundStyle(isOutsideMonth ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.primary))
                 Circle()
-                    .fill(hasNote ? AnyShapeStyle(accent) : AnyShapeStyle(.clear))
+                    .fill(note != nil ? AnyShapeStyle(accent) : AnyShapeStyle(.clear))
                     // A padding day's note still gets a dot, but a faint one:
                     // it belongs to a month that is not on screen.
                     .opacity(isOutsideMonth ? 0.4 : 1)
@@ -498,5 +499,53 @@ private struct DayCell: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(MomentFormat.format(date, pattern: "dddd, MMMM Do YYYY"))
+        .contextMenu { DayMenu(date: date, note: note, onCreate: action) }
+    }
+}
+
+/// Actions on one day of the calendar.
+///
+/// Deliberately not the file list's whole menu. A daily note's *filename* is
+/// its date, and that is how the calendar finds it again, so Rename, Move to…
+/// and Duplicate would quietly detach a note from the day it belongs to: the
+/// note would survive, the day would lose its dot, and clicking that day would
+/// offer to create a second one. The rest of that menu makes as much sense
+/// here as it does there.
+private struct DayMenu: View {
+    @EnvironmentObject private var model: AppModel
+    let date: Date
+    let note: NoteRef?
+    /// Creating and opening are one action: clicking a day already does
+    /// whichever applies, and the menu should not disagree with the click.
+    let onCreate: () -> Void
+
+    var body: some View {
+        if let note {
+            Button("Open") { model.open(note) }
+            Divider()
+            Button("Copy Wikilink") {
+                model.copyToPasteboard("[[\(note.name)]]", describedAs: "wikilink")
+            }
+            // The vault-relative path is what a link needs, the absolute one
+            // what a terminal or another app needs, as in the file list.
+            Button("Copy Path") {
+                model.copyToPasteboard(note.relativePath, describedAs: "path")
+            }
+            Button("Copy Absolute Path") {
+                model.copyToPasteboard(note.url.path, describedAs: "absolute path")
+            }
+            Button("Reveal in Finder") { model.revealInFinder(note.url) }
+            Divider()
+            Button("Move to Trash", role: .destructive) {
+                model.delete(VaultItem(
+                    url: note.url, relativePath: note.relativePath,
+                    kind: note.kind, name: note.name
+                ))
+            }
+        } else {
+            Button("Create Note for \(MomentFormat.format(date, pattern: "MMMM Do"))") {
+                onCreate()
+            }
+        }
     }
 }
