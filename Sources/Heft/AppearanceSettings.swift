@@ -186,6 +186,8 @@ struct SettingsWindow: View {
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
             TypingSettingsView()
                 .tabItem { Label("Typing", systemImage: "keyboard") }
+            VimSettingsView()
+                .tabItem { Label("Vim (Experimental)", systemImage: "terminal") }
         }
         .frame(width: 630)
     }

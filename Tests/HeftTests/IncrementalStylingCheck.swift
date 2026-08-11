@@ -237,7 +237,8 @@ enum IncrementalStylingCheck {
         for (name, document) in corpus {
             let editor = LiveTextEditor(
                 text: .constant(document), generation: 0, findSelection: nil,
-                context: context, onAttachment: { _ in nil }, onFollowLink: { _ in }
+                context: context, onAttachment: { _ in nil }, onFollowLink: { _ in },
+                onVimSearch: { _ in }
             )
             let coordinator = LiveTextEditor.Coordinator(editor)
             let view = HeftTextKit2View(usingTextLayoutManager: true)

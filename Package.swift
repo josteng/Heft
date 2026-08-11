@@ -23,6 +23,11 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "HeftVimCore",
+            path: "Sources/HeftVimCore",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .target(
             name: "HeftCore",
             dependencies: [.product(name: "Markdown", package: "swift-markdown")],
             path: "Sources/HeftCore",
@@ -32,6 +37,7 @@ let package = Package(
             name: "Heft",
             dependencies: [
                 "HeftCore",
+                "HeftVimCore",
                 "SwiftMath",
                 .product(name: "MarkdownEngineCodeBlocks", package: "swift-markdown-engine"),
             ],
@@ -40,7 +46,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HeftTests",
-            dependencies: ["Heft", "HeftCore"],
+            dependencies: ["Heft", "HeftCore", "HeftVimCore"],
             path: "Tests/HeftTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

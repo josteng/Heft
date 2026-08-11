@@ -288,6 +288,8 @@ struct EditorPane: View {
     @State private var findIndex = 0
     @State private var findSelection: FindSelection?
     @State private var findSelectionGeneration = 0
+    @State private var findDirection = 1
+    @State private var findWholeWord = false
     @FocusState private var findFieldFocused: Bool
 
     private var context: RenderContext {
@@ -325,11 +327,39 @@ struct EditorPane: View {
                 onAttachment: handleAttachment,
                 onFollowLink: { url in
                     if !model.handle(url: url) { NSWorkspace.shared.open(url) }
+                },
+                onVimSearch: { action in
+                    switch action {
+                    case let .beginSearch(backward):
+                        findDirection = backward ? -1 : 1
+                        findWholeWord = false
+                        model.isFindPresented = true
+                    case let .nextSearch(backward):
+                        guard !findQuery.isEmpty else {
+                            model.isFindPresented = true
+                            return
+                        }
+                        moveFind(by: backward ? -1 : 1)
+                    case let .searchWord(query, backward, origin):
+                        findDirection = backward ? -1 : 1
+                        findWholeWord = true
+                        findQuery = query
+                        refreshFindMatches()
+                        guard !findMatches.isEmpty else { return }
+                        if backward {
+                            findIndex = findMatches.lastIndex { $0.location < origin }
+                                ?? (findMatches.count - 1)
+                        } else {
+                            findIndex = findMatches.firstIndex { $0.location > origin } ?? 0
+                        }
+                        selectFindMatch()
+                    default: break
+                    }
                 }
             )
-            // Keep prose readable in wide windows while preserving the
-            // editor's existing 28pt TextKit inset on either side.
-            .frame(maxWidth: Theme.contentMaxWidth + 56)
+            // The scroll view fills the pane, keeping its scroller at the
+            // window edge. HeftTextKit2View centers and width-limits only the
+            // text container inside it.
             .frame(maxWidth: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
 
@@ -337,6 +367,9 @@ struct EditorPane: View {
         }
         .task(id: model.documentGeneration) {
             closeFind()
+        }
+        .task(id: model.settings.vimMode) {
+            VimSettings.shared.adoptVaultDefault(model.settings.vimMode)
         }
         .task(id: model.pendingLineReveal) {
             guard let line = model.pendingLineReveal else { return }
@@ -370,7 +403,7 @@ struct EditorPane: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 240)
                 .focused($findFieldFocused)
-                .onSubmit { moveFind(by: 1) }
+                .onSubmit { moveFind(by: findDirection) }
                 .onExitCommand { closeFind() }
                 .onChange(of: findQuery) { _, _ in refreshFindMatches() }
             Text(findMatches.isEmpty ? "0 of 0" : "\(findIndex + 1) of \(findMatches.count)")
@@ -410,7 +443,9 @@ struct EditorPane: View {
                 range: NSRange(location: cursor, length: source.length - cursor)
             )
             guard range.location != NSNotFound else { break }
-            findMatches.append(range)
+            if !findWholeWord || isWholeWordMatch(range, in: source) {
+                findMatches.append(range)
+            }
             cursor = NSMaxRange(range)
         }
         findIndex = 0
@@ -465,10 +500,26 @@ struct EditorPane: View {
 
     private func closeFind() {
         model.isFindPresented = false
+        findWholeWord = false
         findQuery = ""
         findMatches = []
         findIndex = 0
         findSelection = nil
+    }
+
+    private func isWholeWordMatch(_ range: NSRange, in source: NSString) -> Bool {
+        let beforeIsWord = range.location > 0 && isWordCharacter(at: range.location - 1, in: source)
+        let after = NSMaxRange(range)
+        let afterIsWord = after < source.length && isWordCharacter(at: after, in: source)
+        return !beforeIsWord && !afterIsWord
+    }
+
+    private func isWordCharacter(at location: Int, in source: NSString) -> Bool {
+        guard source.length > 0, location >= 0, location < source.length else { return false }
+        let range = source.rangeOfComposedCharacterSequence(at: location)
+        return source.substring(with: range).unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) || $0 == "_"
+        }
     }
 
     /// Called by the text view on paste and drop. Returning nil lets the text
@@ -498,9 +549,15 @@ struct EditorPane: View {
 
 private struct StatusBar: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var vim = VimSettings.shared
 
     var body: some View {
         HStack(spacing: 10) {
+            if vim.isEnabled {
+                Text("-- \(vim.mode.rawValue) --")
+                    .fontWeight(.semibold)
+                if let message = vim.message { Text(message).lineLimit(1) }
+            }
             Text(model.status).lineLimit(1)
             Spacer()
             if let path = model.current?.relativePath {

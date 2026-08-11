@@ -1,5 +1,6 @@
 import AppKit
 import HeftCore
+import HeftVimCore
 import SwiftUI
 
 struct FindSelection: Equatable {
@@ -25,12 +26,14 @@ struct FindSelection: Equatable {
 /// draw per-block decoration — rounded card backgrounds, padding, rules — which
 /// TextKit 1's attribute vocabulary genuinely cannot express.
 struct LiveTextEditor: NSViewRepresentable {
+    @ObservedObject private var vim = VimSettings.shared
     @Binding var text: String
     let generation: Int
     let findSelection: FindSelection?
     let context: RenderContext
     let onAttachment: (NSPasteboard) -> String?
     let onFollowLink: (URL) -> Void
+    let onVimSearch: (VimHostAction) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -52,15 +55,18 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = false
         textView.isAutomaticDataDetectionEnabled = false
         textView.usesFindBar = false
-        textView.insertionPointColor = context.accentColor
+        textView.vimCaretColor = context.accentColor
         textView.textContainerInset = NSSize(width: 28, height: 28)
         textView.linkTextAttributes = [:]
         textView.delegate = nsContext.coordinator
         textView.onAttachment = onAttachment
+        textView.onVimSearch = onVimSearch
         textView.completionIndex = context.index
         // Also set here, not only in `updateNSView`: a note typed into before
         // SwiftUI's first update pass would expand `{{title}}` to nothing.
         textView.noteTitle = context.current?.name ?? ""
+        textView.vimEnabled = vim.isEnabled
+        textView.vimContinuesMarkdownStructure = vim.continuesMarkdownStructure
         textView.textContainer?.widthTracksTextView = true
         // The delegate hands each paragraph its widgets; without it tables,
         // formulae, images and list glyphs have nothing to draw them.
@@ -99,10 +105,13 @@ struct LiveTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? HeftTextKit2View else { return }
         nsContext.coordinator.parent = self
         textView.onAttachment = onAttachment
+        textView.onVimSearch = onVimSearch
         textView.completionIndex = context.index
-        textView.insertionPointColor = context.accentColor
+        textView.vimCaretColor = context.accentColor
         // What `{{title}}` in a custom replacement expands to.
         textView.noteTitle = context.current?.name ?? ""
+        textView.vimEnabled = vim.isEnabled
+        textView.vimContinuesMarkdownStructure = vim.continuesMarkdownStructure
         textView.updateLinkCompletion(allowStart: false)
 
         // `string` includes the input method's marked text, while the SwiftUI
@@ -136,6 +145,7 @@ struct LiveTextEditor: NSViewRepresentable {
                 textView.string = text
                 nsContext.coordinator.resetStyling()
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
+                textView.resetVim()
                 textView.scroll(.zero)
             }
             nsContext.coordinator.restyle(textView)
@@ -195,6 +205,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // would put a stutter into every arrow key.
             (textView as? HeftTextKit2View)?.updateFormatBar()
             (textView as? HeftTextKit2View)?.updateLinkCompletion(allowStart: false)
+            (textView as? HeftTextKit2View)?.updateVimCursor()
             // Backspace only reverts a substitution while the caret has not
             // left it. Moving away — by key, by click, or by anything else
             // that lands here — makes the next backspace an ordinary delete.
@@ -380,8 +391,12 @@ struct LiveTextEditor: NSViewRepresentable {
 
             settleLayout(textView)
             textView.scrollRangeToVisible(selection)
-            // Revealing markup reflows the line, so the bar's anchor moves.
+            // Revealing or collapsing markup reflows the line, so overlays
+            // calculated from TextKit geometry must be moved after layout has
+            // settled. In particular, collapsed wikilink suffixes can report
+            // a stale rectangle at the readable-width boundary.
             (textView as? HeftTextKit2View)?.updateFormatBar()
+            (textView as? HeftTextKit2View)?.updateVimCursor()
             // This pass styled whatever is in the storage now, so a restyle
             // queued by the edit that led here has nothing left to do.
             restyleTask?.cancel()
@@ -481,9 +496,26 @@ extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
     }
 }
 
+private final class VimBlockCursorView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private struct VimInsertionDelta {
+    var relativeLocation: Int
+    var removedLength: Int
+    var replacement: String
+    var caretOffset: Int
+}
+
+private struct VimRepeatRecipe {
+    var keys: [VimKey]
+    var insertion: VimInsertionDelta?
+}
+
 /// Text view with vault-aware paste and list continuation.
 final class HeftTextKit2View: NSTextView {
     var onAttachment: ((NSPasteboard) -> String?)?
+    var onVimSearch: ((VimHostAction) -> Void)?
     var onFirstResponderChange: ((Bool) -> Void)?
     var completionIndex = VaultIndex.empty
     /// Called when the usable width changes. Tables are measured against it, so
@@ -496,10 +528,621 @@ final class HeftTextKit2View: NSTextView {
     private var completionSelection = 0
     private var completionIsActive = false
     private var completionQuery = ""
+    private var vimEngine = VimEngine()
+    private var vimPreferredX: CGFloat?
+    private var vimPendingRepeatKeys: [VimKey] = []
+    private var vimInsertBaseline: (text: String, location: Int)?
+    private var vimLastRepeat: VimRepeatRecipe?
+    private var vimIsReplaying = false
+    var vimContinuesMarkdownStructure = true
+    var vimCaretColor = NSColor.controlAccentColor {
+        didSet { updateVimCursor() }
+    }
+    private lazy var vimBlockCursor: VimBlockCursorView = {
+        let cursor = VimBlockCursorView()
+        cursor.wantsLayer = true
+        cursor.layer?.cornerRadius = 1
+        cursor.isHidden = true
+        addSubview(cursor, positioned: .above, relativeTo: nil)
+        return cursor
+    }()
+    var vimEnabled = false {
+        didSet {
+            guard vimEnabled != oldValue else { return }
+            vimEngine.reset(mode: vimEnabled ? .normal : .insert)
+            VimSettings.shared.report(mode: vimEnabled ? .normal : .insert)
+            if vimEnabled { dismissLinkCompletion() }
+            updateVimCursor()
+        }
+    }
+
+    func resetVim() {
+        vimEngine.reset(mode: vimEnabled ? .normal : .insert)
+        vimPreferredX = nil
+        vimPendingRepeatKeys = []
+        vimInsertBaseline = nil
+        VimSettings.shared.report(mode: vimEngine.mode)
+        updateVimCursor()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard vimEnabled,
+              event.modifierFlags.intersection([.command, .option]).isEmpty,
+              let key = vimKey(for: event)
+        else {
+            super.keyDown(with: event)
+            return
+        }
+
+        if key == .character("."), vimEngine.mode == .normal, vimLastRepeat != nil {
+            replayLastVimChange()
+            return
+        }
+
+        if !handleVimKey(key, recordRepeat: true) {
+            super.keyDown(with: event)
+        }
+    }
+
+    @discardableResult
+    private func handleVimKey(_ key: VimKey, recordRepeat: Bool) -> Bool {
+        let modeBeforeKey = vimEngine.mode
+        let wasAwaiting = vimEngine.isAwaitingMoreKeys
+        let selectionBeforeKey = selectedRange()
+
+        if recordRepeat, !vimIsReplaying {
+            if modeBeforeKey == .normal, !wasAwaiting {
+                vimPendingRepeatKeys = [key]
+            } else if modeBeforeKey != .insert {
+                vimPendingRepeatKeys.append(key)
+            }
+        }
+
+        let movesVertically = isVimVerticalMovement(key)
+        if movesVertically, modeBeforeKey == .normal, vimPreferredX == nil {
+            vimPreferredX = vimCursorRect(at: selectedRange().location)?.minX
+        } else if !movesVertically {
+            vimPreferredX = nil
+        }
+
+        var output = vimEngine.handle(
+            key,
+            in: VimSnapshot(text: string, selection: selectedRange())
+        )
+        if modeBeforeKey == .normal,
+           vimContinuesMarkdownStructure,
+           case let .character(command) = key,
+           command == "o" || command == "O" {
+            output = markdownAwareOpenLineOutput(
+                output,
+                below: command == "o",
+                source: string,
+                cursor: selectionBeforeKey.location
+            )
+        } else if vimContinuesMarkdownStructure, output.mode == .insert {
+            output = markdownAwareLineChangeOutput(
+                output,
+                source: string,
+                cursor: selectionBeforeKey.location
+            )
+        }
+        if movesVertically, modeBeforeKey == .normal,
+           let preferredX = vimPreferredX,
+           let selection = output.selection,
+           selection.length == 0 {
+            output.selection = NSRange(
+                location: vimLocation(
+                    onLineContaining: selection.location,
+                    renderedX: preferredX
+                ),
+                length: 0
+            )
+        }
+        guard output.consumed else {
+            return false
+        }
+
+        dismissLinkCompletion()
+        applyVimOutput(output)
+
+        guard recordRepeat, !vimIsReplaying else { return true }
+        if modeBeforeKey == .insert, key == .escape {
+            finishVimInsertRepeat(caretLocation: selectionBeforeKey.location)
+        } else if (modeBeforeKey == .replace || modeBeforeKey == .blockInsert), key == .escape {
+            vimLastRepeat = VimRepeatRecipe(keys: vimPendingRepeatKeys, insertion: nil)
+            vimPendingRepeatKeys = []
+        } else if output.mode == .insert, modeBeforeKey != .insert {
+            vimInsertBaseline = (string, selectedRange().location)
+        } else if !output.edits.isEmpty, output.mode == .normal {
+            vimLastRepeat = VimRepeatRecipe(keys: vimPendingRepeatKeys, insertion: nil)
+            vimPendingRepeatKeys = []
+        } else if output.mode == .normal, !vimEngine.isAwaitingMoreKeys,
+                  output.edits.isEmpty, output.hostAction == nil {
+            // Motions, yanks, cancelled commands, and unknown keys do not
+            // replace Vim's most recent repeatable change.
+            vimPendingRepeatKeys = []
+        }
+        return true
+    }
+
+    private func markdownAwareOpenLineOutput(
+        _ output: VimOutput,
+        below: Bool,
+        source: String,
+        cursor: Int
+    ) -> VimOutput {
+        let text = source as NSString
+        guard text.length > 0 else { return output }
+        let safeCursor = min(cursor, text.length - 1)
+        let lineRange = text.lineRange(for: NSRange(location: safeCursor, length: 0))
+        let contentRange = Self.lineContentRange(lineRange, in: text)
+        let line = text.substring(with: contentRange)
+        guard let structure = Self.markdownContinuation(of: line) else { return output }
+
+        let marker = below && structure.isList
+            ? Self.nextListMarker(after: structure.marker)
+            : structure.marker
+        let insertion = below ? NSMaxRange(lineRange) : lineRange.location
+        let hasTerminator = NSMaxRange(contentRange) < NSMaxRange(lineRange)
+        let replacement = below
+            ? (hasTerminator ? marker + "\n" : "\n" + marker)
+            : marker + "\n"
+        let caret = insertion + (below && !hasTerminator ? 1 : 0) + marker.utf16.count
+        var adapted = output
+        adapted.edits = [VimEdit(
+            range: NSRange(location: insertion, length: 0),
+            replacement: replacement
+        )]
+        adapted.selection = NSRange(location: caret, length: 0)
+        return adapted
+    }
+
+    private func markdownAwareLineChangeOutput(
+        _ output: VimOutput,
+        source: String,
+        cursor: Int
+    ) -> VimOutput {
+        let text = source as NSString
+        guard text.length > 0, output.edits.count == 1 else { return output }
+        let safeCursor = min(cursor, text.length - 1)
+        let lineRange = text.lineRange(for: NSRange(location: safeCursor, length: 0))
+        let edit = output.edits[0]
+        guard edit.range.location == lineRange.location,
+              edit.range.length >= lineRange.length
+        else { return output }
+        let contentRange = Self.lineContentRange(lineRange, in: text)
+        let line = text.substring(with: contentRange)
+        guard let structure = Self.markdownContinuation(of: line) else { return output }
+
+        let hasTerminator = NSMaxRange(contentRange) < NSMaxRange(lineRange)
+        let replacement = structure.marker + (hasTerminator ? "\n" : "")
+        var adapted = output
+        adapted.edits = [VimEdit(range: edit.range, replacement: replacement)]
+        adapted.selection = NSRange(
+            location: edit.range.location + structure.marker.utf16.count,
+            length: 0
+        )
+        return adapted
+    }
+
+    private static func lineContentRange(_ line: NSRange, in text: NSString) -> NSRange {
+        var end = NSMaxRange(line)
+        while end > line.location {
+            let character = text.character(at: end - 1)
+            guard character == 10 || character == 13 else { break }
+            end -= 1
+        }
+        return NSRange(location: line.location, length: end - line.location)
+    }
+
+    private func applyVimOutput(_ output: VimOutput) {
+        var changedText = false
+        for edit in output.edits.sorted(by: { $0.range.location > $1.range.location }) {
+            guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { continue }
+            textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+            changedText = true
+        }
+        if changedText { didChangeText() }
+        if let selections = output.selections, !selections.isEmpty {
+            let length = (string as NSString).length
+            let safe = selections.map { selection -> NSValue in
+                let location = min(selection.location, length)
+                return NSValue(range: NSRange(
+                    location: location,
+                    length: min(selection.length, length - location)
+                ))
+            }
+            setSelectedRanges(safe, affinity: .downstream, stillSelecting: false)
+        } else if let selection = output.selection {
+            let length = (string as NSString).length
+            let location = min(selection.location, length)
+            setSelectedRange(NSRange(
+                location: location,
+                length: min(selection.length, length - location)
+            ))
+        }
+        if let action = output.hostAction { performVimHostAction(action) }
+        VimSettings.shared.report(mode: output.mode, message: output.message)
+        updateVimCursor()
+    }
+
+    private func finishVimInsertRepeat(caretLocation: Int) {
+        defer {
+            vimInsertBaseline = nil
+            vimPendingRepeatKeys = []
+        }
+        guard let baseline = vimInsertBaseline,
+              let delta = vimInsertionDelta(
+                from: baseline.text,
+                to: string,
+                insertionLocation: baseline.location,
+                caretLocation: caretLocation
+              )
+        else { return }
+        vimLastRepeat = VimRepeatRecipe(keys: vimPendingRepeatKeys, insertion: delta)
+    }
+
+    private func vimInsertionDelta(
+        from old: String,
+        to new: String,
+        insertionLocation: Int,
+        caretLocation: Int
+    ) -> VimInsertionDelta? {
+        let before = old as NSString
+        let after = new as NSString
+        let prefixLimit = min(insertionLocation, before.length, after.length)
+        var prefix = 0
+        while prefix < prefixLimit, before.character(at: prefix) == after.character(at: prefix) {
+            prefix += 1
+        }
+        var suffix = 0
+        while suffix < before.length - prefix,
+              suffix < after.length - prefix,
+              before.character(at: before.length - suffix - 1)
+                == after.character(at: after.length - suffix - 1) {
+            suffix += 1
+        }
+        let removedLength = before.length - prefix - suffix
+        let replacementRange = NSRange(
+            location: prefix,
+            length: after.length - prefix - suffix
+        )
+        guard removedLength > 0 || replacementRange.length > 0 else { return nil }
+        return VimInsertionDelta(
+            relativeLocation: prefix - insertionLocation,
+            removedLength: removedLength,
+            replacement: after.substring(with: replacementRange),
+            caretOffset: caretLocation - insertionLocation
+        )
+    }
+
+    private func replayLastVimChange() {
+        guard let recipe = vimLastRepeat else { return }
+        vimPreferredX = nil
+        vimIsReplaying = true
+        undoManager?.beginUndoGrouping()
+        defer {
+            undoManager?.endUndoGrouping()
+            vimIsReplaying = false
+            updateVimCursor()
+        }
+
+        for key in recipe.keys {
+            _ = handleVimKey(key, recordRepeat: false)
+        }
+        guard let insertion = recipe.insertion, vimEngine.mode == .insert else { return }
+        let insertionStart = selectedRange().location
+        var replayReplacement = insertion.replacement
+        var replayCaretOffset = insertion.caretOffset
+        if insertion.relativeLocation == 0, insertion.removedLength == 0,
+           let redundantMarker = redundantReplayedMarkdownMarker(
+            in: replayReplacement,
+            at: insertionStart
+           ) {
+            replayReplacement.removeFirst(redundantMarker.count)
+            replayCaretOffset -= redundantMarker.utf16.count
+        }
+        let length = (string as NSString).length
+        let location = min(max(0, insertionStart + insertion.relativeLocation), length)
+        let removedLength = min(insertion.removedLength, length - location)
+        let range = NSRange(location: location, length: removedLength)
+        if shouldChangeText(in: range, replacementString: replayReplacement) {
+            textStorage?.replaceCharacters(in: range, with: replayReplacement)
+            didChangeText()
+        }
+        let newLength = (string as NSString).length
+        setSelectedRange(NSRange(
+            location: min(max(0, insertionStart + replayCaretOffset), newLength),
+            length: 0
+        ))
+        _ = handleVimKey(.escape, recordRepeat: false)
+    }
+
+    private func redundantReplayedMarkdownMarker(
+        in replacement: String,
+        at insertion: Int
+    ) -> String? {
+        guard vimContinuesMarkdownStructure else { return nil }
+        let text = string as NSString
+        let line = text.lineRange(for: NSRange(
+            location: min(insertion, text.length),
+            length: 0
+        ))
+        guard insertion >= line.location else { return nil }
+        let prefix = text.substring(with: NSRange(
+            location: line.location,
+            length: insertion - line.location
+        ))
+        guard let supplied = Self.markdownContinuation(of: prefix),
+              supplied.marker == prefix,
+              let captured = Self.markdownContinuation(of: replacement),
+              captured.isList == supplied.isList
+        else { return nil }
+        return captured.marker
+    }
+
+    func updateVimCursor() {
+        let showsBlock = vimEnabled
+            && (vimEngine.mode == .normal || vimEngine.mode == .operatorPending)
+            && selectedRange().length == 0
+            && window?.firstResponder === self
+        let nativeCaretColor = showsBlock ? NSColor.clear : vimCaretColor
+        if !insertionPointColor.isEqual(nativeCaretColor) {
+            insertionPointColor = nativeCaretColor
+        }
+        guard showsBlock else {
+            vimBlockCursor.isHidden = true
+            return
+        }
+
+        let source = string as NSString
+        let location = min(selectedRange().location, source.length)
+        let block = vimBlockCursorRect(at: location, in: source)
+        guard var frame = block, !frame.isEmpty else {
+            vimBlockCursor.isHidden = true
+            return
+        }
+        frame.size.width = max(4, frame.width)
+        vimBlockCursor.frame = frame.integral
+        vimBlockCursor.layer?.backgroundColor = vimCaretColor.withAlphaComponent(0.52).cgColor
+        vimBlockCursor.isHidden = false
+    }
+
+    private func vimBlockCursorRect(at location: Int, in source: NSString) -> NSRect? {
+        if location < source.length {
+            let character = source.character(at: location)
+            if character != 10, character != 13 {
+                let range = source.rangeOfComposedCharacterSequence(at: location)
+                if !vimCharacterIsCollapsed(at: range.location) {
+                    return rect(forSelection: range)
+                }
+                let line = source.lineRange(for: NSRange(location: location, length: 0))
+                if let visible = vimLastVisibleCharacter(
+                    before: range.location,
+                    lineStart: line.location,
+                    source: source
+                ) {
+                    return rect(forSelection: visible)
+                }
+            }
+        }
+
+        // AppKit selections are insertion positions, so clicking past the end
+        // of a non-empty line lands on its newline. Normal-mode Vim cursors are
+        // character positions: cover the final character instead of drawing a
+        // phantom cell after it.
+        var lineStart = 0
+        var lineEnd = 0
+        var contentEnd = 0
+        var lineProbe = location
+        if location < source.length {
+            let character = source.character(at: location)
+            if character == 10 || character == 13 {
+                guard location > 0 else { return caretRect(at: location) }
+                let previous = source.character(at: location - 1)
+                guard previous != 10, previous != 13 else { return caretRect(at: location) }
+                lineProbe = location - 1
+            }
+        } else if location > 0 {
+            let previous = source.character(at: location - 1)
+            if previous != 10, previous != 13 { lineProbe = location - 1 }
+        }
+        source.getLineStart(
+            &lineStart,
+            end: &lineEnd,
+            contentsEnd: &contentEnd,
+            for: NSRange(location: min(lineProbe, source.length), length: 0)
+        )
+        if contentEnd > lineStart {
+            if let visible = vimLastVisibleCharacter(
+                before: contentEnd,
+                lineStart: lineStart,
+                source: source
+            ) {
+                return rect(forSelection: visible)
+            }
+        }
+        return caretRect(at: location)
+    }
+
+    private func vimLastVisibleCharacter(
+        before end: Int,
+        lineStart: Int,
+        source: NSString
+    ) -> NSRange? {
+        var location = end
+        while location > lineStart {
+            let range = source.rangeOfComposedCharacterSequence(at: location - 1)
+            if !vimCharacterIsCollapsed(at: range.location) { return range }
+            location = range.location
+        }
+        return nil
+    }
+
+    private func vimCharacterIsCollapsed(at location: Int) -> Bool {
+        guard let storage = textStorage, location >= 0, location < storage.length,
+              let font = storage.attribute(.font, at: location, effectiveRange: nil) as? NSFont
+        else { return false }
+        return font.pointSize <= 0.1
+    }
+
+    private var vimCursorCellWidth: CGFloat {
+        max(4, ("M" as NSString).size(withAttributes: [.font: Theme.liveFont]).width)
+    }
+
+    private func caretRect(at location: Int) -> NSRect? {
+        let source = string as NSString
+        if let lineFrame = vimTextLineFrame(at: location) {
+            return NSRect(
+                x: vimLineLeadingX(at: location),
+                y: lineFrame.minY,
+                width: vimCursorCellWidth,
+                height: max(lineFrame.height, Theme.liveFont.boundingRectForFont.height)
+            )
+        }
+        if source.length > 0 {
+            let adjacent = max(0, min(location - 1, source.length - 1))
+            if var frame = rect(forSelection: NSRange(location: adjacent, length: 1)) {
+                if source.character(at: adjacent) == 10 || source.character(at: adjacent) == 13 {
+                    // TextKit's selection segment for a newline can span the
+                    // entire available line. Its maxX is therefore the
+                    // readable-width boundary, not the insertion point of the
+                    // following empty paragraph.
+                    frame.origin.x = vimLineLeadingX(at: location)
+                } else if location > adjacent {
+                    frame.origin.x = frame.maxX
+                }
+                frame.size.width = vimCursorCellWidth
+                return frame
+            }
+        }
+        return NSRect(
+            x: textContainerInset.width,
+            y: textContainerInset.height,
+            width: vimCursorCellWidth,
+            height: Theme.liveFont.boundingRectForFont.height
+        )
+    }
+
+    /// The TextKit 2 line fragment belonging to a source insertion position,
+    /// in this view's coordinates. Unlike a newline selection segment, this
+    /// describes the empty paragraph itself even beside a tall block widget.
+    private func vimTextLineFrame(at sourceLocation: Int) -> NSRect? {
+        guard let manager = textLayoutManager,
+              let content = manager.textContentManager,
+              let location = content.location(
+                content.documentRange.location,
+                offsetBy: min(max(0, sourceLocation), string.utf16.count)
+              ),
+              let fragment = manager.textLayoutFragment(for: location),
+              let line = fragment.textLineFragments.first
+        else { return nil }
+        var frame = line.typographicBounds
+        frame.origin.x += fragment.layoutFragmentFrame.minX + textContainerInset.width
+        frame.origin.y += fragment.layoutFragmentFrame.minY + textContainerInset.height
+        return frame
+    }
+
+    private func vimLineLeadingX(at location: Int) -> CGFloat {
+        guard let storage = textStorage, storage.length > 0 else {
+            return textContainerInset.width
+        }
+        let attributeLocation = min(max(0, location), storage.length - 1)
+        let style = storage.attribute(
+            .paragraphStyle,
+            at: attributeLocation,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        return textContainerInset.width + max(
+            style?.firstLineHeadIndent ?? 0,
+            style?.headIndent ?? 0
+        )
+    }
+
+    private func vimKey(for event: NSEvent) -> VimKey? {
+        switch event.keyCode {
+        case 53: return .escape
+        case 36, 76: return .enter
+        case 51: return .backspace
+        case 117: return .delete
+        case 123: return .left
+        case 124: return .right
+        case 125: return .down
+        case 126: return .up
+        case 48: return .tab
+        default: break
+        }
+        guard let characters = event.charactersIgnoringModifiers, !characters.isEmpty else { return nil }
+        if event.modifierFlags.contains(.control), let character = characters.lowercased().first {
+            return .control(character)
+        }
+        return .character(characters)
+    }
+
+    private func isVimVerticalMovement(_ key: VimKey) -> Bool {
+        switch key {
+        case .up, .down, .character("j"), .character("k"): true
+        default: false
+        }
+    }
+
+    private func vimCursorRect(at location: Int) -> NSRect? {
+        let source = string as NSString
+        guard source.length > 0 else { return caretRect(at: 0) }
+        let character = min(location, source.length - 1)
+        return rect(forSelection: NSRange(location: character, length: 1))
+    }
+
+    private func vimLocation(onLineContaining location: Int, renderedX: CGFloat) -> Int {
+        let source = string as NSString
+        guard source.length > 0 else { return 0 }
+        let safeLocation = min(location, source.length - 1)
+        let line = source.lineRange(for: NSRange(location: safeLocation, length: 0))
+        guard let row = rect(forSelection: NSRange(location: safeLocation, length: 1)) else {
+            return safeLocation
+        }
+        let insertion = characterIndexForInsertion(at: NSPoint(x: renderedX, y: row.midY))
+        var contentEnd = NSMaxRange(line)
+        while contentEnd > line.location {
+            let character = source.character(at: contentEnd - 1)
+            guard character == 10 || character == 13 else { break }
+            contentEnd -= 1
+        }
+        guard contentEnd > line.location else { return line.location }
+        return min(max(insertion, line.location), contentEnd - 1)
+    }
+
+    private func performVimHostAction(_ action: VimHostAction) {
+        switch action {
+        case .undo: undoManager?.undo()
+        case .redo: undoManager?.redo()
+        case .scrollCenter: centerSelectionInVisibleArea(nil)
+        case .scrollTop, .scrollBottom:
+            guard let scrollView = enclosingScrollView,
+                  let selectionRect = rect(forSelection: selectedRange())
+            else {
+                scrollRangeToVisible(selectedRange())
+                return
+            }
+            let clip = scrollView.contentView
+            var origin = clip.bounds.origin
+            origin.y = action == .scrollTop
+                ? selectionRect.minY - textContainerInset.height
+                : selectionRect.maxY - clip.bounds.height + textContainerInset.height
+            clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
+            scrollView.reflectScrolledClipView(clip)
+        case .pageUp: pageUp(nil)
+        case .pageDown: pageDown(nil)
+        case .beginSearch, .nextSearch, .searchWord: onVimSearch?(action)
+        }
+    }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
-        if accepted { onFirstResponderChange?(true) }
+        if accepted {
+            onFirstResponderChange?(true)
+            DispatchQueue.main.async { [weak self] in self?.updateVimCursor() }
+        }
         return accepted
     }
 
@@ -508,6 +1151,7 @@ final class HeftTextKit2View: NSTextView {
         if accepted {
             dismissLinkCompletion()
             onFirstResponderChange?(false)
+            updateVimCursor()
         }
         return accepted
     }
@@ -523,6 +1167,10 @@ final class HeftTextKit2View: NSTextView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        let horizontalInset = max(28, (newSize.width - Theme.contentMaxWidth) / 2)
+        if abs(textContainerInset.width - horizontalInset) > 0.5 {
+            textContainerInset = NSSize(width: horizontalInset, height: 28)
+        }
         guard abs(newSize.width - lastWidth) > 1 else { return }
         lastWidth = newSize.width
         // Restyling invalidates layout, which is not safe to do from inside a
@@ -531,6 +1179,11 @@ final class HeftTextKit2View: NSTextView {
             guard self != nil else { return }
             self?.onNeedsRestyle?()
         }
+    }
+
+    override func layout() {
+        super.layout()
+        updateVimCursor()
     }
 
     /// A click in a task line's gutter hits the drawn checkbox rather than the
@@ -580,14 +1233,131 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        vimPreferredX = nil
         dismissLinkCompletion()
         if event.clickCount == 1, toggleTask(at: convert(event.locationInWindow, from: nil)) {
             return
         }
+        let point = convert(event.locationInWindow, from: nil)
+        let usesVimSelection = vimEnabled
+            && vimEngine.mode != .insert
+            && vimEngine.mode != .replace
+            && vimEngine.mode != .blockInsert
+        let emptyLineLocation = usesVimSelection ? vimEmptyLineLocation(at: point) : nil
         isTrackingMouse = true
         super.mouseDown(with: event)
         isTrackingMouse = false
+        if usesVimSelection {
+            if let emptyLineLocation {
+                // AppKit double-clicks select the newline character as a word.
+                // Vim represents an empty line as a Normal-mode cursor at that
+                // newline, for both single and repeated clicks.
+                setSelectedRange(NSRange(location: emptyLineLocation, length: 0))
+            } else if event.clickCount == 2 {
+                normalizeVimDoubleClickSelection(at: point)
+            }
+            if selectedRange().length > 0 {
+                vimEngine.adoptVisualSelection(selectedRange(), in: string)
+                VimSettings.shared.report(mode: .visual)
+            } else {
+                vimEngine.reset(mode: .normal)
+                VimSettings.shared.report(mode: .normal)
+            }
+            updateVimCursor()
+        }
         onTrackingEnded?()
+    }
+
+    /// Returns the source insertion position for an actually empty logical
+    /// line under `point`. It is intentionally resolved before `super` handles
+    /// a double click, because AppKit turns the line's newline into a one-byte
+    /// word selection and loses the distinction afterwards.
+    func vimEmptyLineLocation(at point: NSPoint) -> Int? {
+        let source = string as NSString
+        if source.length == 0 { return 0 }
+
+        // Do not seed this from `characterIndexForInsertion(at:)`. Hidden
+        // Markdown and custom block fragments can make TextKit attribute the
+        // visible area of an empty paragraph to a source position several
+        // lines away (notably around thematic breaks). The laid-out rectangles
+        // are authoritative, and this work happens only on a mouse-down.
+        var location = 0
+        while location <= source.length {
+            let lineRange = source.lineRange(for: NSRange(location: location, length: 0))
+            if Self.lineContentRange(lineRange, in: source).length == 0,
+               let frame = vimTextLineFrame(at: location) {
+                if point.y >= frame.minY - 1, point.y <= frame.maxY + 1 {
+                    return location
+                }
+                // Logical lines and layout fragments are vertically ordered.
+                // Once the scan has passed the click there can be no match.
+                if frame.minY > point.y + 1 { return nil }
+            }
+            let next = NSMaxRange(lineRange)
+            guard next > location else { break }
+            location = next
+        }
+        return nil
+    }
+
+    /// AppKit treats the newline after a line as a selectable word. When a
+    /// Normal-mode double click lands in the blank area after rendered text,
+    /// match Vim editors by selecting the line's final token instead.
+    func normalizeVimDoubleClickSelection(at point: NSPoint) {
+        let source = string as NSString
+        guard source.length > 0 else { return }
+        let insertion = min(characterIndexForInsertion(at: point), source.length)
+        var probe = insertion
+        if probe == source.length {
+            guard probe > 0 else { return }
+            probe -= 1
+        } else if source.character(at: probe) == 10 || source.character(at: probe) == 13 {
+            guard probe > 0 else { return }
+            probe -= 1
+        }
+
+        let content = source.lineRange(for: NSRange(location: probe, length: 0))
+        var contentEnd = NSMaxRange(content)
+        while contentEnd > content.location {
+            let character = source.character(at: contentEnd - 1)
+            guard character == 10 || character == 13 else { break }
+            contentEnd -= 1
+        }
+        guard contentEnd > content.location else { return }
+        let finalRange = source.rangeOfComposedCharacterSequence(at: contentEnd - 1)
+        guard let finalRect = rect(forSelection: finalRange), point.x >= finalRect.maxX else {
+            return
+        }
+
+        var end = contentEnd
+        while end > content.location {
+            let range = source.rangeOfComposedCharacterSequence(at: end - 1)
+            let value = source.substring(with: range)
+            guard value.rangeOfCharacter(from: .whitespaces) != nil else { break }
+            end = range.location
+        }
+        guard end > content.location else { return }
+        let lastTokenRange = source.rangeOfComposedCharacterSequence(at: end - 1)
+        guard isVimWordCharacter(source.substring(with: lastTokenRange)) else {
+            // CodeMirror/Obsidian treats trailing punctuation as the closest
+            // token. In `breakfast)`, double-clicking past the line selects
+            // only `)`, not the preceding word.
+            setSelectedRange(lastTokenRange)
+            return
+        }
+        var start = end
+        while start > content.location {
+            let range = source.rangeOfComposedCharacterSequence(at: start - 1)
+            guard isVimWordCharacter(source.substring(with: range)) else { break }
+            start = range.location
+        }
+        setSelectedRange(NSRange(location: start, length: end - start))
+    }
+
+    private func isVimWordCharacter(_ value: String) -> Bool {
+        value.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) || $0 == "_"
+        }
     }
 
 
@@ -781,7 +1551,13 @@ final class HeftTextKit2View: NSTextView {
     /// Shows or hides the formatting bar for the current selection.
     func updateFormatBar() {
         let selection = selectedRange()
-        guard selection.length > 0, window?.firstResponder === self else {
+        let vimVisual = vimEnabled && (
+            vimEngine.mode == .visual
+                || vimEngine.mode == .visualLine
+                || vimEngine.mode == .visualBlock
+                || vimEngine.mode == .blockInsert
+        )
+        guard selection.length > 0, !vimVisual, window?.firstResponder === self else {
             formatBar?.isHidden = true
             return
         }
@@ -865,11 +1641,11 @@ final class HeftTextKit2View: NSTextView {
         let line = text.substring(with: text.lineRange(for: NSRange(location: caret.location, length: 0)))
             .trimmingCharacters(in: .newlines)
 
-        let listMarker = Self.listMarker(of: line)
-        guard let marker = listMarker ?? Self.quoteMarker(of: line) else {
+        guard let structure = Self.markdownContinuation(of: line) else {
             super.insertNewline(sender)
             return
         }
+        let marker = structure.marker
 
         // Enter on an item with no content ends the list instead of adding
         // another empty bullet.
@@ -885,7 +1661,7 @@ final class HeftTextKit2View: NSTextView {
         }
 
         super.insertNewline(sender)
-        let continuation = listMarker.map(Self.nextListMarker(after:)) ?? marker
+        let continuation = structure.isList ? Self.nextListMarker(after: marker) : marker
         insertText(continuation, replacementRange: selectedRange())
     }
 
@@ -1056,6 +1832,17 @@ final class HeftTextKit2View: NSTextView {
         return String(line[match])
             .replacingOccurrences(of: "[x]", with: "[ ]")
             .replacingOccurrences(of: "[X]", with: "[ ]")
+    }
+
+    /// The structural prefix Heft carries to a following Markdown line.
+    /// Recognizes lists nested inside blockquotes in addition to standalone
+    /// lists and quotes, so Return and Vim's optional o/O behavior agree.
+    static func markdownContinuation(of line: String) -> (marker: String, isList: Bool)? {
+        if let marker = listMarker(of: line) { return (marker, true) }
+        guard let quote = quoteMarker(of: line) else { return nil }
+        let remainder = String(line.dropFirst(quote.count))
+        if let list = listMarker(of: remainder) { return (quote + list, true) }
+        return (quote, false)
     }
 
     /// Marker for the following list item. Bullets and tasks repeat, while an

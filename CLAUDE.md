@@ -17,10 +17,12 @@ swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the
 
 ## Architecture
 
-Two targets:
+Three targets:
 
 - `HeftCore`: pure logic. Never imports AppKit or SwiftUI. Parsing, the link index,
   the vault scanner, moment.js date formatting, live-mode decorations.
+- `HeftVimCore`: Foundation-only modal editing grammar. It returns edits and
+  selections but never owns an editor buffer or imports AppKit.
 - `Heft`: the macOS shell. SwiftUI chrome around an `NSTextView`.
 
 The dependencies are Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and

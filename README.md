@@ -37,10 +37,12 @@ Scripts/run.sh <vault> <relative-path>     # launch and open one note
 
 ## Architecture
 
-Two targets, and the split is deliberate:
+Three targets, and the split is deliberate:
 
 - **`HeftCore`** — pure logic: markdown parsing, wikilink resolution, vault
   indexing, moment-style date tokens. Never imports AppKit or SwiftUI.
+- **`HeftVimCore`** — a Foundation-only modal editing state machine. It emits
+  text transactions and selections; it never owns the document buffer.
 - **`Heft`** — the macOS shell: SwiftUI, `NSTextView`, FSEvents.
 
 Keeping the core UI-free makes it testable without a UI, and makes a future iOS
@@ -108,6 +110,15 @@ structurally out of reach.
   arrive as ordinary rows you can edit. Nothing is replaced inside code, math,
   frontmatter, links, tags or URLs.
 - **Quick open** (⌘O) with fuzzy matching.
+- **Experimental native Vim mode** — opt in under Settings → Vim. Normal, Insert, Replace,
+  Visual, Visual Line, and Visual Block modes support counts, character/word/line/paragraph
+  motions, operator-motion composition, common text objects, find-character
+  motions, matching delimiters, yank/put, join, replace, case toggle, and native
+  undo/redo. Dot-repeat, line indentation, visual paste, word search, and
+  multi-line block insertion cover the common editing workflows. Command-key
+  shortcuts continue to go through macOS normally. An enabled-by-default
+  setting can preserve Markdown list, task, numbered, and blockquote markers
+  across `o`/`O`, `cc`, `S`, and Visual-Line changes.
 - **Content search** (⇧⌘F) across the focused folder or the full vault.
 - **Command palette** (⌘P) for daily-note settings and window controls such as
   the sidebar, calendar, backlinks, and colorful formatting.
@@ -176,8 +187,8 @@ also reports as unresolved).
 
 ## Not built yet
 
-- **Vim mode.** The vault has `vimMode: true`, so this is wanted. The plan is to
-  embed real Neovim via VimR's `NvimView` rather than reimplement modal editing.
+- Advanced Vim features: Ex commands, macros, marks/jump lists, named/system
+  registers, mappings, and full blockwise put.
 - Graph view, plugins and themes.
 
 ## Testing
@@ -190,10 +201,17 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 swift test
 ```
 
-The test sources live under `Tests/HeftTests` and currently contain 194
-lower-level checks. They cover parsing, formatting, links and settings, then
+The test sources live under `Tests/HeftTests` and contain lower-level checks for
+parsing, formatting, links, settings, and modal editing, then
 create a UUID-named temporary vault to exercise the mutable app shell:
 autosave, save conflicts, close-time recovery, editor leases, note creation,
 rename and move, and link-safe folder rename/move. The temporary vault is
 removed after every run, and the integration harness preserves the user's
 remembered vault setting. None of the test harness ships in `Heft.app`.
+
+When Neovim is installed, the Vim suite also runs representative command
+sequences and a generated operator/motion/count matrix through
+`nvim --clean --headless`, then compares its resulting buffer with
+`HeftVimCore`. This is a development-only executable oracle: no Neovim or
+GPL source is linked, copied, bundled, or required at runtime. The oracle checks
+skip automatically when `nvim` is unavailable.
