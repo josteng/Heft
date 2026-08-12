@@ -169,7 +169,7 @@ struct CommandPaletteView: View {
             Divider()
 
             ScrollView {
-                LazyVStack(spacing: 1) {
+                VStack(spacing: 1) {
                     ForEach(Array(results.enumerated()), id: \.element.id) { index, command in
                         CommandRow(
                             command: command,
@@ -185,6 +185,7 @@ struct CommandPaletteView: View {
                 }
                 .padding(6)
             }
+            .id(query)
             .frame(height: 240)
         }
         .frame(width: 560)

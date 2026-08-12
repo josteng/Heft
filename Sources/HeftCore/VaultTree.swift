@@ -92,6 +92,9 @@ public enum VaultScanner {
             // Present it under its real name so the tree does not visibly
             // change shape depending on what happens to be downloaded.
             let (displayFilename, needsDownload) = resolvePlaceholder(raw)
+            let presentedURL = needsDownload
+                ? entry.deletingLastPathComponent().appendingPathComponent(displayFilename)
+                : entry
             if displayFilename.hasPrefix(".") { continue }
 
             if displayFilename == ".DS_Store" { continue }
@@ -108,7 +111,8 @@ public enum VaultScanner {
                 : displayFilename
 
             items.append(VaultItem(
-                url: entry, relativePath: rel, kind: kind, name: name, needsDownload: needsDownload
+                url: presentedURL, relativePath: rel, kind: kind, name: name,
+                needsDownload: needsDownload
             ))
         }
 

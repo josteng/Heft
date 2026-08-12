@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var registry: VaultRegistry
     @Environment(\.openWindow) private var openWindow
+    @State private var windowTopChromeHeight: CGFloat = 0
     var body: some View {
         NavigationSplitView(columnVisibility: $model.columnVisibility) {
             SidebarView()
@@ -22,7 +23,7 @@ struct ContentView: View {
                 } else if model.current == nil {
                     EmptySelectionView()
                 } else {
-                    EditorPane()
+                    EditorPane(topChromeHeight: windowTopChromeHeight)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -45,7 +46,11 @@ struct ContentView: View {
                 .inspectorColumnWidth(min: 220, ideal: 280, max: 420)
         }
         .toolbar { toolbarContent }
-        .background(WindowToolbarConfiguration(registry: registry, workspaceID: model.workspaceID))
+        .background(WindowToolbarConfiguration(
+            registry: registry,
+            workspaceID: model.workspaceID,
+            topChromeHeight: $windowTopChromeHeight
+        ))
         .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
         .sheet(
             isPresented: $model.isCommandPalettePresented,
@@ -211,6 +216,7 @@ struct ContentView: View {
 private struct WindowToolbarConfiguration: NSViewRepresentable {
     let registry: VaultRegistry
     let workspaceID: UUID
+    @Binding var topChromeHeight: CGFloat
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
@@ -234,6 +240,11 @@ private struct WindowToolbarConfiguration: NSViewRepresentable {
         // material rather than making the entire title bar fully clear.
         window.styleMask.insert(.fullSizeContentView)
         window.titlebarSeparatorStyle = .none
+        let measuredHeight = max(0, window.frame.height - window.contentLayoutRect.height)
+        if abs(topChromeHeight - measuredHeight) > 0.5 {
+            let height = measuredHeight
+            DispatchQueue.main.async { topChromeHeight = height }
+        }
         registry.register(window: window, for: workspaceID)
     }
 }
@@ -282,6 +293,7 @@ private struct WorkspaceScopePicker: View {
 
 struct EditorPane: View {
     @EnvironmentObject private var model: AppModel
+    let topChromeHeight: CGFloat
     @ObservedObject private var appearance = AppearanceSettings.shared
     @State private var findQuery = ""
     @State private var findMatches: [NSRange] = []
@@ -313,6 +325,11 @@ struct EditorPane: View {
             // window toolbar now.
 
             if model.isFindPresented {
+                // The whole detail column deliberately starts at the window's
+                // top edge so document scrolling can pass beneath the toolbar.
+                // Fixed find chrome opts out locally, before its own layout,
+                // avoiding modifier-order and safe-area caching surprises.
+                Color.clear.frame(height: topChromeHeight)
                 findBar
             }
 

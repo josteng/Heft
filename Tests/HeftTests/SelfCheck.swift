@@ -285,6 +285,27 @@ public enum SelfCheck {
         let (plain, plainNeeds) = VaultScanner.resolvePlaceholder("Note.md")
         expect(plain, "Note.md", "normal filename untouched")
         expectTrue(!plainNeeds, "normal filename not flagged")
+        let placeholderVault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-placeholder-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: placeholderVault) }
+        do {
+            try FileManager.default.createDirectory(
+                at: placeholderVault, withIntermediateDirectories: true
+            )
+            try Data().write(to: placeholderVault.appendingPathComponent(".Inbox.md.icloud"))
+            let placeholderItem = VaultScanner.scan(root: placeholderVault).children.first
+            expect(placeholderItem?.relativePath ?? "", "Inbox.md", "placeholder relative path")
+            expect(placeholderItem?.url.lastPathComponent ?? "", "Inbox.md", "placeholder logical URL")
+            expectTrue(placeholderItem?.needsDownload == true, "placeholder remains downloadable")
+            let placeholderIndex = VaultIndex.build(root: VaultScanner.scan(root: placeholderVault))
+            expect(
+                placeholderIndex.search("inbox").first?.relativePath ?? "",
+                "Inbox.md",
+                "quick-open index includes evicted notes"
+            )
+        } catch {
+            r.failures.append("placeholder scan setup: \(error)")
+        }
 
         // MARK: Block source ranges (foundation for block-based editing)
         let blockDoc = """
@@ -771,6 +792,28 @@ public enum SelfCheck {
         expectTrue(wordBoundary >= max(36, 2 * 16), "compact fuzzy search clears threshold")
         let loose = FuzzyMatch.score(query: "eee", candidate: "2026-05-19 thesis meeting") ?? 0
         expectTrue(loose < max(36, 3 * 16), "loose repeated letters stay below threshold")
+        let searchRootURL = URL(fileURLWithPath: "/tmp/heft-search-check")
+        let searchIndex = VaultIndex.build(root: VaultItem(
+            url: searchRootURL, relativePath: "", kind: .folder, name: "Vault",
+            children: [
+                VaultItem(
+                    url: searchRootURL.appendingPathComponent("Ideas/Ideas.md"),
+                    relativePath: "Ideas/Ideas.md", kind: .markdown, name: "Ideas"
+                ),
+                VaultItem(
+                    url: searchRootURL.appendingPathComponent("MSc Thesis/Ideas.md"),
+                    relativePath: "MSc Thesis/Ideas.md", kind: .markdown, name: "Ideas"
+                ),
+                VaultItem(
+                    url: searchRootURL.appendingPathComponent("2025_11_07_Meeting.md"),
+                    relativePath: "2025_11_07_Meeting.md", kind: .markdown,
+                    name: "2025_11_07_Meeting"
+                ),
+            ]
+        ))
+        let ideaHits = searchIndex.search("ideas")
+        expectTrue(ideaHits.count == 2, "exact quick-open query excludes stale empty-query rows")
+        expectTrue(ideaHits.allSatisfy { $0.name == "Ideas" }, "quick open returns both exact names")
 
         // MARK: Wikilink completion
         func completion(_ source: String, after needle: String) -> WikiCompletionContext? {
