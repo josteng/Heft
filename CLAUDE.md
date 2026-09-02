@@ -13,7 +13,6 @@ swift test                                      # core, live-surface, and dispos
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
-swift run Heft proposals <vault>                # agent edits waiting for review
 ```
 
 ## Architecture
@@ -149,34 +148,6 @@ tags or URLs — `SmartTypography.allowsSubstitution` is a cheap own scan rather
 than a `LiveDecorator` pass, because it runs on every keystroke and only has to
 answer for one position.
 
-### Agent proposals
-
-An agent does not edit the vault; it proposes, and the editor asks. `AgentCLI`
-adds `propose`, `proposals`, `diff`, `drop`, `read` and `find` to the same
-headless dispatch in `Main.swift` that `stats` and `render` use, so the whole
-integration is a CLI rather than a daemon or a port. `heft propose` takes the
-**complete new body** on stdin, not a patch: an agent already has the finished
-text, and a full body cannot fail to apply.
-
-A proposal is one JSON file under `<vault>/.heft/proposals/`, which the existing
-vault watcher already sees. `NoteDiff` in HeftCore turns it into hunks, and each
-one is accepted or rejected on its own in `ProposalReviewView`.
-
-Three decisions carry it:
-
-- The diff is against the note **as it is now**, never against what the agent
-  read. The user is deciding about their current note; `Proposal.isStale` says
-  so when the note moved on, rather than silently rebasing the reasoning.
-- A partly reviewed proposal is a **smaller proposal**, not a lost one.
-  `ProposalStore.settle` applies the accepted hunks, drops the rejected ones
-  from the body for good, and rewrites the rest as a fresh proposal against the
-  updated note.
-- An accepted change to the open note goes through the buffer and the normal
-  autosave, rather than writing the file under the editor and racing it.
-
-`Docs/AgentIntegration.md` has the verbs and the `CLAUDE.md` snippet that makes
-Claude Code reach for `propose` instead of `Write`.
-
 ## Gotchas, all of them hard-won
 
 - **Xcode 26.6 is installed, but `xcode-select` points at the Command Line Tools.**
@@ -200,13 +171,6 @@ Claude Code reach for `propose` instead of `Write`.
   day-of-month but ICU `DD` is day-of-year; moment `WW` is the ISO week but ICU `WW`
   is week-of-month; moment escapes with `[W]` where ICU uses `'W'`. `MomentFormat`
   implements them directly. Never route these through `DateFormatter`.
-- **Replacing the buffer is right for a new note and destructive for the same
-  one.** `documentGeneration` used to mean both, so an edit arriving from
-  iCloud, Obsidian or an agent scrolled the reader back to the top and dropped
-  the caret. `documentGenerationKeepsPosition` separates them, and
-  `LiveTextEditor.mapLocation` moves the caret by the size of the change above
-  it. Scroll is restored *after* the restyle, never before: scrolling within an
-  estimated height lands somewhere else.
 - **Reserve widget height with `minimumLineHeight`, not by overriding
   `layoutFragmentFrame`.** Line height is ordinary paragraph geometry the layout
   manager must honour; the frame override did not survive contact with reality and

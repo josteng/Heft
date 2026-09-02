@@ -29,10 +29,6 @@ struct LiveTextEditor: NSViewRepresentable {
     @ObservedObject private var vim = VimSettings.shared
     @Binding var text: String
     let generation: Int
-    /// True when this generation replaced the text of the note already open
-    /// rather than opening a different one, so caret and scroll are still
-    /// meaningful and must survive.
-    let generationKeepsPosition: Bool
     let findSelection: FindSelection?
     let context: RenderContext
     let onAttachment: (NSPasteboard) -> String?
@@ -146,19 +142,11 @@ struct LiveTextEditor: NSViewRepresentable {
         if nsContext.coordinator.lastGeneration != generation {
             nsContext.coordinator.lastGeneration = generation
             if textView.string != text {
-                if generationKeepsPosition {
-                    // The same note, rewritten underneath us: iCloud, Obsidian,
-                    // or an agent. Resetting to the top would be right for a
-                    // different document and is merely destructive here — the
-                    // reader has not moved, the text has.
-                    replaceKeepingPosition(with: text, in: textView, nsContext.coordinator)
-                } else {
-                    textView.string = text
-                    nsContext.coordinator.resetStyling()
-                    textView.setSelectedRange(NSRange(location: 0, length: 0))
-                    textView.resetVim()
-                    textView.scroll(.zero)
-                }
+                textView.string = text
+                nsContext.coordinator.resetStyling()
+                textView.setSelectedRange(NSRange(location: 0, length: 0))
+                textView.resetVim()
+                textView.scroll(.zero)
             }
             nsContext.coordinator.restyle(textView)
         } else if textView.string != text {
@@ -170,56 +158,6 @@ struct LiveTextEditor: NSViewRepresentable {
             ))
             nsContext.coordinator.restyle(textView)
         }
-    }
-
-    /// Swaps the buffer for a version edited elsewhere, keeping the caret on
-    /// the same words and the view on the same place in the document.
-    private func replaceKeepingPosition(
-        with new: String, in textView: HeftTextKit2View, _ coordinator: Coordinator
-    ) {
-        let old = textView.string as NSString
-        let updated = new as NSString
-        let clip = textView.enclosingScrollView?.contentView
-        let scrollOrigin = clip?.bounds.origin
-        let caret = textView.selectedRange().location
-
-        textView.string = new
-        coordinator.resetStyling()
-        textView.setSelectedRange(NSRange(
-            location: Self.mapLocation(caret, from: old, to: updated), length: 0
-        ))
-        // Restyling lays the document out; scrolling before it would be
-        // scrolling within an estimated height and would land somewhere else.
-        coordinator.restyle(textView)
-        if let clip, let scrollOrigin {
-            let maximum = max(0, clip.documentRect.height - clip.bounds.height)
-            clip.scroll(to: NSPoint(x: scrollOrigin.x, y: min(scrollOrigin.y, maximum)))
-            textView.enclosingScrollView?.reflectScrolledClipView(clip)
-        }
-    }
-
-    /// Where a caret at `location` in `old` belongs in `new`.
-    ///
-    /// The unchanged head and tail are found by comparison, which is all the
-    /// information there is: a caret inside the head keeps its offset, one
-    /// inside the tail keeps its distance from the end, and one inside the
-    /// rewritten middle has no true answer and goes to where that middle
-    /// starts.
-    static func mapLocation(_ location: Int, from old: NSString, to new: NSString) -> Int {
-        let shared = min(old.length, new.length)
-        var prefix = 0
-        while prefix < shared, old.character(at: prefix) == new.character(at: prefix) {
-            prefix += 1
-        }
-        var suffix = 0
-        while suffix < shared - prefix,
-              old.character(at: old.length - 1 - suffix) == new.character(at: new.length - 1 - suffix) {
-            suffix += 1
-        }
-
-        if location <= prefix { return min(location, new.length) }
-        if location >= old.length - suffix { return new.length - (old.length - location) }
-        return min(prefix, new.length)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {

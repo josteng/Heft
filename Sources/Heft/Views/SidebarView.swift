@@ -234,6 +234,9 @@ struct SidebarView: View {
             Button("New Note") { beginCreatingNote(in: root) }
             Button("New Folder") { beginCreatingFolder(in: root) }
             Divider()
+            Button("Copy Absolute Path") {
+                model.copyToPasteboard(root.path, describedAs: "absolute path")
+            }
             Button(model.scopePath == nil ? "Reveal Vault in Finder" : "Reveal Focused Folder in Finder") {
                 model.revealInFinder(root)
             }
@@ -551,7 +554,12 @@ private struct TreeRow: View {
                     onRename: beginRename
                 )
             }
-            .draggable(item.url)
+            // Simultaneous, so the row's button still gets its click: this
+            // only fires once the pointer has actually travelled.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6)
+                    .onChanged { _ in beginFileDrag(for: item.url) }
+            )
             .dropDestination(for: URL.self) { urls, _ in
                 dropTarget = nil
                 model.move(urls, into: item.url)
@@ -602,7 +610,12 @@ private struct TreeRow: View {
                     onRename: beginRename
                 )
             }
-            .draggable(item.url)
+            // Simultaneous, so the row's button still gets its click: this
+            // only fires once the pointer has actually travelled.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6)
+                    .onChanged { _ in beginFileDrag(for: item.url) }
+            )
             // Dropping onto a file means "put it here, beside this" — the row
             // itself is not the destination, its folder is. So the drop is
             // accepted, but the highlight goes to the enclosing folder.
@@ -658,6 +671,106 @@ private struct TreeRow: View {
         case .canvas: "square.on.square.dashed"
         default: "doc"
         }
+    }
+}
+
+// MARK: - Dragging out of Heft
+
+/// What a dragged note or folder is written to the pasteboard as.
+///
+/// `NSURL` publishes `public.file-url` as concrete data, which is what a
+/// terminal, Finder, another editor, and Heft's own
+/// `dropDestination(for: URL.self)` move targets all read as the real file.
+func fileDragPasteboardWriter(for url: URL) -> NSPasteboardWriting { url as NSURL }
+
+/// Starts a real AppKit drag for a vault item.
+///
+/// SwiftUI cannot export this drag, and the reason is worth recording because
+/// two plausible fixes both fail. `.draggable(url)` and
+/// `.onDrag { NSItemProvider(object: url as NSURL) }` each hand the receiver a
+/// file *promise* rather than the file: SwiftUI redeems it by copying the item
+/// into `~/Library/Caches/com.apple.SwiftUI.Drag-<uuid>/`, so dropping a note
+/// into a terminal yielded a path to a throwaway copy — worse than a broken
+/// path, because it looks like a real one. The item provider is not at fault;
+/// on its own it registers `public.file-url` and loads the correct path. It is
+/// SwiftUI's drag bridge that re-exports it, it does so whether or not the app
+/// is sandboxed, and there is no SwiftUI-level way to turn it off.
+///
+/// So only the *gesture* stays in SwiftUI, and the drag itself is begun
+/// through AppKit, which writes the URL straight to the drag pasteboard with
+/// nothing to stage. Starting from the window's content view rather than a
+/// view of our own is what keeps the row untouched: it still has its button,
+/// hover, context menu and rename field, none of which a drag-catching overlay
+/// could have left intact.
+///
+/// `allowsInternalMove` is false for a drag that may leave Heft but must not
+/// rearrange the vault: a daily note is found again by its filename, so
+/// dropping one into another folder would detach it from its day. `DayMenu`
+/// withholds Rename and Move to… for that reason, and a drag is not a way
+/// around it.
+@MainActor
+func beginFileDrag(for url: URL, allowsInternalMove: Bool = true) {
+    // `onChanged` repeats for the whole gesture; a session is already running.
+    guard !FileDragSource.shared.isDragging,
+          let event = NSApp.currentEvent,
+          let view = event.window?.contentView
+    else { return }
+
+    let item = NSDraggingItem(pasteboardWriter: fileDragPasteboardWriter(for: url))
+    let icon = NSWorkspace.shared.icon(forFile: url.path)
+    icon.size = NSSize(width: 32, height: 32)
+    let origin = view.convert(event.locationInWindow, from: nil)
+    item.setDraggingFrame(
+        NSRect(x: origin.x - 16, y: origin.y - 16, width: 32, height: 32),
+        contents: icon
+    )
+
+    FileDragSource.shared.isDragging = true
+    FileDragSource.shared.allowsInternalMove = allowsInternalMove
+    view.beginDraggingSession(with: [item], event: event, source: FileDragSource.shared)
+}
+
+/// Owns the drag operation. A dragging source has to outlive the session, and
+/// sidebar rows are replaced whenever the tree rescans, so this cannot be the
+/// row.
+final class FileDragSource: NSObject, NSDraggingSource {
+    @MainActor static let shared = FileDragSource()
+
+    /// Set for the length of one session, so the gesture cannot start a second.
+    @MainActor var isDragging = false
+
+    /// Whether this session may also be dropped on Heft's own move targets.
+    @MainActor var allowsInternalMove = true
+
+    /// What a session started by `beginFileDrag` is allowed to do.
+    ///
+    /// Leaving Heft hands over a reference, so nothing is removed here. Inside
+    /// it, a drop on a folder means move, but the destination is left to
+    /// choose: it is `AppModel.move` that relocates the file, not AppKit. A
+    /// drag that may not rearrange the vault offers nothing at all internally,
+    /// so its rows refuse it rather than appearing to accept and doing nothing.
+    static func operation(
+        for context: NSDraggingContext, allowsInternalMove: Bool
+    ) -> NSDragOperation {
+        guard context != .outsideApplication else { return .copy }
+        return allowsInternalMove ? [.copy, .move] : []
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        MainActor.assumeIsolated {
+            Self.operation(for: context, allowsInternalMove: allowsInternalMove)
+        }
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        MainActor.assumeIsolated { isDragging = false }
     }
 }
 
@@ -726,6 +839,9 @@ private struct FolderMenu: View {
         Button("Rename") { onRename() }
         Button("Move to…") { model.promptToMove(item) }
         Button("Copy Path") { model.copyToPasteboard(item.relativePath, describedAs: "path") }
+        Button("Copy Absolute Path") {
+            model.copyToPasteboard(item.url.path, describedAs: "absolute path")
+        }
         Button("Reveal in Finder") { model.revealInFinder(item.url) }
         Divider()
         Button("Move to Trash", role: .destructive) { model.delete(item) }

@@ -1123,6 +1123,65 @@ public enum SelfCheck {
             expectTrue(false, "arrow substitution produces an edit")
         }
 
+        // MARK: Pasted paths
+        //
+        // The escaped form is what Finder and a terminal hand over, and it is
+        // the one that used to fail: the backslashes are shell syntax, not
+        // part of any folder's name.
+        let home = "/Users/tester"
+        func path(_ raw: String) -> String {
+            PathInput.normalize(raw, home: home) ?? "<nil>"
+        }
+        let vault = "/Users/tester/Library/Mobile Documents/iCloud~md~obsidian/Documents"
+
+        expect(
+            path("/Users/tester/Library/Mobile\\ Documents/iCloud\\~md\\~obsidian/Documents"),
+            vault,
+            "a shell-escaped path loses its escapes"
+        )
+        expect(
+            path("\(vault)/PersonalVault/MSc\\ Thesis/Meetings/2026-07-30\\ Questions.md"),
+            "\(vault)/PersonalVault/MSc Thesis/Meetings/2026-07-30 Questions.md",
+            "an escaped note path resolves"
+        )
+        // A tilde inside a name is an ordinary character; only a leading one
+        // is the home directory. An Obsidian vault path contains both.
+        expect(
+            path("~/Library/Mobile\\ Documents/iCloud~md~obsidian"),
+            "/Users/tester/Library/Mobile Documents/iCloud~md~obsidian",
+            "a leading tilde expands and an inner one survives"
+        )
+        expect(path("~"), home, "a lone tilde is the home directory")
+        expect(
+            path("\"\(vault)/MSc Thesis\""),
+            "\(vault)/MSc Thesis",
+            "a quoted path loses its quotes"
+        )
+        expect(
+            path("'\(vault)/MSc Thesis'"),
+            "\(vault)/MSc Thesis",
+            "a single-quoted path loses its quotes"
+        )
+        expect(
+            path("file:///Users/tester/Notes/A%20Note.md"),
+            "/Users/tester/Notes/A Note.md",
+            "a file URL is decoded rather than unescaped"
+        )
+        expect(
+            path("\(vault)/MSc Thesis/"),
+            "\(vault)/MSc Thesis",
+            "a trailing separator is dropped"
+        )
+        expect(path("  /tmp/notes  "), "/tmp/notes", "surrounding whitespace is ignored")
+        expect(path("/"), "/", "the root path survives the trailing-slash rule")
+        expectTrue(PathInput.normalize("   ", home: home) == nil, "blank input resolves to nothing")
+        // Nothing above may damage a path that was already correct.
+        expect(
+            path("\(vault)/PersonalVault/MSc Thesis"),
+            "\(vault)/PersonalVault/MSc Thesis",
+            "an already-clean path is unchanged"
+        )
+
         return r
     }
 }

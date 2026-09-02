@@ -121,6 +121,10 @@ struct HeftCommands: Commands {
             Divider()
             Button("Open Vault in New Window…") { openVaultInNewWindow() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+            // No ⇧⌘G: that is Find Previous. The system's Go to Folder sheet
+            // cannot be given a shell-escaped path, which is the form one is
+            // almost always copied in, so this is Heft's own way in.
+            Button("Go to Path…") { model?.promptToGoToPath() }
         }
         CommandGroup(after: .textEditing) {
             Menu("Format") {

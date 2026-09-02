@@ -272,6 +272,19 @@ enum AppIntegrationCheck {
         }
         expect(autosaved, "autosave writes the open note atomically")
 
+        // The window subtitle shares its row with the toolbar's centred scope
+        // picker, so anything that changes width while typing slides that
+        // picker back and forth. Autosave toggles `isDirty` on a 700ms cycle,
+        // which is exactly the shape of state that must not reach it.
+        let subtitleWhenClean = first.windowSubtitle
+        expect(!first.isDirty, "the note is saved before the subtitle is compared")
+        first.text = "typing changes the buffer"
+        expect(first.isDirty, "typing marks the note dirty")
+        expectEqual(
+            first.windowSubtitle, subtitleWhenClean,
+            "the window subtitle does not change while typing"
+        )
+
         let competingOwner = UUID()
         expect(
             !registry.claim(draftURL, for: competingOwner),
@@ -474,6 +487,81 @@ enum AppIntegrationCheck {
             contents(root.appendingPathComponent("Archive/Research/Internal.md"))?
                 .contains("[[Archive/Research/Chapter]]") == true,
             "folder move repoints links inside the moved folder"
+        )
+
+        // Going to a path in the form one is actually copied in. Finder and a
+        // terminal both escape spaces for the shell, and the system's own Go
+        // to Folder sheet takes the escaped text literally and finds nothing.
+        let spacedFolder = root.appendingPathComponent("MSc Thesis", isDirectory: true)
+        try? manager.createDirectory(at: spacedFolder, withIntermediateDirectories: true)
+        try? "# Meeting".write(
+            to: spacedFolder.appendingPathComponent("Questions To Ask.md"),
+            atomically: true, encoding: .utf8
+        )
+        let spacedAppeared = await waitUntil {
+            files.tree?.flattened().contains { $0.relativePath == "MSc Thesis" } == true
+        }
+        expect(spacedAppeared, "a folder with a space appears in the tree")
+
+        let escapedFolder = spacedFolder.path.replacingOccurrences(of: " ", with: "\\ ")
+        expect(files.goToPath(escapedFolder), "an escaped folder path is accepted")
+        expectEqual(files.scopePath, "MSc Thesis", "an escaped folder path focuses that folder")
+
+        let escapedNote = spacedFolder
+            .appendingPathComponent("Questions To Ask.md").path
+            .replacingOccurrences(of: " ", with: "\\ ")
+        let noteIndexed = await waitUntil {
+            files.index.note(atRelativePath: "MSc Thesis/Questions To Ask.md") != nil
+        }
+        expect(noteIndexed, "a note in a spaced folder is indexed")
+        expect(files.goToPath(escapedNote), "an escaped note path is accepted")
+        expectEqual(
+            files.current?.relativePath, "MSc Thesis/Questions To Ask.md",
+            "an escaped note path opens that note"
+        )
+
+        expect(
+            !files.goToPath("\(root.path)/Nowhere\\ At\\ All.md"),
+            "a path that points at nothing is refused"
+        )
+        files.showEntireVault()
+
+        // Dragging an item out of Heft. `.draggable(url)` exported a file
+        // *promise*, so a terminal resolved it to a path inside
+        // `~/Library/Caches/com.apple.SwiftUI.Drag-<uuid>/` rather than the
+        // note's own. What the drop target reads is the payload, so that is
+        // what this checks; the gesture itself belongs to AppKit.
+        let dragged = root.appendingPathComponent("Archive/Research/Chapter.md")
+        let dragBoard = NSPasteboard(name: NSPasteboard.Name("dev.stenglein.Heft.tests.drag"))
+        dragBoard.clearContents()
+        dragBoard.writeObjects([fileDragPasteboardWriter(for: dragged)])
+        let draggedTypes = dragBoard.types ?? []
+        expect(
+            draggedTypes.contains(.fileURL),
+            "a dragged item is written to the pasteboard as a file URL"
+        )
+        expect(
+            !draggedTypes.contains { $0.rawValue.contains("promise") },
+            "a dragged item is not promised, which is what resolved to a cache copy"
+        )
+        let deliveredPath = (dragBoard.readObjects(forClasses: [NSURL.self]) as? [URL])?
+            .first?.path
+        expectEqual(deliveredPath, dragged.path, "a dragged item delivers the vault's own path")
+
+        // A calendar day drags its note out of Heft but must not be able to
+        // rearrange the vault: a daily note is found again by its filename.
+        expect(
+            FileDragSource.operation(for: .outsideApplication, allowsInternalMove: false) == .copy,
+            "a daily note can still be dragged to another app"
+        )
+        expect(
+            FileDragSource.operation(for: .withinApplication, allowsInternalMove: false).isEmpty,
+            "a daily note cannot be dropped into another folder of its own vault"
+        )
+        expect(
+            FileDragSource.operation(for: .withinApplication, allowsInternalMove: true)
+                .contains(.move),
+            "an ordinary note can still be moved within the vault"
         )
 
         // Typing substitutions, through the text view rather than the engine:
