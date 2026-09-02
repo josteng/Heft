@@ -1,162 +1,145 @@
 # Heft
 
-A native macOS markdown vault editor. Opens an existing Obsidian vault as-is,
-starts instantly, and syncs by living in an iCloud Drive folder rather than by
-running a sync engine.
+A native macOS editor for a Markdown vault. Pure Swift and TextKit 2 — no
+Electron, no web view, no sync engine of its own.
 
-Pure Swift with a native Xcode app target and a SwiftPM core package. macOS 26+.
-
-## Build and run
-
-```bash
-Scripts/run.sh                         # build and run the last-used vault
-Scripts/run.sh /path/to/vault          # build and run a specific vault
-Scripts/bundle.sh debug                 # build without launching
-Scripts/install.sh                     # release install into /Applications, then launch
-Scripts/install.sh --install-only      # install without launching
-open Heft.xcodeproj                     # or use Xcode and press Command-R
-```
-
-The scripts invoke the Xcode project, so the result includes the native app
-bundle, icon, menu bar, window restoration, signing, and App Intent metadata.
-Spotlight and Shortcuts can only execute an action from a validated app bundle.
-For local development, add your Apple ID in Xcode and create an Apple Development
-certificate; this is free and the build scripts pick it up automatically.
-
-### Command-line tools
+Heft opens an existing Obsidian vault **unmodified**, including its
+`.obsidian/` config. Your notes stay a folder of Markdown files, sync stays
+iCloud Drive, and nothing is ever rewritten to make it render.
 
 ```bash
-swift test                                 # core and disposable-vault checks
-swift run Heft stats  <vault>              # read-only index report
-swift run Heft files  <vault>              # list every indexed file
-swift run Heft daily  <vault> [YYYY-MM-DD] # create a daily note, print it
-Scripts/run.sh <vault> <relative-path>     # launch and open one note
+git clone https://github.com/josteng/Heft.git
+cd Heft
+Scripts/install.sh
 ```
 
-`stats` is read-only and safe to point at a real vault. `daily` writes a note.
+Requires macOS 26 and Xcode. That installs `Heft.app` into `/Applications` and
+a `heft` command into `~/.local/bin`.
 
-## Architecture
+---
 
-Three targets, and the split is deliberate:
+## Why another Markdown editor
 
-- **`HeftCore`** — pure logic: markdown parsing, wikilink resolution, vault
-  indexing, moment-style date tokens. Never imports AppKit or SwiftUI.
-- **`HeftVimCore`** — a Foundation-only modal editing state machine. It emits
-  text transactions and selections; it never owns the document buffer.
-- **`Heft`** — the macOS shell: SwiftUI, `NSTextView`, FSEvents.
+Obsidian is good, and it is a web app in a window. Heft is the same vault
+opened by something that behaves like a Mac program:
 
-Keeping the core UI-free makes it testable without a UI, and makes a future iOS
-target (or a Skip-transpiled Android one) a question of writing a new shell
-rather than untangling logic from views.
+- **Drag a note out** and the receiver gets its *real* path, not a copy in a
+  cache directory.
+- **`heft .`** opens the current folder from a terminal, the way `code .` does.
+- **Capture from Spotlight** — file a line into today's daily note or your
+  inbox without leaving what you were doing.
+- **Agents propose, you review.** An agent never writes your notes.
 
-Within the macOS shell, one `VaultSession` shares the scanner, index, settings,
-recents, and FSEvents watcher for a vault. Every window has its own `AppModel`,
-open note, navigation state, folder focus, and panel visibility. Folder focus is
-a view boundary—not a second vault—so links still resolve against the full vault.
+## An agent does not edit your notes
 
-### Why not Kotlin Multiplatform
+This is the part that doesn't exist elsewhere. A coding agent writing straight
+into a vault is indistinguishable from your own typing an hour later, and there
+is nothing left to review. So Heft doesn't let it.
 
-Considered, and rejected for this app specifically. Almost nothing here is
-portable: file I/O, change watching, the text editor, and the entire UI are
-platform-bound. The shareable slice is the parser and the link index, which is
-not worth a Gradle/JDK/SKIE toolchain and a bridging boundary — the exact place
-where build failures are hardest to debug. The next target is iOS, which is
-Swift anyway. See `Apude` for the pattern if that ever changes.
+An agent proposes the new body of a note:
 
-### Dependencies
+```bash
+heft propose . "Projects/Heft.md" --from /tmp/new.md \
+    --summary "tighten the opening and add a Next section"
+```
 
-- [swift-markdown](https://github.com/swiftlang/swift-markdown) for CommonMark
-  and GFM parsing.
-- [SwiftMath](https://github.com/mgriebling/SwiftMath) for native LaTeX
-  typesetting.
-- `swift-markdown-engine` for its syntax-highlighting grammars.
+The proposal lands in `.heft/proposals/`, the vault watcher notices it, and a
+banner appears above that note: the summary, the agent, `+n −m in k places`,
+and **Review**. Each hunk gets its own Accept and Reject. Accepting one applies
+it and rewrites the proposal to hold only what is still undecided, so a
+half-reviewed proposal is a smaller proposal, never a lost one.
 
-Obsidian's non-CommonMark syntax is applied to *text nodes* of the parsed AST,
-never by regex over raw source — by that point cmark has already isolated code
-spans and fenced blocks, so a `[[link]]` written inside a code sample is
-structurally out of reach.
+Three details that make it trustworthy rather than a demo:
 
-## What works
+- The diff is computed against the note **as it is now**, not against what the
+  agent read. If it moved on since, the banner says so instead of silently
+  rebasing.
+- Accepted changes go through the editor's buffer, so they join the normal
+  autosave and undo path rather than racing it.
+- No daemon and no port. The verbs live on the same binary as the app.
 
-- **File tree** with folders, images, PDFs and any other file (Obsidian lets a
-  link point at anything, so everything is indexed), plus inline creation,
-  rename, drag-and-drop moves, Recent and Tags views.
-- **Live editor** — one continuous `NSTextView` with inline markdown styling,
-  debounced autosave and a find bar. Headings, lists, task lists, tables, code
-  blocks with copy, block quotes, Obsidian callouts (`> [!warning]`),
-  `==highlights==`, images and math render directly in the editing surface.
+**Teaching an agent to use it** is one command: `heft agent-setup <vault>`, or
+**File ▸ Set Up Agent Access**. It writes the vault's `CLAUDE.md`, which is
+where a session started in that folder looks. It is written between markers, so
+running it again after an upgrade refreshes Heft's section and leaves anything
+else in the file alone.
+
+## The editing surface
+
+One live surface — not source/split/preview. Markup is hidden by *collapsing*
+it: the characters stay in the text storage and keep their place in every
+offset, so the buffer always equals the file byte-for-byte and selecting across
+hidden markup copies real source.
+
+Markup comes back at two granularities, which is most of what makes it feel
+right: block markup (heading hashes, list and quote markers, fences) reveals
+when the caret is anywhere on its line, while inline spans (`**bold**`,
+`$math$`, links) reveal only when the caret is inside that span.
+
+- **Tables are edited in place.** A table stays a drawn grid while the caret is
+  inside it; only the cell being typed into shows its Markdown. Tab walks
+  cells, rows and columns can be added without dissolving the grid, and the
+  `---` row is the deliberate way to edit one as plain text.
+- **Rendered in the editor**: headings, task lists, code blocks with syntax
+  highlighting, block quotes, Obsidian callouts (`> [!warning]`),
+  `==highlights==`, images, LaTeX, note transclusion, and YAML frontmatter as a
+  properties card.
+- **Nested lists shape their bullets** — filled disc, hollow ring, square —
+  the way browsers have always shaded nesting. Return on an empty item steps
+  *out* one level instead of ending the list.
 - **Wikilinks** — `[[note]]`, `[[note|alias]]`, `[[note#heading]]`,
-  `[[note#^block]]`, embeds `![[image.png|400]]`, note transclusion.
-  Typing `[[` or `![[` opens filename completion and auto-pairs the closing
-  brackets. Unresolved links render orange and create the note when clicked.
-- **Backlinks** panel with the referencing line as context, plus unresolved
-  outgoing links.
-- **Calendar** with a dot per existing daily note; clicking a day creates it
-  from the vault's configured template. If none exists, the calendar can set
-  up editable daily-note and template paths, show supported placeholders with
-  a live preview, and create an Obsidian-compatible configuration.
-- **Typing substitutions** — `->` becomes `→`, `--` an en dash, `...` an
-  ellipsis, quotes curl, `<->` and `<=>` become `↔` and `⇔`, `!=` becomes `≠`,
-  `(c)` becomes `©`, and `1/2` becomes `½`, as you type. Backspace right after
-  one puts back what you typed. Settings (⌘,) has a Typing tab where each of
-  the eight groups can be switched off and your own `trigger → replacement`
-  pairs added. Each of those fires either immediately or once the word is ended
-  by a space, punctuation or Return, as macOS text replacement does, and its
-  text can carry `{{date:…}}`, `{{time:…}}` and `{{title}}` like a daily-note
-  template plus `{{caret}}` for where the caret should land — so a trigger can
-  expand into a whole code fence with the caret already inside it. An "Add from
-  Library" menu offers ready-made ones — today's daily-note link, this week's
-  note, a timed log entry, a task, a code block, a table, a callout — which
-  arrive as ordinary rows you can edit. Nothing is replaced inside code, math,
+  `[[note#^block]]`, embeds `![[image.png|400]]`. Typing `[[` opens filename
+  completion. Unresolved links render dimmed and create the note when clicked.
+- **Typing substitutions** — `->` becomes `→`, `--` an en dash, quotes curl, as
+  you type; backspace immediately after puts back what you typed. Eight groups,
+  each switchable, plus your own `trigger → replacement` table with date/time
+  placeholders and a `{{caret}}` token, so a trigger can expand into a whole
+  code fence with the caret already inside it. Nothing fires inside code, math,
   frontmatter, links, tags or URLs.
-- **Quick open** (⌘O) with fuzzy matching.
-- **Experimental native Vim mode** — opt in under Settings → Vim. Normal, Insert, Replace,
-  Visual, Visual Line, and Visual Block modes support counts, character/word/line/paragraph
-  motions, operator-motion composition, common text objects, find-character
-  motions, matching delimiters, yank/put, join, replace, case toggle, and native
-  undo/redo. Dot-repeat, line indentation, visual paste, word search, and
-  multi-line block insertion cover the common editing workflows. Command-key
-  shortcuts continue to go through macOS normally. An enabled-by-default
-  setting can preserve Markdown list, task, numbered, and blockquote markers
-  across `o`/`O`, `cc`, `S`, and Visual-Line changes.
-- **Content search** (⇧⌘F) across the focused folder or the full vault.
-- **Command palette** (⌘P) for daily-note settings and window controls such as
-  the sidebar, calendar, backlinks, and colorful formatting.
-- **Spotlight and Shortcuts actions** capture to `Inbox.md`, append a
-  timestamped item to today's daily note, or open either note in the best
-  matching Heft window. They currently use the most recently opened vault.
-  Inbox capture is also available in-app with ⇧⌘I.
-- **Image paste and drop** into the vault's attachment folder, content-hashed so
-  pasting the same screenshot twice does not create a second file.
-- **Live reload** via FSEvents; external edits appear without clobbering unsaved
-  local changes.
+- **Experimental Vim mode** (Settings ▸ Vim) — an original, Foundation-only
+  modal engine. Not an embedded Neovim; see `Docs/VimMode.md`.
+
+Restyling is scoped: a keystroke re-styles only the ranges that actually
+changed, rather than re-attributing the whole note twice per character.
+
+## Around the editor
+
+- **File tree** with folders, images and PDFs, inline creation, rename, and
+  drag-and-drop moves that repoint path-qualified wikilinks.
+- **Calendar** with a dot per existing daily note; clicking a day creates it
+  from the vault's configured template.
+- **Backlinks** panel with the referencing line as context.
+- **Quick open** (⌘O), **content search** (⇧⌘F), **command palette** (⌘P).
 - **Multiple windows** over the same or different vaults, with an optional
-  folder-focused view whose file tree, quick open, tags, recents, and search are
-  scoped to that folder. Two windows can edit different notes; opening the same
-  note brings its existing editor window forward.
-- **Link-safe file operations** — note and folder rename/move operations update
-  path-qualified wikilinks that resolve to the affected files, including links
-  in notes moved along with a folder.
+  folder-focused view that scopes the tree, search and quick open without
+  turning that folder into a second vault.
+- **Open Recent** for vaults, so switching between a real vault and a test copy
+  is one menu away. Vaults sharing a folder name are told apart by their parent.
+- **Go to Path…** accepts a path in the form it is actually copied in — shell
+  escaped (`Mobile\ Documents`), quoted, or a `file://` URL.
 
-## Production safety
+## The `heft` command
 
-- Saves are atomic and compare the current file with the exact source Heft
-  originally loaded. If Obsidian, iCloud or another process changes the same
-  note during local editing, autosave pauses and asks which version to keep.
-- An unresolved conflict blocks switching notes or vaults. If a window closes
-  before the conflict is resolved, Heft preserves the local buffer as a
-  timestamped `Heft Recovery` markdown note.
-- Deletion requires confirmation and moves items to the macOS Trash.
-- A note can have only one writable Heft editor. Structural operations are
-  blocked when they would rewrite a source note open in another window.
-- iCloud provides synchronization, not versioned backup. Important vaults
-  should still be covered by Time Machine, Git, or another backup system.
+```bash
+heft [path]                     # open a folder or note, like `code .`
+heft agent-setup <vault>        # teach an agent in that vault to propose
+heft find <vault> <query>       # full-text search
+heft read <vault> <note>        # a note's source
+heft files <vault>              # every note, vault-relative
+heft proposals <vault>          # what is waiting for review
+heft diff <vault> <id>          # what one of them would change
+heft stats <vault>              # read-only index report
+heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
+heft render <vault> <note>      # what the live surface would draw, headless
+```
 
-### Obsidian compatibility
+`stats` and `render` are read-only and safe against a real vault.
+
+## Obsidian compatibility
 
 Heft reads the vault's own `.obsidian/` config rather than guessing: daily-note
 folder, filename format and template, attachment folder, and wikilink-vs-
-markdown link preference. `.obsidian`, `.trash`, `.makemd` and `.space` are
+Markdown link preference. `.obsidian`, `.trash`, `.makemd` and `.space` are
 skipped.
 
 Two syntax details that trip up naive parsers, both found in a real vault and
@@ -166,9 +149,25 @@ both handled:
 - `\[[[Paper Name]]` — a literal bracket abutting a link; the link is the
   innermost pair.
 
+Obsidian templates use moment.js tokens, which collide with ICU: moment `DD` is
+day-of-month where ICU `DD` is day-of-year. Heft implements the moment tokens
+directly rather than routing them through `DateFormatter`.
+
 Measured against a 379-note vault: scan 8 ms, full index 122 ms, 84.7% of
-wikilinks resolved (the remainder are genuinely missing notes, which Obsidian
-also reports as unresolved).
+wikilinks resolved (the rest are genuinely missing notes, which Obsidian also
+reports as unresolved).
+
+## Not losing your notes
+
+- Saves are atomic and compare the file against the exact source Heft loaded.
+  If Obsidian, iCloud or another process changes the same note during editing,
+  autosave pauses and asks which version to keep.
+- An unresolved conflict blocks switching notes or vaults. If a window closes
+  first, the local buffer is preserved as a timestamped `Heft Recovery` note.
+- Deletion asks, and moves to the macOS Trash.
+- A note has one writable editor; structural operations are blocked when they
+  would rewrite a note open in another window.
+- iCloud is synchronisation, not backup. Keep Time Machine or Git as well.
 
 ## Keyboard
 
@@ -176,42 +175,74 @@ also reports as unresolved).
 |---|---|
 | ⌘O | Quick open |
 | ⌘N | New note |
+| ⌘P | Command palette |
 | ⌘S | Save pending edits now |
-| ⇧⌘S | Toggle sidebar |
+| ⇧⌘F | Search the vault |
 | ⇧⌘I | Capture to Inbox |
-| ⇧⌘N | New window |
 | ⇧⌘T | Today's daily note |
-| ⇧⌘O | Open vault in new window |
+| ⇧⌘S | Toggle sidebar |
 | ⇧⌘D | Toggle calendar |
+| ⇧⌘O | Open vault in new window |
 | ⌥⌘B | Toggle backlinks |
+
+## Architecture
+
+Three targets, and the split is deliberate:
+
+- **`HeftCore`** — pure logic: parsing, the link index, the vault scanner,
+  moment-style date tokens, live-mode decorations, diffing. Never imports
+  AppKit or SwiftUI.
+- **`HeftVimCore`** — a Foundation-only modal editing state machine. It emits
+  transactions and selections; it never owns the document buffer.
+- **`Heft`** — the macOS shell: SwiftUI, `NSTextView`, FSEvents.
+
+Keeping the core UI-free makes it testable without a UI, and makes iOS a
+question of writing a new shell rather than untangling logic from views.
+
+Anything no text attribute can express — tables, LaTeX, image embeds,
+transclusions, callout cards, list bullets, checkboxes — is collapsed and then
+painted by an `NSTextLayoutFragment` subclass. That subclassability is the
+whole reason the editor is on TextKit 2 rather than 1.
+
+Dependencies: Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and
+swift-markdown-engine for syntax-highlighting grammars.
+
+## Development
+
+```bash
+Scripts/run.sh [vault] [note]   # debug build, launched without installing
+Scripts/bundle.sh debug         # build the .app without launching
+swift test                      # the full suite
+```
+
+`Scripts/run.sh` is the one to use while iterating — it launches from `.build`
+and takes a vault path, so risky editor changes can be pointed at a disposable
+copy. The GUI autosaves; never aim it at a vault you care about while testing.
+
+The suite is 39 tests across 6 suites: pure checks over parsing, formatting,
+links, paths and settings; a live-surface check that runs edit scripts through
+both an incrementally styled buffer and a from-scratch one and compares every
+attribute on every character; a disposable-vault integration check that
+exercises autosave, save conflicts, recovery, renames and link repointing; and
+the table and proposal suites. Temporary vaults are UUID-named and removed
+afterwards, and the harness restores any user setting it touches.
+
+When Neovim is installed, the Vim suite additionally runs command sequences and
+a generated operator/motion/count matrix through `nvim --clean --headless` and
+compares the resulting buffer against `HeftVimCore`. It is a development-only
+oracle: no Neovim or GPL source is linked, copied, bundled, or required at
+runtime, and the checks skip when `nvim` is absent.
 
 ## Not built yet
 
-- Advanced Vim features: Ex commands, macros, marks/jump lists, named/system
-  registers, mappings, and full blockwise put.
-- Graph view, plugins and themes.
+- Graph view, plugins, themes.
+- Advanced Vim: Ex commands, macros, marks and jump lists, named registers,
+  mappings, full blockwise put.
+- A table selection cannot span two cells; column alignment is changed by
+  editing the `---` row.
+- Renaming a *folder* does not repoint path-shaped links into it; renaming a
+  note does.
 
-## Testing
+## Licence
 
-The same Swift Testing suite is available from Xcode and SwiftPM:
-
-```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
-  -project Heft.xcodeproj -scheme Heft -destination 'platform=macOS' test
-swift test
-```
-
-The test sources live under `Tests/HeftTests` and contain lower-level checks for
-parsing, formatting, links, settings, and modal editing, then
-create a UUID-named temporary vault to exercise the mutable app shell:
-autosave, save conflicts, close-time recovery, editor leases, note creation,
-rename and move, and link-safe folder rename/move. The temporary vault is
-removed after every run, and the integration harness preserves the user's
-remembered vault setting. None of the test harness ships in `Heft.app`.
-
-When Neovim is installed, the Vim suite also runs representative command
-sequences and a generated operator/motion/count matrix through
-`nvim --clean --headless`, then compares its resulting buffer with
-`HeftVimCore`. This is a development-only executable oracle: no Neovim or
-GPL source is linked, copied, bundled, or required at runtime. The oracle checks
-skip automatically when `nvim` is unavailable.
+Not yet chosen.
