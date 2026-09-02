@@ -9,6 +9,9 @@ enum HeftMain {
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
 
+        // The agent verbs: propose, proposals, diff, drop, read, find.
+        if AgentCLI.run(arguments) { return }
+
         if arguments.first == "stats", arguments.count > 1 {
             runStats(vaultPath: arguments[1])
             return

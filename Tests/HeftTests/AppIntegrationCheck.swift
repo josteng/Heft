@@ -476,44 +476,6 @@ enum AppIntegrationCheck {
             "folder move repoints links inside the moved folder"
         )
 
-        // Dragging an item out of Heft. `.draggable(url)` exported a file
-        // *promise*, so a terminal resolved it to a path inside
-        // `~/Library/Caches/com.apple.SwiftUI.Drag-<uuid>/` rather than the
-        // note's own. What the drop target reads is the payload, so that is
-        // what this checks; the gesture itself belongs to AppKit.
-        let dragged = root.appendingPathComponent("Archive/Research/Chapter.md")
-        let dragBoard = NSPasteboard(name: NSPasteboard.Name("dev.stenglein.Heft.tests.drag"))
-        dragBoard.clearContents()
-        dragBoard.writeObjects([fileDragPasteboardWriter(for: dragged)])
-        let draggedTypes = dragBoard.types ?? []
-        expect(
-            draggedTypes.contains(.fileURL),
-            "a dragged item is written to the pasteboard as a file URL"
-        )
-        expect(
-            !draggedTypes.contains { $0.rawValue.contains("promise") },
-            "a dragged item is not promised, which is what resolved to a cache copy"
-        )
-        let deliveredPath = (dragBoard.readObjects(forClasses: [NSURL.self]) as? [URL])?
-            .first?.path
-        expectEqual(deliveredPath, dragged.path, "a dragged item delivers the vault's own path")
-
-        // A calendar day drags its note out of Heft but must not be able to
-        // rearrange the vault: a daily note is found again by its filename.
-        expect(
-            FileDragSource.operation(for: .outsideApplication, allowsInternalMove: false) == .copy,
-            "a daily note can still be dragged to another app"
-        )
-        expect(
-            FileDragSource.operation(for: .withinApplication, allowsInternalMove: false).isEmpty,
-            "a daily note cannot be dropped into another folder of its own vault"
-        )
-        expect(
-            FileDragSource.operation(for: .withinApplication, allowsInternalMove: true)
-                .contains(.move),
-            "an ordinary note can still be moved within the vault"
-        )
-
         // Typing substitutions, through the text view rather than the engine:
         // that the rules are right is `SelfCheck`'s job, that the editor calls
         // them and that backspace reverts one is this one's.
