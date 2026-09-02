@@ -68,6 +68,27 @@ final class AppModel: ObservableObject {
     var scopeName: String { scopePath?.split(separator: "/").last.map(String.init) ?? "Entire Vault" }
     var vaultName: String { vaultRoot?.lastPathComponent ?? "Heft" }
 
+    /// What the window shows beneath its title.
+    ///
+    /// Nothing here may depend on state that changes while typing. The
+    /// subtitle shares its row with the toolbar's `.status` region, and the
+    /// scope picker sits centred between two flexible spacers there, so a word
+    /// that comes and goes drags the picker left and right with it. "Edited"
+    /// used to be exactly that word: it was appended whenever `isDirty` was
+    /// set, and autosave clears that 700ms after the last keystroke, so it
+    /// appeared and vanished on a cycle for as long as anyone kept typing. A
+    /// state with a 700ms lifetime is not worth a word, let alone a moving
+    /// one; unsaved work is reported by `saveConflict`, which persists.
+    var windowSubtitle: String {
+        guard let current else {
+            return vaultRoot == nil ? "" : "\(scopedNotes.count) notes · \(scopeName)"
+        }
+        let folder = current.folder
+        var parts = [folder.isEmpty ? "Vault root" : folder]
+        if !isInScope(current) { parts.append("Outside \(scopeName)") }
+        return parts.joined(separator: " · ")
+    }
+
     var scopedTree: VaultItem? {
         guard let tree else { return nil }
         guard let scopePath else { return tree }
@@ -88,6 +109,11 @@ final class AppModel: ObservableObject {
     /// Bumped whenever `text` is replaced from outside the editor, so the
     /// NSTextView knows to reset rather than treat it as user typing.
     @Published private(set) var documentGeneration = 0
+    /// Whether that replacement was the same note changing underneath the
+    /// reader — in which case caret and scroll survive it — or a different
+    /// note being opened. Set in lockstep with `documentGeneration`, which is
+    /// what the view observes.
+    private(set) var documentGenerationKeepsPosition = false
 
     // MARK: UI state
     @Published var isCalendarVisible = true
@@ -116,6 +142,10 @@ final class AppModel: ObservableObject {
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
+    /// Edits agents have proposed and nobody has answered yet, vault-wide.
+    @Published private(set) var proposals: [Proposal] = []
+    /// The proposal whose review sheet is open.
+    @Published var reviewing: Proposal?
     @Published private(set) var saveConflict: SaveConflict?
     /// Set when `promptForScope()`'s folder panel returns a folder outside
     /// the current vault. That can't become a focus folder, so the picker
@@ -284,7 +314,9 @@ final class AppModel: ObservableObject {
         }
         diskChangeSubscription = session.$diskChangeGeneration.dropFirst().sink { [weak self] _ in
             self?.reloadCurrentIfChangedExternally()
+            self?.refreshProposals()
         }
+        refreshProposals()
         objectWillChange.send()
     }
 
@@ -324,7 +356,7 @@ final class AppModel: ObservableObject {
         lastKnownModification = modified
         lastKnownDiskText = fresh
         if fresh != text {
-            setText(fresh)
+            setText(fresh, keepingPosition: true)
             status = "Reloaded \(current.relativePath) from disk"
         }
     }
@@ -495,11 +527,12 @@ final class AppModel: ObservableObject {
         return try? String(contentsOf: url, encoding: .isoLatin1)
     }
 
-    private func setText(_ new: String) {
+    private func setText(_ new: String, keepingPosition: Bool = false) {
         // Assign through the backing store so didSet does not mark it dirty.
         isApplyingExternalText = true
         text = new
         isApplyingExternalText = false
+        documentGenerationKeepsPosition = keepingPosition
         documentGeneration += 1
     }
 
@@ -542,8 +575,12 @@ final class AppModel: ObservableObject {
 
     /// Handles the internal URLs the preview renderer emits.
     func handle(url: URL) -> Bool {
-        guard url.scheme == "heft" else { return false }
+        guard url.scheme == HeftURL.scheme else { return false }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        // Only a link click. `heft://open` arrives from outside the app and is
+        // a vault to open, not a wikilink to follow; without this it would be
+        // taken as a target named "…?path=…" and silently go nowhere.
+        guard components?.host == HeftURL.Host.follow.rawValue else { return false }
         let value = components?.queryItems?.first(where: { $0.name == "target" })?.value ?? ""
         guard let decoded = value.removingPercentEncoding else { return true }
         follow(WikiLinkParser.links(in: "[[\(decoded)]]").first ?? WikiLink(target: decoded))
@@ -1428,6 +1465,147 @@ final class AppModel: ObservableObject {
         status = folder.map { "Focused on \($0.relativePath)" } ?? "Showing the entire vault"
     }
 
+    /// True when the vault has no agent guidance yet, so the menu can say
+    /// whether this would create the file or refresh it.
+    var hasAgentGuide: Bool {
+        guard let vaultRoot else { return false }
+        let text = try? String(
+            contentsOf: vaultRoot.appendingPathComponent("CLAUDE.md"), encoding: .utf8
+        )
+        return text?.contains(AgentGuide.markerStart) == true
+    }
+
+    private static let agentOfferDismissedKey = "dev.stenglein.Heft.agentOfferDismissed"
+
+    /// Whether to offer agent setup for the open vault.
+    ///
+    /// Opt-in only works if something actually asks. The menu item alone left
+    /// the proposal flow invisible: open a folder, and a Claude Code session
+    /// in it would reach for Write, which is the one thing proposals exist to
+    /// prevent. So a vault without the guide says so once, and remembers being
+    /// turned down.
+    var shouldOfferAgentSetup: Bool {
+        guard let vaultRoot, !hasAgentGuide else { return false }
+        let dismissed = UserDefaults.standard.stringArray(
+            forKey: Self.agentOfferDismissedKey
+        ) ?? []
+        return !dismissed.contains(vaultRoot.standardizedFileURL.path)
+    }
+
+    /// Remembers that this vault was offered agent setup and turned down, so
+    /// the banner is a one-time question rather than a recurring one.
+    func dismissAgentSetupOffer() {
+        guard let vaultRoot else { return }
+        var dismissed = UserDefaults.standard.stringArray(
+            forKey: Self.agentOfferDismissedKey
+        ) ?? []
+        let path = vaultRoot.standardizedFileURL.path
+        guard !dismissed.contains(path) else { return }
+        dismissed.append(path)
+        UserDefaults.standard.set(dismissed, forKey: Self.agentOfferDismissedKey)
+        objectWillChange.send()
+    }
+
+    /// Writes the vault's `CLAUDE.md` so an agent started in that folder knows
+    /// to propose changes rather than write notes.
+    ///
+    /// Offered rather than done silently on open: this writes a file into
+    /// somebody's vault, and a vault is not ours to add things to unasked.
+    func setUpAgentAccess() {
+        guard let vaultRoot else { promptForVault(); return }
+        let target = vaultRoot.appendingPathComponent("CLAUDE.md")
+        let existing = try? String(contentsOf: target, encoding: .utf8)
+
+        let binary = Bundle.main.executablePath ?? "heft"
+        let merged = AgentGuide.merged(
+            into: existing, section: AgentGuide.section(binaryPath: binary)
+        )
+        do {
+            try merged.write(to: target, atomically: true, encoding: .utf8)
+            status = existing == nil
+                ? "Wrote CLAUDE.md: agents in this vault will propose changes"
+                : "Updated CLAUDE.md for agents"
+        } catch {
+            status = "Could not write CLAUDE.md: \(error.localizedDescription)"
+        }
+    }
+
+    /// Asks for a path and goes wherever it points.
+    ///
+    /// The system's own Go to Folder sheet is not ours to preprocess, and it
+    /// takes a literal path, so a shell-escaped one pasted into a file panel
+    /// simply fails to resolve. This is the entry point that accepts the forms
+    /// a path is actually copied in; `PathInput` documents which and why.
+    func promptToGoToPath() {
+        guard let entered = FilePrompt.path(
+            title: "Go to Path",
+            message: "Paste a path to a note or folder. Escaped paths, quoted "
+                + "paths and file:// URLs are all accepted."
+        ) else { return }
+        goToPath(entered)
+    }
+
+    /// Focuses a folder, opens a note, or offers to open a vault, depending on
+    /// what the path turns out to be.
+    @discardableResult
+    func goToPath(_ raw: String) -> Bool {
+        guard let normalized = PathInput.normalize(raw) else { return false }
+        let url = URL(fileURLWithPath: normalized)
+
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else {
+            status = "There is nothing at \(normalized)"
+            return false
+        }
+
+        // With no vault open, any folder is a candidate to become one.
+        guard let vaultRoot else {
+            guard isFolder.boolValue else {
+                status = "Open a vault before opening a note"
+                return false
+            }
+            openVault(at: url)
+            return true
+        }
+
+        let rootPath = vaultRoot.standardizedFileURL.path
+        let target = url.standardizedFileURL.path
+        guard target == rootPath || target.hasPrefix(rootPath + "/") else {
+            // Outside the vault entirely. A folder can become its own vault,
+            // which is the same offer the scope picker makes.
+            guard isFolder.boolValue else {
+                status = "\(url.lastPathComponent) is outside \(vaultName)"
+                return false
+            }
+            pendingOutsideVaultFolder = url
+            return true
+        }
+
+        if target == rootPath {
+            showEntireVault()
+            return true
+        }
+
+        let relative = String(target.dropFirst(rootPath.count + 1))
+        if isFolder.boolValue {
+            guard let folder = tree?.flattened().first(where: {
+                $0.isFolder && $0.relativePath == relative
+            }) else {
+                status = "That folder is not available in the vault yet"
+                return false
+            }
+            setScope(to: folder)
+            return true
+        }
+
+        guard let note = index.note(atRelativePath: relative) else {
+            status = "That note is not in the vault index yet"
+            return false
+        }
+        open(note)
+        return true
+    }
+
     func promptForScope() {
         guard let vaultRoot else { return }
         let panel = NSOpenPanel()
@@ -1558,6 +1736,120 @@ final class AppModel: ObservableObject {
 
     func insertAtCursor(_ snippet: String) {
         NotificationCenter.default.post(name: .heftInsertSnippet, object: snippet)
+    }
+
+    // MARK: - Agent proposals
+
+    /// Re-reads `.heft/proposals`. Cheap: a handful of small JSON files, and
+    /// only when the vault reports a change or a review is acted on.
+    func refreshProposals() {
+        guard let vaultRoot else {
+            proposals = []
+            return
+        }
+        let found = ProposalStore.all(in: vaultRoot)
+        guard found != proposals else { return }
+        proposals = found
+        if let reviewing, !found.contains(where: { $0.id == reviewing.id }) {
+            self.reviewing = nil
+        }
+    }
+
+    var proposalsForCurrentNote: [Proposal] {
+        guard let current else { return [] }
+        return proposals.filter { $0.notePath == current.relativePath }
+    }
+
+    /// The note a proposal is about, as it stands right now. The open buffer
+    /// wins over the file: what the user is looking at is what they are
+    /// deciding about, even if the autosave has not fired yet.
+    func currentText(for proposal: Proposal) -> String {
+        if let current, current.relativePath == proposal.notePath { return text }
+        guard let vaultRoot else { return "" }
+        return (try? String(
+            contentsOf: vaultRoot.appendingPathComponent(proposal.notePath), encoding: .utf8
+        )) ?? ""
+    }
+
+    func beginReview(of proposal: Proposal) {
+        reviewing = proposal
+    }
+
+    /// Opens the note a proposal is about, then reviews it.
+    func openAndReview(_ proposal: Proposal) {
+        if current?.relativePath != proposal.notePath,
+           let note = index.notes.first(where: { $0.relativePath == proposal.notePath }) {
+            open(note)
+        }
+        reviewing = proposal
+    }
+
+    /// Accepts or rejects one hunk. Either way the proposal is rewritten to
+    /// hold only what is still undecided, so a half-reviewed proposal is a
+    /// smaller proposal rather than a lost one.
+    func decide(_ proposal: Proposal, hunk: Int, accept: Bool) {
+        guard let vaultRoot else { return }
+        let before = currentText(for: proposal)
+        do {
+            let outcome = try ProposalStore.settle(
+                proposal,
+                currentText: before,
+                accepted: accept ? [hunk] : [],
+                rejected: accept ? [] : [hunk],
+                in: vaultRoot
+            )
+            if accept { write(outcome.noteText, to: proposal.notePath) }
+            reviewing = outcome.remaining
+            refreshProposals()
+            status = accept
+                ? "Applied one change to \(proposal.noteName)"
+                : "Rejected one change to \(proposal.noteName)"
+        } catch {
+            status = "Could not update the proposal: \(error.localizedDescription)"
+        }
+    }
+
+    func acceptAll(_ proposal: Proposal) {
+        guard let vaultRoot else { return }
+        let before = currentText(for: proposal)
+        write(proposal.body, to: proposal.notePath)
+        ProposalStore.remove(proposal.id, in: vaultRoot)
+        reviewing = nil
+        refreshProposals()
+        let diff = proposal.diff(against: before)
+        status = "Applied \(diff.hunks.count) change(s) to \(proposal.noteName)"
+    }
+
+    func discard(_ proposal: Proposal) {
+        guard let vaultRoot else { return }
+        ProposalStore.remove(proposal.id, in: vaultRoot)
+        reviewing = nil
+        refreshProposals()
+        status = "Discarded \(proposal.agent)'s proposal for \(proposal.noteName)"
+    }
+
+    /// Writes an accepted change. Through the open buffer when it is the note
+    /// on screen, so the edit joins the normal autosave and undo path instead
+    /// of racing it; straight to disk otherwise.
+    private func write(_ new: String, to relativePath: String) {
+        if let current, current.relativePath == relativePath {
+            text = new
+            documentGenerationKeepsPosition = true
+            documentGeneration += 1
+            save()
+            return
+        }
+        guard let vaultRoot else { return }
+        let url = vaultRoot.appendingPathComponent(relativePath)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try new.write(to: url, atomically: true, encoding: .utf8)
+            reload(immediately: true)
+        } catch {
+            status = "Could not write \(relativePath): \(error.localizedDescription)"
+        }
     }
 }
 

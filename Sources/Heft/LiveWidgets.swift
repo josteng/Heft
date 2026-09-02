@@ -86,7 +86,7 @@ enum CodeBlockEdge: Equatable {
 }
 
 enum ListGlyph {
-    case bullet
+    case bullet(BulletShape)
     case ordered(String)
     /// The accent is resolved at style time, where `RenderContext` is in
     /// scope, for the same reason `headingAccent` carries its colour: reading
@@ -110,6 +110,23 @@ struct LiveLayout {
     /// one that crosses into or out of a span and so needs a restyle.
     var revealableSpans: [NSRange] = []
 
+    /// Every drawn table in the note, in document order. The editor needs these
+    /// outside a draw pass — to put the caret in a cell, to work out what a
+    /// click landed on, to know what Tab should do — and a widget keyed by the
+    /// paragraph it hangs off is not a convenient way to ask.
+    var tables: [TableGrid] {
+        blocks.values
+            .compactMap { if case .table(let grid) = $0 { grid } else { nil } }
+            .sorted { $0.documentStart < $1.documentStart }
+    }
+
+    /// The table containing `location`, if any.
+    func table(containing location: Int) -> TableGrid? {
+        tables.first {
+            location >= $0.documentStart && location <= $0.documentStart + $0.sourceLength
+        }
+    }
+
     /// Cheap identity for "did the set of widgets change". Compared to decide
     /// whether a full layout invalidation is needed; the images themselves are
     /// deliberately not part of it, because editing inside a formula already
@@ -125,11 +142,31 @@ struct LiveLayout {
 // MARK: - Table measurement
 
 /// A table measured into concrete rectangles, so drawing is a straight paint.
+///
+/// One cell may be *active*: the caret is inside it, so it shows its markdown
+/// source while every other cell stays rendered. That is the whole point of the
+/// grid outliving the caret. The alternative — what this editor used to do, and
+/// what a naive live-preview does — is to dissolve the entire table back into
+/// pipes the moment it is clicked, which is exactly when its shape is most
+/// useful to look at.
 struct TableGrid {
+    /// Which cell the caret is in, in `TableLayout.rows` coordinates.
+    struct ActiveCell: Hashable {
+        let row: Int
+        let column: Int
+    }
+
     struct Cell {
         let text: NSAttributedString
         let rect: CGRect
         let alignment: MDColumnAlignment
+        let row: Int
+        let column: Int
+        /// The cell's source range, relative to the table's own start.
+        /// `NSNotFound` for a cell that only exists because its row is short
+        /// of the table's column count, and so has nothing behind it in the
+        /// file to put a caret in.
+        let source: NSRange
     }
 
     var cells: [Cell] = []
@@ -137,8 +174,51 @@ struct TableGrid {
     var columnWidths: [CGFloat] = []
     var size: CGSize = .zero
     var headerHeight: CGFloat = 0
+    var active: ActiveCell?
+    /// The parse the grid was measured from, carried along so the editor can
+    /// answer questions about the table — which cell is at this offset, what
+    /// Tab does next, what a new column would look like — without re-parsing
+    /// the document to find out.
+    var layout = TableLayout(rows: [], alignments: [])
+    /// How much of the document the table occupies, from `documentStart`.
+    var sourceLength: Int { layout.sourceLength }
+    /// Where the table begins in the document. Filled in after the measurement
+    /// is fetched, because two identical tables in one note share one cached
+    /// grid and only differ in where they are.
+    var documentStart = 0
+    /// Resolved at style time, like every other custom colour a fragment draws
+    /// with: reading `AppearanceSettings` inside `draw` would sidestep the
+    /// restyle-on-change fingerprint and leave open windows on the old accent.
+    var accent: NSColor = .controlAccentColor
 
     static let padding = CGSize(width: 11, height: 7)
+    /// Thickness of the add-row strip under the table and the add-column strip
+    /// beside it.
+    ///
+    /// The space is reserved whether or not the strips are drawn. Reserving it
+    /// only while the table is active would make clicking one shove the rest of
+    /// the note down by this much, and clicking away shove it back.
+    static let affordance: CGFloat = 17
+
+    /// Including the affordance strips, which is what the line has to be tall
+    /// enough for.
+    var contentSize: CGSize {
+        CGSize(width: size.width + Self.affordance, height: size.height + Self.affordance)
+    }
+
+    /// In grid coordinates: the strip that adds a row, under the last one.
+    var addRowRect: CGRect {
+        CGRect(x: 0, y: size.height + 1, width: size.width, height: Self.affordance - 1)
+    }
+
+    /// In grid coordinates: the strip that adds a column, past the last one.
+    var addColumnRect: CGRect {
+        CGRect(x: size.width + 1, y: 0, width: Self.affordance - 1, height: size.height)
+    }
+
+    func cell(row: Int, column: Int) -> Cell? {
+        cells.first { $0.row == row && $0.column == column }
+    }
 
     /// Measuring a table styles every cell, which is far too much work to redo
     /// on each caret move. Keyed by everything the result depends on.
@@ -146,22 +226,26 @@ struct TableGrid {
         let layout: TableLayout
         let maxWidth: CGFloat
         let fontSize: CGFloat
+        let active: ActiveCell?
         let vault: String
     }
 
     private static var cache: [CacheKey: TableGrid] = [:]
 
     static func measure(
-        _ layout: TableLayout, maxWidth: CGFloat, context: RenderContext, fontSize: CGFloat
+        _ layout: TableLayout, maxWidth: CGFloat, context: RenderContext, fontSize: CGFloat,
+        active: ActiveCell? = nil
     ) -> TableGrid {
         let key = CacheKey(
-            layout: layout, maxWidth: maxWidth, fontSize: fontSize,
+            layout: layout, maxWidth: maxWidth, fontSize: fontSize, active: active,
             // Link colour inside a cell depends on whether the target resolves,
             // so a changed index must not reuse an earlier measurement.
             vault: "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")"
         )
         if let hit = cache[key] { return hit }
-        let grid = compute(layout, maxWidth: maxWidth, context: context, fontSize: fontSize)
+        let grid = compute(
+            layout, maxWidth: maxWidth, context: context, fontSize: fontSize, active: active
+        )
         // Plain eviction: notes hold a handful of tables, and the key changes
         // on every window resize, so the map must not grow without bound.
         if cache.count > 64 { cache.removeAll(keepingCapacity: true) }
@@ -172,14 +256,15 @@ struct TableGrid {
     /// Lays the table out within `maxWidth`. Columns take their natural width
     /// where they fit, and are scaled down proportionally when they do not.
     private static func compute(
-        _ layout: TableLayout, maxWidth: CGFloat, context: RenderContext, fontSize: CGFloat
+        _ layout: TableLayout, maxWidth: CGFloat, context: RenderContext, fontSize: CGFloat,
+        active: ActiveCell?
     ) -> TableGrid {
         let columnCount = layout.columnCount
         guard columnCount > 0, !layout.rows.isEmpty else { return TableGrid() }
 
         // Every cell is styled through the same decorator the prose uses, so a
         // link or `**bold**` inside a cell looks the same as it does outside.
-        let styled: [[NSAttributedString]] = layout.rows.enumerated().map { rowIndex, row in
+        let display: [[NSAttributedString]] = layout.rows.enumerated().map { rowIndex, row in
             (0..<columnCount).map { column in
                 let source = column < row.count ? row[column] : ""
                 return CellText.render(
@@ -191,8 +276,13 @@ struct TableGrid {
         // Measured the same way the cells are later drawn. `size()` reports a
         // hair less than `boundingRect` does, which is enough to make a header
         // wrap inside the column that was sized for it.
+        //
+        // Deliberately measured from the *rendered* text even for the active
+        // cell, whose drawn text is longer because its markup is showing. A
+        // column that resized as the caret entered and left it would make the
+        // whole table twitch on every click.
         var natural = [CGFloat](repeating: 0, count: columnCount)
-        for row in styled {
+        for row in display {
             for (column, cell) in row.enumerated() {
                 let bounds = cell.boundingRect(
                     with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
@@ -215,8 +305,39 @@ struct TableGrid {
             }
         }
 
+        var styled = display
+        if let active, active.row < styled.count, active.column < styled[active.row].count {
+            // The cell under the caret shows what is actually in the file, so
+            // the markers being edited are visible and every offset inside it
+            // is an offset into the document.
+            let raw = active.row < layout.rawRows.count
+                && active.column < layout.rawRows[active.row].count
+                ? layout.rawRows[active.row][active.column] : ""
+            let revealed = CellText.render(
+                raw, bold: active.row == 0, fontSize: fontSize, context: context, revealed: true
+            )
+            styled[active.row][active.column] = revealed
+
+            // Markup appearing makes the cell's text longer, and a cell that
+            // wraps onto a second line makes its row taller and shoves the rest
+            // of the note down. Where the table is narrower than the text
+            // column there is slack going spare, so spend it on this one column
+            // rather than on the document's vertical rhythm. No other column
+            // changes width, so nothing outside the table moves at all.
+            let wanted = ceil(revealed.boundingRect(
+                with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading]
+            ).width) + 1 + padding.width * 2
+            let spare = maxWidth - widths.reduce(0, +)
+            if spare > 0, wanted > widths[active.column] {
+                widths[active.column] += min(spare, wanted - widths[active.column])
+            }
+        }
+
         var grid = TableGrid()
         grid.columnWidths = widths
+        grid.active = active
+        grid.layout = layout
 
         var y: CGFloat = 0
         for (rowIndex, row) in styled.enumerated() {
@@ -236,13 +357,20 @@ struct TableGrid {
 
             var x: CGFloat = 0
             for (column, entry) in measured.enumerated() {
+                let source = rowIndex < layout.cellRanges.count
+                    && column < layout.cellRanges[rowIndex].count
+                    ? layout.cellRanges[rowIndex][column]
+                    : NSRange(location: NSNotFound, length: 0)
                 grid.cells.append(Cell(
                     text: entry.0,
                     rect: CGRect(
                         x: x + padding.width, y: y + padding.height,
                         width: entry.1, height: height - padding.height * 2
                     ),
-                    alignment: column < layout.alignments.count ? layout.alignments[column] : .leading
+                    alignment: column < layout.alignments.count ? layout.alignments[column] : .leading,
+                    row: rowIndex,
+                    column: column,
+                    source: source
                 ))
                 x += widths[column]
             }
@@ -253,6 +381,153 @@ struct TableGrid {
 
         grid.size = CGSize(width: widths.reduce(0, +), height: y)
         return grid
+    }
+
+    // MARK: Hit testing
+
+    /// The cell a point in grid coordinates falls in, snapped to the nearest
+    /// one rather than missing between borders.
+    func cell(at point: CGPoint) -> Cell? {
+        guard !rowHeights.isEmpty, !columnWidths.isEmpty else { return nil }
+        var row = rowHeights.count - 1
+        var y: CGFloat = 0
+        for (index, height) in rowHeights.enumerated() {
+            if point.y < y + height { row = index; break }
+            y += height
+        }
+        var column = columnWidths.count - 1
+        var x: CGFloat = 0
+        for (index, width) in columnWidths.enumerated() {
+            if point.x < x + width { column = index; break }
+            x += width
+        }
+        return cell(row: max(0, row), column: max(0, column))
+    }
+
+    /// Lays a cell's text out on its own and runs `body` against it, so
+    /// positions inside the cell can be asked for.
+    ///
+    /// TextKit 1 rather than `boundingRect`, because a cell wraps and a caret
+    /// has to follow it onto the second line. The container is set up the way
+    /// `draw(with:options:)` lays the same string out: no line-fragment
+    /// padding, one container the width of the cell's text rect.
+    ///
+    /// Closure-shaped rather than returning the three objects, and that is the
+    /// whole point: `NSLayoutManager` does not retain its text storage, so
+    /// handing the trio back left every caller free to drop the storage on the
+    /// spot and lay out against a deallocated one. It does not crash — it
+    /// quietly answers 0 for every position, which reads as a caret pinned to
+    /// the left edge of the cell and a selection with no rectangles at all.
+    private func typeset<T>(
+        _ cell: Cell, _ body: (NSLayoutManager, NSTextContainer) -> T
+    ) -> T {
+        let storage = NSTextStorage(attributedString: cell.text)
+        let container = NSTextContainer(
+            size: CGSize(width: max(cell.rect.width, 1), height: .greatestFiniteMagnitude)
+        )
+        container.lineFragmentPadding = 0
+        let manager = NSLayoutManager()
+        storage.addLayoutManager(manager)
+        manager.addTextContainer(container)
+        // Forces glyph generation as well as layout.
+        _ = manager.glyphRange(for: container)
+        return withExtendedLifetime(storage) { body(manager, container) }
+    }
+
+    /// Where a caret sitting `offset` characters into `cell` is drawn, in grid
+    /// coordinates.
+    ///
+    /// Measured from the bounding box of the glyph the caret sits before —
+    /// its trailing edge for the position past the last one. That is the one
+    /// query that is reliable here: the per-glyph location is relative to a
+    /// line fragment that may not have been laid out yet, and answers 0 when
+    /// it has not.
+    func caretRect(in cell: Cell, offset: Int) -> CGRect {
+        let clamped = min(max(0, offset), cell.text.length)
+        let origin = CGPoint(
+            x: cell.rect.minX + alignmentOffset(for: cell), y: cell.rect.minY
+        )
+        return typeset(cell) { manager, container in
+            guard manager.numberOfGlyphs > 0 else {
+                return CGRect(x: origin.x, y: origin.y, width: 2, height: max(cell.rect.height, 12))
+            }
+            let atEnd = clamped >= cell.text.length
+            let probe = min(
+                manager.glyphIndexForCharacter(at: atEnd ? cell.text.length - 1 : clamped),
+                manager.numberOfGlyphs - 1
+            )
+            let box = manager.boundingRect(
+                forGlyphRange: NSRange(location: probe, length: 1), in: container
+            )
+            return CGRect(
+                x: origin.x + (atEnd ? box.maxX : box.minX), y: origin.y + box.minY,
+                width: 2, height: max(box.height, 12)
+            )
+        }
+    }
+
+    /// The boxes a selection inside one cell covers, in grid coordinates.
+    func selectionRects(in cell: Cell, range: NSRange) -> [CGRect] {
+        let clamped = NSIntersectionRange(
+            range, NSRange(location: 0, length: cell.text.length)
+        )
+        guard clamped.length > 0 else { return [] }
+        let origin = CGPoint(
+            x: cell.rect.minX + alignmentOffset(for: cell), y: cell.rect.minY
+        )
+        return typeset(cell) { manager, container in
+            let glyphs = manager.glyphRange(forCharacterRange: clamped, actualCharacterRange: nil)
+            var rects: [CGRect] = []
+            // `{NSNotFound, 0}` for the selected range is what asks for the
+            // plain enclosing rectangles. Passing the same range twice asks
+            // instead for its intersection with a selection this layout manager
+            // does not have, and comes back empty every time.
+            manager.enumerateEnclosingRects(
+                forGlyphRange: glyphs,
+                withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+                in: container
+            ) { rect, _ in
+                rects.append(rect.offsetBy(dx: origin.x, dy: origin.y))
+            }
+            return rects
+        }
+    }
+
+    /// The character offset a point in grid coordinates falls on inside `cell`.
+    func characterOffset(in cell: Cell, at point: CGPoint) -> Int {
+        guard cell.text.length > 0 else { return 0 }
+        let local = CGPoint(
+            x: point.x - cell.rect.minX - alignmentOffset(for: cell),
+            y: min(max(point.y - cell.rect.minY, 0), max(cell.rect.height - 1, 0))
+        )
+        return typeset(cell) { manager, container in
+            var fraction: CGFloat = 0
+            let glyph = manager.glyphIndex(
+                for: local, in: container, fractionOfDistanceThroughGlyph: &fraction
+            )
+            let character = manager.characterIndexForGlyph(
+                at: min(glyph, max(0, manager.numberOfGlyphs - 1))
+            )
+            // Past the midpoint of a glyph the caret belongs after it, which is
+            // what makes clicking the right half of a letter feel accurate.
+            let offset = fraction > 0.5 ? character + 1 : character
+            return min(max(0, offset), cell.text.length)
+        }
+    }
+
+    /// The shift `draw` applies for a centred or right-aligned column, so the
+    /// caret lands on the glyphs rather than beside them.
+    func alignmentOffset(for cell: Cell) -> CGFloat {
+        guard cell.alignment != .leading else { return 0 }
+        let bounds = cell.text.boundingRect(
+            with: CGSize(width: cell.rect.width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        return switch cell.alignment {
+        case .center: max(0, (cell.rect.width - bounds.width) / 2)
+        case .trailing: max(0, cell.rect.width - bounds.width)
+        case .leading: 0
+        }
     }
 }
 
@@ -377,8 +652,12 @@ enum PropertiesRenderer {
 
 /// Renders one table cell's markdown source to an attributed string.
 enum CellText {
+    /// - Parameter revealed: show the cell's markup rather than collapsing it.
+    ///   True for the one cell the caret is in, so that what is on screen is
+    ///   what is in the file and a caret offset means the same thing in both.
     static func render(
-        _ source: String, bold: Bool, fontSize: CGFloat, context: RenderContext
+        _ source: String, bold: Bool, fontSize: CGFloat, context: RenderContext,
+        revealed: Bool = false
     ) -> NSAttributedString {
         let base = bold
             ? NSFont.systemFont(ofSize: fontSize, weight: .semibold)
@@ -388,11 +667,12 @@ enum CellText {
             .foregroundColor: NSColor.labelColor,
         ])
         // Reuse the prose styler so cells and body text cannot drift apart.
-        // Nothing is revealed: a cell is never the caret's line, because a
-        // table with the caret in it is shown as source instead of drawn.
+        let whole = NSRange(location: 0, length: (source as NSString).length)
         _ = LiveStyler.apply(
             to: storage,
-            reveal: .none,
+            reveal: revealed
+                ? Reveal(line: whole, selection: whole)
+                : .none,
             context: context,
             baseFont: base,
             drawsWidgets: false
@@ -421,7 +701,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         switch widget {
         case .blockMath(let image): image.size
         case .image(let image): Self.displaySize(for: image)
-        case .table(let grid): grid.size
+        case .table(let grid): grid.contentSize
         case .embed(let embed): embed.size
         case .properties(let card): card.size
         default: nil
@@ -654,6 +934,26 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     }
 
     /// Rounds only the corners this line actually owns.
+    /// The rounded rect to fill for one line of a multi-line quote or callout.
+    ///
+    /// Each line is filled separately, clipped to its own slice, so a corner
+    /// is only round where the block genuinely ends. The rect is therefore
+    /// pushed `radius` past every end the block continues through, putting
+    /// those corners outside the clip and leaving a straight edge to meet the
+    /// next line with.
+    static func grownFill(_ rect: CGRect, edge: QuoteEdge, radius: CGFloat) -> CGRect {
+        let opensAbove = edge != .first   // .first owns the top of the card
+        let opensBelow = edge != .last    // .last owns the bottom
+        return CGRect(
+            x: rect.minX,
+            y: opensAbove ? rect.minY - radius : rect.minY,
+            width: rect.width,
+            height: rect.height
+                + (opensAbove ? radius : 0)
+                + (opensBelow ? radius : 0)
+        )
+    }
+
     private func fill(_ rect: CGRect, edge: QuoteEdge, radius: CGFloat, in context: CGContext) {
         switch edge {
         case .only:
@@ -662,14 +962,13 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ))
             context.fillPath()
         case .first, .last, .middle:
-            // Grow past the open end so its corners fall outside the clip and
-            // the fill meets the neighbouring paragraph with a straight edge.
-            let grown = CGRect(
-                x: rect.minX,
-                y: edge == .last ? rect.minY - radius : rect.minY,
-                width: rect.width,
-                height: rect.height + (edge == .middle ? radius * 2 : radius)
-            )
+            // Grow past every *open* end, so those corners fall outside the
+            // clip and the fill meets the neighbouring paragraph with a
+            // straight edge. A middle line has two open ends and must grow at
+            // both: growing only downwards left its rounded top corners
+            // sitting on the clip's edge, so every interior line of a callout
+            // drew its own little roof and the card came out notched.
+            let grown = Self.grownFill(rect, edge: edge, radius: radius)
             context.saveGState()
             context.clip(to: rect)
             context.addPath(CGPath(
@@ -922,24 +1221,81 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         context.addPath(border)
         context.strokePath()
 
+        if let active = grid.active, let cell = grid.cell(row: active.row, column: active.column) {
+            drawActiveCell(cell, in: grid, origin: origin, context: context)
+        }
+
         withAppKitContext(context) {
             for cell in grid.cells {
-                let bounds = cell.text.boundingRect(
-                    with: CGSize(width: cell.rect.width, height: .greatestFiniteMagnitude),
-                    options: [.usesLineFragmentOrigin, .usesFontLeading]
-                )
-                let offset: CGFloat = switch cell.alignment {
-                case .leading: 0
-                case .center: max(0, (cell.rect.width - bounds.width) / 2)
-                case .trailing: max(0, cell.rect.width - bounds.width)
-                }
                 cell.text.draw(with: CGRect(
-                    x: origin.x + cell.rect.minX + offset,
+                    x: origin.x + cell.rect.minX + grid.alignmentOffset(for: cell),
                     y: origin.y + cell.rect.minY,
                     width: cell.rect.width,
                     height: cell.rect.height
                 ), options: [.usesLineFragmentOrigin, .usesFontLeading])
             }
+        }
+
+        if grid.active != nil { drawTableAffordances(grid, origin: origin, in: context) }
+    }
+
+    /// A tinted box around the cell being edited.
+    ///
+    /// Without it the table reads as static rendered output that has somehow
+    /// grown a caret. The box is what says "this one is text you are typing
+    /// into, the rest is a picture of your table".
+    private func drawActiveCell(
+        _ cell: TableGrid.Cell, in grid: TableGrid, origin: CGPoint, context: CGContext
+    ) {
+        let box = CGRect(
+            x: origin.x + cell.rect.minX - TableGrid.padding.width + 1,
+            y: origin.y + cell.rect.minY - TableGrid.padding.height + 1,
+            width: cell.rect.width + TableGrid.padding.width * 2 - 2,
+            height: cell.rect.height + TableGrid.padding.height * 2 - 2
+        )
+        let path = CGPath(roundedRect: box, cornerWidth: 4, cornerHeight: 4, transform: nil)
+        context.saveGState()
+        context.setFillColor(grid.accent.withAlphaComponent(0.10).cgColor)
+        context.addPath(path)
+        context.fillPath()
+        context.setStrokeColor(grid.accent.withAlphaComponent(0.55).cgColor)
+        context.setLineWidth(1)
+        context.addPath(path)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    /// The `+` strips below and beside an active table.
+    ///
+    /// Only drawn while the caret is in the table, but the space they occupy is
+    /// reserved always: appearing and disappearing is free, growing and
+    /// shrinking would shove the rest of the note about on every click.
+    private func drawTableAffordances(
+        _ grid: TableGrid, origin: CGPoint, in context: CGContext
+    ) {
+        for rect in [grid.addRowRect, grid.addColumnRect] {
+            let frame = rect.offsetBy(dx: origin.x, dy: origin.y)
+            guard frame.width > 4, frame.height > 4 else { continue }
+            let path = CGPath(roundedRect: frame, cornerWidth: 4, cornerHeight: 4, transform: nil)
+            context.saveGState()
+            context.setFillColor(NSColor.quaternarySystemFill.cgColor)
+            context.addPath(path)
+            context.fillPath()
+            context.setStrokeColor(NSColor.separatorColor.cgColor)
+            context.setLineWidth(1)
+            context.addPath(path)
+            context.strokePath()
+
+            let arm = min(4.5, min(frame.width, frame.height) / 2 - 2)
+            context.setStrokeColor(NSColor.secondaryLabelColor.cgColor)
+            context.setLineWidth(1.5)
+            context.setLineCap(.round)
+            context.move(to: CGPoint(x: frame.midX - arm, y: frame.midY))
+            context.addLine(to: CGPoint(x: frame.midX + arm, y: frame.midY))
+            context.move(to: CGPoint(x: frame.midX, y: frame.midY - arm))
+            context.addLine(to: CGPoint(x: frame.midX, y: frame.midY + arm))
+            context.strokePath()
+            context.restoreGState()
         }
     }
 
@@ -958,13 +1314,35 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         let markerCentre = textLeft + markerOffset
 
         switch glyph {
-        case .bullet:
+        case .bullet(let shape):
+            // One optical size for all three. A stroked ring and a square both
+            // read larger than a filled dot of the same radius, so the ring
+            // keeps the dot's outer edge and the square is drawn slightly
+            // smaller than its bounding circle would be.
             let radius: CGFloat = 2.75
             context.setFillColor(NSColor.tertiaryLabelColor.cgColor)
-            context.fillEllipse(in: CGRect(
-                x: markerCentre - radius, y: centreY - radius,
-                width: radius * 2, height: radius * 2
-            ))
+            context.setStrokeColor(NSColor.tertiaryLabelColor.cgColor)
+            switch shape {
+            case .disc:
+                context.fillEllipse(in: CGRect(
+                    x: markerCentre - radius, y: centreY - radius,
+                    width: radius * 2, height: radius * 2
+                ))
+            case .circle:
+                let line: CGFloat = 1.2
+                context.setLineWidth(line)
+                context.strokeEllipse(in: CGRect(
+                    x: markerCentre - radius + line / 2,
+                    y: centreY - radius + line / 2,
+                    width: radius * 2 - line, height: radius * 2 - line
+                ))
+            case .square:
+                let side = radius * 1.8
+                context.fill(CGRect(
+                    x: markerCentre - side / 2, y: centreY - side / 2,
+                    width: side, height: side
+                ))
+            }
 
         case .ordered(let label):
             let text = NSAttributedString(string: label, attributes: [

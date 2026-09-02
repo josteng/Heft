@@ -13,6 +13,7 @@ swift test                                      # core, live-surface, and dispos
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
+swift run Heft proposals <vault>                # agent edits waiting for review
 ```
 
 ## Architecture
@@ -22,10 +23,7 @@ Three targets:
 - `HeftCore`: pure logic. Never imports AppKit or SwiftUI. Parsing, the link index,
   the vault scanner, moment.js date formatting, live-mode decorations.
 - `HeftVimCore`: Foundation-only modal editing grammar. It returns edits and
-  selections but never owns an editor buffer or imports AppKit. Anything it
-  cannot answer from the text alone — which lines are on screen for `H M L`,
-  replaying a macro's keys against a document it does not hold — comes back as
-  a `VimHostAction` for the text view to carry out.
+  selections but never owns an editor buffer or imports AppKit.
 - `Heft`: the macOS shell. SwiftUI chrome around an `NSTextView`.
 
 The dependencies are Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and
@@ -65,6 +63,40 @@ Four files carry it:
 - `RestyleScope` (in HeftCore): how much of that has to be redone. Pure, testable.
 - `LiveStyler`: turns decorations into attributes, and decides which widgets to draw.
 - `LiveWidgets`: measures tables and draws every widget.
+
+### Tables are edited in place
+
+A table is the one construct with a third reveal state. Everything else is
+either rendered or shown as source; a table stays a drawn grid *while the caret
+is in it*, and only the one cell being typed into shows its markdown. So
+`Reveal.state(of:)` returns `RevealState` — `.hidden`, `.revealed`, or
+`.cell(row:column:)` — and `RestyleScope` diffs that rather than a bare
+"is it revealed", which is what makes moving between two cells a restyle.
+
+`TableLayout` therefore carries where every cell came from: `cellRanges[r][c]`
+is exactly the span of the file that `rawRows[r][c]` was read from (`rows`
+unescapes `\|` for display, which changes the length, so the raw form is kept
+alongside). `TableLayout.cursor(for:tableStart:)` turns a document selection
+into a cell and an offset inside it, and returns nil for the delimiter row and
+for a selection spanning cells — both of which fall back to plain source, so
+the `---` row is the deliberate way to edit a table as text.
+
+The caret inside a cell cannot be TextKit's. The grid bears no relation to the
+lines its source occupies — a four-row table is one 150pt paragraph followed by
+three hairlines — so TextKit puts the insertion point at the table's left edge
+whichever cell is active. `TableCaretOverlay` (a subview, like the Vim block
+cursor) draws it instead, positioned from the measured grid, with the native
+insertion point switched to `.clear` while it is up. For the same reason clicks
+inside a table are hit-tested against the grid in `mouseDown` and never reach
+`super`, including drag-selection, which runs its own tracking loop confined to
+the cell it started in.
+
+`TableEditing` in HeftCore holds the structural edits — rows and columns in and
+out, and the cell walk Tab, Shift-Tab, Return and the arrow keys perform. Pure,
+like `MarkdownEditing`: a replacement range and where the selection ends up.
+Row operations splice a single line and leave the rest of the source untouched;
+column operations rewrite the table into canonical `| a | b |` form, because
+hand-aligned padding no longer lines up once a column has been added anyway.
 
 ### Restyling only what changed
 
@@ -151,6 +183,34 @@ tags or URLs — `SmartTypography.allowsSubstitution` is a cheap own scan rather
 than a `LiveDecorator` pass, because it runs on every keystroke and only has to
 answer for one position.
 
+### Agent proposals
+
+An agent does not edit the vault; it proposes, and the editor asks. `AgentCLI`
+adds `propose`, `proposals`, `diff`, `drop`, `read` and `find` to the same
+headless dispatch in `Main.swift` that `stats` and `render` use, so the whole
+integration is a CLI rather than a daemon or a port. `heft propose` takes the
+**complete new body** on stdin, not a patch: an agent already has the finished
+text, and a full body cannot fail to apply.
+
+A proposal is one JSON file under `<vault>/.heft/proposals/`, which the existing
+vault watcher already sees. `NoteDiff` in HeftCore turns it into hunks, and each
+one is accepted or rejected on its own in `ProposalReviewView`.
+
+Three decisions carry it:
+
+- The diff is against the note **as it is now**, never against what the agent
+  read. The user is deciding about their current note; `Proposal.isStale` says
+  so when the note moved on, rather than silently rebasing the reasoning.
+- A partly reviewed proposal is a **smaller proposal**, not a lost one.
+  `ProposalStore.settle` applies the accepted hunks, drops the rejected ones
+  from the body for good, and rewrites the rest as a fresh proposal against the
+  updated note.
+- An accepted change to the open note goes through the buffer and the normal
+  autosave, rather than writing the file under the editor and racing it.
+
+`Docs/AgentIntegration.md` has the verbs and the `CLAUDE.md` snippet that makes
+Claude Code reach for `propose` instead of `Write`.
+
 ## Gotchas, all of them hard-won
 
 - **Xcode 26.6 is installed, but `xcode-select` points at the Command Line Tools.**
@@ -174,6 +234,13 @@ answer for one position.
   day-of-month but ICU `DD` is day-of-year; moment `WW` is the ISO week but ICU `WW`
   is week-of-month; moment escapes with `[W]` where ICU uses `'W'`. `MomentFormat`
   implements them directly. Never route these through `DateFormatter`.
+- **Replacing the buffer is right for a new note and destructive for the same
+  one.** `documentGeneration` used to mean both, so an edit arriving from
+  iCloud, Obsidian or an agent scrolled the reader back to the top and dropped
+  the caret. `documentGenerationKeepsPosition` separates them, and
+  `LiveTextEditor.mapLocation` moves the caret by the size of the change above
+  it. Scroll is restored *after* the restyle, never before: scrolling within an
+  estimated height lands somewhere else.
 - **Reserve widget height with `minimumLineHeight`, not by overriding
   `layoutFragmentFrame`.** Line height is ordinary paragraph geometry the layout
   manager must honour; the frame override did not survive contact with reality and
@@ -191,6 +258,32 @@ answer for one position.
   therefore copies. Symptom when it does not: the diff compares the document
   against itself, finds nothing changed, and the surface stops restyling
   entirely.
+- **`NSLayoutManager` does not retain its `NSTextStorage`.** Laying a table
+  cell out on the side to find a caret position, and dropping the storage on
+  the same line (`let (manager, container, _) = typeset(cell)` — `_` keeps
+  nothing), does not crash. It quietly answers 0 for every position, which
+  reads as a caret pinned to the left edge of the cell and a selection with no
+  rectangles at all. `TableGrid.typeset` takes a closure and wraps the body in
+  `withExtendedLifetime` so the lifetime cannot be got wrong.
+- **`enumerateEnclosingRects` wants `{NSNotFound, 0}` for
+  `withinSelectedGlyphRange`** when you just want the boxes a range covers.
+  Passing the same range twice asks for its intersection with a selection the
+  layout manager does not have, and comes back empty every time.
+- **A subview of an `NSTextView` composites over the text the view drew**, so a
+  selection highlight filled in an overlay covers the glyphs it is meant to sit
+  behind. `TableCaretOverlay` paints the active cell's string again on top of
+  its own fill; the layout is identical, so the second pass lands exactly where
+  the first did.
+- **The space the table `+` strips occupy is reserved whether or not they are
+  drawn.** They only appear while the caret is in the table, and reserving
+  their height on demand would shove the rest of the note down by 17pt on every
+  click into a table and back up on every click out.
+- **Showing a cell's markers makes its text longer**, so the row can wrap and
+  grow, which moves everything below it in the document. Where the table is
+  narrower than the text column, `TableGrid.compute` spends the spare width on
+  the active column instead — no other column changes, so nothing outside the
+  table moves. Column widths are always measured from the *rendered* text, so
+  entering and leaving a cell never resizes a column on its own.
 - **`String.range(of:options:.regularExpression)` builds a fresh
   `NSRegularExpression` every call.** Fine once, ruinous per line: quote-marker
   detection alone was most of the cost of decorating a long note. The
@@ -271,13 +364,17 @@ answer for one position.
 - Lists and headings inside a `>` block are not detected: the block matchers are
   anchored to the start of the line, so `> - item` is quoted text, not a list.
 - Callout folding (`[!note]-`) parses and hides the marker but does not fold.
+- A table selection cannot span two cells: dragging is confined to the cell it
+  began in, and a selection made any other way (Select All, a find match)
+  drops the table back to plain source rather than highlighting across pipes.
+- Column alignment cannot be changed from the grid; edit the `---` row, which
+  is what a caret on it shows the table as source for.
 - Renaming a *folder* does not repoint path-shaped links into it; renaming a
   note does.
 - Native tabbing is not customized; workspace windows are independent windows.
-- Vim mode is experimental. Ex commands, system/clipboard registers, mappings,
-  jump lists, and blockwise put are not implemented; `Docs/VimMode.md` tracks
-  the full command surface and the handful of narrow places the prose objects
-  differ from Vim.
+- Vim mode is experimental. Ex commands, named and system registers, mappings,
+  macros, marks and jump lists, blockwise put, and `H M L` are not implemented;
+  `Docs/VimMode.md` tracks the full command surface.
 - Deferred: graph view, plugins.
 
 ## The icon

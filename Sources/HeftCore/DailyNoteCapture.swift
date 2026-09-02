@@ -113,19 +113,29 @@ public struct DailyNoteCapture: Sendable {
             + newline
     }
 
+    /// The marker captures are inserted above: the **last** one in the note.
+    ///
+    /// A note is not guaranteed to hold only one. A template contributes one,
+    /// and another arrives whenever a whole body is pasted or accepted from an
+    /// agent proposal that carried its own. Taking the first would then move
+    /// the insertion point backwards the moment a second appeared above it,
+    /// splitting a day's log in two and dropping new entries somewhere in the
+    /// middle of the note. The last marker keeps them where the earlier ones
+    /// already are — at the end of the log.
     private static func markerLine(
         in text: String,
         newline: String
     ) -> Range<String.Index>? {
         var start = text.startIndex
+        var found: Range<String.Index>?
         while start < text.endIndex {
             let lineBreak = text.range(of: newline, range: start..<text.endIndex)
             let end = lineBreak?.lowerBound ?? text.endIndex
             let line = text[start..<end].trimmingCharacters(in: .whitespaces)
-            if line == insertionMarker { return start..<end }
+            if line == insertionMarker { found = start..<end }
             guard let lineBreak else { break }
             start = lineBreak.upperBound
         }
-        return nil
+        return found
     }
 }
