@@ -393,9 +393,11 @@ struct DailyNotesSettingsView: View {
     private func loadDefaultsOnce() {
         guard !didLoad else { return }
         didLoad = true
-        dailyFolder = model.settings.dailyNotesFolder.isEmpty
-            ? "Daily"
-            : model.settings.dailyNotesFolder
+        // Whatever the vault is really doing, including Heft's own default
+        // for a vault that has never been configured.
+        dailyFolder = model.vaultRoot.map {
+            DailyNotes(vaultRoot: $0, settings: model.settings).folder
+        } ?? DailyNotes.defaultFolder
         filenameFormat = model.settings.dailyNoteFormat
 
         if let configured = model.settings.dailyNoteTemplate {

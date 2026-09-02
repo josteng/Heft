@@ -20,6 +20,14 @@ public enum ObsidianSettingsWriteError: LocalizedError {
 public struct ObsidianSettings: Equatable, Sendable {
     /// Folder for daily notes, vault-relative. Empty means the vault root.
     public var dailyNotesFolder: String = ""
+    /// Whether the vault actually says where daily notes go.
+    ///
+    /// Empty cannot answer this on its own: it is both "the vault root" and
+    /// "nobody has said". Obsidian's own default is the root, so a vault that
+    /// chose the root must keep it or the two apps look in different places —
+    /// but a vault that never configured daily notes has no Obsidian setting
+    /// to agree with, and gets Heft's default instead.
+    public var dailyNotesFolderIsConfigured: Bool = false
     /// moment.js pattern for daily-note filenames.
     public var dailyNoteFormat: String = "YYYY-MM-DD"
     /// Vault-relative path to the daily template, without the `.md` extension.
@@ -52,7 +60,10 @@ public struct ObsidianSettings: Equatable, Sendable {
         }
 
         if let daily = json(at: configDir.appendingPathComponent("daily-notes.json")) {
-            if let folder = daily["folder"] as? String { settings.dailyNotesFolder = folder }
+            if let folder = daily["folder"] as? String {
+                settings.dailyNotesFolder = folder
+                settings.dailyNotesFolderIsConfigured = true
+            }
             if let format = daily["format"] as? String, !format.isEmpty { settings.dailyNoteFormat = format }
             if let template = daily["template"] as? String, !template.isEmpty {
                 settings.dailyNoteTemplate = template

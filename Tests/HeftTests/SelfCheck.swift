@@ -1270,6 +1270,77 @@ public enum SelfCheck {
             "re-running still leaves the rest of the file alone"
         )
 
+        // MARK: Where an unconfigured vault files its daily notes
+        let dailyRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("heft-daily-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(
+            at: dailyRoot, withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: dailyRoot) }
+
+        var unset = ObsidianSettings()
+        expectTrue(
+            !unset.dailyNotesFolderIsConfigured,
+            "a vault with no daily-notes.json has not configured a folder"
+        )
+        expect(
+            DailyNotes(vaultRoot: dailyRoot, settings: unset).folder,
+            "Daily",
+            "an unconfigured vault files daily notes in Daily, not the root"
+        )
+        expectTrue(
+            DailyNotes(vaultRoot: dailyRoot, settings: unset)
+                .relativePath(for: Date()).hasPrefix("Daily/"),
+            "the calendar creates the note in that folder"
+        )
+
+        // A vault that chose the root keeps it: Obsidian looks there.
+        var chosenRoot = ObsidianSettings()
+        chosenRoot.dailyNotesFolderIsConfigured = true
+        expect(
+            DailyNotes(vaultRoot: dailyRoot, settings: chosenRoot).folder,
+            "",
+            "a vault configured for the root still uses the root"
+        )
+
+        var elsewhere = ObsidianSettings()
+        elsewhere.dailyNotesFolder = "Journal/2026"
+        elsewhere.dailyNotesFolderIsConfigured = true
+        expect(
+            DailyNotes(vaultRoot: dailyRoot, settings: elsewhere).folder,
+            "Journal/2026",
+            "a configured folder is used as written"
+        )
+
+        // An unconfigured vault already keeping dailies in its root goes on
+        // doing so, rather than splitting the habit across two places.
+        let habitual = DailyNotes(vaultRoot: dailyRoot, settings: unset)
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+        try? "yesterday\n".write(
+            to: dailyRoot.appendingPathComponent("\(habitual.stem(for: yesterday)).md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        expect(
+            DailyNotes(vaultRoot: dailyRoot, settings: unset).folder,
+            "",
+            "a vault already keeping daily notes in its root is left alone"
+        )
+
+        // Reading a config that names the root records the choice, so it is
+        // not mistaken for silence on the next launch.
+        let configDir = dailyRoot.appendingPathComponent(".obsidian", isDirectory: true)
+        try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        try? "{\"folder\": \"\"}".write(
+            to: configDir.appendingPathComponent("daily-notes.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        expectTrue(
+            ObsidianSettings.load(vaultRoot: dailyRoot).dailyNotesFolderIsConfigured,
+            "a daily-notes.json naming the root counts as configured"
+        )
+
         // MARK: Nested bullet shapes
         expectTrue(BulletShape.forLevel(0) == .disc, "the outermost bullet is a filled dot")
         expectTrue(BulletShape.forLevel(1) == .circle, "one level in is a hollow ring")

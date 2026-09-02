@@ -1317,6 +1317,7 @@ final class AppModel: ObservableObject {
 
         var updated = settings
         updated.dailyNotesFolder = folder
+        updated.dailyNotesFolderIsConfigured = true
         updated.dailyNoteFormat = format
         updated.dailyNoteTemplate = templatePath
         try updated.saveDailyNotesConfiguration(vaultRoot: vaultRoot)

@@ -293,7 +293,8 @@ enum HeftMain {
         print("  \(index.notes.count) notes, \(files.count - index.notes.count) attachments")
         print("")
         print("Daily notes")
-        print("  folder    \(settings.dailyNotesFolder.isEmpty ? "(vault root)" : settings.dailyNotesFolder)")
+        let dailyFolder = DailyNotes(vaultRoot: root, settings: settings).folder
+        print("  folder    \(dailyFolder.isEmpty ? "(vault root)" : dailyFolder)")
         print("  format    \(settings.dailyNoteFormat)")
         print("  template  \(settings.dailyNoteTemplate ?? "(none)")")
         let daily = DailyNotes(vaultRoot: root, settings: settings)
