@@ -563,8 +563,12 @@ final class AppModel: ObservableObject {
 
     /// Handles the internal URLs the preview renderer emits.
     func handle(url: URL) -> Bool {
-        guard url.scheme == "heft" else { return false }
+        guard url.scheme == HeftURL.scheme else { return false }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        // Only a link click. `heft://open` arrives from outside the app and is
+        // a vault to open, not a wikilink to follow; without this it would be
+        // taken as a target named "…?path=…" and silently go nowhere.
+        guard components?.host == HeftURL.Host.follow.rawValue else { return false }
         let value = components?.queryItems?.first(where: { $0.name == "target" })?.value ?? ""
         guard let decoded = value.removingPercentEncoding else { return true }
         follow(WikiLinkParser.links(in: "[[\(decoded)]]").first ?? WikiLink(target: decoded))

@@ -59,6 +59,30 @@ enum HeftMain {
             }
             exit(0)
         }
+        // `open [path]` is what the `heft` shell command runs. It resolves the
+        // path and hands it to the *bundled* app as a URL rather than doing
+        // anything itself: arguments given to `open --args` are dropped unless
+        // the app is being launched fresh, and a running Heft is the usual
+        // case. Run directly from a shell, this process inherits the working
+        // directory, so a relative path — `heft .` above all — resolves
+        // against where it was typed.
+        if arguments.first == "open" {
+            let requested = arguments.count > 1 ? arguments[1] : "."
+            let expanded = PathInput.normalize(requested) ?? requested
+            let resolved = URL(
+                fileURLWithPath: expanded,
+                relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            ).standardizedFileURL
+
+            guard FileManager.default.fileExists(atPath: resolved.path) else {
+                FileHandle.standardError.write(
+                    Data("heft: no such file or folder: \(requested)\n".utf8)
+                )
+                exit(1)
+            }
+            guard let url = HeftURL.open(path: resolved.path) else { exit(1) }
+            exit(NSWorkspace.shared.open(url) ? 0 : 1)
+        }
         HeftApp.main()
     }
 

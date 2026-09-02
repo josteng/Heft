@@ -14,8 +14,23 @@ extension FocusedValues {
     }
 }
 
+/// Receives `heft://` URLs from LaunchServices.
+///
+/// A delegate rather than `onOpenURL`: the URL that *launches* Heft arrives
+/// before any scene exists, and `IntentNavigation` already knows how to hold a
+/// request until a workspace registers itself.
+final class HeftAppDelegate: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let path = HeftURL.openedPath(in: url) else { continue }
+            MainActor.assumeIsolated { IntentNavigation.shared.openPath(path) }
+        }
+    }
+}
+
 struct HeftApp: App {
     @StateObject private var registry = VaultRegistry()
+    @NSApplicationDelegateAdaptor(HeftAppDelegate.self) private var appDelegate
 
     init() {
         HeftAppShortcuts.updateAppShortcutParameters()

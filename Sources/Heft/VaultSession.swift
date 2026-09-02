@@ -214,6 +214,62 @@ final class VaultRegistry: ObservableObject {
         return .open(WorkspaceDescriptor(vaultPath: chosen.path))
     }
 
+    /// Opens whatever `path` names, for the `heft` command line tool.
+    ///
+    /// The rule is `resolveOpen`'s, so a path means the same thing here as it
+    /// does everywhere else in the app: inside a vault that is already open it
+    /// focuses a window on that folder, and otherwise the folder becomes a
+    /// vault of its own. A window already showing that vault and folder is
+    /// raised rather than duplicated, because `heft .` twice in a terminal
+    /// should not leave two identical windows.
+    ///
+    /// Returns false when there is nothing to open or no window to open it
+    /// with, which is what tells `IntentNavigation` to hold the request until
+    /// a workspace exists.
+    @discardableResult
+    func openPath(_ path: String) -> Bool {
+        guard let normalized = PathInput.normalize(path) else { return false }
+        let url = URL(fileURLWithPath: normalized).standardizedFileURL
+
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else {
+            return false
+        }
+
+        // A note in a vault that is already open belongs in one of its
+        // windows, which is exactly what the App Intent route works out.
+        if !isFolder.boolValue, let session = activeSession(containing: url),
+           openFromIntent(url, in: session.root) {
+            return true
+        }
+
+        let folder = isFolder.boolValue ? url : url.deletingLastPathComponent()
+        guard case .open(var descriptor) = resolveOpen(for: folder) else { return false }
+        if !isFolder.boolValue {
+            let root = descriptor.vaultPath ?? folder.path
+            descriptor.notePath = url.path.hasPrefix(root + "/")
+                ? String(url.path.dropFirst(root.count + 1))
+                : url.lastPathComponent
+        }
+
+        if descriptor.notePath == nil, let owner = window(showing: descriptor) {
+            focusWindow(owner: owner)
+            return true
+        }
+        guard let opener = preferredWindowOpener() else { return false }
+        opener(descriptor)
+        return true
+    }
+
+    /// An open window already on the same vault and focused folder.
+    private func window(showing descriptor: WorkspaceDescriptor) -> UUID? {
+        workspaceModels.first { _, weakModel in
+            guard let model = weakModel.value else { return false }
+            return model.vaultRoot?.standardizedFileURL.path == descriptor.vaultPath
+                && model.scopePath == descriptor.scopePath
+        }?.key
+    }
+
     func claim(_ url: URL, for owner: UUID) -> Bool {
         let path = url.standardizedFileURL.path
         if let current = documentOwners[path], current != owner { return false }

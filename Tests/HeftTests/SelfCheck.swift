@@ -1228,6 +1228,54 @@ public enum SelfCheck {
             "distinct names stay short"
         )
 
+        // MARK: heft:// URLs
+        //
+        // The path that matters is the awkward one: a vault under "Mobile
+        // Documents" carries a space, which without encoding produces a URL
+        // that does not parse at all.
+        let spacedVault = "/Users/tester/Library/Mobile Documents/PersonalVault"
+        if let opened = HeftURL.open(path: spacedVault) {
+            expect(opened.scheme ?? "", "heft", "an open URL uses the heft scheme")
+            expect(opened.host ?? "", "open", "an open URL is addressed to the open host")
+            expectTrue(
+                !opened.absoluteString.contains(" "),
+                "a path with a space is percent-encoded"
+            )
+            expect(
+                HeftURL.openedPath(in: opened) ?? "<nil>",
+                spacedVault,
+                "a path with a space survives the round trip"
+            )
+        } else {
+            expectTrue(false, "an open URL can be built for a path with a space")
+        }
+
+        // The internal link scheme must not be mistaken for a command.
+        if let follow = InlineText_heftURLForTesting(target: "Some Note") {
+            expectTrue(
+                HeftURL.openedPath(in: follow) == nil,
+                "a link-following URL is not read as an open command"
+            )
+        }
+        expectTrue(
+            HeftURL.openedPath(in: URL(string: "https://example.com?path=/tmp")!) == nil,
+            "another scheme is not read as an open command"
+        )
+        expectTrue(
+            HeftURL.openedPath(in: URL(string: "heft://open")!) == nil,
+            "an open URL without a path asks for nothing"
+        )
+
         return r
+    }
+
+    /// Mirrors `InlineText.heftURL`, which lives in the app target and so
+    /// cannot be reached from a HeftCore check.
+    private static func InlineText_heftURLForTesting(target: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "heft"
+        components.host = "follow"
+        components.queryItems = [URLQueryItem(name: "target", value: target)]
+        return components.url
     }
 }
