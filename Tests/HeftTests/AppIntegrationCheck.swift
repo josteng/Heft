@@ -267,8 +267,10 @@ enum AppIntegrationCheck {
         expect(first.current?.relativePath == "Draft.md", "integration opens a requested note")
 
         first.text = "autosaved"
-        try? await Task.sleep(for: .milliseconds(850))
-        expect(contents(draftURL) == "autosaved", "autosave writes the open note atomically")
+        let autosaved = await waitUntil {
+            (try? String(contentsOf: draftURL, encoding: .utf8)) == "autosaved"
+        }
+        expect(autosaved, "autosave writes the open note atomically")
 
         let competingOwner = UUID()
         expect(
