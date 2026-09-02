@@ -1,15 +1,42 @@
 import Foundation
 
 public struct VimEngine: Sendable {
-    private enum Operator: Character, Sendable { case delete = "d", change = "c", yank = "y" }
+    private enum Operator: Character, Sendable {
+        case delete = "d", change = "c", yank = "y"
+        case lowercase = "u", uppercase = "U", toggleCase = "~"
+
+        /// `gu`, `gU` and `g~` rewrite in place: no register, no insert mode,
+        /// and the cursor stays at the start of what they touched.
+        var isTransform: Bool {
+            switch self {
+            case .lowercase, .uppercase, .toggleCase: return true
+            case .delete, .change, .yank: return false
+            }
+        }
+    }
     private struct Find: Sendable {
         var character: String
         var forward: Bool
         var till: Bool
     }
+    /// What a key typed after `"`, `m`, `` ` ``, `'`, `q` or `@` means. Each
+    /// of these consumes exactly one following character.
+    private enum PendingNamed: Sendable {
+        case register
+        case setMark
+        case jumpMark(exact: Bool)
+        case recordMacro
+        case playMacro
+    }
 
+    public var options = VimOptions()
     public private(set) var mode: VimMode = .normal
     public private(set) var unnamedRegister = VimRegister()
+    /// Named registers `"a`–`"z`, the yank register `"0`, the small-delete
+    /// register `"-`, and the shifting delete ring `"1`–`"9`.
+    public private(set) var registers: [Character: VimRegister] = [:]
+    /// The register a macro is being recorded into, for a host status line.
+    public private(set) var recordingMacro: Character?
 
     public var isAwaitingMoreKeys: Bool {
         count != nil
@@ -18,6 +45,7 @@ public struct VimEngine: Sendable {
             || pendingFind != nil
             || pendingTextObjectAround != nil
             || pendingReplacementCount != nil
+            || pendingNamed != nil
     }
 
     private var count: Int?
@@ -27,7 +55,14 @@ public struct VimEngine: Sendable {
     private var pendingFind: (forward: Bool, till: Bool)?
     private var pendingTextObjectAround: Bool?
     private var pendingReplacementCount: Int?
+    private var pendingNamed: PendingNamed?
+    private var pendingRegister: Character?
     private var lastFind: Find?
+    private var marks: [Character: Int] = [:]
+    private var previousJump: Int?
+    private var macros: [Character: [VimKey]] = [:]
+    private var macroKeys: [VimKey] = []
+    private var lastMacro: Character?
     private var visualAnchor: Int?
     private var visualCursor: Int?
     private var preferredColumn: Int?
@@ -45,6 +80,8 @@ public struct VimEngine: Sendable {
         pendingFind = nil
         pendingTextObjectAround = nil
         pendingReplacementCount = nil
+        pendingNamed = nil
+        pendingRegister = nil
         visualAnchor = nil
         visualCursor = nil
         preferredColumn = nil
@@ -66,6 +103,11 @@ public struct VimEngine: Sendable {
     }
 
     public mutating func handle(_ key: VimKey, in snapshot: VimSnapshot) -> VimOutput {
+        // Recording taps the raw key stream ahead of every other branch, so a
+        // macro captures insert-mode typing — which returns unconsumed below —
+        // exactly as it captures Normal-mode commands. The closing `q` is
+        // dropped again in `handleNormal`.
+        if recordingMacro != nil { macroKeys.append(key) }
         if key == .escape { return escape(in: snapshot) }
         if key == .control("c") || key == .control("[") { return escape(in: snapshot) }
         if mode == .insert {
@@ -128,27 +170,49 @@ public struct VimEngine: Sendable {
             return output(edits: [VimEdit(range: NSRange(location: cursor, length: end - cursor), replacement: value)], selection: cursor + max(0, (value as NSString).length - (replacement as NSString).length))
         }
 
+        if let named = pendingNamed {
+            pendingNamed = nil
+            guard case let .character(value) = key, let name = value.first, value.count == 1 else {
+                clearCommand()
+                return output(selection: selection(for: cursor, text: text), message: "cancelled")
+            }
+            return handleNamed(named, name: name, text: text, cursor: cursor)
+        }
+
         if let around = pendingTextObjectAround {
             pendingTextObjectAround = nil
+            let objectCount = operatorCount * takeCount(default: 1)
             guard case let .character(value) = key, value.count == 1,
                   let object = value.first,
-                  let range = textObject(object, around: around, text: text, cursor: cursor)
+                  let found = textObject(
+                      object, around: around, text: text, cursor: cursor, count: objectCount
+                  )
             else {
                 clearCommand()
                 return output(selection: cursor, message: "text object not found")
             }
+            let range = found.range
             if let op = pendingOperator {
-                return apply(op, range: range, linewise: false, text: text)
+                return apply(op, range: range, linewise: found.linewise, text: text, cursor: cursor)
             }
             if mode == .visual || mode == .visualLine {
-                guard range.length > 0 else {
+                // A Visual selection ends on a character, so an object that
+                // absorbed its line break gives that break back here: `vis`
+                // leaves the line where `dis` takes it away.
+                var selected = range
+                if !found.linewise {
+                    while selected.length > 0, text.isNewline(at: NSMaxRange(selected) - 1) {
+                        selected.length -= 1
+                    }
+                }
+                guard selected.length > 0 else {
                     return visualOutput(cursor: cursor, text: text)
                 }
                 mode = .visual
-                visualAnchor = range.location
-                visualCursor = text.previousCharacter(from: NSMaxRange(range))
+                visualAnchor = selected.location
+                visualCursor = text.previousCharacter(from: NSMaxRange(selected))
                 clearCommand(keepMode: true)
-                return visualOutput(cursor: visualCursor ?? range.location, text: text)
+                return visualOutput(cursor: visualCursor ?? selected.location, text: text)
             }
             clearCommand()
             return output(selection: cursor, message: "text object cancelled")
@@ -174,6 +238,48 @@ public struct VimEngine: Sendable {
 
         if let prefix = pendingPrefix {
             pendingPrefix = nil
+            if prefix == "g", let op = pendingOperator, op.isTransform {
+                // `gugu` and `gUgU` are Vim's spelled-out doubled forms; the
+                // shorter `guu` is caught by the operator block below.
+                guard character == op.rawValue || character == "g" else {
+                    clearCommand()
+                    return output(selection: cursor, message: "unknown command")
+                }
+                if character == "g" { pendingPrefix = "g"; return output(selection: cursor) }
+                return applyLineOperator(
+                    op,
+                    count: operatorCount * takeCount(default: 1),
+                    text: text,
+                    cursor: cursor
+                )
+            }
+            if prefix == "g", character == "u" || character == "U" || character == "~" {
+                pendingOperator = Operator(rawValue: character)
+                operatorCount = takeCount(default: 1)
+                if mode == .visual || mode == .visualLine || mode == .visualBlock {
+                    return applyVisualTransform(text: text, cursor: cursor)
+                }
+                mode = .operatorPending
+                return output(selection: cursor)
+            }
+            if prefix == "g", character == "e" || character == "E" {
+                guard let target = text.wordEndBackward(
+                    from: cursor,
+                    count: operatorCount * takeCount(default: 1),
+                    bigWord: character == "E"
+                ) else {
+                    clearCommand()
+                    return output(
+                        selection: selection(for: cursor, text: text),
+                        message: "no word end before the cursor"
+                    )
+                }
+                return finishMotion(
+                    VimMotionResult(target: target, kind: .inclusive),
+                    text: text,
+                    cursor: cursor
+                )
+            }
             if (prefix == ">" || prefix == "<"), character == prefix {
                 return shiftLines(
                     right: prefix == ">",
@@ -216,6 +322,10 @@ public struct VimEngine: Sendable {
                 pendingTextObjectAround = character == "a"
                 return output(selection: cursor)
             }
+            if character == "`" || character == "'" {
+                pendingNamed = .jumpMark(exact: character == "`")
+                return output(selection: cursor)
+            }
             if character == "g" {
                 pendingPrefix = "g"
                 return output(selection: cursor)
@@ -238,11 +348,20 @@ public struct VimEngine: Sendable {
                             target: text.wordEnd(from: cursor, count: motionCount, bigWord: character == "W"),
                             kind: .inclusive
                         )
-                    } else if op == .delete, motionCount == 1,
-                              motion.target >= NSMaxRange(text.lineRange(at: cursor)) {
-                        motion = VimMotionResult(
-                            target: text.lastCharacterOfLine(at: cursor), kind: .inclusive
-                        )
+                    } else if op == .delete || op.isTransform, motionCount == 1 {
+                        // `w` on the document's last word has nowhere to go and
+                        // comes back inside the word it started in. The operator
+                        // should still reach the end of it, so recognise that by
+                        // the target landing in the cursor's own word rather
+                        // than at the start of the next one.
+                        let stalled = text.wordObject(
+                            at: cursor, bigWord: character == "W", around: false
+                        ).map { NSLocationInRange(motion.target, $0) } ?? false
+                        if stalled || motion.target >= NSMaxRange(text.lineRange(at: cursor)) {
+                            motion = VimMotionResult(
+                                target: text.lastCharacterOfLine(at: cursor), kind: .inclusive
+                            )
+                        }
                     }
                 }
                 return applyOperator(op, motion: motion, text: text, cursor: cursor)
@@ -256,6 +375,86 @@ public struct VimEngine: Sendable {
         }
 
         return handleNormal(character, text: text, cursor: cursor)
+    }
+
+    private mutating func handleNamed(
+        _ named: PendingNamed,
+        name: Character,
+        text: VimText,
+        cursor: Int
+    ) -> VimOutput {
+        switch named {
+        case .register:
+            guard name.isLetter || name.isNumber || name == "_" || name == "-" else {
+                clearCommand()
+                return output(selection: selection(for: cursor, text: text), message: "unknown register")
+            }
+            pendingRegister = name
+            return output(selection: selection(for: cursor, text: text))
+
+        case .setMark:
+            guard name.isLetter else {
+                clearCommand()
+                return output(selection: selection(for: cursor, text: text), message: "unknown mark")
+            }
+            marks[name] = cursor
+            clearCommand()
+            return output(selection: selection(for: cursor, text: text), message: "mark \(name) set")
+
+        case let .jumpMark(exact):
+            // Marks are plain offsets, so an edit above one leaves it pointing
+            // a little off rather than moving it. Clamping keeps the jump in
+            // the document instead of failing outright.
+            let target: Int?
+            if name == "`" || name == "'" {
+                target = previousJump
+            } else {
+                target = marks[name]
+            }
+            guard let target else {
+                clearCommand()
+                return output(selection: selection(for: cursor, text: text), message: "mark not set")
+            }
+            let destination = text.clampedCursor(target)
+            previousJump = cursor
+            return finishMotion(
+                exact
+                    ? VimMotionResult(target: destination, kind: .exclusive)
+                    : VimMotionResult(target: text.firstNonblank(at: destination), kind: .linewise),
+                text: text,
+                cursor: cursor
+            )
+
+        case .recordMacro:
+            guard name.isLetter else {
+                clearCommand()
+                return output(selection: selection(for: cursor, text: text), message: "unknown register")
+            }
+            recordingMacro = Character(name.lowercased())
+            // Drop the register key itself; recording starts with what follows.
+            macroKeys = []
+            if name.isUppercase { macroKeys = macros[Character(name.lowercased())] ?? [] }
+            clearCommand()
+            return output(selection: selection(for: cursor, text: text), message: "recording @\(name)")
+
+        case .playMacro:
+            let register = name == "@" ? lastMacro : Character(name.lowercased())
+            guard let register, let keys = macros[register], !keys.isEmpty else {
+                clearCommand()
+                return output(selection: selection(for: cursor, text: text), message: "register is empty")
+            }
+            lastMacro = register
+            let repetitions = takeCount(default: 1)
+            clearCommand()
+            // Replay goes back through the host, which owns the buffer: the
+            // engine cannot re-run keys against a document it never holds.
+            return output(
+                selection: selection(for: cursor, text: text),
+                hostAction: .replayKeys(Array(
+                    repeatElement(keys, count: max(1, repetitions)).joined()
+                ))
+            )
+        }
     }
 
     private mutating func handleSpecial(_ key: VimKey, text: VimText, cursor: Int) -> VimOutput {
@@ -360,8 +559,32 @@ public struct VimEngine: Sendable {
             guard var find = lastFind else { return output(selection: cursor) }
             if command == "," { find.forward.toggle() }
             return performFind(find, text: text, cursor: cursor)
+        case "H", "M", "L":
+            let lines = takeCount(default: 1)
+            clearCommand()
+            return host(.moveToViewportLine(
+                command == "H" ? .top(count: lines)
+                    : (command == "M" ? .middle : .bottom(count: lines))
+            ), cursor: cursor)
         case "z": pendingPrefix = "z"; return output(selection: cursor)
         case ">", "<": pendingPrefix = command; return output(selection: cursor)
+        case "\"": pendingNamed = .register; return output(selection: cursor)
+        case "m": pendingNamed = .setMark; return output(selection: cursor)
+        case "`", "'": pendingNamed = .jumpMark(exact: command == "`"); return output(selection: cursor)
+        case "q":
+            if let register = recordingMacro {
+                // The `q` that stops recording was appended by `handle`.
+                if !macroKeys.isEmpty { macroKeys.removeLast() }
+                macros[register] = macroKeys
+                lastMacro = register
+                recordingMacro = nil
+                macroKeys = []
+                clearCommand()
+                return output(selection: cursor, message: "recorded @\(register)")
+            }
+            pendingNamed = .recordMacro
+            return output(selection: cursor)
+        case "@": pendingNamed = .playMacro; return output(selection: cursor)
         default:
             if let motion = motion(for: command, text: text, cursor: cursor, count: takeCount(default: 1)) {
                 let result = finishMotion(motion, text: text, cursor: cursor)
@@ -399,6 +622,15 @@ public struct VimEngine: Sendable {
                 : applyVisualOperator(op, text: text, cursor: cursor)
         case "p", "P":
             return putOverVisualSelection(text: text, cursor: cursor)
+        case "u", "U", "~":
+            pendingOperator = Operator(rawValue: command == "u" ? "u" : (command == "U" ? "U" : "~"))
+            return applyVisualTransform(text: text, cursor: cursor)
+        case "\"":
+            pendingNamed = .register
+            return visualOutput(cursor: cursor, text: text)
+        case "g":
+            pendingPrefix = "g"
+            return visualOutput(cursor: cursor, text: text)
         case "f", "F", "t", "T":
             pendingFind = (command == "f" || command == "t", command == "t" || command == "T")
             return visualOutput(cursor: cursor, text: text)
@@ -463,6 +695,7 @@ public struct VimEngine: Sendable {
             for _ in 1..<count { target = text.lineStart(from: target, offset: 1) }
             return VimMotionResult(target: text.lastCharacterOfLine(at: target), kind: .inclusive)
         case "{", "}": return VimMotionResult(target: text.paragraph(from: cursor, forward: command == "}", count: count), kind: .exclusive)
+        case "(", ")": return VimMotionResult(target: text.sentence(from: cursor, forward: command == ")", count: count), kind: .exclusive)
         case "%": return text.matchingBracket(from: cursor).map { VimMotionResult(target: $0, kind: .inclusive) }
         default: return nil
         }
@@ -483,7 +716,7 @@ public struct VimEngine: Sendable {
 
     private mutating func applyOperator(_ op: Operator, motion: VimMotionResult, text: VimText, cursor: Int) -> VimOutput {
         let range = operatorRange(motion: motion, text: text, cursor: cursor)
-        return apply(op, range: range, linewise: motion.kind == .linewise, text: text)
+        return apply(op, range: range, linewise: motion.kind == .linewise, text: text, cursor: cursor)
     }
 
     private mutating func applyLineOperator(_ op: Operator, count: Int, text: VimText, cursor: Int) -> VimOutput {
@@ -494,20 +727,105 @@ public struct VimEngine: Sendable {
             endLine = text.lineRange(at: next)
         }
         let start = text.lineRange(at: cursor).location
-        return apply(op, range: NSRange(location: start, length: NSMaxRange(endLine) - start), linewise: true, text: text)
+        return apply(
+            op,
+            range: NSRange(location: start, length: NSMaxRange(endLine) - start),
+            linewise: true,
+            text: text,
+            cursor: cursor
+        )
     }
 
     private mutating func applyVisualOperator(_ op: Operator, text: VimText, cursor: Int) -> VimOutput {
         let range = visualRange(cursor: cursor, text: text)
-        return apply(op, range: range, linewise: mode == .visualLine, text: text)
+        return apply(op, range: range, linewise: mode == .visualLine, text: text, cursor: cursor)
+    }
+
+    /// Visual `u`, `U`, `~` and `gu`/`gU`/`g~` all land here. Blockwise keeps
+    /// its rectangle, so it rewrites one edit per line rather than one span.
+    private mutating func applyVisualTransform(text: VimText, cursor: Int) -> VimOutput {
+        guard let op = pendingOperator, op.isTransform else {
+            return visualOutput(cursor: cursor, text: text)
+        }
+        let ranges = mode == .visualBlock
+            ? visualBlockRanges(cursor: cursor, text: text)
+            : [visualRange(cursor: cursor, text: text)]
+        guard let first = ranges.first else { return leaveVisual(cursor: cursor, text: text) }
+        visualAnchor = nil
+        visualCursor = nil
+        mode = .normal
+        clearCommand(keepMode: true)
+        return output(
+            edits: ranges.map {
+                VimEdit(range: $0, replacement: transformed(text.value.substring(with: $0), by: op))
+            },
+            selection: text.clampedCursor(first.location)
+        )
+    }
+
+    private func transformed(_ value: String, by op: Operator) -> String {
+        switch op {
+        case .lowercase: return value.lowercased()
+        case .uppercase: return value.uppercased()
+        case .toggleCase:
+            return String(value.map { character in
+                let text = String(character)
+                // `~` flips per character, so a caseless one has to survive
+                // unchanged rather than being folded to its own uppercasing.
+                if text == text.lowercased() { return Character(text.uppercased()) }
+                return Character(text.lowercased())
+            })
+        case .delete, .change, .yank: return value
+        }
+    }
+
+    /// Applies Vim's register rules for one yank or delete: the unnamed
+    /// register always, plus `"0` for yanks, the `"1`–`"9` ring for multiline
+    /// deletes, and `"-` for deletes inside a single line. An explicit `"x`
+    /// overrides all of that, uppercase appends, and `"_` discards.
+    private mutating func record(_ register: VimRegister, isDelete: Bool) {
+        if let name = pendingRegister {
+            pendingRegister = nil
+            guard name != "_" else { return }
+            unnamedRegister = register
+            let key = Character(name.lowercased())
+            if name.isUppercase, var existing = registers[key] {
+                if existing.linewise, !existing.text.hasSuffix("\n") { existing.text += "\n" }
+                existing.text += register.text
+                existing.linewise = existing.linewise || register.linewise
+                registers[key] = existing
+            } else {
+                registers[key] = register
+            }
+            return
+        }
+        unnamedRegister = register
+        guard isDelete else { registers["0"] = register; return }
+        if register.linewise || register.text.contains("\n") {
+            for digit in stride(from: 8, through: 1, by: -1) {
+                registers[Character("\(digit + 1)")] = registers[Character("\(digit)")]
+            }
+            registers["1"] = register
+        } else {
+            registers["-"] = register
+        }
+    }
+
+    private func namedRegister(_ name: Character?) -> VimRegister {
+        guard let name else { return unnamedRegister }
+        if name == "_" { return VimRegister() }
+        return registers[Character(name.lowercased())] ?? VimRegister()
     }
 
     private mutating func applyBlockOperator(_ op: Operator, text: VimText, cursor: Int) -> VimOutput {
         let ranges = visualBlockRanges(cursor: cursor, text: text)
         guard !ranges.isEmpty else { return leaveVisual(cursor: cursor, text: text) }
-        unnamedRegister = VimRegister(
-            text: ranges.map { text.value.substring(with: $0) }.joined(separator: "\n"),
-            linewise: false
+        record(
+            VimRegister(
+                text: ranges.map { text.value.substring(with: $0) }.joined(separator: "\n"),
+                linewise: false
+            ),
+            isDelete: op != .yank
         )
         let location = ranges[0].location
         visualAnchor = nil
@@ -536,9 +854,39 @@ public struct VimEngine: Sendable {
         )
     }
 
-    private mutating func apply(_ op: Operator, range: NSRange, linewise: Bool, text: VimText) -> VimOutput {
-        let safe = NSIntersectionRange(range, NSRange(location: 0, length: text.length))
-        unnamedRegister = VimRegister(text: text.value.substring(with: safe), linewise: linewise)
+    private mutating func apply(
+        _ op: Operator,
+        range: NSRange,
+        linewise: Bool,
+        text: VimText,
+        cursor: Int
+    ) -> VimOutput {
+        var safe = NSIntersectionRange(range, NSRange(location: 0, length: text.length))
+        // A characterwise `c` stops at the line break rather than removing it:
+        // `cis` on a sentence that fills its line leaves you typing on that
+        // line, where `dis` takes the line away entirely.
+        if op == .change, !linewise {
+            while safe.length > 0, text.isNewline(at: NSMaxRange(safe) - 1) { safe.length -= 1 }
+        }
+        if op.isTransform {
+            let location = safe.location
+            clearCommand()
+            visualAnchor = nil
+            visualCursor = nil
+            mode = .normal
+            guard safe.length > 0 else { return output(selection: text.clampedCursor(location)) }
+            return output(
+                edits: [VimEdit(
+                    range: safe,
+                    replacement: transformed(text.value.substring(with: safe), by: op)
+                )],
+                selection: text.clampedCursor(location)
+            )
+        }
+        record(
+            VimRegister(text: text.value.substring(with: safe), linewise: linewise),
+            isDelete: op != .yank
+        )
         let location = safe.location
         clearCommand()
         visualAnchor = nil
@@ -557,7 +905,57 @@ public struct VimEngine: Sendable {
                 selection: location + (indent as NSString).length
             )
         }
-        return output(edits: [VimEdit(range: safe, replacement: "")], selection: location)
+        return output(
+            edits: [VimEdit(range: safe, replacement: "")],
+            selection: op == .delete
+                ? (linewise
+                    ? caretAfterLineDelete(safe, text: text, cursor: cursor)
+                    : caretAfterDelete(safe, text: text))
+                : location
+        )
+    }
+
+    /// After a linewise delete the caret keeps its column on whichever line
+    /// now occupies the gap — the line that followed, or the one above when
+    /// the delete reached the end of the document.
+    private func caretAfterLineDelete(_ range: NSRange, text: VimText, cursor: Int) -> Int {
+        let column = text.column(at: cursor)
+        let after = NSMaxRange(range)
+        let lineStart: Int
+        if after < text.length {
+            lineStart = range.location
+        } else if range.location > 0 {
+            lineStart = text.lineRange(at: text.previousCharacter(from: range.location)).location
+        } else {
+            return 0
+        }
+        // The surviving line is measured in the pre-edit text: deleting whole
+        // lines shifts it wholesale, so only its start location moves.
+        let survivor = text.lineContentRange(at: after < text.length ? after : lineStart)
+        guard survivor.length > 0 else { return lineStart }
+        return lineStart + min(column, survivor.length - 1)
+    }
+
+    /// A characterwise delete that reached the end of its line leaves the
+    /// caret on the new last character, not on the line break — Vim never
+    /// rests a Normal-mode cursor there. `c` is exempt: that caret is an
+    /// insertion point, and it belongs exactly where the text was removed.
+    private func caretAfterDelete(_ range: NSRange, text: VimText) -> Int {
+        // Nothing survives after the range, so the caret falls back onto the
+        // last line that is left, keeping the column the delete started in.
+        if range.location >= text.length - range.length {
+            guard range.location > 0 else { return 0 }
+            let column = text.column(at: range.location)
+            let lineStart = text.lineRange(at: text.previousCharacter(from: range.location)).location
+            var surviving = range.location - lineStart
+            if text.isNewline(at: range.location - 1) { surviving -= 1 }
+            return lineStart + min(column, max(0, surviving - 1))
+        }
+        let after = NSMaxRange(range)
+        let endsLine = after >= text.length || text.isNewline(at: after)
+        let lineStart = text.lineRange(at: range.location).location
+        guard endsLine, range.location > lineStart else { return range.location }
+        return text.previousCharacter(from: range.location)
     }
 
     private func operatorRange(motion: VimMotionResult, text: VimText, cursor: Int) -> NSRange {
@@ -594,11 +992,17 @@ public struct VimEngine: Sendable {
             for _ in 1..<repetitions { end = min(NSMaxRange(text.lineContentRange(at: cursor)), text.nextCharacter(from: end)) }
         }
         guard end > start else { return output(selection: cursor) }
-        return apply(.delete, range: NSRange(location: start, length: end - start), linewise: false, text: text)
+        return apply(
+            .delete,
+            range: NSRange(location: start, length: end - start),
+            linewise: false,
+            text: text,
+            cursor: cursor
+        )
     }
 
     private mutating func put(after: Bool, text: VimText, cursor: Int) -> VimOutput {
-        let register = unnamedRegister
+        let register = namedRegister(pendingRegister)
         guard !register.text.isEmpty else { clearCommand(); return output(selection: cursor, message: "register is empty") }
         let repetitions = takeCount(default: 1)
         let insertion: Int
@@ -617,7 +1021,12 @@ public struct VimEngine: Sendable {
             }
         } else {
             insertion = after && text.length > 0 ? text.nextCharacter(from: cursor) : cursor
-            caret = insertion + max(0, (value as NSString).length - 1)
+            // A characterwise put lands the caret on the last character it
+            // wrote — unless the text spans lines, where Vim leaves it on the
+            // first instead, so the caret stays where you can see it.
+            caret = value.contains("\n")
+                ? insertion
+                : insertion + max(0, (value as NSString).length - 1)
         }
         clearCommand()
         return output(
@@ -633,7 +1042,7 @@ public struct VimEngine: Sendable {
             return result
         }
         let range = visualRange(cursor: cursor, text: text)
-        let replacement = unnamedRegister
+        let replacement = namedRegister(pendingRegister)
         guard !replacement.text.isEmpty else {
             return leaveVisual(cursor: cursor, text: text)
         }
@@ -642,6 +1051,7 @@ public struct VimEngine: Sendable {
         visualAnchor = nil
         visualCursor = nil
         mode = .normal
+        pendingRegister = nil
         clearCommand(keepMode: true)
         unnamedRegister = VimRegister(text: removed, linewise: removedWasLinewise)
         return output(
@@ -810,6 +1220,8 @@ public struct VimEngine: Sendable {
         pendingPrefix = nil
         pendingFind = nil
         pendingTextObjectAround = nil
+        pendingNamed = nil
+        pendingRegister = nil
         if !keepMode, mode == .operatorPending { mode = .normal }
     }
 
@@ -845,16 +1257,56 @@ public struct VimEngine: Sendable {
         return text.clampedCursor(min(content.location + column, NSMaxRange(content) - 1))
     }
 
-    private func textObject(_ object: Character, around: Bool, text: VimText, cursor: Int) -> NSRange? {
+    /// `ip` and `ap` are Vim's only linewise text objects: they always cover
+    /// whole lines, so they yank linewise and change the way `cc` does.
+    private func textObject(
+        _ object: Character,
+        around: Bool,
+        text: VimText,
+        cursor: Int,
+        count: Int
+    ) -> (range: NSRange, linewise: Bool)? {
+        let count = max(1, count)
+        func pair(_ opening: Character, _ closing: Character) -> (NSRange, Bool)? {
+            text.delimitedObject(
+                at: cursor, opening: opening, closing: closing, around: around, count: count
+            ).map { ($0, false) }
+        }
         switch object {
-        case "w": return text.wordObject(at: cursor, bigWord: false, around: around)
-        case "W": return text.wordObject(at: cursor, bigWord: true, around: around)
-        case "\"", "'", "`": return text.delimitedObject(at: cursor, opening: object, closing: object, around: around)
-        case "(", ")", "b": return text.delimitedObject(at: cursor, opening: "(", closing: ")", around: around)
-        case "[", "]": return text.delimitedObject(at: cursor, opening: "[", closing: "]", around: around)
-        case "{", "}", "B": return text.delimitedObject(at: cursor, opening: "{", closing: "}", around: around)
-        case "<", ">": return text.delimitedObject(at: cursor, opening: "<", closing: ">", around: around)
+        case "w": return text.wordObject(at: cursor, bigWord: false, around: around, count: count).map { ($0, false) }
+        case "W": return text.wordObject(at: cursor, bigWord: true, around: around, count: count).map { ($0, false) }
+        case "\"", "'", "`":
+            return text.quoteObject(at: cursor, forms: quoteForms(for: object), around: around)
+                .map { ($0, false) }
+        case "(", ")", "b": return pair("(", ")")
+        case "[", "]": return pair("[", "]")
+        case "{", "}", "B": return pair("{", "}")
+        case "<", ">": return pair("<", ">")
+        case "s": return text.sentenceObject(at: cursor, around: around, count: count).map { ($0, false) }
+        case "p": return text.paragraphObject(at: cursor, around: around, count: count).map { ($0, true) }
+        case "t": return text.tagObject(at: cursor, around: around, count: count).map { ($0, false) }
         default: return nil
+        }
+    }
+
+    /// What `i"` and `i'` count as a quote. The straight character comes first
+    /// so a note that still holds one is matched exactly as Vim would; the
+    /// typeset forms follow, because in a note written in this editor they are
+    /// what `"` and `'` actually became. `«»` is included with `"` for the same
+    /// reason: the Typing pane produces it, and no other object reaches it.
+    private func quoteForms(for object: Character) -> [VimText.QuoteForm] {
+        guard options.matchesTypographicQuotes else { return [VimText.QuoteForm(object, object)] }
+        switch object {
+        case "\"":
+            return [
+                VimText.QuoteForm("\"", "\""),
+                VimText.QuoteForm("\u{201C}", "\u{201D}"),
+                VimText.QuoteForm("\u{00AB}", "\u{00BB}"),
+            ]
+        case "'":
+            return [VimText.QuoteForm("'", "'"), VimText.QuoteForm("\u{2018}", "\u{2019}")]
+        default:
+            return [VimText.QuoteForm(object, object)]
         }
     }
 

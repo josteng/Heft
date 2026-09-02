@@ -31,10 +31,15 @@ private struct VimHarness {
             replace(edit.range, with: edit.replacement)
         }
         if let next = output.selection { selection = next }
+        // Macro playback is a host responsibility: each replayed key has to
+        // see the document the one before it produced.
+        if case let .replayKeys(keys)? = output.hostAction {
+            for key in keys { send(key) }
+        }
     }
 
     mutating func type(_ commands: String) {
-        send(commands.map { .character(String($0)) })
+        send(commands.map { $0 == "\u{1b}" ? .escape : .character(String($0)) })
     }
 
     private mutating func replace(_ range: NSRange, with replacement: String) {
@@ -64,6 +69,31 @@ struct VimCoreTests {
         view.keyDown(with: try Self.keyEvent("\u{1b}", keyCode: 53))
         #expect(view.string == "new two")
         #expect(view.selectedRange() == NSRange(location: 3, length: 0))
+
+        // The typographic-quote option has to travel from the settings object
+        // into the engine, since it decides what an object matches rather than
+        // being applied to the transaction afterwards.
+        let quotes = HeftTextKit2View(usingTextLayoutManager: true)
+        quotes.isEditable = true
+        quotes.string = "say \u{201C}hello\u{201D} now"
+        quotes.vimEnabled = true
+        quotes.vimMatchesTypographicQuotes = true
+        quotes.setSelectedRange(NSRange(location: 6, length: 0))
+        quotes.keyDown(with: try Self.keyEvent("d", keyCode: 2))
+        quotes.keyDown(with: try Self.keyEvent("i", keyCode: 34))
+        quotes.keyDown(with: try Self.keyEvent("\"", keyCode: 39, modifiers: .shift))
+        #expect(quotes.string == "say \u{201C}\u{201D} now")
+
+        let strict = HeftTextKit2View(usingTextLayoutManager: true)
+        strict.isEditable = true
+        strict.string = "say \u{201C}hello\u{201D} now"
+        strict.vimEnabled = true
+        strict.vimMatchesTypographicQuotes = false
+        strict.setSelectedRange(NSRange(location: 6, length: 0))
+        strict.keyDown(with: try Self.keyEvent("d", keyCode: 2))
+        strict.keyDown(with: try Self.keyEvent("i", keyCode: 34))
+        strict.keyDown(with: try Self.keyEvent("\"", keyCode: 39, modifiers: .shift))
+        #expect(strict.string == "say \u{201C}hello\u{201D} now")
 
         let block = HeftTextKit2View(usingTextLayoutManager: true)
         block.isEditable = true
@@ -559,6 +589,359 @@ struct VimCoreTests {
         #expect(replace.engine.mode == .normal)
     }
 
+    @Test("Sentence, paragraph, and tag objects carve the text the way Vim does")
+    func proseTextObjects() {
+        // A sentence that fills its line takes the line break with it, so
+        // `dis` removes the line rather than leaving an empty one behind.
+        var wholeLine = VimHarness("One here.\nTwo lines.\n\nthird.\n", cursor: 12)
+        wholeLine.type("dis")
+        #expect(wholeLine.text == "One here.\n\nthird.\n")
+
+        // Mid-line it stops at the terminator, and `as` takes the space after.
+        var inline = VimHarness("One. Two here. Three.\n", cursor: 6)
+        inline.type("dis")
+        #expect(inline.text == "One.  Three.\n")
+
+        var around = VimHarness("One. Two here. Three.\n", cursor: 6)
+        around.type("das")
+        #expect(around.text == "One. Three.\n")
+
+        // With nothing after it, `as` reaches backwards for its padding.
+        var trailing = VimHarness("One. Two here.\nmore text.\n", cursor: 6)
+        trailing.type("das")
+        #expect(trailing.text == "One.\nmore text.\n")
+
+        // `c` stops at the line break where `d` removes it.
+        var change = VimHarness("One here.\nTwo lines.\n\nthird.\n", cursor: 12)
+        change.type("cis")
+        change.type("X")
+        change.send(.escape)
+        #expect(change.text == "One here.\nX\n\nthird.\n")
+
+        var paragraph = VimHarness("alpha\nbeta\n\n\ngamma\n", cursor: 2)
+        paragraph.type("dip")
+        #expect(paragraph.text == "\n\ngamma\n")
+
+        var wholeParagraph = VimHarness("alpha\nbeta\n\n\ngamma\n", cursor: 2)
+        wholeParagraph.type("dap")
+        #expect(wholeParagraph.text == "gamma\n")
+
+        // On the blank run, `ap` reaches forward into the paragraph it opens.
+        var fromBlank = VimHarness("alpha\n\n\nbeta\ngamma\n", cursor: 6)
+        fromBlank.type("dap")
+        #expect(fromBlank.text == "alpha\n")
+
+        var tag = VimHarness("<div>outer <b>bold</b> tail</div>\n", cursor: 16)
+        tag.type("dit")
+        #expect(tag.text == "<div>outer <b></b> tail</div>\n")
+
+        var aroundTag = VimHarness("<div>outer <b>bold</b> tail</div>\n", cursor: 16)
+        aroundTag.type("dat")
+        #expect(aroundTag.text == "<div>outer  tail</div>\n")
+
+        var outerTag = VimHarness("<div>outer <b>bold</b> tail</div>\n", cursor: 16)
+        outerTag.type("2dit")
+        #expect(outerTag.text == "<div></div>\n")
+
+        // A count past the outermost pair fails rather than settling for less.
+        var tooDeep = VimHarness("<div>outer <b>bold</b> tail</div>\n", cursor: 16)
+        tooDeep.type("3dit")
+        #expect(tooDeep.text == "<div>outer <b>bold</b> tail</div>\n")
+    }
+
+    @Test("Quote objects match the quotes typing substitutions actually leave behind")
+    func typographicQuoteObjects() {
+        // The case this exists for: by the time the caret is inside the
+        // quotation, Smart Typography has replaced both `"` characters, so a
+        // strict `i"` finds nothing at all in a note written in this editor.
+        var typeset = VimHarness("- 20:05 asdf  (\u{201C}test edit\u{201D})\n", cursor: 20)
+        typeset.type("ci\"")
+        typeset.type("X")
+        typeset.send(.escape)
+        #expect(typeset.text == "- 20:05 asdf  (\u{201C}X\u{201D})\n")
+
+        var around = VimHarness("say \u{201C}hello world\u{201D} now\n", cursor: 10)
+        around.type("da\"")
+        #expect(around.text == "say now\n")
+
+        var single = VimHarness("it\u{2019}s \u{2018}single curly\u{2019} here\n", cursor: 12)
+        single.type("ci'")
+        single.type("X")
+        single.send(.escape)
+        #expect(single.text == "it\u{2019}s \u{2018}X\u{2019} here\n")
+
+        var guillemets = VimHarness("a \u{00AB}guillemet quote\u{00BB} here\n", cursor: 8)
+        guillemets.type("di\"")
+        #expect(guillemets.text == "a \u{00AB}\u{00BB} here\n")
+
+        // A line holding both forms picks the one the caret is actually in.
+        let mixed = "mixed \"straight\" and \u{201C}curly\u{201D} on one line\n"
+        var straightSide = VimHarness(mixed, cursor: 10)
+        straightSide.type("di\"")
+        #expect(straightSide.text == "mixed \"\" and \u{201C}curly\u{201D} on one line\n")
+
+        var curlySide = VimHarness(mixed, cursor: 26)
+        curlySide.type("di\"")
+        #expect(curlySide.text == "mixed \"straight\" and \u{201C}\u{201D} on one line\n")
+
+        // The apostrophe in `it’s` is a lone closing quote and pairs with
+        // nothing, so it cannot swallow half the line.
+        var apostrophe = VimHarness("it\u{2019}s plain text\n", cursor: 6)
+        apostrophe.type("di'")
+        #expect(apostrophe.text == "it\u{2019}s plain text\n")
+
+        // Turned off, the objects see only what Vim sees.
+        var strict = VimHarness("say \u{201C}hello world\u{201D} now\n", cursor: 10)
+        strict.engine.options.matchesTypographicQuotes = false
+        strict.type("di\"")
+        #expect(strict.text == "say \u{201C}hello world\u{201D} now\n")
+
+        var strictStraight = VimHarness("say \"hello world\" now\n", cursor: 10)
+        strictStraight.engine.options.matchesTypographicQuotes = false
+        strictStraight.type("di\"")
+        #expect(strictStraight.text == "say \"\" now\n")
+    }
+
+    @Test("A quote object is bounded by the quotes either side of the caret")
+    func quotePairing() {
+        // Vim does not pair quotes 1-2 then 3-4: between two quotations the
+        // object is the gap, bounded by the closing quote of one and the
+        // opening quote of the next.
+        let source = "a \"one\" and \"two\" here\n"
+        var gap = VimHarness(source, cursor: 8)
+        gap.type("di\"")
+        #expect(gap.text == "a \"one\"\"two\" here\n")
+
+        var inside = VimHarness(source, cursor: 4)
+        inside.type("di\"")
+        #expect(inside.text == "a \"\" and \"two\" here\n")
+
+        // On a quote, its position from the start of the line says whether it
+        // opens or closes.
+        var onClosing = VimHarness(source, cursor: 6)
+        onClosing.type("di\"")
+        #expect(onClosing.text == "a \"\" and \"two\" here\n")
+
+        var onOpening = VimHarness(source, cursor: 12)
+        onOpening.type("di\"")
+        #expect(onOpening.text == "a \"one\" and \"\" here\n")
+
+        // Past the last quote there is nothing to bound the object.
+        var after = VimHarness(source, cursor: 19)
+        after.type("di\"")
+        #expect(after.text == source)
+    }
+
+    @Test("Counted objects reach outwards and refuse to settle for less")
+    func countedTextObjects() {
+        var second = VimHarness("outer (aa (bb) cc) end\n", cursor: 11)
+        second.type("2di(")
+        #expect(second.text == "outer () end\n")
+
+        var beforeOperator = VimHarness("outer (aa (bb) cc) end\n", cursor: 11)
+        beforeOperator.type("d2i(")
+        #expect(beforeOperator.text == "outer () end\n")
+
+        // Only one enclosing pair from here, so `2i(` is a failed object.
+        var tooFar = VimHarness("outer (aa (bb) cc) end\n", cursor: 7)
+        tooFar.type("2di(")
+        #expect(tooFar.text == "outer (aa (bb) cc) end\n")
+
+        var words = VimHarness("one two three four\n", cursor: 0)
+        words.type("2daw")
+        #expect(words.text == "three four\n")
+
+        // `iw` counts a whitespace run as a unit of its own.
+        var innerWords = VimHarness("one two three four\n", cursor: 0)
+        innerWords.type("2diw")
+        #expect(innerWords.text == "two three four\n")
+    }
+
+    @Test("Case operators rewrite in place without touching a register")
+    func caseOperators() {
+        var upper = VimHarness("alpha beta\n", cursor: 0)
+        upper.type("gUiw")
+        #expect(upper.text == "ALPHA beta\n")
+        #expect(upper.engine.mode == .normal)
+        #expect(upper.engine.unnamedRegister.text.isEmpty)
+
+        var lower = VimHarness("ALPHA BETA\n", cursor: 6)
+        lower.type("guiw")
+        #expect(lower.text == "ALPHA beta\n")
+
+        var toggled = VimHarness("Alpha bEta\n", cursor: 0)
+        toggled.type("g~$")
+        #expect(toggled.text == "aLPHA BeTA\n")
+
+        var line = VimHarness("alpha beta\ngamma\n", cursor: 3)
+        line.type("gUU")
+        #expect(line.text == "ALPHA BETA\ngamma\n")
+
+        var spelled = VimHarness("alpha beta\ngamma\n", cursor: 3)
+        spelled.type("gUgU")
+        #expect(spelled.text == "ALPHA BETA\ngamma\n")
+
+        var visual = VimHarness("alpha beta\n", cursor: 0)
+        visual.type("v4lU")
+        #expect(visual.text == "ALPHA beta\n")
+        #expect(visual.engine.mode == .normal)
+    }
+
+    @Test("ge and gE walk back to the previous word end")
+    func backwardWordEnds() {
+        var end = VimHarness("alpha beta gamma\n", cursor: 12)
+        end.type("ge")
+        #expect(end.selection.location == 9)
+
+        var counted = VimHarness("alpha beta gamma\n", cursor: 12)
+        counted.type("2ge")
+        #expect(counted.selection.location == 4)
+
+        var big = VimHarness("a.b c.d e.f\n", cursor: 9)
+        big.type("gE")
+        #expect(big.selection.location == 6)
+
+        // Nothing behind the caret: the motion fails and the operator with it.
+        var none = VimHarness("alpha beta\n", cursor: 0)
+        none.type("dge")
+        #expect(none.text == "alpha beta\n")
+    }
+
+    @Test("Sentence motions cross paragraphs")
+    func sentenceMotions() {
+        let source = "One. Two here.\nThree.\n\nFour.\n"
+        var forward = VimHarness(source, cursor: 0)
+        forward.type(")")
+        #expect(forward.selection.location == 5)
+        forward.type(")")
+        #expect(forward.selection.location == 15)
+
+        var backward = VimHarness(source, cursor: 17)
+        backward.type("(")
+        #expect(backward.selection.location == 15)
+        backward.type("(")
+        #expect(backward.selection.location == 5)
+
+        // A counted backward motion that cannot complete leaves the caret.
+        var stuck = VimHarness(source, cursor: 2)
+        stuck.type("2(")
+        #expect(stuck.selection.location == 2)
+    }
+
+    @Test("Named, numbered, and black-hole registers follow Vim's rules")
+    func registers() {
+        var named = VimHarness("alpha\nbeta\n", cursor: 0)
+        named.type("\"ayy")
+        #expect(named.engine.registers["a"]?.text == "alpha\n")
+        named.type("j\"ap")
+        #expect(named.text == "alpha\nbeta\nalpha\n")
+
+        // Uppercase appends to the same register.
+        var appended = VimHarness("alpha\nbeta\n", cursor: 0)
+        appended.type("\"ayyj\"Ayy")
+        #expect(appended.engine.registers["a"]?.text == "alpha\nbeta\n")
+
+        // A yank fills "0; a delete does not, so "0 survives the delete.
+        var yankRegister = VimHarness("alpha\nbeta\n", cursor: 0)
+        yankRegister.type("yyjdd")
+        #expect(yankRegister.engine.registers["0"]?.text == "alpha\n")
+        #expect(yankRegister.engine.registers["1"]?.text == "beta\n")
+
+        // A delete inside one line goes to "-, not to the numbered ring.
+        var small = VimHarness("alpha beta\n", cursor: 0)
+        small.type("dw")
+        #expect(small.engine.registers["-"]?.text == "alpha ")
+        #expect(small.engine.registers["1"] == nil)
+
+        // The black hole discards without disturbing the unnamed register.
+        var blackHole = VimHarness("alpha\nbeta\n", cursor: 0)
+        blackHole.type("yy")
+        blackHole.type("\"_dd")
+        #expect(blackHole.engine.unnamedRegister.text == "alpha\n")
+        blackHole.type("p")
+        #expect(blackHole.text == "beta\nalpha\n")
+    }
+
+    @Test("Marks record a position and operators reach back to it")
+    func marks() {
+        var jump = VimHarness("alpha\nbeta\ngamma\n", cursor: 2)
+        jump.type("majj")
+        #expect(jump.selection.location == 13)
+        jump.type("`a")
+        #expect(jump.selection.location == 2)
+
+        var exact = VimHarness("alpha\nbeta\ngamma\n", cursor: 2)
+        exact.type("majjd`a")
+        #expect(exact.text == "almma\n")
+
+        // `'a` is linewise where `` `a `` is not.
+        var lines = VimHarness("alpha\nbeta\ngamma\n", cursor: 2)
+        lines.type("majjd'a")
+        #expect(lines.text == "")
+
+        var missing = VimHarness("alpha\n", cursor: 0)
+        missing.type("`z")
+        #expect(missing.selection.location == 0)
+    }
+
+    @Test("Macros record a key stream and replay it against the live document")
+    func macros() {
+        var simple = VimHarness("alpha beta\n", cursor: 0)
+        simple.type("qaxq")
+        #expect(simple.text == "lpha beta\n")
+        #expect(simple.engine.recordingMacro == nil)
+        simple.type("@a")
+        #expect(simple.text == "pha beta\n")
+
+        // A count repeats the whole recording.
+        var counted = VimHarness("abcdefgh\n", cursor: 0)
+        counted.type("qaxq3@a")
+        #expect(counted.text == "efgh\n")
+
+        // `@@` replays whatever ran last.
+        var again = VimHarness("abcdefgh\n", cursor: 0)
+        again.type("qaxq@a@@")
+        #expect(again.text == "defgh\n")
+
+        // Insert-mode keys are part of the recording, not skipped over.
+        var insert = VimHarness("one\ntwo\n", cursor: 0)
+        insert.type("qaI")
+        insert.type("- ")
+        insert.send(.escape)
+        insert.type("jq")
+        #expect(insert.text == "- one\ntwo\n")
+        insert.type("@a")
+        #expect(insert.text == "- one\n- two\n")
+
+        var empty = VimHarness("alpha\n", cursor: 0)
+        empty.type("@z")
+        #expect(empty.text == "alpha\n")
+    }
+
+    @Test("A delete never leaves the caret past the end of its line")
+    func caretAfterDelete() {
+        var toLineEnd = VimHarness("alpha beta\nsecond\n", cursor: 6)
+        toLineEnd.type("D")
+        #expect(toLineEnd.text == "alpha \nsecond\n")
+        #expect(toLineEnd.selection.location == 5)
+
+        var lastCharacter = VimHarness("alpha\n", cursor: 4)
+        lastCharacter.type("x")
+        #expect(lastCharacter.selection.location == 3)
+
+        // A linewise delete keeps its column on whichever line moves up.
+        var line = VimHarness("alpha beta\nsecond one\n", cursor: 7)
+        line.type("dd")
+        #expect(line.text == "second one\n")
+        #expect(line.selection.location == 7)
+
+        // Deleting the last line falls back to the one above it.
+        var last = VimHarness("alpha beta\nsecond\n", cursor: 14)
+        last.type("dd")
+        #expect(last.text == "alpha beta\n")
+        #expect(last.selection.location == 3)
+    }
+
     @Test("Line and Visual indentation use Heft's Markdown tab width")
     func indentation() {
         var lines = VimHarness("- one\n- two\nplain\n")
@@ -761,6 +1144,165 @@ struct VimCoreTests {
                 )
             }
         }
+    }
+
+    @Test("External Neovim agrees on prose objects from every cursor position")
+    func neovimProseObjectMatrix() throws {
+        guard let nvim = Self.neovimURL else { return }
+        // Sentence and paragraph boundaries are the part of this surface with
+        // the most Vim folklore in it — a sentence filling its line takes the
+        // line break, one that does not takes the space instead — so every
+        // position in each buffer is checked rather than a chosen few.
+        let sources = [
+            "One. Two here. Three last.\nNext line one. Next two.\n\nPara two only.\n\nEnd.\n",
+            "A sentence that wraps\nonto a second line. Then more.\n\nx.\n",
+            "Tail no period\nsecond line\n\nx.\n",
+            "alpha line\n\n\nbeta line\ngamma line\n\ndelta\n",
+        ]
+        // `d)` and `d(` are covered by `sentenceMotions` instead: Vim's
+        // exclusive-motion-to-column-one rule is only implemented for forward
+        // motions, and `Docs/VimMode.md` records that.
+        let commands = [
+            "dis", "das", "cisX\u{1b}", "dip", "dap", "2dip", "2dap",
+            "yisP", "yasP", "yipP", "yapP", "visd", "vipd", "vapd",
+        ]
+        for source in sources {
+            for cursor in 0..<(source as NSString).length {
+                // Vim's sentence object reaches into the next paragraph from a
+                // blank line; Heft stops at the paragraph, which is the one
+                // deliberate difference. `Docs/VimMode.md` records it.
+                if Self.isBlankLine(at: cursor, in: source) { continue }
+                for command in commands {
+                    var heft = VimHarness(source, cursor: cursor)
+                    heft.type(command)
+                    let oracle = try Self.runNeovimKeystrokes(
+                        nvim, source: source, cursor: cursor, keys: command
+                    )
+                    #expect(
+                        heft.text == oracle,
+                        "Prose-object mismatch for \(command) from \(cursor) in \(source.debugDescription)"
+                    )
+                }
+            }
+        }
+    }
+
+    @Test("External Neovim agrees on tag objects, case operators, and backward word ends")
+    func neovimTagAndCaseMatrix() throws {
+        guard let nvim = Self.neovimURL else { return }
+        let tags = "<div class=\"a\">outer <b>bold text</b> tail</div>\n<p>plain</p>\n"
+        for cursor in 0..<(tags as NSString).length {
+            for command in ["dit", "dat", "2dit", "2dat", "3dit", "yitP"] {
+                var heft = VimHarness(tags, cursor: cursor)
+                heft.type(command)
+                let oracle = try Self.runNeovimKeystrokes(
+                    nvim, source: tags, cursor: cursor, keys: command
+                )
+                #expect(
+                    heft.text == oracle,
+                    "Tag-object mismatch for \(command) from \(cursor)"
+                )
+            }
+        }
+
+        let code = "alpha (beta [gamma {delta} epsilon] zeta) omega\none two three four five six\n"
+        let commands = [
+            "gUiw", "guiw", "g~iw", "gUU", "guu", "g~~", "gU$", "gu$", "g~$", "gUw",
+            "gUgU", "gugu", "vjgU", "vU", "v3lu", "V~",
+            "ge", "gE", "2ge", "3ge", "dge", "dgE", "yge",
+            "2di(", "2da(", "d2i(", "3di(", "2diw", "2daw", "d2aw", "2daW", "2diW",
+        ]
+        for cursor in 0..<(code as NSString).length {
+            for command in commands {
+                var heft = VimHarness(code, cursor: cursor)
+                heft.type(command)
+                let oracle = try Self.runNeovimKeystrokes(
+                    nvim, source: code, cursor: cursor, keys: command
+                )
+                #expect(
+                    heft.text == oracle,
+                    "Mismatch for \(command) from \(cursor)"
+                )
+            }
+        }
+    }
+
+    @Test("External Neovim agrees on straight quote objects from every cursor position")
+    func neovimQuoteObjectMatrix() throws {
+        guard let nvim = Self.neovimURL else { return }
+        // The typographic forms have no oracle — Vim has no object for them —
+        // so what is checked here is that adding them left the straight-quote
+        // behaviour exactly as Vim defines it, including the pairing rule for
+        // a caret sitting between two quotations.
+        let sources = [
+            "say \"hello there\" now\n",
+            "a \"one\" and \"two\" here\n",
+            "one \"a\" two \"b\" three \"c\" four\n",
+            "it's an apostrophe 'and a quote' here\n",
+            "say `code span` now\n",
+            "unbalanced \"quote here\n",
+            "plain text no quotes\n",
+            #"say "hello \"there\" now" end"# + "\n",
+        ]
+        let commands = [
+            "di\"", "da\"", "ci\"X\u{1b}", "yi\"P", "ya\"P", "vi\"d", "va\"d",
+            "di'", "da'", "ci'X\u{1b}", "di`", "da`",
+        ]
+        for source in sources {
+            for cursor in 0..<(source as NSString).length {
+                for command in commands {
+                    var heft = VimHarness(source, cursor: cursor)
+                    heft.type(command)
+                    let oracle = try Self.runNeovimKeystrokes(
+                        nvim, source: source, cursor: cursor, keys: command
+                    )
+                    #expect(
+                        heft.text == oracle,
+                        "Quote-object mismatch for \(command) from \(cursor) in \(source.debugDescription)"
+                    )
+                }
+            }
+        }
+    }
+
+    @Test("External Neovim agrees on registers, marks, and macros")
+    func neovimRegisterMarkMacroMatrix() throws {
+        guard let nvim = Self.neovimURL else { return }
+        let source = "alpha beta gamma\none two three\nlast row here\n"
+        let registerAndMark = [
+            "\"ayyj\"ap", "\"addj\"aP", "\"ayw\"aP", "\"Ayyj\"Ayy\"ap",
+            "yyjdd\"0p", "\"_ddp", "ddjdd\"1p", "ddjdd\"2p", "dwj\"-p",
+            "majjd`a", "majjd'a", "majjy`aP", "majjG'a", "maw`aiX\u{1b}",
+        ]
+        for command in registerAndMark {
+            var heft = VimHarness(source, cursor: 0)
+            heft.type(command)
+            let oracle = try Self.runNeovimKeystrokes(
+                nvim, source: source, cursor: 0, keys: command
+            )
+            #expect(heft.text == oracle, "Register/mark mismatch for \(command)")
+        }
+
+        // `:normal!` cannot record a macro, so `q` and `@` need an oracle that
+        // feeds Neovim literal keystrokes instead.
+        for command in ["qaxq@a", "qaxq3@a", "qaddq@a", "qadwjq@a", "qaxq@a@@", "qbdwq2@b"] {
+            var heft = VimHarness(source, cursor: 0)
+            heft.type(command)
+            let oracle = try Self.runNeovimKeystrokes(nvim, source: source, cursor: 0, keys: command)
+            #expect(heft.text == oracle, "Macro mismatch for \(command)")
+        }
+    }
+
+    private static func isBlankLine(at cursor: Int, in source: String) -> Bool {
+        let text = source as NSString
+        let line = text.lineRange(for: NSRange(location: min(cursor, text.length), length: 0))
+        var end = NSMaxRange(line)
+        while end > line.location {
+            let character = text.character(at: end - 1)
+            guard character == 10 || character == 13 else { break }
+            end -= 1
+        }
+        return end == line.location
     }
 
     @Test("External Neovim agrees on operator-motion compositions away from column zero")
@@ -993,6 +1535,49 @@ struct VimCoreTests {
             exCommand: "+call cursor(\(line),\(byteColumn + 1))",
             additionalCommand: "+normal! \(command)"
         )
+    }
+
+    /// Replays `keys` through `nvim -s`, which reads a file as if it were
+    /// typed — the faithful oracle, and the one the newer matrices use.
+    ///
+    /// `:normal!` differs from typing in two ways that matter here: it ignores
+    /// `q`, so it cannot judge macro recording at all, and it abandons the
+    /// whole command when a motion fails, so `vjgU` on the last line reports
+    /// "nothing happened" where a real editor still uppercases the character
+    /// under the caret.
+    private static func runNeovimKeystrokes(
+        _ executable: URL,
+        source: String,
+        cursor: Int,
+        keys: String
+    ) throws -> String {
+        precondition(source.unicodeScalars.allSatisfy { $0.isASCII })
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-vim-keys-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("fixture.txt")
+        let script = directory.appendingPathComponent("keys.in")
+        try Data(source.utf8).write(to: file)
+        // `:goto` takes a one-based byte offset. The trailing Escape drops any
+        // mode the keys left open so the write command is not typed into the
+        // buffer instead.
+        let body = ":goto \(cursor + 1)\r" + keys + "\u{1b}:write\r:quit!\r"
+        try Data(body.utf8).write(to: script)
+
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["--clean", "--headless", "-n", "-s", script.path, file.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
+        process.environment = environment
+        let errors = Pipe()
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
+        return String(decoding: try Data(contentsOf: file), as: UTF8.self)
     }
 
     private static func runNeovim(

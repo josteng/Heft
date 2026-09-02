@@ -341,16 +341,29 @@ struct VimText {
         guard let pair = delimiterPair(at: location, opening: opening, closing: closing) else {
             return nil
         }
-        var start = around ? pair.left : pair.left + 1
-        var end = around ? pair.right + 1 : pair.right
-        if !around, opening != closing, start < end, isNewline(at: start) {
+        return delimitedRange(pair, at: location, quoted: opening == closing, around: around)
+    }
+
+    /// Turns a delimiter pair into the object's range. `quoted` selects the
+    /// quote rules rather than the bracket ones — it is not `opening ==
+    /// closing`, because a curly quote pair is quote-like despite its two ends
+    /// being different characters.
+    func delimitedRange(
+        _ pair: (left: Int, right: Int),
+        at location: Int,
+        quoted: Bool,
+        around: Bool
+    ) -> NSRange? {
+        var start = around ? pair.left : nextCharacter(from: pair.left)
+        var end = around ? nextCharacter(from: pair.right) : pair.right
+        if !around, !quoted, start < end, isNewline(at: start) {
             // For a multiline inner block Vim preserves the structural newline
             // immediately after the opening delimiter (`di[` leaves "[\n]").
             start = nextCharacter(from: start)
         }
         // Vim's quote objects absorb adjacent horizontal whitespace. Prefer
         // the following run and use the preceding run only at line end.
-        if around, opening == closing {
+        if around, quoted {
             let line = lineContentRange(at: location)
             let originalEnd = end
             while end < NSMaxRange(line), whitespace(at: end) { end = nextCharacter(from: end) }

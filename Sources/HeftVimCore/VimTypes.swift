@@ -25,6 +25,18 @@ public enum VimKey: Equatable, Sendable {
     case control(Character)
 }
 
+/// Heft's deliberate departures from strict Vim, all opt-out.
+public struct VimOptions: Sendable {
+    /// `i"` and `i'` also match the curly quotes Smart Typography produces, so
+    /// `ci"` works on a quotation the editor has already typeset. Off gives
+    /// strict Vim, which sees only the straight characters.
+    public var matchesTypographicQuotes = true
+
+    public init(matchesTypographicQuotes: Bool = true) {
+        self.matchesTypographicQuotes = matchesTypographicQuotes
+    }
+}
+
 public struct VimSnapshot: Sendable {
     public var text: String
     public var selection: NSRange
@@ -56,6 +68,19 @@ public enum VimHostAction: Equatable, Sendable {
     case beginSearch(backward: Bool)
     case nextSearch(backward: Bool)
     case searchWord(query: String, backward: Bool, origin: Int)
+    /// Feed these keys back through the engine, one at a time. Macro playback
+    /// has to go through the host because each key must see the document the
+    /// previous one produced, and the engine never holds a buffer.
+    case replayKeys([VimKey])
+    /// Move the caret to a line measured from the visible viewport: `H`, `M`
+    /// and `L`. Only the host knows which lines those are.
+    case moveToViewportLine(ViewportLine)
+}
+
+public enum ViewportLine: Equatable, Sendable {
+    case top(count: Int)
+    case middle
+    case bottom(count: Int)
 }
 
 public struct VimOutput: Sendable {

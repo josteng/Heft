@@ -22,10 +22,20 @@ final class VimSettings: ObservableObject {
             )
         }
     }
+    @Published var matchesTypographicQuotes: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                matchesTypographicQuotes,
+                forKey: Self.matchesTypographicQuotesKey
+            )
+        }
+    }
 
     private static let enabledKey = "dev.stenglein.Heft.vim.enabled"
     private static let continuesMarkdownStructureKey =
         "dev.stenglein.Heft.vim.continuesMarkdownStructure"
+    private static let matchesTypographicQuotesKey =
+        "dev.stenglein.Heft.vim.matchesTypographicQuotes"
     private var isApplyingVaultDefault = false
     private(set) var followsVaultDefault: Bool
 
@@ -36,6 +46,9 @@ final class VimSettings: ObservableObject {
         continuesMarkdownStructure = defaults.object(
             forKey: Self.continuesMarkdownStructureKey
         ) == nil || defaults.bool(forKey: Self.continuesMarkdownStructureKey)
+        matchesTypographicQuotes = defaults.object(
+            forKey: Self.matchesTypographicQuotesKey
+        ) == nil || defaults.bool(forKey: Self.matchesTypographicQuotesKey)
     }
 
     func adoptVaultDefault(_ enabled: Bool) {
@@ -82,6 +95,15 @@ struct VimSettingsView: View {
             Text("Continues bullet, numbered, task, and blockquote markers with o/O, and retains the "
                 + "marker when cc, S, or a Visual Line change replaces an item. This is a Heft "
                 + "convenience rather than standard Vim behavior.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+            Toggle("Match typographic quotes in text objects", isOn: $vim.matchesTypographicQuotes)
+            Text("Lets ci\" and ca\" work on \u{201C}curly quotes\u{201D} and \u{00AB}guillemets\u{00BB}, "
+                + "and ci' on \u{2018}curly single quotes\u{2019}. Typing substitutions replace the "
+                + "straight characters as you write, so without this the quotes in your notes are no "
+                + "longer the ones those commands look for. Turn it off for strict Vim, which matches "
+                + "only \" and '.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

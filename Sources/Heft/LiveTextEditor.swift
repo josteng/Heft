@@ -71,6 +71,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.noteTitle = context.current?.name ?? ""
         textView.vimEnabled = vim.isEnabled
         textView.vimContinuesMarkdownStructure = vim.continuesMarkdownStructure
+        textView.vimMatchesTypographicQuotes = vim.matchesTypographicQuotes
         textView.textContainer?.widthTracksTextView = true
         // The delegate hands each paragraph its widgets; without it tables,
         // formulae, images and list glyphs have nothing to draw them.
@@ -116,6 +117,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.noteTitle = context.current?.name ?? ""
         textView.vimEnabled = vim.isEnabled
         textView.vimContinuesMarkdownStructure = vim.continuesMarkdownStructure
+        textView.vimMatchesTypographicQuotes = vim.matchesTypographicQuotes
         textView.updateLinkCompletion(allowStart: false)
 
         // `string` includes the input method's marked text, while the SwiftUI
@@ -606,6 +608,13 @@ final class HeftTextKit2View: NSTextView {
     private var vimLastRepeat: VimRepeatRecipe?
     private var vimIsReplaying = false
     var vimContinuesMarkdownStructure = true
+    /// Pushed straight into the engine: unlike the Markdown-structure
+    /// option, which the host applies to the transaction afterwards, this
+    /// one changes what a text object matches and so has to be in scope
+    /// while the object is being resolved.
+    var vimMatchesTypographicQuotes = true {
+        didSet { vimEngine.options.matchesTypographicQuotes = vimMatchesTypographicQuotes }
+    }
     var vimCaretColor = NSColor.controlAccentColor {
         didSet { updateVimCursor() }
     }
@@ -1256,7 +1265,66 @@ final class HeftTextKit2View: NSTextView {
         case .pageUp: pageUp(nil)
         case .pageDown: pageDown(nil)
         case .beginSearch, .nextSearch, .searchWord: onVimSearch?(action)
+        case let .replayKeys(keys): replayVimKeys(keys)
+        case let .moveToViewportLine(line): moveVimCaretToViewportLine(line)
         }
+    }
+
+    /// Macro playback. Each key has to see the document the one before it
+    /// produced, so it goes back through the same path a typed key takes —
+    /// and the dot-repeat recorder is muted, since `@a` is not itself the
+    /// change that `.` should repeat.
+    private func replayVimKeys(_ keys: [VimKey]) {
+        guard !vimIsReplaying else { return }
+        vimIsReplaying = true
+        defer {
+            vimIsReplaying = false
+            updateVimCursor()
+        }
+        for key in keys {
+            if vimEngine.mode == .insert, case let .character(value) = key {
+                insertText(value, replacementRange: selectedRange())
+                continue
+            }
+            _ = handleVimKey(key, recordRepeat: false)
+        }
+        if vimEngine.mode != .normal { _ = handleVimKey(.escape, recordRepeat: false) }
+    }
+
+    /// `H`, `M` and `L`: only the view knows which lines are on screen, so the
+    /// engine asks rather than guesses.
+    private func moveVimCaretToViewportLine(_ line: ViewportLine) {
+        guard let scrollView = enclosingScrollView else { return }
+        let visible = scrollView.contentView.bounds
+        let source = string as NSString
+        var lineStarts: [Int] = []
+        var location = 0
+        while location <= source.length {
+            let range = source.lineRange(for: NSRange(location: location, length: 0))
+            if let frame = vimTextLineFrame(at: range.location),
+               frame.maxY > visible.minY, frame.minY < visible.maxY {
+                lineStarts.append(range.location)
+            }
+            guard NSMaxRange(range) > location else { break }
+            location = NSMaxRange(range)
+        }
+        guard !lineStarts.isEmpty else { return }
+        let index: Int
+        switch line {
+        case let .top(count): index = min(max(0, count - 1), lineStarts.count - 1)
+        case .middle: index = lineStarts.count / 2
+        case let .bottom(count): index = max(0, lineStarts.count - max(1, count))
+        }
+        let target = lineStarts[index]
+        var caret = target
+        let content = source.lineRange(for: NSRange(location: target, length: 0))
+        while caret < NSMaxRange(content) {
+            let character = source.character(at: caret)
+            if character != 32, character != 9, character != 10, character != 13 { break }
+            caret += 1
+        }
+        setSelectedRange(NSRange(location: min(caret, source.length), length: 0))
+        updateVimCursor()
     }
 
     override func becomeFirstResponder() -> Bool {

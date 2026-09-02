@@ -23,7 +23,10 @@ Three targets:
 - `HeftCore`: pure logic. Never imports AppKit or SwiftUI. Parsing, the link index,
   the vault scanner, moment.js date formatting, live-mode decorations.
 - `HeftVimCore`: Foundation-only modal editing grammar. It returns edits and
-  selections but never owns an editor buffer or imports AppKit.
+  selections but never owns an editor buffer or imports AppKit. Anything it
+  cannot answer from the text alone — which lines are on screen for `H M L`,
+  replaying a macro's keys against a document it does not hold — comes back as
+  a `VimHostAction` for the text view to carry out.
 - `Heft`: the macOS shell. SwiftUI chrome around an `NSTextView`.
 
 The dependencies are Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and
@@ -322,6 +325,15 @@ Claude Code reach for `propose` instead of `Write`.
   opt-out list records "everything, unless you said otherwise", which is the
   actual default. The one-time migration from the old format subtracts from
   `legacyKnownGroups` rather than from `allCases`, for the same reason.
+- **Smart Typography breaks Vim's quote text objects, and the two features
+  cannot both be naive about it.** By the time the caret is inside a quotation,
+  `"` has become `“ ”`, so `ci"` searches for a character that is no longer in
+  the file and silently does nothing — in a note written in this editor it never
+  works at all. `VimOptions.matchesTypographicQuotes` (on by default, with a
+  toggle in Settings → Vim) makes `i"`/`a"` match `“…”` and `«…»` and `i'`/`a'`
+  match `‘…’`. The curly forms are scanned as open-then-close rather than as a
+  run of one character, or the `’` in `it’s` would pair with the next apostrophe
+  and take half the line with it.
 - **A typing substitution must not fire on anything but a typed character.**
   `insertText` is also how paste, drag, attachment insertion and link
   completion put text in, so `applySubstitution` insists on a single character
@@ -372,9 +384,10 @@ Claude Code reach for `propose` instead of `Write`.
 - Renaming a *folder* does not repoint path-shaped links into it; renaming a
   note does.
 - Native tabbing is not customized; workspace windows are independent windows.
-- Vim mode is experimental. Ex commands, named and system registers, mappings,
-  macros, marks and jump lists, blockwise put, and `H M L` are not implemented;
-  `Docs/VimMode.md` tracks the full command surface.
+- Vim mode is experimental. Ex commands, system/clipboard registers, mappings,
+  jump lists, and blockwise put are not implemented; `Docs/VimMode.md` tracks
+  the full command surface and the handful of narrow places the prose objects
+  differ from Vim.
 - Deferred: graph view, plugins.
 
 ## The icon
