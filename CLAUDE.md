@@ -127,6 +127,29 @@ Two invariants make it safe, and both are load-bearing:
   Widgets outside the dirty ranges are carried over from the previous pass and
   shifted by the edit rather than re-measured.
 
+### Typing must not wait for styling
+
+A keystroke used to run a full decorate and style *before the character was
+drawn*, because typing moves the caret and `textViewDidChangeSelection`
+restyled synchronously. Measured: 21ms per character on a 50KB structured
+note. macOS repeats a held key every `KeyRepeat × 15ms` — 30ms on a fast
+setting — so a held key could not keep up, and each character arrived visibly
+late.
+
+An edit's own caret move now defers to the pass the edit already scheduled,
+and `scheduleRestyle` waits longer than a repeat interval while edits are
+arriving in a burst, so holding a key costs one restyle at the end rather than
+one per character. The critical path fell to 3.1ms on that note.
+
+Two things must stay synchronous, and both are load-bearing: a caret move that
+is *only* a caret move (or arrow keys stutter), and anything reading the layout
+it just invalidated — `TableSurface.apply` calls `restyleNow()` because the row
+it added has to exist before the caret is placed in it.
+
+`Tests/HeftTests/TypingPerformanceCheck.swift` guards the budget, and
+`IncrementalStylingCheck` asserts a deferred pass was actually *scheduled*, so
+deferring can never be mistaken for deciding no restyle was needed.
+
 `Tests/HeftTests/IncrementalStylingCheck.swift` is what makes this maintainable:
 it runs edit scripts through both an incrementally styled buffer and a
 from-scratch one and compares every attribute on every character, through the

@@ -19,6 +19,12 @@ import HeftCore
 /// the real offset, exactly as it does in prose.
 extension HeftTextKit2View {
 
+    /// Styles now rather than on the next runloop pass. For the few edits
+    /// whose own follow-up work reads the layout they just invalidated.
+    func restyleNow() {
+        (delegate as? LiveTextEditor.Coordinator)?.restyle(self)
+    }
+
     /// The table the caret is in, with where the caret sits inside it.
     var activeTable: (grid: TableGrid, cursor: TableCursor)? {
         let selection = selectedRange()
@@ -409,6 +415,12 @@ extension HeftTextKit2View {
         textStorage?.replaceCharacters(in: replace, with: action.replacement)
         didChangeText()
         setSelectedRange(action.selection)
+        // Both the drawn caret and the cell ranges below come from the styled
+        // layout rather than from TextKit, so it has to describe the text this
+        // edit just made. Typing defers its restyle; a structural table edit
+        // cannot, because the row it added has to exist before the caret is
+        // placed in it.
+        restyleNow()
         updateTableCaret()
         return true
     }

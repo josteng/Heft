@@ -1,3 +1,4 @@
+import Dispatch
 import AppKit
 import HeftCore
 import HeftVimCore
@@ -272,6 +273,9 @@ struct LiveTextEditor: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
+            let now = DispatchTime.now().uptimeNanoseconds
+            editGap = lastEditAt.map { Double(now - $0) / 1_000_000 } ?? .infinity
+            lastEditAt = now
             parent.text = textView.string
             (textView as? HeftTextKit2View)?.updateLinkCompletion(allowStart: true)
             scheduleRestyle(textView)
@@ -300,6 +304,24 @@ struct LiveTextEditor: NSViewRepresentable {
             guard !NSEqualRanges(line, reveal.line)
                 || spanSignature(for: selection) != revealedSpans
             else { return }
+
+            // Typing moves the caret, so every keystroke arrives here as well
+            // as through `textDidChange`. Restyling synchronously then puts a
+            // whole re-parse of the note in front of the character being
+            // drawn — the cost that stops a held key from repeating. The edit
+            // has already scheduled a pass, and it will compute this same
+            // reveal; a caret move that is *only* a caret move still styles
+            // at once, so arrow keys keep their responsiveness.
+            // Not in a table. A table's caret is drawn by this view from the
+            // measured grid, and its cell ranges come from the same layout,
+            // so deferring there would leave both describing the text as it
+            // was before the keystroke.
+            let inTable = (textView as? HeftTextKit2View)?.activeTable != nil
+            if !inTable, let styled,
+               styled.source.length != (textView.string as NSString).length {
+                scheduleRestyle(textView)
+                return
+            }
 
             // Never mid-drag: see `HeftTextKit2View.isTrackingMouse`.
             restyle(textView)
@@ -343,14 +365,33 @@ struct LiveTextEditor: NSViewRepresentable {
             restyle(textView)
         }
 
+        /// When the last edit landed, and the gap before it, so a held key can
+        /// be told apart from someone typing quickly.
+        private var lastEditAt: UInt64?
+        private var editGap: Double = .infinity
+
+        /// A held key repeats every `KeyRepeat × 15ms` — 30ms on a fast
+        /// setting. Waiting longer than that between edits means each repeat
+        /// cancels the pending pass, so a burst costs one restyle at its end
+        /// rather than one per character. Ordinary typing leaves far larger
+        /// gaps and is unaffected.
+        private static let burstGap: Double = 55
+
+        /// How many passes have been deferred rather than run at once. The
+        /// incremental check asserts this moves, so deferring can never be
+        /// mistaken for not needing a restyle at all.
+        private(set) var scheduledRestyleCount = 0
+
         private func scheduleRestyle(_ textView: NSTextView) {
+            scheduledRestyleCount += 1
             restyleTask?.cancel()
+            let delay = editGap < Self.burstGap ? Self.burstGap : 16
             restyleTask = Task { @MainActor [weak textView] in
                 // Coalesce AppKit's notifications from one edit without
                 // postponing styling until the user stops typing. In
                 // particular, fenced code should gain token colours as each
                 // token is entered.
-                try? await Task.sleep(for: .milliseconds(16))
+                try? await Task.sleep(for: .milliseconds(Int(delay)))
                 guard !Task.isCancelled, let textView else { return }
                 self.restyle(textView)
             }
@@ -2132,3 +2173,4 @@ final class HeftTextKit2View: NSTextView {
         return result
     }
 }
+

@@ -252,6 +252,11 @@ enum IncrementalStylingCheck {
             coordinator.restyle(view)
 
             func compare(_ label: String) {
+                // Typing defers its restyle so the character is not held up by
+                // a re-parse of the note. Run the pass the edit scheduled,
+                // which is what the debounce does in the app, before asking
+                // whether the result matches a full restyle.
+                coordinator.restyle(view)
                 let selection = view.selectedRange()
                 let (expected, _) = reference(
                     view.string, selection: selection, context: context,
@@ -273,7 +278,13 @@ enum IncrementalStylingCheck {
                 view.setSelectedRange(NSRange(
                     location: min(index * 3, view.string.utf16.count), length: 0
                 ))
+                let scheduled = coordinator.scheduledRestyleCount
                 view.insertText(character, replacementRange: view.selectedRange())
+                if coordinator.scheduledRestyleCount == scheduled {
+                    result.failures.append(
+                        "editor \(name): typing scheduled no restyle at all"
+                    )
+                }
                 compare("typed \(character.debugDescription) at \(index * 3)")
             }
             // Backspace, which is where markup that failed to reset shows up.
