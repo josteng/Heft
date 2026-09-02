@@ -1377,6 +1377,108 @@ public enum SelfCheck {
             "a note in the vault root gives its name the whole row"
         )
 
+        // MARK: The agent guide's version stamp
+        expectTrue(
+            AgentGuide.status(of: nil) == .absent,
+            "a vault with no CLAUDE.md has no guide"
+        )
+        expectTrue(
+            AgentGuide.status(of: "# My own notes\n") == .absent,
+            "someone else's CLAUDE.md is not a guide"
+        )
+        expectTrue(
+            AgentGuide.status(of: guide) == .current,
+            "a guide this Heft just wrote is current"
+        )
+        expectTrue(
+            AgentGuide.versionStamp(in: guide) == AgentGuide.version,
+            "the guide stamps the version it was written at"
+        )
+
+        // The case the stamp exists for: a guide written before stamping, and
+        // one written by an older Heft, both have to read as behind.
+        let unstamped = guide.replacingOccurrences(
+            of: "\(AgentGuide.versionMarker) \(AgentGuide.version) -->\n", with: ""
+        )
+        expectTrue(
+            AgentGuide.status(of: unstamped) == .outdated(found: 0),
+            "a guide from before the stamp existed reads as outdated"
+        )
+        let older = guide.replacingOccurrences(
+            of: "\(AgentGuide.versionMarker) \(AgentGuide.version) -->",
+            with: "\(AgentGuide.versionMarker) \(AgentGuide.version - 1) -->"
+        )
+        expectTrue(
+            AgentGuide.status(of: older) == .outdated(found: AgentGuide.version - 1),
+            "a guide from an older Heft reads as outdated, and says which"
+        )
+        expectTrue(
+            AgentGuide.refreshAdvice(found: 0, vaultPath: "/tmp/v").contains("heft agent-setup"),
+            "the advice names the command that fixes it"
+        )
+
+        // Refreshing an outdated guide leaves the user's own words alone, and
+        // does not stack a second copy.
+        let refreshed = AgentGuide.merged(
+            into: unstamped + "\n\nMy own conventions.\n",
+            section: AgentGuide.section(binaryPath: "/opt/heft/Heft")
+        )
+        expectTrue(
+            AgentGuide.status(of: refreshed) == .current,
+            "refreshing brings an outdated guide up to date"
+        )
+        expectTrue(
+            refreshed.contains("My own conventions."),
+            "refreshing leaves the rest of the file alone"
+        )
+        expectTrue(
+            refreshed.components(separatedBy: AgentGuide.markerStart).count == 2,
+            "refreshing does not stack a second guide"
+        )
+
+        // MARK: Where the user's own instructions go
+        // A brand-new file gets somewhere to write; there is deliberately no
+        // second marker pair fencing the user's part off.
+        let seeded = AgentGuide.merged(
+            into: nil, section: guide, preamble: AgentGuide.preamble(vaultName: "PersonalVault")
+        )
+        expectTrue(seeded.hasPrefix("# PersonalVault"), "a new CLAUDE.md is titled for the vault")
+        expectTrue(
+            seeded.contains("This part of the file is yours"),
+            "a new CLAUDE.md says which part the user owns"
+        )
+        expectTrue(
+            seeded.range(of: "This part of the file is yours")!.lowerBound
+                < seeded.range(of: AgentGuide.markerStart)!.lowerBound,
+            "the user's part comes before Heft's section"
+        )
+        expectTrue(
+            AgentGuide.status(of: seeded) == .current,
+            "a seeded file still carries a current guide"
+        )
+        expectTrue(
+            seeded.components(separatedBy: AgentGuide.markerStart).count == 2,
+            "seeding writes exactly one guide"
+        )
+
+        // Re-running never inserts a preamble into a file the user already
+        // has: that would be the meddling the markers promise against.
+        let rerunSeeded = AgentGuide.merged(
+            into: "# Their own title\n\nTheir words.\n",
+            section: guide,
+            preamble: AgentGuide.preamble(vaultName: "PersonalVault")
+        )
+        expectTrue(
+            !rerunSeeded.contains("This part of the file is yours"),
+            "an existing CLAUDE.md is never given a preamble"
+        )
+        expectTrue(rerunSeeded.contains("Their words."), "their words survive")
+        expectTrue(
+            AgentGuide.merged(into: seeded, section: guide, preamble: "IGNORED")
+                .contains("IGNORED") == false,
+            "refreshing a seeded file does not add a second preamble"
+        )
+
         // MARK: Nested bullet shapes
         expectTrue(BulletShape.forLevel(0) == .disc, "the outermost bullet is a filled dot")
         expectTrue(BulletShape.forLevel(1) == .circle, "one level in is a hollow ring")

@@ -82,7 +82,9 @@ enum HeftMain {
             let target = root.appendingPathComponent("CLAUDE.md")
             let existing = try? String(contentsOf: target, encoding: .utf8)
             let merged = AgentGuide.merged(
-                into: existing, section: AgentGuide.section(binaryPath: binary)
+                into: existing,
+                section: AgentGuide.section(binaryPath: binary),
+                preamble: AgentGuide.preamble(vaultName: root.lastPathComponent)
             )
             do {
                 try merged.write(to: target, atomically: true, encoding: .utf8)

@@ -1529,7 +1529,23 @@ final class AppModel: ObservableObject {
         return text?.contains(AgentGuide.markerStart) == true
     }
 
+    /// What the open vault's `CLAUDE.md` carries, so the banner can offer a
+    /// refresh rather than only a first-time setup.
+    var agentGuideStatus: AgentGuide.Status {
+        guard let vaultRoot else { return .absent }
+        return AgentGuide.status(of: try? String(
+            contentsOf: vaultRoot.appendingPathComponent("CLAUDE.md"), encoding: .utf8
+        ))
+    }
+
     private static let agentOfferDismissedKey = "dev.stenglein.Heft.agentOfferDismissed"
+
+    /// Turning the offer down is remembered per vault *and per guide version*,
+    /// so a vault that said no once is asked again when the instructions it
+    /// would receive have actually changed — and not before.
+    private static func offerKey(for vaultRoot: URL) -> String {
+        "\(vaultRoot.standardizedFileURL.path)#\(AgentGuide.version)"
+    }
 
     /// Whether to offer agent setup for the open vault.
     ///
@@ -1539,11 +1555,11 @@ final class AppModel: ObservableObject {
     /// prevent. So a vault without the guide says so once, and remembers being
     /// turned down.
     var shouldOfferAgentSetup: Bool {
-        guard let vaultRoot, !hasAgentGuide else { return false }
+        guard let vaultRoot, agentGuideStatus != .current else { return false }
         let dismissed = UserDefaults.standard.stringArray(
             forKey: Self.agentOfferDismissedKey
         ) ?? []
-        return !dismissed.contains(vaultRoot.standardizedFileURL.path)
+        return !dismissed.contains(Self.offerKey(for: vaultRoot))
     }
 
     /// Remembers that this vault was offered agent setup and turned down, so
@@ -1553,7 +1569,7 @@ final class AppModel: ObservableObject {
         var dismissed = UserDefaults.standard.stringArray(
             forKey: Self.agentOfferDismissedKey
         ) ?? []
-        let path = vaultRoot.standardizedFileURL.path
+        let path = Self.offerKey(for: vaultRoot)
         guard !dismissed.contains(path) else { return }
         dismissed.append(path)
         UserDefaults.standard.set(dismissed, forKey: Self.agentOfferDismissedKey)
@@ -1572,7 +1588,9 @@ final class AppModel: ObservableObject {
 
         let binary = Bundle.main.executablePath ?? "heft"
         let merged = AgentGuide.merged(
-            into: existing, section: AgentGuide.section(binaryPath: binary)
+            into: existing,
+            section: AgentGuide.section(binaryPath: binary),
+            preamble: AgentGuide.preamble(vaultName: vaultName)
         )
         do {
             try merged.write(to: target, atomically: true, encoding: .utf8)

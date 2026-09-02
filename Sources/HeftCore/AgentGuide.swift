@@ -16,10 +16,55 @@ public enum AgentGuide {
     public static let markerStart = "<!-- heft:agent-guide start -->"
     public static let markerEnd = "<!-- heft:agent-guide end -->"
 
+    /// The guide's revision. Bump it whenever the wording an agent depends on
+    /// changes: a new verb, a changed flag, a rule that now reads differently.
+    ///
+    /// The stamp exists because the guide is copied *into the user's vault*.
+    /// Once written it is frozen there, and an upgraded Heft has no way to
+    /// reach it — so a vault set up a year ago goes on telling its agent about
+    /// a command line that no longer exists. The version is what lets the
+    /// commands notice and say so.
+    public static let version = 1
+    static let versionMarker = "<!-- heft:agent-guide version:"
+
+    /// What a vault's `CLAUDE.md` currently carries.
+    public enum Status: Equatable, Sendable {
+        case absent
+        case current
+        /// Present, but written by an older Heft. Carries the version found;
+        /// a guide from before the stamp existed reads as 0.
+        case outdated(found: Int)
+    }
+
+    public static func status(of existing: String?) -> Status {
+        guard let existing, existing.contains(markerStart) else { return .absent }
+        let found = versionStamp(in: existing) ?? 0
+        return found >= version ? .current : .outdated(found: found)
+    }
+
+    /// The stamped revision, or nil for a guide written before stamping.
+    public static func versionStamp(in text: String) -> Int? {
+        guard let start = text.range(of: versionMarker) else { return nil }
+        let rest = text[start.upperBound...]
+        guard let end = rest.range(of: "-->") else { return nil }
+        return Int(rest[..<end.lowerBound].trimmingCharacters(in: .whitespaces))
+    }
+
+    /// The line an out-of-date vault should see, naming the one command that
+    /// fixes it. Deliberately not a repair Heft performs on its own: the file
+    /// is the user's, may hold their own instructions, and rewriting it
+    /// unasked is the behaviour proposals exist to avoid.
+    public static func refreshAdvice(found: Int, vaultPath: String) -> String {
+        "note: this vault's Heft agent guide is version \(found), "
+            + "but this Heft writes version \(version). "
+            + "Run `heft agent-setup \"\(vaultPath)\"` to refresh it."
+    }
+
     /// The guidance itself, pointing at whichever binary is installed.
     public static func section(binaryPath: String) -> String {
         """
         \(markerStart)
+        \(versionMarker) \(version) -->
         <!-- Written by `heft agent-setup`. Edits between these markers are
              replaced when it is run again; everything else in this file is
              left alone. -->
@@ -62,14 +107,43 @@ public enum AgentGuide {
         """
     }
 
+    /// What a brand-new `CLAUDE.md` opens with, above Heft's section.
+    ///
+    /// There is no second marker pair for "the user's part", on purpose: that
+    /// would invent a third place — text outside both regions — and imply Heft
+    /// manages two halves of the file. The contract is simpler stated than
+    /// fenced: what is between the markers is Heft's, everything else is the
+    /// user's. But a file that is *only* a generated block says nothing about
+    /// that and reads as machinery, so a new one gets somewhere to write.
+    public static func preamble(vaultName: String) -> String {
+        """
+        # \(vaultName)
+
+        Notes for coding agents working in this vault.
+
+        Write your own instructions here — conventions, what lives where, what
+        to leave alone. This part of the file is yours: Heft only rewrites the
+        section between its markers below, and never touches anything else.
+        """
+    }
+
     /// `existing` with the guide added, or its previous copy replaced.
     ///
     /// Idempotent on purpose: this file is the user's, and may well hold notes
     /// of their own about their vault. Re-running after an upgrade has to
     /// refresh Heft's section without touching a word of the rest.
-    public static func merged(into existing: String?, section: String) -> String {
+    /// `preamble` is used only when there is no file yet. An existing
+    /// `CLAUDE.md` already has whatever the user put above the guide, and
+    /// inserting a heading into it would be exactly the meddling the markers
+    /// promise not to do.
+    public static func merged(
+        into existing: String?, section: String, preamble: String? = nil
+    ) -> String {
         guard let existing, !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return section + "\n" }
+        else {
+            guard let preamble else { return section + "\n" }
+            return preamble + "\n\n" + section + "\n"
+        }
 
         guard let start = existing.range(of: markerStart),
               let end = existing.range(of: markerEnd),

@@ -214,6 +214,16 @@ Three decisions carry it:
 `Docs/AgentIntegration.md` has the verbs and the `CLAUDE.md` snippet that makes
 Claude Code reach for `propose` instead of `Write`.
 
+The guide is **stamped with a version**, because it is copied into the user's
+vault and frozen there: an upgraded Heft cannot reach it, so a vault set up a
+year ago would go on describing a command line that no longer exists. Every
+agent verb checks the stamp and writes one line to *stderr* when the vault is
+behind, naming `heft agent-setup` as the fix; the editor offers the same as a
+refresh banner. Nothing rewrites `CLAUDE.md` on its own — it is the user's
+file and may hold their own instructions, which is the same rule proposals
+exist to enforce. Bump `AgentGuide.version` whenever the wording an agent
+depends on changes.
+
 ## Gotchas, all of them hard-won
 
 - **Xcode 26.6 is installed, but `xcode-select` points at the Command Line Tools.**

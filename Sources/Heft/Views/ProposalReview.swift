@@ -17,6 +17,11 @@ struct AgentSetupBanner: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.appAccent) private var accent
 
+    private var isRefresh: Bool {
+        if case .outdated = model.agentGuideStatus { return true }
+        return false
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "sparkles")
@@ -24,10 +29,14 @@ struct AgentSetupBanner: View {
                 .font(.system(size: 12, weight: .semibold))
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("Let agents propose changes to this vault")
+                Text(isRefresh
+                     ? "This vault's agent instructions are out of date"
+                     : "Let agents propose changes to this vault")
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
-                Text("Writes CLAUDE.md, so Claude Code proposes edits here for review instead of editing notes directly.")
+                Text(isRefresh
+                     ? "Rewrites Heft's section of CLAUDE.md and leaves the rest of the file alone."
+                     : "Writes CLAUDE.md, so Claude Code proposes edits here for review instead of editing notes directly.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -35,7 +44,7 @@ struct AgentSetupBanner: View {
 
             Spacer(minLength: 8)
 
-            Button("Set Up") { model.setUpAgentAccess() }
+            Button(isRefresh ? "Update" : "Set Up") { model.setUpAgentAccess() }
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
             Button("Not Now") { model.dismissAgentSetupOffer() }

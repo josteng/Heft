@@ -24,6 +24,7 @@ enum AgentCLI {
         }
         let root = URL(fileURLWithPath: (arguments[1] as NSString).expandingTildeInPath)
         let rest = Array(arguments.dropFirst(2))
+        warnIfGuideOutdated(root: root)
 
         switch verb {
         case "propose": propose(root: root, arguments: rest)
@@ -35,6 +36,22 @@ enum AgentCLI {
         default: return false
         }
         return true
+    }
+
+    /// Tells an agent when the vault's instructions are older than this binary.
+    ///
+    /// On stderr, so it never lands in the output a verb is being read for,
+    /// and only when there is a guide that is genuinely behind: a vault that
+    /// has never been set up is not the business of a command that already
+    /// knows the verb it was called with.
+    private static func warnIfGuideOutdated(root: URL) {
+        let text = try? String(
+            contentsOf: root.appendingPathComponent("CLAUDE.md"), encoding: .utf8
+        )
+        guard case let .outdated(found) = AgentGuide.status(of: text) else { return }
+        FileHandle.standardError.write(
+            Data((AgentGuide.refreshAdvice(found: found, vaultPath: root.path) + "\n").utf8)
+        )
     }
 
     // MARK: - Verbs
