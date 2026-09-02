@@ -1182,6 +1182,38 @@ public enum SelfCheck {
             "an already-clean path is unchanged"
         )
 
+        // MARK: Nested bullet shapes
+        expectTrue(BulletShape.forLevel(0) == .disc, "the outermost bullet is a filled dot")
+        expectTrue(BulletShape.forLevel(1) == .circle, "one level in is a hollow ring")
+        expectTrue(BulletShape.forLevel(2) == .square, "two levels in is a square")
+        expectTrue(BulletShape.forLevel(3) == .disc, "the three shapes cycle rather than run out")
+        expectTrue(BulletShape.forLevel(-1) == .disc, "a negative level cannot index out of bounds")
+        // Adjacent levels must never collide, which is the whole point.
+        expectTrue(
+            Set((0..<3).map(BulletShape.forLevel)).count == 3,
+            "the first three levels are all different"
+        )
+
+        // The decorator has to carry the depth, or every bullet draws the same.
+        func bulletShapes(_ source: String) -> [BulletShape] {
+            LiveDecorator.decorations(in: source).compactMap {
+                if case .listMarker(let kind, _) = $0.style, case .bullet(let shape) = kind {
+                    return shape
+                }
+                return nil
+            }
+        }
+        expect(
+            "\(bulletShapes("- one\n\t- two\n\t\t- three\n"))",
+            "[HeftCore.BulletShape.disc, HeftCore.BulletShape.circle, HeftCore.BulletShape.square]",
+            "tab-nested bullets get one shape per level"
+        )
+        expect(
+            "\(bulletShapes("- one\n  - two\n    - three\n"))",
+            "[HeftCore.BulletShape.disc, HeftCore.BulletShape.circle, HeftCore.BulletShape.square]",
+            "space-nested bullets get the same shapes as tab-nested ones"
+        )
+
         // MARK: Recent vaults
         let vaultA = "/Users/tester/Vaults/PersonalVault"
         let vaultB = "/Users/tester/Sandbox/PersonalVault"

@@ -86,7 +86,7 @@ enum CodeBlockEdge: Equatable {
 }
 
 enum ListGlyph {
-    case bullet
+    case bullet(BulletShape)
     case ordered(String)
     /// The accent is resolved at style time, where `RenderContext` is in
     /// scope, for the same reason `headingAccent` carries its colour: reading
@@ -958,13 +958,35 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         let markerCentre = textLeft + markerOffset
 
         switch glyph {
-        case .bullet:
+        case .bullet(let shape):
+            // One optical size for all three. A stroked ring and a square both
+            // read larger than a filled dot of the same radius, so the ring
+            // keeps the dot's outer edge and the square is drawn slightly
+            // smaller than its bounding circle would be.
             let radius: CGFloat = 2.75
             context.setFillColor(NSColor.tertiaryLabelColor.cgColor)
-            context.fillEllipse(in: CGRect(
-                x: markerCentre - radius, y: centreY - radius,
-                width: radius * 2, height: radius * 2
-            ))
+            context.setStrokeColor(NSColor.tertiaryLabelColor.cgColor)
+            switch shape {
+            case .disc:
+                context.fillEllipse(in: CGRect(
+                    x: markerCentre - radius, y: centreY - radius,
+                    width: radius * 2, height: radius * 2
+                ))
+            case .circle:
+                let line: CGFloat = 1.2
+                context.setLineWidth(line)
+                context.strokeEllipse(in: CGRect(
+                    x: markerCentre - radius + line / 2,
+                    y: centreY - radius + line / 2,
+                    width: radius * 2 - line, height: radius * 2 - line
+                ))
+            case .square:
+                let side = radius * 1.8
+                context.fill(CGRect(
+                    x: markerCentre - side / 2, y: centreY - side / 2,
+                    width: side, height: side
+                ))
+            }
 
         case .ordered(let label):
             let text = NSAttributedString(string: label, attributes: [

@@ -646,7 +646,7 @@ enum LiveStyler {
             // rendering exists to avoid.
             if drawsWidgets, !revealed {
                 let glyph: ListGlyph = switch kind {
-                case .bullet: .bullet
+                case .bullet(let shape): .bullet(shape)
                 case .task(let checked): .checkbox(checked, accent: context.accentColor)
                 case .ordered: .ordered(orderedLabel(marker))
                 }

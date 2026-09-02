@@ -140,9 +140,38 @@ public struct QuoteLine: Sendable, Equatable {
     public var needsDrawnTitle: Bool { title?.isEmpty == true }
 }
 
+/// How a bullet is drawn at a given nesting level.
+///
+/// Depth is otherwise invisible in a live surface: the indent alone is easy to
+/// lose track of once a list runs past a few items. Browsers have shaded
+/// nested lists this way since the beginning — `list-style-type` defaults to
+/// disc, then circle, then square — and Obsidian, Bear and most Markdown
+/// editors inherit it, so it is the shape people already read as "one level
+/// in" rather than a private convention.
+public enum BulletShape: Sendable, Equatable, CaseIterable {
+    /// A filled dot, for the outermost items.
+    case disc
+    /// A hollow ring: the same dot, one level in.
+    case circle
+    /// A filled square.
+    case square
+
+    /// The shape for `level`, counting the outermost list as zero.
+    ///
+    /// The three repeat rather than growing indefinitely. Lists nested four
+    /// deep are rare enough that inventing further shapes would trade a
+    /// familiar cycle for glyphs nobody recognises, and the indent is still
+    /// there to say which level is which.
+    public static func forLevel(_ level: Int) -> BulletShape {
+        let cycle = allCases
+        return cycle[max(0, level) % cycle.count]
+    }
+}
+
 public enum ListMarkerKind: Sendable, Equatable {
-    /// `-`, `*` or `+`: replaced by a drawn bullet.
-    case bullet
+    /// `-`, `*` or `+`: replaced by a drawn bullet, whose shape says how
+    /// deeply the item is nested.
+    case bullet(shape: BulletShape)
     /// `1.` / `1)`: the numeral stays legible, so it is only dimmed.
     case ordered
     /// `- [ ]` / `- [x]`: replaced by a drawn checkbox.
@@ -518,7 +547,7 @@ public enum LiveDecorator {
             } else if marker.contains(where: \.isNumber) {
                 kind = .ordered
             } else {
-                kind = .bullet
+                kind = .bullet(shape: .forLevel(depth))
             }
 
             // The whole marker hides, indentation included: the editor redraws
