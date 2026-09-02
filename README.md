@@ -108,8 +108,10 @@ changed, rather than re-attributing the whole note twice per character.
 
 ## Around the editor
 
-- **File tree** with folders, images and PDFs, inline creation, rename, and
-  drag-and-drop moves that repoint path-qualified wikilinks.
+- **File tree** with folders, images and PDFs, and inline creation. Renaming
+  or moving a note *or a folder* repoints the path-qualified wikilinks that
+  pointed into it, including from the notes that travelled with it, while bare
+  `[[Chapter]]` links that still resolve are left alone.
 - **Calendar** with a dot per existing daily note; clicking a day creates it
   from the vault's configured template.
 - **Backlinks** panel with the referencing line as context.
@@ -240,12 +242,10 @@ runtime, and the checks skip when `nvim` is absent.
 ## Not built yet
 
 - Graph view, plugins, themes.
-- Advanced Vim: Ex commands, macros, marks and jump lists, named registers,
-  mappings, full blockwise put.
+- Advanced Vim: Ex commands, system and clipboard registers, mappings, jump
+  lists beyond the previous-position mark, full blockwise put.
 - A table selection cannot span two cells; column alignment is changed by
   editing the `---` row.
-- Renaming a *folder* does not repoint path-shaped links into it; renaming a
-  note does.
 
 ## Licence
 

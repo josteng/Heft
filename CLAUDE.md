@@ -381,8 +381,6 @@ Claude Code reach for `propose` instead of `Write`.
   drops the table back to plain source rather than highlighting across pipes.
 - Column alignment cannot be changed from the grid; edit the `---` row, which
   is what a caret on it shows the table as source for.
-- Renaming a *folder* does not repoint path-shaped links into it; renaming a
-  note does.
 - Native tabbing is not customized; workspace windows are independent windows.
 - Vim mode is experimental. Ex commands, system/clipboard registers, mappings,
   jump lists, and blockwise put are not implemented; `Docs/VimMode.md` tracks
@@ -400,7 +398,8 @@ and was reverse engineered; see `Resources/Heft.icon/README.md` before editing.
 
 Kotlin Multiplatform was evaluated and rejected: the only portable slice is the
 parser and link index, which is not worth the Gradle/SKIE boundary, and iOS is the
-next target and is Swift anyway. See the `Apude` repo for what that boundary costs.
+next target and is Swift anyway. The Gradle, JDK, XcodeGen and KMP-framework
+pre-build phase a shared module needs cost more than the slice is worth.
 
 A web-based renderer was rejected outright. This is a native app.
 

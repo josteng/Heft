@@ -365,6 +365,7 @@ struct EditorPane: View {
             // three editors to fix every bug in.
             LiveTextEditor(
                 text: $model.text,
+                documentIdentity: model.current?.relativePath ?? "",
                 generation: model.documentGeneration,
                 generationKeepsPosition: model.documentGenerationKeepsPosition,
                 findSelection: findSelection,

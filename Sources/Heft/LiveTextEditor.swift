@@ -28,6 +28,11 @@ struct FindSelection: Equatable {
 struct LiveTextEditor: NSViewRepresentable {
     @ObservedObject private var vim = VimSettings.shared
     @Binding var text: String
+    /// Which note is on screen. Separate from `generation`, which only says
+    /// the buffer was replaced: opening a different note is a different
+    /// question from the same note being rewritten, and only the first should
+    /// put the reader back at the top.
+    let documentIdentity: String
     let generation: Int
     /// True when this generation replaced the text of the note already open
     /// rather than opening a different one, so caret and scroll are still
@@ -145,10 +150,16 @@ struct LiveTextEditor: NSViewRepresentable {
             nsContext.coordinator.restyle(textView)
         }
 
-        if nsContext.coordinator.lastGeneration != generation {
+        // A different note starts at its beginning, the way Obsidian does.
+        // Carrying the caret across notes lands it in the middle of a document
+        // the reader has not looked at yet.
+        let switchedNote = nsContext.coordinator.lastIdentity != documentIdentity
+        nsContext.coordinator.lastIdentity = documentIdentity
+
+        if switchedNote || nsContext.coordinator.lastGeneration != generation {
             nsContext.coordinator.lastGeneration = generation
             if textView.string != text {
-                if generationKeepsPosition {
+                if generationKeepsPosition, !switchedNote {
                     // The same note, rewritten underneath us: iCloud, Obsidian,
                     // or an agent. Resetting to the top would be right for a
                     // different document and is merely destructive here — the
@@ -161,6 +172,12 @@ struct LiveTextEditor: NSViewRepresentable {
                     textView.resetVim()
                     textView.scroll(.zero)
                 }
+            } else if switchedNote {
+                // Two notes can hold the same text, and the buffer is then
+                // never replaced. The reader still moved.
+                textView.setSelectedRange(NSRange(location: 0, length: 0))
+                textView.resetVim()
+                textView.scroll(.zero)
             }
             nsContext.coordinator.restyle(textView)
         } else if textView.string != text {
@@ -227,6 +244,7 @@ struct LiveTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: LiveTextEditor
         var lastGeneration = -1
+        var lastIdentity: String?
         var layout = LiveLayout()
         var indexFingerprint = ""
         var lastFindGeneration = -1

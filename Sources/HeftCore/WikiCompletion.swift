@@ -63,3 +63,35 @@ public struct WikiCompletionContext: Equatable, Sendable {
         )
     }
 }
+
+/// How a completion row divides its width between the note's name and the
+/// folder it sits in.
+///
+/// Kept out of the panel so it can be tested: the folder column is the part
+/// that goes wrong, and it goes wrong invisibly. `NSTextField` stops reporting
+/// a useful `intrinsicContentSize` once a line-break mode is set, which had
+/// squeezed the folder to a few points and rendered "Daily" as "…ily".
+public enum CompletionRowLayout {
+    /// Below this a head-truncated folder is a fragment rather than a hint, so
+    /// it is dropped entirely and the name gets the room instead.
+    public static let minimumDetail: CGFloat = 34
+
+    /// The name is what is being chosen, so it keeps at least this much before
+    /// the folder is allowed any width at all.
+    public static let titleFloor: CGFloat = 120
+
+    public static func split(
+        available: CGFloat, title natural: CGFloat, detail wanted: CGFloat
+    ) -> (title: CGFloat, detail: CGFloat) {
+        guard available > 0 else { return (0, 0) }
+        guard wanted > 0 else { return (available, 0) }
+
+        var detail = min(wanted, min(180, available * 0.45))
+        let floor = min(natural, max(titleFloor, available * 0.5))
+        if available - detail < floor { detail = max(0, available - floor) }
+        // Only a *truncated* folder can be a fragment. One that fits whole is
+        // legible at any width: "Daily" is about 30 points.
+        if detail < wanted, detail < minimumDetail { detail = 0 }
+        return (max(0, available - detail), detail)
+    }
+}

@@ -102,7 +102,7 @@ final class WikiCompletionPanel: NSView {
     }
 }
 
-private final class WikiCompletionRow: NSView {
+final class WikiCompletionRow: NSView {
     var onPick: (() -> Void)?
 
     private let icon = NSImageView()
@@ -157,15 +157,34 @@ private final class WikiCompletionRow: NSView {
     override func layout() {
         super.layout()
         icon.frame = NSRect(x: 9, y: 9, width: 16, height: 16)
-        let detailWidth = detail.stringValue.isEmpty ? 0 : min(150, detail.intrinsicContentSize.width)
+        // Measured through the cell, which counts the field's own insets.
+        let columns = CompletionRowLayout.split(
+            available: max(0, bounds.width - 34 - 9 - 8),
+            title: Self.measure(title),
+            detail: Self.measure(detail)
+        )
         detail.frame = NSRect(
-            x: bounds.width - detailWidth - 9, y: 8,
-            width: detailWidth, height: 18
+            x: bounds.width - columns.detail - 9, y: 8,
+            width: columns.detail, height: 18
         )
-        title.frame = NSRect(
-            x: 34, y: 7,
-            width: max(20, bounds.width - 34 - detailWidth - 16), height: 20
-        )
+        detail.isHidden = columns.detail == 0
+        title.frame = NSRect(x: 34, y: 7, width: max(20, columns.title), height: 20)
+    }
+
+    private static func measure(_ field: NSTextField) -> CGFloat {
+        guard !field.stringValue.isEmpty else { return 0 }
+        // The glyphs are not the whole story: a text field draws its string
+        // inside about four points of inset, and `intrinsicContentSize` leaves
+        // them out. A frame of that width is a couple of points short, which
+        // is all it takes for the field to give up and render "Daily" as
+        // "…ily". `cellSize` includes them.
+        return ceil(field.cell?.cellSize.width ?? field.intrinsicContentSize.width) + 1
+    }
+
+    /// What the row's two columns ended up at, for tests: the folder hint
+    /// going quietly to a few points is the failure that matters here.
+    var measuredColumns: (title: CGFloat, detail: CGFloat) {
+        (title.frame.width, detail.isHidden ? 0 : detail.frame.width)
     }
 
     override func mouseDown(with event: NSEvent) { onPick?() }

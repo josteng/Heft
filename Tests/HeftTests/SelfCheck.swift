@@ -1341,6 +1341,42 @@ public enum SelfCheck {
             "a daily-notes.json naming the root counts as configured"
         )
 
+        // MARK: Completion row columns
+        // The reported bug: a short folder beside a short name had room and
+        // was still cut to a fragment.
+        let roomy = CompletionRowLayout.split(available: 331, title: 80, detail: 30)
+        expectTrue(
+            roomy.detail >= 30,
+            "a folder that fits is shown whole, not head-truncated"
+        )
+        expectTrue(roomy.title >= 80, "the name still gets what it needs")
+
+        // A long folder is capped rather than allowed to crowd the name out.
+        let greedy = CompletionRowLayout.split(available: 331, title: 90, detail: 900)
+        expectTrue(greedy.detail <= 331 * 0.45 + 0.5, "a long folder is capped")
+        expectTrue(
+            greedy.title >= CompletionRowLayout.titleFloor,
+            "the name keeps its floor against a long folder"
+        )
+
+        // Where only a fragment would fit, the hint is dropped: "…ily" tells
+        // the user less than nothing.
+        let cramped = CompletionRowLayout.split(available: 150, title: 140, detail: 60)
+        expectTrue(
+            cramped.detail == 0,
+            "a folder that cannot fit legibly is dropped rather than truncated"
+        )
+        expectTrue(cramped.title == 150, "dropping the folder gives the name the room")
+
+        expectTrue(
+            CompletionRowLayout.split(available: 331, title: 90, detail: 0).detail == 0,
+            "a note in the vault root shows no folder column"
+        )
+        expectTrue(
+            CompletionRowLayout.split(available: 331, title: 90, detail: 0).title == 331,
+            "a note in the vault root gives its name the whole row"
+        )
+
         // MARK: Nested bullet shapes
         expectTrue(BulletShape.forLevel(0) == .disc, "the outermost bullet is a filled dot")
         expectTrue(BulletShape.forLevel(1) == .circle, "one level in is a hollow ring")
