@@ -31,6 +31,22 @@ struct SaveConflict: Identifiable, Equatable {
     let noteName: String
     let relativePath: String
     let diskVersionExists: Bool
+    /// The buffer as the editor holds it, and the file as it now reads.
+    ///
+    /// Both are captured when the conflict is raised rather than re-read when
+    /// the review sheet opens: the diff the user is deciding about has to be
+    /// the one they were shown, and a note being written from another device
+    /// can change again while the sheet is up.
+    let mine: String
+    let disk: String?
+
+    /// The hunks between the two, measured from the buffer. `removed` is
+    /// therefore what the editor holds and `added` is what disk says instead,
+    /// so accepting a hunk takes the outside change.
+    func diff() -> NoteDiff {
+        guard let disk else { return NoteDiff(hunks: []) }
+        return NoteDiff.between(original: mine, proposed: disk)
+    }
 }
 
 enum SaveConflictResolution {
@@ -147,6 +163,10 @@ final class AppModel: ObservableObject {
     /// The proposal whose review sheet is open.
     @Published var reviewing: Proposal?
     @Published private(set) var saveConflict: SaveConflict?
+    /// The conflict currently open in the merge sheet. Held separately from
+    /// `saveConflict`, because dismissing the alert to show the sheet resolves
+    /// the alert as `.cancel` and clears it.
+    @Published var reviewingConflict: SaveConflict?
     /// Set when `promptForScope()`'s folder panel returns a folder outside
     /// the current vault. That can't become a focus folder, so the picker
     /// offers to open it as its own vault instead of failing silently.
@@ -371,7 +391,11 @@ final class AppModel: ObservableObject {
         saveConflict = SaveConflict(
             noteName: current.name,
             relativePath: current.relativePath,
-            diskVersionExists: diskVersionExists
+            diskVersionExists: diskVersionExists,
+            mine: text,
+            disk: diskVersionExists
+                ? (try? String(contentsOf: current.url, encoding: .utf8))
+                : nil
         )
         status = diskVersionExists
             ? "Save paused: \(current.name) changed on disk"
@@ -1376,7 +1400,9 @@ final class AppModel: ObservableObject {
             saveConflict = SaveConflict(
                 noteName: current.name,
                 relativePath: current.relativePath,
-                diskVersionExists: diskExists
+                diskVersionExists: diskExists,
+                mine: text,
+                disk: diskText
             )
             status = diskExists
                 ? "Save paused: \(current.name) changed on disk"
@@ -1384,6 +1410,33 @@ final class AppModel: ObservableObject {
             return
         }
 
+        writeCurrentBuffer()
+    }
+
+    /// Moves a conflict from the all-or-nothing alert into hunk-by-hunk review.
+    /// Only a modified note can be reviewed; a removed one has no second
+    /// version to diff against.
+    /// Takes the conflict rather than reading `saveConflict`, because
+    /// dismissing the alert to open the sheet clears it, and the order of the
+    /// two is not ours to depend on.
+    func reviewSaveConflict(_ conflict: SaveConflict) {
+        guard conflict.disk != nil else { return }
+        reviewingConflict = conflict
+    }
+
+    /// Writes the merged result of a reviewed conflict.
+    ///
+    /// This is the deliberate end of the conflict: the user has seen both
+    /// versions and said what the file should read, so the merge is written
+    /// even though disk no longer matches what Heft last loaded — exactly as
+    /// `.keepMine` does.
+    func applyMergedConflict(_ merged: String) {
+        guard current != nil else { return }
+        reviewingConflict = nil
+        saveConflict = nil
+        saveTask?.cancel()
+        saveTask = nil
+        setText(merged, keepingPosition: true)
         writeCurrentBuffer()
     }
 

@@ -81,8 +81,13 @@ struct ContentView: View {
         .sheet(item: $model.reviewing) { proposal in
             ProposalReviewView(proposal: proposal).environmentObject(model)
         }
+        .sheet(item: $model.reviewingConflict) { conflict in
+            ConflictReviewView(conflict: conflict).environmentObject(model)
+        }
         .alert(
-            "This Note Changed Outside Heft",
+            model.saveConflict?.diskVersionExists == false
+                ? "This Note Was Removed Outside Heft"
+                : "This Note Changed Outside Heft",
             isPresented: Binding(
                 get: { model.saveConflict != nil },
                 set: { presented in
@@ -97,6 +102,9 @@ struct ContentView: View {
                 model.resolveSaveConflict(.keepMine)
             }
             if conflict.diskVersionExists {
+                Button("Review Changes…") {
+                    model.reviewSaveConflict(conflict)
+                }
                 Button("Use Disk Version") {
                     model.resolveSaveConflict(.useDisk)
                 }

@@ -191,7 +191,7 @@ struct ProposalReviewView: View {
 
 /// One change, shown the way a diff is: context in grey, the old lines struck
 /// through in red, the new ones in green, with its own two buttons.
-private struct HunkCard: View {
+struct HunkCard: View {
     let hunk: NoteDiff.Hunk
     let decide: (Bool) -> Void
 
@@ -241,10 +241,24 @@ private struct HunkCard: View {
         return "Replace \(hunk.removed.count) with \(hunk.added.count) line(s) at line \(line)"
     }
 
-    private enum Kind { case context, removed, added }
+    typealias Kind = DiffLine.Kind
 
     @ViewBuilder
     private func line(_ text: String, kind: Kind) -> some View {
+        DiffLine(text: text, kind: kind)
+    }
+}
+
+/// One line of a diff. Shared so a save-conflict merge and an agent proposal
+/// read as the same thing, because to the user they are: another version of
+/// this note, decided a hunk at a time.
+struct DiffLine: View {
+    enum Kind { case context, removed, added }
+
+    let text: String
+    let kind: Kind
+
+    var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Text(kind == .removed ? "−" : kind == .added ? "+" : " ")
                 .font(.system(size: 11.5, design: .monospaced))

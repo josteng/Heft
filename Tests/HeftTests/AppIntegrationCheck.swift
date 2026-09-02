@@ -402,6 +402,51 @@ enum AppIntegrationCheck {
             "keeping local changes overwrites only after explicit confirmation"
         )
 
+        // A conflict where both sides changed something different: neither
+        // all-or-nothing answer keeps both, which is the whole reason the
+        // merge sheet exists. Reuses the same model, because the workspace
+        // holding Draft.md also holds its editor lease.
+        conflictModel.text = "alpha\nbeta (mine)\ngamma\ndelta\nepsilon\n"
+        try? "alpha\nbeta\ngamma\ndelta\nepsilon (disk)\n"
+            .write(to: draftURL, atomically: true, encoding: .utf8)
+        conflictModel.save()
+        if let conflict = conflictModel.saveConflict {
+            expect(conflict.disk != nil, "a modified note carries the disk version for review")
+            conflictModel.reviewSaveConflict(conflict)
+            expect(conflictModel.reviewingConflict != nil, "a modified conflict opens the merge sheet")
+
+            let conflictDiff = conflict.diff()
+            expect(conflictDiff.hunks.count == 2, "each side's change is its own hunk")
+            expect(
+                NoteDiff.apply(conflictDiff.hunks, to: conflict.mine, accepting: [])
+                    == conflict.mine,
+                "accepting no hunk is exactly keeping the buffer"
+            )
+            expect(
+                NoteDiff.apply(
+                    conflictDiff.hunks, to: conflict.mine,
+                    accepting: Set(conflictDiff.hunks.map(\.id))
+                ) == conflict.disk,
+                "accepting every hunk is exactly taking the disk version"
+            )
+
+            // Keep mine at the top, take disk's at the bottom.
+            let mergedText = NoteDiff.apply(
+                conflictDiff.hunks, to: conflict.mine, accepting: Set([conflictDiff.hunks[1].id])
+            )
+            expect(
+                mergedText == "alpha\nbeta (mine)\ngamma\ndelta\nepsilon (disk)\n",
+                "a merge keeps both sides' edits"
+            )
+            conflictModel.applyMergedConflict(mergedText)
+            expect(contents(draftURL) == mergedText, "saving a merge writes it to disk")
+            expect(conflictModel.saveConflict == nil, "a saved merge resolves the conflict")
+            expect(conflictModel.reviewingConflict == nil, "a saved merge closes the sheet")
+            expect(!conflictModel.isDirty, "a saved merge leaves the buffer clean")
+        } else {
+            expect(false, "a divergent note produces a reviewable conflict")
+        }
+
         conflictModel.text = "recover me"
         try? "newer external version".write(to: draftURL, atomically: true, encoding: .utf8)
         conflictModel.closeWorkspace()
