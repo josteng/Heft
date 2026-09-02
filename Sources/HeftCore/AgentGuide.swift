@@ -24,7 +24,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 1
+    public static let version = 4
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -71,6 +71,10 @@ public enum AgentGuide {
 
         # This vault is edited in Heft
 
+        > Everything from here to the end of this section is rewritten by
+        > `heft agent-setup`. Put your own notes **outside** it — above this
+        > line or below the closing one — where nothing touches them.
+
         `heft` below is `\(binaryPath)`.
 
         ## Do not write notes directly
@@ -89,6 +93,23 @@ public enum AgentGuide {
 
         `propose` takes the whole new body of the note, not a patch. Heft works
         out the hunks itself, against the note as it is *now*.
+
+        ## Changing part of a long note
+
+        Restating a long note just to change a paragraph is mostly
+        transcription. `--replace` takes anchored edits on stdin instead:
+
+        ```bash
+        echo '[{"old": "the exact text to replace", "new": "its replacement"}]' \\
+            | heft propose . "Path/To/Note.md" --replace \\
+                --summary "one line on what this changes"
+        ```
+
+        Each `old` must appear **exactly once** in the note; Heft refuses an
+        anchor that matches twice rather than guessing which you meant. Edits
+        apply in order, each to the result of the last. Heft resolves them
+        against the current note and stores an ordinary full-body proposal, so
+        a bad anchor fails here and now rather than at review time.
 
         ## Finding things
 
@@ -125,6 +146,69 @@ public enum AgentGuide {
         to leave alone. This part of the file is yours: Heft only rewrites the
         section between its markers below, and never touches anything else.
         """
+    }
+
+    /// What an editor writes on a drawn marker.
+    ///
+    /// The opening one names the section it begins; it says nothing about
+    /// where to write, because the space directly above it is the file's own
+    /// beginning and pointing at it reads as a description of whatever
+    /// happens to be there. Only the closing marker has room below it that is
+    /// unambiguously the user's.
+    public static func boundaryLabel(isEnd: Bool) -> String {
+        isEnd
+            ? "End of the section Heft manages — anything below is yours"
+            : "Start of the section Heft manages — rewritten by heft agent-setup"
+    }
+
+    /// The guide currently in `text`, markers included.
+    public static func managedSection(in text: String) -> String? {
+        guard let start = text.range(of: markerStart),
+              let end = text.range(of: markerEnd),
+              start.lowerBound < end.lowerBound
+        else { return nil }
+        return String(text[start.lowerBound..<end.upperBound])
+    }
+
+    /// Everything but the line naming the installed binary, which differs
+    /// between a debug run and an installed one without anyone having typed
+    /// anything.
+    static func comparable(_ section: String) -> String {
+        section
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("`heft` below is") }
+            .joined(separator: "\n")
+    }
+
+    /// Saves the section about to be replaced, if someone has typed inside it.
+    ///
+    /// The markers are HTML comments and so invisible in a rendered editor: a
+    /// note added at the end of the guide looks like it is at the end of the
+    /// file, and is in fact on managed ground. Refusing to refresh would be
+    /// worse than the disease, so the words are kept instead.
+    ///
+    /// Only when the stamped version matches this one. An older guide is
+    /// *expected* to differ, and backing that up on every upgrade would file
+    /// away copies nobody wanted.
+    @discardableResult
+    public static func backUpIfEdited(
+        existing: String?,
+        replacement: String,
+        vaultRoot: URL,
+        now: Date = Date()
+    ) throws -> URL? {
+        guard let existing, let previous = managedSection(in: existing) else { return nil }
+        guard versionStamp(in: previous) == version else { return nil }
+        guard comparable(previous) != comparable(replacement) else { return nil }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let directory = vaultRoot.appendingPathComponent(".heft/claude-md", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let target = directory.appendingPathComponent("\(formatter.string(from: now)).md")
+        try previous.write(to: target, atomically: true, encoding: .utf8)
+        return target
     }
 
     /// `existing` with the guide added, or its previous copy replaced.

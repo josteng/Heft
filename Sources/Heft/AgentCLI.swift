@@ -68,7 +68,7 @@ enum AgentCLI {
         let options = Options(arguments.dropFirst())
         let relative = normalized(notePath)
 
-        let body: String
+        var body: String
         if let from = options["from"] {
             guard let text = try? String(
                 contentsOf: URL(fileURLWithPath: (from as NSString).expandingTildeInPath),
@@ -85,7 +85,30 @@ enum AgentCLI {
         }
 
         let noteURL = root.appendingPathComponent(relative)
-        let current = try? String(contentsOf: noteURL, encoding: .utf8)
+        var current = try? String(contentsOf: noteURL, encoding: .utf8)
+
+        // `--replace` means the input is a list of anchored edits rather than
+        // the note's new text, so a long note does not have to be restated to
+        // change a line of it. Resolved here, against the note as it is now,
+        // so a bad anchor is an error the agent sees at once.
+        if options.flag("replace") {
+            guard let existing = current else {
+                fail("--replace needs an existing note to anchor against: \(relative) is new")
+            }
+            let edits: [AnchoredEdit]
+            do {
+                edits = try JSONDecoder().decode([AnchoredEdit].self, from: Data(body.utf8))
+            } catch {
+                fail("--replace expects JSON: [{\"old\": \"…\", \"new\": \"…\"}]")
+            }
+            guard !edits.isEmpty else { fail("--replace was given no edits") }
+            do {
+                body = try AnchoredEdit.apply(edits, to: existing)
+            } catch {
+                fail(error.localizedDescription)
+            }
+            current = existing
+        }
 
         if let current, current == body {
             print("no change: \(relative) already reads that way")
@@ -212,16 +235,29 @@ enum AgentCLI {
     /// dependency here would be a dependency in the app.
     private struct Options {
         private var values: [String: String] = [:]
+        private var flags: Set<String> = []
 
         init(_ arguments: ArraySlice<String>) {
-            var iterator = Array(arguments).makeIterator()
-            while let token = iterator.next() {
-                guard token.hasPrefix("--") else { continue }
-                values[String(token.dropFirst(2))] = iterator.next()
+            let tokens = Array(arguments)
+            var index = 0
+            while index < tokens.count {
+                guard tokens[index].hasPrefix("--") else { index += 1; continue }
+                let key = String(tokens[index].dropFirst(2))
+                // A bare flag must not eat the option after it: `--replace
+                // --summary x` is a flag and an option, not a flag valued
+                // "--summary".
+                if index + 1 < tokens.count, !tokens[index + 1].hasPrefix("--") {
+                    values[key] = tokens[index + 1]
+                    index += 2
+                } else {
+                    flags.insert(key)
+                    index += 1
+                }
             }
         }
 
         subscript(key: String) -> String? { values[key] }
+        func flag(_ key: String) -> Bool { flags.contains(key) }
     }
 
     private static func fail(_ message: String) -> Never {

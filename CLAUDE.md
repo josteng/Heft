@@ -193,7 +193,11 @@ adds `propose`, `proposals`, `diff`, `drop`, `read` and `find` to the same
 headless dispatch in `Main.swift` that `stats` and `render` use, so the whole
 integration is a CLI rather than a daemon or a port. `heft propose` takes the
 **complete new body** on stdin, not a patch: an agent already has the finished
-text, and a full body cannot fail to apply.
+text, and a full body cannot fail to apply. Where that would mean restating a
+long note to change a paragraph, `--replace` takes anchored `old`/`new` pairs
+instead; `AnchoredEdit` resolves them against the note as it is now and refuses
+an anchor matching more than once, so a bad anchor fails at the command rather
+than at review time and what reaches the store is still a full-body proposal.
 
 A proposal is one JSON file under `<vault>/.heft/proposals/`, which the existing
 vault watcher already sees. `NoteDiff` in HeftCore turns it into hunks, and each
@@ -213,6 +217,14 @@ Three decisions carry it:
 
 `Docs/AgentIntegration.md` has the verbs and the `CLAUDE.md` snippet that makes
 Claude Code reach for `propose` instead of `Write`.
+
+The two markers are **drawn as a labelled rule** rather than hidden with the
+other HTML comments, and reveal their source when the caret is on their line
+like any other block. Without that the boundary is invisible, and a note typed
+at what looks like the end of the file lands on managed ground; with it,
+pressing Return at the end of the rendered marker lands *after* it. Anything
+typed inside anyway is saved to `.heft/claude-md/` before the section is
+replaced.
 
 The guide is **stamped with a version**, because it is copied into the user's
 vault and frozen there: an upgraded Heft cannot reach it, so a vault set up a

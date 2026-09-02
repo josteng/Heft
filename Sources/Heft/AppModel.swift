@@ -1587,16 +1587,25 @@ final class AppModel: ObservableObject {
         let existing = try? String(contentsOf: target, encoding: .utf8)
 
         let binary = Bundle.main.executablePath ?? "heft"
+        let section = AgentGuide.section(binaryPath: binary)
+        let saved = try? AgentGuide.backUpIfEdited(
+            existing: existing, replacement: section, vaultRoot: vaultRoot
+        )
         let merged = AgentGuide.merged(
             into: existing,
-            section: AgentGuide.section(binaryPath: binary),
+            section: section,
             preamble: AgentGuide.preamble(vaultName: vaultName)
         )
         do {
             try merged.write(to: target, atomically: true, encoding: .utf8)
-            status = existing == nil
-                ? "Wrote CLAUDE.md: agents in this vault will propose changes"
-                : "Updated CLAUDE.md for agents"
+            if let saved = saved ?? nil {
+                status = "Updated CLAUDE.md; your edits inside it were saved to "
+                    + saved.lastPathComponent
+            } else {
+                status = existing == nil
+                    ? "Wrote CLAUDE.md: agents in this vault will propose changes"
+                    : "Updated CLAUDE.md for agents"
+            }
         } catch {
             status = "Could not write CLAUDE.md: \(error.localizedDescription)"
         }

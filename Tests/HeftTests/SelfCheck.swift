@@ -1479,6 +1479,170 @@ public enum SelfCheck {
             "refreshing a seeded file does not add a second preamble"
         )
 
+        // MARK: Anchored edits
+        let longNote = "# Title\n\nalpha\n\nbeta\n\ngamma\n"
+        expectTrue(
+            (try? AnchoredEdit.apply([AnchoredEdit(old: "beta", new: "BETA")], to: longNote))
+                == "# Title\n\nalpha\n\nBETA\n\ngamma\n",
+            "an anchored edit changes only what it names"
+        )
+        expectTrue(
+            (try? AnchoredEdit.apply(
+                [AnchoredEdit(old: "alpha", new: "one"), AnchoredEdit(old: "gamma", new: "three")],
+                to: longNote
+            )) == "# Title\n\none\n\nbeta\n\nthree\n",
+            "several anchored edits apply in order"
+        )
+        // Each edit sees the result of the last, so an anchor may be created
+        // by an earlier one.
+        expectTrue(
+            (try? AnchoredEdit.apply(
+                [AnchoredEdit(old: "beta", new: "delta"), AnchoredEdit(old: "delta", new: "done")],
+                to: longNote
+            )) == "# Title\n\nalpha\n\ndone\n\ngamma\n",
+            "an anchored edit applies to the result of the one before it"
+        )
+
+        // The refusals are the point: a wrong guess here would produce a
+        // plausible proposal that changes the wrong paragraph.
+        let repeated = "same\nsame\n"
+        var ambiguous = false
+        do {
+            _ = try AnchoredEdit.apply([AnchoredEdit(old: "same", new: "x")], to: repeated)
+        } catch let error as AnchoredEditError {
+            ambiguous = error == .ambiguous(index: 0, count: 2)
+        } catch {}
+        expectTrue(ambiguous, "an anchor matching twice is refused, not guessed")
+
+        var missing = false
+        do {
+            _ = try AnchoredEdit.apply([AnchoredEdit(old: "nope", new: "x")], to: longNote)
+        } catch let error as AnchoredEditError {
+            missing = error == .notFound(index: 0)
+        } catch {}
+        expectTrue(missing, "an anchor that is not there is refused")
+
+        var emptyAnchor = false
+        do {
+            _ = try AnchoredEdit.apply([AnchoredEdit(old: "", new: "x")], to: longNote)
+        } catch let error as AnchoredEditError {
+            emptyAnchor = error == .emptyAnchor(index: 0)
+        } catch {}
+        expectTrue(emptyAnchor, "an empty anchor is refused")
+
+        expectTrue(
+            AnchoredEdit.occurrences(of: "aa", in: "aaaa") == 2,
+            "overlapping anchors are counted without looping"
+        )
+
+        // The guide has to describe the mode, and say which version it is.
+        let guideV2 = AgentGuide.section(binaryPath: "/x/Heft")
+        expectTrue(guideV2.contains("--replace"), "the guide documents anchored edits")
+        expectTrue(
+            guideV2.contains("exactly once"),
+            "the guide states the anchor rule an agent must satisfy"
+        )
+        // The guide must not invite writing at its *end*: the closing marker
+        // is an HTML comment, so a line typed after the last visible sentence
+        // lands inside the managed section, not after it.
+        expectTrue(
+            !guideV2.contains("Anything below this line is yours"),
+            "the guide does not invite the reader to write just above its invisible end"
+        )
+        expectTrue(
+            guideV2.contains("Put your own notes **outside** it"),
+            "the guide points at the safe places instead, at its top"
+        )
+
+        // The opening marker names the section it begins. Telling the reader
+        // their notes "belong above" it describes the top of the file, which
+        // is not what that rule is drawn across.
+        expectTrue(
+            AgentGuide.boundaryLabel(isEnd: false).hasPrefix("Start of the section"),
+            "the opening marker says what it starts"
+        )
+        expectTrue(
+            !AgentGuide.boundaryLabel(isEnd: false).contains("above"),
+            "the opening marker does not point at the space above it"
+        )
+        expectTrue(
+            AgentGuide.boundaryLabel(isEnd: true).contains("below is yours"),
+            "the closing marker points at the room that is actually the user's"
+        )
+
+        // Typing inside the section is not refused, it is kept.
+        let backupVault = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("heft-guidebak-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(
+            at: backupVault, withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: backupVault) }
+        let typedInside = AgentGuide.merged(into: nil, section: guideV2)
+            .replacingOccurrences(
+                of: AgentGuide.markerEnd, with: "My note typed in here.\n" + AgentGuide.markerEnd
+            )
+        let savedURL = try? AgentGuide.backUpIfEdited(
+            existing: typedInside, replacement: guideV2, vaultRoot: backupVault
+        )
+        expectTrue(savedURL != nil, "words typed inside the guide are saved before it is replaced")
+        if let savedURL, let saved = try? String(contentsOf: savedURL, encoding: .utf8) {
+            expectTrue(saved.contains("My note typed in here."), "the saved copy holds them")
+        }
+
+        // An untouched guide files nothing away, and neither does an older one:
+        // it is expected to differ, and would otherwise back up on every
+        // upgrade.
+        expectTrue(
+            (try? AgentGuide.backUpIfEdited(
+                existing: AgentGuide.merged(into: nil, section: guideV2),
+                replacement: guideV2, vaultRoot: backupVault
+            )) as? URL == nil,
+            "an untouched guide is replaced without filing a copy"
+        )
+        let priorVersion = AgentGuide.merged(into: nil, section: guideV2)
+            .replacingOccurrences(
+                of: "\(AgentGuide.versionMarker) \(AgentGuide.version) -->",
+                with: "\(AgentGuide.versionMarker) 1 -->"
+            )
+        expectTrue(
+            (try? AgentGuide.backUpIfEdited(
+                existing: priorVersion, replacement: guideV2, vaultRoot: backupVault
+            )) as? URL == nil,
+            "an older guide is not filed away merely for being older"
+        )
+        expectTrue(AgentGuide.version >= 2, "documenting a new verb bumps the guide version")
+
+        // MARK: The agent guide's markers are visible
+        let markedUp = "before\n\(AgentGuide.markerStart)\ninside\n\(AgentGuide.markerEnd)\nafter\n"
+        let markerDecorations = LiveDecorator.decorations(in: markedUp)
+        let boundaries = markerDecorations.filter {
+            if case .agentGuideBoundary = $0.style { return true }
+            return false
+        }
+        expectTrue(boundaries.count == 2, "both markers are decorated as boundaries")
+        expectTrue(
+            boundaries.contains {
+                if case .agentGuideBoundary(let isEnd) = $0.style { return isEnd }
+                return false
+            },
+            "the closing marker knows it is the end"
+        )
+        // Claimed before the general comment sweep, which would otherwise hide
+        // them as ordinary metadata and leave the boundary invisible.
+        expectTrue(
+            !markerDecorations.contains {
+                if case .comment = $0.style {
+                    return $0.range.location == (markedUp as NSString).range(of: AgentGuide.markerEnd).location
+                }
+                return false
+            },
+            "a marker is not also claimed as a plain comment"
+        )
+        expectTrue(
+            Reveal.revealsWithItsLine(.agentGuideBoundary(isEnd: true)),
+            "a caret on the marker shows its real source, like any block"
+        )
+
         // MARK: Nested bullet shapes
         expectTrue(BulletShape.forLevel(0) == .disc, "the outermost bullet is a filled dot")
         expectTrue(BulletShape.forLevel(1) == .circle, "one level in is a hollow ring")

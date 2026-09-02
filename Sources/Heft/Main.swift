@@ -81,9 +81,15 @@ enum HeftMain {
             let binary = Bundle.main.executablePath ?? CommandLine.arguments[0]
             let target = root.appendingPathComponent("CLAUDE.md")
             let existing = try? String(contentsOf: target, encoding: .utf8)
+            let section = AgentGuide.section(binaryPath: binary)
+            if let saved = try? AgentGuide.backUpIfEdited(
+                existing: existing, replacement: section, vaultRoot: root
+            ) {
+                print("saved your edits inside the guide to \(saved.path)")
+            }
             let merged = AgentGuide.merged(
                 into: existing,
-                section: AgentGuide.section(binaryPath: binary),
+                section: section,
                 preamble: AgentGuide.preamble(vaultName: root.lastPathComponent)
             )
             do {
@@ -182,6 +188,7 @@ enum HeftMain {
             case .codeBlock(let edge, let language):
                 "code block \(edge)\(language.map { " \($0)" } ?? "")"
             case .thematicBreak: "thematic break"
+            case .agentGuide(let isEnd): "agent guide \(isEnd ? "end" : "start")"
             case .blockMath(let image): "block math \(size(image.size))"
             case .image(let image): "image \(size(image.size))"
             case .table(let grid):

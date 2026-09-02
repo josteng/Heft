@@ -36,6 +36,11 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case inlineMath(String)
         case blockMath(String)
         case thematicBreak
+        /// One of the two markers fencing the section `heft agent-setup`
+        /// rewrites. Drawn as a labelled rule so the boundary is visible: as a
+        /// bare HTML comment it disappears, and a note typed at what looks
+        /// like the end of the file is in fact on managed ground.
+        case agentGuideBoundary(isEnd: Bool)
     }
 
     public let range: NSRange
@@ -297,7 +302,7 @@ public struct Reveal: Equatable, Sendable {
     public static func revealsWithItsLine(_ style: MarkdownDecoration.Style) -> Bool {
         switch style {
         case .frontmatter, .comment, .codeBlock, .heading, .quoteLine,
-             .table, .thematicBreak, .blockMath, .image:
+             .table, .thematicBreak, .blockMath, .image, .agentGuideBoundary:
             true
         // An embed owning its line is drawn as a block, so it behaves like one.
         case .wikiLink(let link):
@@ -424,6 +429,28 @@ public enum LiveDecorator {
             guard let layout = parseTable(text.substring(with: match)) else { continue }
             result.append(MarkdownDecoration(range: match, style: .table(layout)))
             protected.insert(match)
+        }
+
+        // The agent-guide markers are claimed before the general comment
+        // sweep, which would otherwise hide them as ordinary metadata and
+        // leave the boundary invisible.
+        for (marker, isEnd) in [(AgentGuide.markerStart, false), (AgentGuide.markerEnd, true)] {
+            var searchStart = 0
+            while searchStart < text.length {
+                let found = text.range(
+                    of: marker,
+                    range: NSRange(location: searchStart, length: text.length - searchStart)
+                )
+                guard found.location != NSNotFound else { break }
+                searchStart = NSMaxRange(found)
+                guard !protected.intersects(found) else { continue }
+                result.append(MarkdownDecoration(
+                    range: found,
+                    syntax: [found],
+                    style: .agentGuideBoundary(isEnd: isEnd)
+                ))
+                protected.insert(found)
+            }
         }
 
         // HTML comments are metadata, not visible prose. Keep them in the

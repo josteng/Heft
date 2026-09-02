@@ -393,6 +393,11 @@ enum LiveStyler {
             hideWhole(range, in: storage, text: text, reserving: 2)
             layout.blocks[lineStart] = .thematicBreak
 
+        case .agentGuideBoundary(let isEnd):
+            // Enough height for the label the rule carries.
+            hideWhole(range, in: storage, text: text, reserving: 14)
+            layout.blocks[lineStart] = .agentGuide(isEnd: isEnd)
+
         default:
             break
         }
@@ -802,7 +807,7 @@ enum LiveStyler {
         case .inlineMath, .blockMath:
             monospace(storage, range: range, delta: -1, base: base, color: .systemTeal)
 
-        case .thematicBreak:
+        case .thematicBreak, .agentGuideBoundary:
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
         }
     }

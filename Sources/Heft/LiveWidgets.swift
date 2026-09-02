@@ -21,6 +21,8 @@ enum BlockWidget {
     case headingAccent(level: Int, color: NSColor)
     case codeBlock(edge: CodeBlockEdge, language: String?)
     case thematicBreak
+    /// A labelled rule where the agent guide begins or ends.
+    case agentGuide(isEnd: Bool)
     case blockMath(NSImage)
     case image(NSImage)
     /// Drawn as a grid; the widget owns every line of the table.
@@ -727,6 +729,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             bounds = bounds.union(CGRect(
                 x: 0, y: -8, width: containerWidth, height: bounds.height + 16
             ))
+        case .agentGuide:
+            bounds = bounds.union(CGRect(
+                x: 0, y: -8, width: containerWidth, height: bounds.height + 16
+            ))
         case .headingAccent:
             bounds = bounds.union(CGRect(x: -16, y: 0, width: bounds.width + 16, height: bounds.height))
         case .codeBlock:
@@ -810,6 +816,8 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             drawHeadingAccent(color: color, at: point, in: context)
         case .thematicBreak:
             drawThematicBreak(at: point, in: context)
+        case .agentGuide(let isEnd):
+            drawAgentGuideBoundary(isEnd: isEnd, at: point, in: context)
         default:
             break
         }
@@ -1397,6 +1405,39 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         context.setFillColor(color.cgColor)
         context.addPath(CGPath(roundedRect: rect, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
         context.fillPath()
+    }
+
+    /// A rule with the boundary's meaning written on it. The label is drawn
+    /// rather than stored in the note: it is the editor explaining a marker,
+    /// not text the vault should carry to every other program.
+    private func drawAgentGuideBoundary(
+        isEnd: Bool, at point: CGPoint, in context: CGContext
+    ) {
+        guard let line = textLineFragments.first else { return }
+        let y = (point.y + line.typographicBounds.midY).rounded() + 0.5
+        let label = AgentGuide.boundaryLabel(isEnd: isEnd)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9.5, weight: .medium),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
+        let text = NSAttributedString(string: label, attributes: attributes)
+        let size = text.size()
+        let gap: CGFloat = 8
+        let textX = point.x + max(0, (containerWidth - size.width) / 2)
+
+        context.setStrokeColor(NSColor.separatorColor.cgColor)
+        context.setLineWidth(1)
+        if textX - gap > point.x {
+            context.move(to: CGPoint(x: point.x, y: y))
+            context.addLine(to: CGPoint(x: textX - gap, y: y))
+        }
+        let rightStart = textX + size.width + gap
+        if rightStart < point.x + containerWidth {
+            context.move(to: CGPoint(x: rightStart, y: y))
+            context.addLine(to: CGPoint(x: point.x + containerWidth, y: y))
+        }
+        context.strokePath()
+        text.draw(at: CGPoint(x: textX, y: y - size.height / 2))
     }
 
     private func drawThematicBreak(at point: CGPoint, in context: CGContext) {

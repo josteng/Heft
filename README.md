@@ -47,6 +47,16 @@ heft propose . "Projects/Heft.md" --from /tmp/new.md \
     --summary "tighten the opening and add a Next section"
 ```
 
+Restating a long note to change a paragraph is mostly transcription, so
+`--replace` takes anchored edits instead. Each anchor must match exactly once;
+Heft refuses one that matches twice rather than guessing, resolves them against
+the current note, and stores the result as an ordinary full-body proposal.
+
+```bash
+echo '[{"old": "the exact text", "new": "its replacement"}]' \
+    | heft propose . "Projects/Heft.md" --replace --summary "tighten the opening"
+```
+
 The proposal lands in `.heft/proposals/`, the vault watcher notices it, and a
 banner appears above that note: the summary, the agent, `+n −m in k places`,
 and **Review**. Each hunk gets its own Accept and Reject. Accepting one applies
