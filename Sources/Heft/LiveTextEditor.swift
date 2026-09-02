@@ -205,6 +205,10 @@ struct LiveTextEditor: NSViewRepresentable {
             // would put a stutter into every arrow key.
             (textView as? HeftTextKit2View)?.updateFormatBar()
             (textView as? HeftTextKit2View)?.updateLinkCompletion(allowStart: false)
+            // The table caret is drawn by this view, not by TextKit, so it has
+            // to be moved on every selection change — including the ones that
+            // need no restyle at all, which is most of them.
+            (textView as? HeftTextKit2View)?.updateTableCaret()
             (textView as? HeftTextKit2View)?.updateVimCursor()
             // Backspace only reverts a substitution while the caret has not
             // left it. Moving away — by key, by click, or by anything else
@@ -369,6 +373,10 @@ struct LiveTextEditor: NSViewRepresentable {
                     LiveStyler.Incremental(dirty: $0.dirty, edit: $0.edit, previous: layout)
                 }
             )
+            // The view resolves clicks and places the table caret against the
+            // same measurement the fragments draw with, so it needs the layout
+            // this pass produced, not the one before it.
+            (textView as? HeftTextKit2View)?.liveLayout = layout
             // Recorded after styling: the span list is only known once the
             // decorator has run over the current text.
             revealedSpans = spanSignature(for: selection)
@@ -396,6 +404,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // settled. In particular, collapsed wikilink suffixes can report
             // a stale rectangle at the readable-width boundary.
             (textView as? HeftTextKit2View)?.updateFormatBar()
+            (textView as? HeftTextKit2View)?.updateTableCaret()
             (textView as? HeftTextKit2View)?.updateVimCursor()
             // This pass styled whatever is in the storage now, so a restyle
             // queued by the edit that led here has nothing left to do.
@@ -546,6 +555,40 @@ final class HeftTextKit2View: NSTextView {
         addSubview(cursor, positioned: .above, relativeTo: nil)
         return cursor
     }()
+    /// The widgets the last restyle produced, for the whole document.
+    ///
+    /// The view needs them outside a draw pass: a click has to be resolved
+    /// against the table it landed on, and the caret inside a cell has to be
+    /// placed from the same measurement the grid was drawn with.
+    var liveLayout = LiveLayout()
+    /// True while the caret is being drawn inside a table cell, in which case
+    /// the native insertion point is switched off.
+    var tableCaretIsActive = false
+    /// The cell a table context menu was opened on. Kept because the menu's
+    /// commands act on where the pointer was, which need not be where the
+    /// caret is — right-clicking a table the caret has never been in is the
+    /// normal way to reach them.
+    var pendingTableCommand: (grid: TableGrid, row: Int, column: Int)?
+    private var loadedTableCaretOverlay: TableCaretOverlay?
+    var tableCaretOverlayIfLoaded: TableCaretOverlay? { loadedTableCaretOverlay }
+    var tableCaretOverlay: TableCaretOverlay {
+        if let loadedTableCaretOverlay { return loadedTableCaretOverlay }
+        let overlay = TableCaretOverlay(frame: .zero)
+        addSubview(overlay, positioned: .above, relativeTo: nil)
+        loadedTableCaretOverlay = overlay
+        return overlay
+    }
+
+    /// Runs `body` with restyling held off, the way `mouseDown` does for
+    /// AppKit's own tracking loop. Rewriting attributes underneath a loop that
+    /// is hit-testing against them lands the caret on the wrong character.
+    func withMouseTracking(_ body: () -> Void) {
+        isTrackingMouse = true
+        body()
+        isTrackingMouse = false
+        onTrackingEnded?()
+    }
+
     var vimEnabled = false {
         didSet {
             guard vimEnabled != oldValue else { return }
@@ -881,16 +924,33 @@ final class HeftTextKit2View: NSTextView {
         return captured.marker
     }
 
+    /// Whether Vim wants a block cursor rather than a bar. Read by the table
+    /// surface, which draws its own caret and has to draw it in the right
+    /// shape for the mode.
+    var wantsVimBlockCursor: Bool {
+        vimEnabled
+            && (vimEngine.mode == .normal || vimEngine.mode == .operatorPending)
+            && selectedRange().length == 0
+            && window?.firstResponder === self
+    }
+
     func updateVimCursor() {
         let showsBlock = vimEnabled
             && (vimEngine.mode == .normal || vimEngine.mode == .operatorPending)
             && selectedRange().length == 0
             && window?.firstResponder === self
-        let nativeCaretColor = showsBlock ? NSColor.clear : vimCaretColor
+        // A caret drawn inside a table cell is this view's own; leaving the
+        // native one on as well would put a second bar at the table's left
+        // edge, on the line the collapsed source occupies.
+        let nativeCaretColor = showsBlock || tableCaretIsActive ? NSColor.clear : vimCaretColor
         if !insertionPointColor.isEqual(nativeCaretColor) {
             insertionPointColor = nativeCaretColor
         }
-        guard showsBlock else {
+        // A caret inside a table is drawn from the grid, which is the only
+        // thing that knows where the cell is. The block cursor is derived from
+        // TextKit's own geometry, and inside a collapsed table that geometry
+        // describes a few hairline characters at the left margin.
+        guard showsBlock, !tableCaretIsActive else {
             vimBlockCursor.isHidden = true
             return
         }
@@ -1141,7 +1201,10 @@ final class HeftTextKit2View: NSTextView {
         let accepted = super.becomeFirstResponder()
         if accepted {
             onFirstResponderChange?(true)
-            DispatchQueue.main.async { [weak self] in self?.updateVimCursor() }
+            DispatchQueue.main.async { [weak self] in
+                self?.updateTableCaret()
+                self?.updateVimCursor()
+            }
         }
         return accepted
     }
@@ -1151,6 +1214,9 @@ final class HeftTextKit2View: NSTextView {
         if accepted {
             dismissLinkCompletion()
             onFirstResponderChange?(false)
+            // The drawn caret belongs to a focused editor, and nothing else
+            // takes it down: it is a subview, not something TextKit manages.
+            hideTableCaret()
             updateVimCursor()
         }
         return accepted
@@ -1199,8 +1265,27 @@ final class HeftTextKit2View: NSTextView {
     private(set) var isTrackingMouse = false
     var onTrackingEnded: (() -> Void)?
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        pendingTableCommand = nil
+        let point = convert(event.locationInWindow, from: nil)
+        return tableMenu(at: point) ?? super.menu(for: event)
+    }
+
+    override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if let action = item.action, let table = validatesTableCommand(action) { return table }
+        return super.validateMenuItem(item)
+    }
+
     override func resetCursorRects() {
         super.resetCursorRects()
+
+        // The `+` strips are buttons, so they say so under the pointer.
+        for grid in liveLayout.tables {
+            guard let origin = tableOrigin(of: grid) else { continue }
+            for strip in [grid.addRowRect, grid.addColumnRect] {
+                addCursorRect(strip.offsetBy(dx: origin.x, dy: origin.y), cursor: .pointingHand)
+            }
+        }
 
         let text = string as NSString
         var location = 0
@@ -1239,6 +1324,11 @@ final class HeftTextKit2View: NSTextView {
             return
         }
         let point = convert(event.locationInWindow, from: nil)
+        // A drawn table is hit-tested against its own grid. TextKit sees only
+        // the collapsed source — a whole table is a few zero-width characters
+        // on one line — so left to itself it puts every click in the table on
+        // the same character.
+        if handleTableClick(at: point, event: event) { return }
         let usesVimSelection = vimEnabled
             && vimEngine.mode != .insert
             && vimEngine.mode != .replace
@@ -1524,11 +1614,23 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func moveUp(_ sender: Any?) {
-        guard moveLinkCompletion(-1) else { super.moveUp(sender); return }
+        guard moveLinkCompletion(-1) else {
+            // Inside a table the rows are not lines any more: they are boxes in
+            // a grid drawn over four hairline paragraphs. Left to TextKit, one
+            // press up out of the first body row lands on the delimiter row and
+            // dissolves the whole table back into pipes.
+            if handleTableVerticalMove(down: false) { return }
+            super.moveUp(sender)
+            return
+        }
     }
 
     override func moveDown(_ sender: Any?) {
-        guard moveLinkCompletion(1) else { super.moveDown(sender); return }
+        guard moveLinkCompletion(1) else {
+            if handleTableVerticalMove(down: true) { return }
+            super.moveDown(sender)
+            return
+        }
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -1632,6 +1734,9 @@ final class HeftTextKit2View: NSTextView {
     /// got right.
     override func insertNewline(_ sender: Any?) {
         if acceptLinkCompletion() { return }
+        // Inside a table, Return means the row below. A literal newline there
+        // splits the table in two, which is never what was meant.
+        if handleTableReturn() { return }
         // Return ends a word, so an "after a space" replacement gets its turn
         // before the line does — and the newline still happens, exactly as it
         // does in macOS text replacement.
@@ -1667,6 +1772,7 @@ final class HeftTextKit2View: NSTextView {
 
     override func insertTab(_ sender: Any?) {
         if acceptLinkCompletion() { return }
+        if handleTableTab(forward: true) { return }
         guard adjustListIndent(outdent: false) else {
             super.insertTab(sender)
             return
@@ -1674,6 +1780,7 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func insertBacktab(_ sender: Any?) {
+        if handleTableTab(forward: false) { return }
         guard adjustListIndent(outdent: true) else {
             super.insertBacktab(sender)
             return

@@ -68,27 +68,6 @@ final class AppModel: ObservableObject {
     var scopeName: String { scopePath?.split(separator: "/").last.map(String.init) ?? "Entire Vault" }
     var vaultName: String { vaultRoot?.lastPathComponent ?? "Heft" }
 
-    /// What the window shows beneath its title.
-    ///
-    /// Nothing here may depend on state that changes while typing. The
-    /// subtitle shares its row with the toolbar's `.status` region, and the
-    /// scope picker sits centred between two flexible spacers there, so a word
-    /// that comes and goes drags the picker left and right with it. "Edited"
-    /// used to be exactly that word: it was appended whenever `isDirty` was
-    /// set, and autosave clears that 700ms after the last keystroke, so it
-    /// appeared and vanished on a cycle for as long as anyone kept typing. A
-    /// state with a 700ms lifetime is not worth a word, let alone a moving
-    /// one; unsaved work is reported by `saveConflict`, which persists.
-    var windowSubtitle: String {
-        guard let current else {
-            return vaultRoot == nil ? "" : "\(scopedNotes.count) notes · \(scopeName)"
-        }
-        let folder = current.folder
-        var parts = [folder.isEmpty ? "Vault root" : folder]
-        if !isInScope(current) { parts.append("Outside \(scopeName)") }
-        return parts.joined(separator: " · ")
-    }
-
     var scopedTree: VaultItem? {
         guard let tree else { return nil }
         guard let scopePath else { return tree }
@@ -563,12 +542,8 @@ final class AppModel: ObservableObject {
 
     /// Handles the internal URLs the preview renderer emits.
     func handle(url: URL) -> Bool {
-        guard url.scheme == HeftURL.scheme else { return false }
+        guard url.scheme == "heft" else { return false }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        // Only a link click. `heft://open` arrives from outside the app and is
-        // a vault to open, not a wikilink to follow; without this it would be
-        // taken as a target named "…?path=…" and silently go nowhere.
-        guard components?.host == HeftURL.Host.follow.rawValue else { return false }
         let value = components?.queryItems?.first(where: { $0.name == "target" })?.value ?? ""
         guard let decoded = value.removingPercentEncoding else { return true }
         follow(WikiLinkParser.links(in: "[[\(decoded)]]").first ?? WikiLink(target: decoded))
@@ -1451,82 +1426,6 @@ final class AppModel: ObservableObject {
         if let vaultRoot { registry.updateFocus(root: vaultRoot, scopePath: scopePath, for: workspaceID) }
         expandedFolders = []
         status = folder.map { "Focused on \($0.relativePath)" } ?? "Showing the entire vault"
-    }
-
-    /// Asks for a path and goes wherever it points.
-    ///
-    /// The system's own Go to Folder sheet is not ours to preprocess, and it
-    /// takes a literal path, so a shell-escaped one pasted into a file panel
-    /// simply fails to resolve. This is the entry point that accepts the forms
-    /// a path is actually copied in; `PathInput` documents which and why.
-    func promptToGoToPath() {
-        guard let entered = FilePrompt.path(
-            title: "Go to Path",
-            message: "Paste a path to a note or folder. Escaped paths, quoted "
-                + "paths and file:// URLs are all accepted."
-        ) else { return }
-        goToPath(entered)
-    }
-
-    /// Focuses a folder, opens a note, or offers to open a vault, depending on
-    /// what the path turns out to be.
-    @discardableResult
-    func goToPath(_ raw: String) -> Bool {
-        guard let normalized = PathInput.normalize(raw) else { return false }
-        let url = URL(fileURLWithPath: normalized)
-
-        var isFolder: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else {
-            status = "There is nothing at \(normalized)"
-            return false
-        }
-
-        // With no vault open, any folder is a candidate to become one.
-        guard let vaultRoot else {
-            guard isFolder.boolValue else {
-                status = "Open a vault before opening a note"
-                return false
-            }
-            openVault(at: url)
-            return true
-        }
-
-        let rootPath = vaultRoot.standardizedFileURL.path
-        let target = url.standardizedFileURL.path
-        guard target == rootPath || target.hasPrefix(rootPath + "/") else {
-            // Outside the vault entirely. A folder can become its own vault,
-            // which is the same offer the scope picker makes.
-            guard isFolder.boolValue else {
-                status = "\(url.lastPathComponent) is outside \(vaultName)"
-                return false
-            }
-            pendingOutsideVaultFolder = url
-            return true
-        }
-
-        if target == rootPath {
-            showEntireVault()
-            return true
-        }
-
-        let relative = String(target.dropFirst(rootPath.count + 1))
-        if isFolder.boolValue {
-            guard let folder = tree?.flattened().first(where: {
-                $0.isFolder && $0.relativePath == relative
-            }) else {
-                status = "That folder is not available in the vault yet"
-                return false
-            }
-            setScope(to: folder)
-            return true
-        }
-
-        guard let note = index.note(atRelativePath: relative) else {
-            status = "That note is not in the vault index yet"
-            return false
-        }
-        open(note)
-        return true
     }
 
     func promptForScope() {

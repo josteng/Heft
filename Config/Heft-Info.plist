@@ -34,19 +34,6 @@
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>
     <true/>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>dev.stenglein.Heft.url</string>
-            <key>CFBundleTypeRole</key>
-            <string>Editor</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>heft</string>
-            </array>
-        </dict>
-    </array>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
