@@ -515,7 +515,19 @@ struct LiveTextEditor: NSViewRepresentable {
             if let styled, styled.source.isEqual(to: source as String) {
                 decorations = styled.decorations
             } else {
-                decorations = LiveDecorator.decorations(in: source as String)
+                // Reuse the previous parse where the edit provably could not
+                // have changed anything outside one paragraph. Decorating is
+                // the largest single cost of a keystroke, and it is the reason
+                // typing scales with the length of the note rather than with
+                // the size of the edit.
+                decorations = LiveDecorator.decorations(
+                    in: source,
+                    reusing: styled.map {
+                        LiveDecorator.DecorationCache(
+                            source: $0.source, decorations: $0.decorations
+                        )
+                    }
+                )
             }
             let snapshot = RestyleScope.Snapshot(
                 source: source, decorations: decorations, reveal: reveal

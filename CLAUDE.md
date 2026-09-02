@@ -146,6 +146,36 @@ is *only* a caret move (or arrow keys stutter), and anything reading the layout
 it just invalidated — `TableSurface.apply` calls `restyleNow()` because the row
 it added has to exist before the caret is placed in it.
 
+Decorating is what made typing scale with the length of the note rather than
+with the size of the edit: it reparsed the whole document on every keystroke.
+`LiveDecorator.decorations(in:reusing:)` reuses the previous parse when the
+edit provably could not have changed anything outside one blank-line-bounded
+paragraph, reparsing that paragraph alone and shifting the rest. Measured 5–6×
+cheaper on a note-shaped document; a 23KB note went from 7.0ms to 4.8ms per
+keystroke, which is the difference between missing and making a frame on a
+144Hz display.
+
+Two guards are what make it safe, and both are proven by mutation against the
+differential check: a paragraph containing anything multi-line (a fence, a
+pipe, `---`, `$$`, a comment) is never reused, and neither is one any
+line-spanning decoration reaches into. The rest of the guards are defence in
+depth — `paragraph(containing:)` rejecting blank lines already subsumes them
+today, which the check confirms, but that is a property of `paragraph` rather
+than of them.
+
+The reparsed paragraph's decorations are appended as a group rather than left
+in phase order. That is safe because decorations only ever overlap within a
+paragraph, so their relative order — a heading applied before the bold inside
+it — is preserved, and `RestyleScope` matches by location rather than by
+position whenever the source changed.
+
+`Tests/HeftTests/IncrementalDecorationCheck.swift` is the oracle, and it has to
+be: the incremental-styling check compares an incrementally styled buffer
+against a from-scratch one, and if both used the reusing decorator a wrong
+reuse would agree with itself. So it drives edit scripts — including deletions,
+pasted fences and blank lines — through both decorators and compares the
+decorations directly, and it fails if the fast path never ran.
+
 `Tests/HeftTests/TypingPerformanceCheck.swift` guards the budget, and
 `IncrementalStylingCheck` asserts a deferred pass was actually *scheduled*, so
 deferring can never be mistaken for deciding no restyle was needed.

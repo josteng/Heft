@@ -70,6 +70,50 @@ struct HeftAppIntegrationTests {
 
 @Suite("Typing performance")
 struct TypingPerformanceTests {
+    @Test("Reusing the previous parse is cheaper than redoing it")
+    func decorationReuseCost() {
+        for (label, document) in [
+            ("structured 20KB", TypingPerformanceCheck.document(paragraphs: 60)),
+            ("structured 50KB", TypingPerformanceCheck.document(paragraphs: 150)),
+            ("prose 25KB", TypingPerformanceCheck.prose(words: 4000)),
+            ("prose 74KB", TypingPerformanceCheck.prose(words: 12000)),
+            ("realistic 20KB", TypingPerformanceCheck.realistic(sections: 40)),
+            ("realistic 50KB", TypingPerformanceCheck.realistic(sections: 100)),
+        ] {
+            let source = document as NSString
+            // Type into the middle of a paragraph, which is what typing is.
+            let at = source.length / 2
+            var full: [Double] = []
+            var reused: [Double] = []
+            var hits = 0
+            var cache = LiveDecorator.DecorationCache(
+                source: source, decorations: LiveDecorator.decorations(in: document)
+            )
+            for step in 0..<25 {
+                let edited = cache.source.replacingCharacters(
+                    in: NSRange(location: min(at + step, cache.source.length), length: 0), with: "x"
+                ) as NSString
+
+                var start = DispatchTime.now().uptimeNanoseconds
+                let fromScratch = LiveDecorator.decorations(in: edited as String)
+                full.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+
+                start = DispatchTime.now().uptimeNanoseconds
+                let viaCache = LiveDecorator.decorations(in: edited, reusing: cache)
+                reused.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+
+                if LiveDecorator.reuse(cache: cache, for: edited) != nil { hits += 1 }
+                cache = LiveDecorator.DecorationCache(source: edited, decorations: viaCache)
+            }
+            let f = full.sorted()[full.count / 2]
+            let r = reused.sorted()[reused.count / 2]
+            print(String(
+                format: "REUSE %@: full %.2fms, reused %.2fms (%.1fx), fast path %d/25",
+                label, f, r, f / max(0.001, r), hits
+            ))
+        }
+    }
+
     @Test("Where a keystroke's time goes")
     func decorationCost() {
         for (label, document) in [
@@ -132,5 +176,20 @@ struct TypingPerformanceTests {
                     + "\(sample.label), which a held key cannot outrun")
             )
         }
+    }
+}
+
+@Suite("Incremental decoration")
+struct IncrementalDecorationTests {
+    @Test("Reusing the previous parse answers what a full scan would")
+    func matchesFullScan() {
+        let result = IncrementalDecorationCheck.run()
+        for failure in result.failures.prefix(10) {
+            Issue.record(Comment(rawValue: failure))
+        }
+        print("DECOR-DIFF \(result.passed) agreed, \(result.failures.count) disagreed, "
+            + "fast path \(result.reused), fell back \(result.fellBack)")
+        #expect(result.failures.isEmpty)
+        #expect(result.reused > 0, "the fast path never ran, so nothing was proven")
     }
 }

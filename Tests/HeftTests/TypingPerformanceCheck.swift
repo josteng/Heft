@@ -60,6 +60,33 @@ enum TypingPerformanceCheck {
         return parts.joined(separator: "\n")
     }
 
+    /// A note shaped like a real one: mostly prose, with headings and lists,
+    /// and a table only now and then rather than in every paragraph.
+    static func realistic(sections: Int) -> String {
+        var parts: [String] = ["# Weekly notes\n"]
+        for index in 0..<sections {
+            parts.append("""
+            ## Section \(index)
+
+            A paragraph of ordinary prose with **bold** and a [[Wiki Link]], long
+            enough to wrap across a couple of lines the way a real note does.
+
+            Another paragraph, plainer, with a #tag in it.
+
+            - a list item
+            - another one
+
+            """)
+            if index % 8 == 0 {
+                parts.append("| a | b |\n|---|---|\n| 1 | 2 |\n")
+            }
+            if index % 11 == 0 {
+                parts.append("```swift\nlet value = \(index)\n```\n")
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+
     static func prose(words: Int) -> String {
         let vocabulary = ["alpha", "beta", "gamma", "delta", "epsilon", "note", "vault", "editor"]
         var out = "# Long prose\n\n"
@@ -186,6 +213,8 @@ enum TypingPerformanceCheck {
             measureTyping(in: document(paragraphs: 150), label: "huge", keystrokes: 30),
             measureTyping(in: mathHeavy(), label: "math-heavy", keystrokes: 30),
             measureTyping(in: prose(words: 12000), label: "long-prose", keystrokes: 30),
+            measureTyping(in: realistic(sections: 40), label: "realistic 20KB", keystrokes: 30),
+            measureTyping(in: realistic(sections: 100), label: "realistic 50KB", keystrokes: 30),
         ]
     }
 }
