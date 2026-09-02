@@ -1475,6 +1475,37 @@ final class AppModel: ObservableObject {
         return text?.contains(AgentGuide.markerStart) == true
     }
 
+    private static let agentOfferDismissedKey = "dev.stenglein.Heft.agentOfferDismissed"
+
+    /// Whether to offer agent setup for the open vault.
+    ///
+    /// Opt-in only works if something actually asks. The menu item alone left
+    /// the proposal flow invisible: open a folder, and a Claude Code session
+    /// in it would reach for Write, which is the one thing proposals exist to
+    /// prevent. So a vault without the guide says so once, and remembers being
+    /// turned down.
+    var shouldOfferAgentSetup: Bool {
+        guard let vaultRoot, !hasAgentGuide else { return false }
+        let dismissed = UserDefaults.standard.stringArray(
+            forKey: Self.agentOfferDismissedKey
+        ) ?? []
+        return !dismissed.contains(vaultRoot.standardizedFileURL.path)
+    }
+
+    /// Remembers that this vault was offered agent setup and turned down, so
+    /// the banner is a one-time question rather than a recurring one.
+    func dismissAgentSetupOffer() {
+        guard let vaultRoot else { return }
+        var dismissed = UserDefaults.standard.stringArray(
+            forKey: Self.agentOfferDismissedKey
+        ) ?? []
+        let path = vaultRoot.standardizedFileURL.path
+        guard !dismissed.contains(path) else { return }
+        dismissed.append(path)
+        UserDefaults.standard.set(dismissed, forKey: Self.agentOfferDismissedKey)
+        objectWillChange.send()
+    }
+
     /// Writes the vault's `CLAUDE.md` so an agent started in that folder knows
     /// to propose changes rather than write notes.
     ///

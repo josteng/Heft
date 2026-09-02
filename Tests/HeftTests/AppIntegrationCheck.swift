@@ -774,6 +774,37 @@ enum AppIntegrationCheck {
         let decoded = try? JSONDecoder().decode([CustomSubstitution].self, from: legacy)
         expect(decoded?.first?.firing == .immediately, "an older stored rule still decodes")
 
+        // The agent-setup offer. A vault with no guide asks once; both ways of
+        // answering have to silence it, or the banner nags on every open.
+        let offerDefaults = UserDefaults.standard
+        let offerKey = "dev.stenglein.Heft.agentOfferDismissed"
+        let previousDismissed = offerDefaults.object(forKey: offerKey)
+        offerDefaults.removeObject(forKey: offerKey)
+        defer {
+            if let previousDismissed {
+                offerDefaults.set(previousDismissed, forKey: offerKey)
+            } else {
+                offerDefaults.removeObject(forKey: offerKey)
+            }
+        }
+
+        expect(!files.hasAgentGuide, "a fresh vault has no agent guide")
+        expect(files.shouldOfferAgentSetup, "a vault without the guide is offered one")
+
+        files.dismissAgentSetupOffer()
+        expect(!files.shouldOfferAgentSetup, "declining the offer stops it coming back")
+
+        files.setUpAgentAccess()
+        expect(files.hasAgentGuide, "setting up writes the vault's CLAUDE.md")
+        expect(
+            contents(root.appendingPathComponent("CLAUDE.md"))?.contains("heft propose") == true,
+            "the guide tells an agent how to propose"
+        )
+        expect(
+            !files.shouldOfferAgentSetup,
+            "a vault that now has the guide is not offered it again"
+        )
+
         // Open Recent. Its own registry, so recording a throwaway vault cannot
         // disturb the sessions the checks above are still holding; the list
         // itself is app-wide and shared, which is what makes it worth writing.
