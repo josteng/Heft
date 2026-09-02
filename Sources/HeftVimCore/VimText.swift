@@ -341,6 +341,16 @@ struct VimText {
         guard let pair = delimiterPair(at: location, opening: opening, closing: closing) else {
             return nil
         }
+        return delimitedRange(pair, at: location, opening: opening, closing: closing, around: around)
+    }
+
+    func delimitedRange(
+        _ pair: (left: Int, right: Int),
+        at location: Int,
+        opening: Character,
+        closing: Character,
+        around: Bool
+    ) -> NSRange? {
         var start = around ? pair.left : pair.left + 1
         var end = around ? pair.right + 1 : pair.right
         if !around, opening != closing, start < end, isNewline(at: start) {

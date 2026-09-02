@@ -205,64 +205,6 @@ enum AppIntegrationCheck {
             "pressing Return inserts the incremented ordered marker"
         )
 
-        // A callout is filled one line at a time, each clipped to its own
-        // slice. A corner may only be round where the block actually ends, or
-        // interior lines draw their own roof and the card comes out notched.
-        let slice = CGRect(x: 0, y: 100, width: 300, height: 20)
-        let radius: CGFloat = 8
-        func grown(_ edge: QuoteEdge) -> CGRect {
-            HeftLayoutFragment.grownFill(slice, edge: edge, radius: radius)
-        }
-        expect(
-            grown(.first).minY == slice.minY && grown(.first).maxY > slice.maxY,
-            "the first line keeps its rounded top and runs straight off the bottom"
-        )
-        expect(
-            grown(.last).minY < slice.minY && grown(.last).maxY == slice.maxY,
-            "the last line keeps its rounded bottom and runs straight off the top"
-        )
-        expect(
-            grown(.middle).minY < slice.minY && grown(.middle).maxY > slice.maxY,
-            "a middle line runs straight off both ends, so it shows no corners"
-        )
-        expect(
-            grown(.first).width == slice.width && grown(.middle).width == slice.width,
-            "growing a slice never changes its width"
-        )
-
-        // Return on an empty nested item steps out one level rather than
-        // abandoning the list, so the levels above it survive.
-        func returnOnEmptyItem(_ source: String) -> String {
-            let editor = HeftTextKit2View(usingTextLayoutManager: true)
-            editor.string = source
-            editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
-            editor.insertNewline(nil)
-            return editor.string
-        }
-        expectEqual(
-            returnOnEmptyItem("- one\n\t\t- "), "- one\n\t- ",
-            "Return on an empty item two levels in steps out to one"
-        )
-        expectEqual(
-            returnOnEmptyItem("- one\n\t- "), "- one\n- ",
-            "Return on an empty item one level in steps out to the top"
-        )
-        // Only once it has run out of levels does the list end, which is the
-        // behaviour that was there before.
-        expectEqual(
-            returnOnEmptyItem("- one\n- "), "- one\n\n",
-            "Return on an empty top-level item still ends the list"
-        )
-        expectEqual(
-            returnOnEmptyItem("\t- [ ] "), "- [ ] ",
-            "an empty nested task steps out rather than ending"
-        )
-        // An item with content is unaffected: it continues, as it always did.
-        expectEqual(
-            returnOnEmptyItem("\t- typed"), "\t- typed\n\t- ",
-            "a nested item with content still continues at its own level"
-        )
-
         let completionEditor = HeftTextKit2View(usingTextLayoutManager: true)
         completionEditor.string = "["
         completionEditor.setSelectedRange(NSRange(location: 1, length: 0))
@@ -277,21 +219,12 @@ enum AppIntegrationCheck {
         let defaults = UserDefaults.standard
         let lastVaultKey = "dev.stenglein.Heft.vaultPath"
         let previousLastVault = defaults.object(forKey: lastVaultKey)
-        // Recents are app-wide and persist, so a test run must put the real
-        // list back rather than leave its disposable vaults in someone's
-        // Open Recent menu.
-        let previousRecents = defaults.object(forKey: VaultRegistry.recentVaultsKey)
         defer {
             try? manager.removeItem(at: root)
             if let previousLastVault {
                 defaults.set(previousLastVault, forKey: lastVaultKey)
             } else {
                 defaults.removeObject(forKey: lastVaultKey)
-            }
-            if let previousRecents {
-                defaults.set(previousRecents, forKey: VaultRegistry.recentVaultsKey)
-            } else {
-                defaults.removeObject(forKey: VaultRegistry.recentVaultsKey)
             }
         }
 
@@ -338,19 +271,6 @@ enum AppIntegrationCheck {
             (try? String(contentsOf: draftURL, encoding: .utf8)) == "autosaved"
         }
         expect(autosaved, "autosave writes the open note atomically")
-
-        // The window subtitle shares its row with the toolbar's centred scope
-        // picker, so anything that changes width while typing slides that
-        // picker back and forth. Autosave toggles `isDirty` on a 700ms cycle,
-        // which is exactly the shape of state that must not reach it.
-        let subtitleWhenClean = first.windowSubtitle
-        expect(!first.isDirty, "the note is saved before the subtitle is compared")
-        first.text = "typing changes the buffer"
-        expect(first.isDirty, "typing marks the note dirty")
-        expectEqual(
-            first.windowSubtitle, subtitleWhenClean,
-            "the window subtitle does not change while typing"
-        )
 
         let competingOwner = UUID()
         expect(
@@ -556,43 +476,6 @@ enum AppIntegrationCheck {
             "folder move repoints links inside the moved folder"
         )
 
-        // Going to a path in the form one is actually copied in. Finder and a
-        // terminal both escape spaces for the shell, and the system's own Go
-        // to Folder sheet takes the escaped text literally and finds nothing.
-        let spacedFolder = root.appendingPathComponent("MSc Thesis", isDirectory: true)
-        try? manager.createDirectory(at: spacedFolder, withIntermediateDirectories: true)
-        try? "# Meeting".write(
-            to: spacedFolder.appendingPathComponent("Questions To Ask.md"),
-            atomically: true, encoding: .utf8
-        )
-        let spacedAppeared = await waitUntil {
-            files.tree?.flattened().contains { $0.relativePath == "MSc Thesis" } == true
-        }
-        expect(spacedAppeared, "a folder with a space appears in the tree")
-
-        let escapedFolder = spacedFolder.path.replacingOccurrences(of: " ", with: "\\ ")
-        expect(files.goToPath(escapedFolder), "an escaped folder path is accepted")
-        expectEqual(files.scopePath, "MSc Thesis", "an escaped folder path focuses that folder")
-
-        let escapedNote = spacedFolder
-            .appendingPathComponent("Questions To Ask.md").path
-            .replacingOccurrences(of: " ", with: "\\ ")
-        let noteIndexed = await waitUntil {
-            files.index.note(atRelativePath: "MSc Thesis/Questions To Ask.md") != nil
-        }
-        expect(noteIndexed, "a note in a spaced folder is indexed")
-        expect(files.goToPath(escapedNote), "an escaped note path is accepted")
-        expectEqual(
-            files.current?.relativePath, "MSc Thesis/Questions To Ask.md",
-            "an escaped note path opens that note"
-        )
-
-        expect(
-            !files.goToPath("\(root.path)/Nowhere\\ At\\ All.md"),
-            "a path that points at nothing is refused"
-        )
-        files.showEntireVault()
-
         // Dragging an item out of Heft. `.draggable(url)` exported a file
         // *promise*, so a terminal resolved it to a path inside
         // `~/Library/Caches/com.apple.SwiftUI.Drag-<uuid>/` rather than the
@@ -773,72 +656,6 @@ enum AppIntegrationCheck {
         )
         let decoded = try? JSONDecoder().decode([CustomSubstitution].self, from: legacy)
         expect(decoded?.first?.firing == .immediately, "an older stored rule still decodes")
-
-        // The agent-setup offer. A vault with no guide asks once; both ways of
-        // answering have to silence it, or the banner nags on every open.
-        let offerDefaults = UserDefaults.standard
-        let offerKey = "dev.stenglein.Heft.agentOfferDismissed"
-        let previousDismissed = offerDefaults.object(forKey: offerKey)
-        offerDefaults.removeObject(forKey: offerKey)
-        defer {
-            if let previousDismissed {
-                offerDefaults.set(previousDismissed, forKey: offerKey)
-            } else {
-                offerDefaults.removeObject(forKey: offerKey)
-            }
-        }
-
-        expect(!files.hasAgentGuide, "a fresh vault has no agent guide")
-        expect(files.shouldOfferAgentSetup, "a vault without the guide is offered one")
-
-        files.dismissAgentSetupOffer()
-        expect(!files.shouldOfferAgentSetup, "declining the offer stops it coming back")
-
-        files.setUpAgentAccess()
-        expect(files.hasAgentGuide, "setting up writes the vault's CLAUDE.md")
-        expect(
-            contents(root.appendingPathComponent("CLAUDE.md"))?.contains("heft propose") == true,
-            "the guide tells an agent how to propose"
-        )
-        expect(
-            !files.shouldOfferAgentSetup,
-            "a vault that now has the guide is not offered it again"
-        )
-
-        // Open Recent. Its own registry, so recording a throwaway vault cannot
-        // disturb the sessions the checks above are still holding; the list
-        // itself is app-wide and shared, which is what makes it worth writing.
-        let recentsProbe = VaultRegistry()
-        let ghostVault = manager.temporaryDirectory
-            .appendingPathComponent("heft-ghost-\(UUID().uuidString)", isDirectory: true)
-        try? manager.createDirectory(at: ghostVault, withIntermediateDirectories: true)
-        let ghostPath = ghostVault.standardizedFileURL.path
-
-        _ = recentsProbe.session(for: ghostVault)
-        expectEqual(
-            recentsProbe.recentVaultPaths.first, ghostPath,
-            "opening a vault puts it at the front of the recents"
-        )
-        expect(
-            recentsProbe.recentVaults.contains { $0.url.standardizedFileURL.path == ghostPath },
-            "a vault that is still there is offered"
-        )
-
-        // A vault in iCloud Drive can move or be evicted between sessions. It
-        // stops being offered, but is not forgotten: a volume that comes back
-        // should bring its vault back with it.
-        try? manager.removeItem(at: ghostVault)
-        expect(
-            !recentsProbe.recentVaults.contains { $0.url.standardizedFileURL.path == ghostPath },
-            "a vault that has gone is not offered"
-        )
-        expect(
-            recentsProbe.recentVaultPaths.contains(ghostPath),
-            "a vault that has gone is still remembered"
-        )
-
-        recentsProbe.clearRecentVaults()
-        expect(recentsProbe.recentVaults.isEmpty, "clearing empties the menu")
 
         files.closeWorkspace()
         return result

@@ -21,22 +21,7 @@ struct ContentView: View {
                 if model.vaultRoot == nil {
                     WelcomeView()
                 } else if model.current == nil {
-                    // The offer belongs here above all: opening a folder that
-                    // has never been set up is exactly the moment there is no
-                    // note open yet, so hanging it only over the editor meant
-                    // it appeared everywhere except where it was needed.
-                    VStack(spacing: 0) {
-                        if model.shouldOfferAgentSetup {
-                            // The unified toolbar draws over the top of this
-                            // column, so a banner placed flush with it is
-                            // hidden behind the title. `EditorPane` reserves
-                            // the same height for the same reason.
-                            Color.clear.frame(height: windowTopChromeHeight)
-                            AgentSetupBanner()
-                        }
-                        EmptySelectionView()
-                            .frame(maxHeight: .infinity)
-                    }
+                    EmptySelectionView()
                 } else {
                     EditorPane(topChromeHeight: windowTopChromeHeight)
                 }
@@ -54,7 +39,7 @@ struct ContentView: View {
             // app puts it there. It used to sit in a row of its own below,
             // which cost a strip of height and left the toolbar looking empty.
             .navigationTitle(model.current?.name ?? "Heft")
-            .navigationSubtitle(model.windowSubtitle)
+            .navigationSubtitle(subtitle)
         }
         .inspector(isPresented: $model.isInspectorVisible) {
             BacklinksPanel()
@@ -77,9 +62,6 @@ struct ContentView: View {
         }
         .sheet(isPresented: $model.isInboxCapturePresented) {
             InboxCaptureView()
-        }
-        .sheet(item: $model.reviewing) { proposal in
-            ProposalReviewView(proposal: proposal).environmentObject(model)
         }
         .alert(
             "This Note Changed Outside Heft",
@@ -143,6 +125,20 @@ struct ContentView: View {
         .environment(\.openURL, OpenURLAction { url in
             model.handle(url: url) ? .handled : .systemAction
         })
+    }
+
+    /// Folder, or the note count when nothing is open, mirroring how Notes
+    /// captions its title.
+    private var subtitle: String {
+        guard let current = model.current else {
+            return model.vaultRoot == nil ? "" : "\(model.scopedNotes.count) notes · \(model.scopeName)"
+        }
+        let folder = current.folder
+        let where_ = folder.isEmpty ? "Vault root" : folder
+        var parts = [where_]
+        if !model.isInScope(current) { parts.append("Outside \(model.scopeName)") }
+        if model.isDirty { parts.append("Edited") }
+        return parts.joined(separator: " · ")
     }
 
     private func openAsNewVault(_ url: URL) {
@@ -337,28 +333,12 @@ struct EditorPane: View {
                 findBar
             }
 
-            if !model.proposalsForCurrentNote.isEmpty {
-                if !model.isFindPresented {
-                    Color.clear.frame(height: topChromeHeight)
-                }
-                ProposalBanner()
-            } else if model.shouldOfferAgentSetup {
-                // Below the proposals, never beside them: a vault with a
-                // proposal waiting is already set up, and two banners stacked
-                // over one note is noise.
-                if !model.isFindPresented {
-                    Color.clear.frame(height: topChromeHeight)
-                }
-                AgentSetupBanner()
-            }
-
             // One surface, always. Source and preview modes were removed once
             // live mode could render everything they could: keeping them meant
             // three editors to fix every bug in.
             LiveTextEditor(
                 text: $model.text,
                 generation: model.documentGeneration,
-                generationKeepsPosition: model.documentGenerationKeepsPosition,
                 findSelection: findSelection,
                 context: context,
                 onAttachment: handleAttachment,

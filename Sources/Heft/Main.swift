@@ -9,9 +9,6 @@ enum HeftMain {
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
 
-        // The agent verbs: propose, proposals, diff, drop, read, find.
-        if AgentCLI.run(arguments) { return }
-
         if arguments.first == "stats", arguments.count > 1 {
             runStats(vaultPath: arguments[1])
             return
@@ -61,63 +58,6 @@ enum HeftMain {
                 print(item.relativePath)
             }
             exit(0)
-        }
-        // `agent-setup <vault>` writes the vault's CLAUDE.md, so a coding
-        // agent started in that folder knows to propose rather than write.
-        // Without it the proposal verbs exist but nothing ever calls them.
-        if arguments.first == "agent-setup", arguments.count > 1 {
-            let root = URL(
-                fileURLWithPath: PathInput.normalize(arguments[1]) ?? arguments[1]
-            ).standardizedFileURL
-            var isFolder: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isFolder),
-                  isFolder.boolValue else {
-                FileHandle.standardError.write(Data("no such vault: \(arguments[1])\n".utf8))
-                exit(1)
-            }
-
-            // The path an agent should call is this binary, wherever it is
-            // installed, rather than a guess at /Applications.
-            let binary = Bundle.main.executablePath ?? CommandLine.arguments[0]
-            let target = root.appendingPathComponent("CLAUDE.md")
-            let existing = try? String(contentsOf: target, encoding: .utf8)
-            let merged = AgentGuide.merged(
-                into: existing, section: AgentGuide.section(binaryPath: binary)
-            )
-            do {
-                try merged.write(to: target, atomically: true, encoding: .utf8)
-                print("\(existing == nil ? "wrote" : "updated") \(target.path)")
-                exit(0)
-            } catch {
-                FileHandle.standardError.write(
-                    Data("could not write \(target.path): \(error.localizedDescription)\n".utf8)
-                )
-                exit(1)
-            }
-        }
-        // `open [path]` is what the `heft` shell command runs. It resolves the
-        // path and hands it to the *bundled* app as a URL rather than doing
-        // anything itself: arguments given to `open --args` are dropped unless
-        // the app is being launched fresh, and a running Heft is the usual
-        // case. Run directly from a shell, this process inherits the working
-        // directory, so a relative path — `heft .` above all — resolves
-        // against where it was typed.
-        if arguments.first == "open" {
-            let requested = arguments.count > 1 ? arguments[1] : "."
-            let expanded = PathInput.normalize(requested) ?? requested
-            let resolved = URL(
-                fileURLWithPath: expanded,
-                relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            ).standardizedFileURL
-
-            guard FileManager.default.fileExists(atPath: resolved.path) else {
-                FileHandle.standardError.write(
-                    Data("heft: no such file or folder: \(requested)\n".utf8)
-                )
-                exit(1)
-            }
-            guard let url = HeftURL.open(path: resolved.path) else { exit(1) }
-            exit(NSWorkspace.shared.open(url) ? 0 : 1)
         }
         HeftApp.main()
     }
@@ -184,7 +124,6 @@ enum HeftMain {
             case .image(let image): "image \(size(image.size))"
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
-                    + describeActiveCell(of: grid)
             case .properties(let card):
                 "properties \(card.rows.count) rows \(size(card.size))"
             case .embed(let embed):
@@ -252,19 +191,6 @@ enum HeftMain {
             print("  line \(line(offset)): \(fmt(frame.height)) / \(fmt(textHeight)) / \(fmt(lead)) / \(fmt(trail))")
             return true
         }
-    }
-
-    /// Which cell of a drawn table the caret is in, and where the editor would
-    /// paint the caret inside it. Reported here because it is the one part of
-    /// the table surface that has no source of its own to inspect: the buffer
-    /// still holds plain pipes whichever cell is active.
-    private static func describeActiveCell(of grid: TableGrid) -> String {
-        guard let active = grid.active,
-              let cell = grid.cell(row: active.row, column: active.column)
-        else { return "" }
-        let caret = grid.caretRect(in: cell, offset: cell.text.length)
-        return ", active cell r\(active.row)c\(active.column)"
-            + " source \(cell.source) caret at \(fmt(caret.minX)),\(fmt(caret.minY))"
     }
 
     private static func size(_ s: CGSize) -> String { "\(fmt(s.width))x\(fmt(s.height))" }

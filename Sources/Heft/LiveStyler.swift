@@ -144,15 +144,6 @@ enum LiveStyler {
         layout.revealableSpans = decorations
             .filter { !Reveal.revealsWithItsLine($0.style) }
             .map { $0.revealRange ?? $0.range }
-        // A table's cells count too. Moving from one column to the next stays
-        // on the same line, so the line test alone would miss it and the caret
-        // would keep drawing itself into the cell it had left.
-        layout.revealableSpans += decorations.flatMap { decoration -> [NSRange] in
-            guard case .table(let table) = decoration.style else { return [] }
-            return table.cellRanges.flatMap { $0 }.map {
-                NSRange(location: $0.location + decoration.range.location, length: $0.length)
-            }
-        }
 
         for decoration in decorations where writes(decoration.range) {
             sink.writes = true
@@ -182,8 +173,7 @@ enum LiveStyler {
             sink.writes = true
             widget(
                 decoration, in: sink, text: text, base: baseFont,
-                context: context, layout: &layout, contentWidth: contentWidth,
-                state: reveal.state(of: decoration)
+                context: context, layout: &layout, contentWidth: contentWidth
             )
         }
 
@@ -220,14 +210,6 @@ enum LiveStyler {
         for (start, widget) in previous.blocks {
             let start = moved(start)
             guard !rebuilt(start) else { continue }
-            // A grid knows where it is in the document, and an edit above it
-            // moves it. Carrying that over unchanged would leave clicks and
-            // carets in a table below an edit resolving against stale offsets.
-            if case .table(var grid) = widget {
-                grid.documentStart = start
-                layout.blocks[start] = .table(grid)
-                continue
-            }
             layout.blocks[start] = widget
         }
         for (start, items) in previous.inlineMath {
@@ -291,8 +273,7 @@ enum LiveStyler {
         base: NSFont,
         context: RenderContext,
         layout: inout LiveLayout,
-        contentWidth: CGFloat,
-        state: RevealState
+        contentWidth: CGFloat
     ) {
         let range = decoration.range
         guard range.location >= 0, NSMaxRange(range) <= storage.length else { return }
@@ -310,22 +291,11 @@ enum LiveStyler {
             layout.blocks[lineStart] = .properties(card)
 
         case .table(let table):
-            // The caret does not dissolve a table back into pipes: the grid is
-            // drawn either way and one cell shows its source instead.
-            var active: TableGrid.ActiveCell?
-            if case .cell(let row, let column) = state {
-                active = TableGrid.ActiveCell(row: row, column: column)
-            }
-            var grid = TableGrid.measure(
-                table, maxWidth: contentWidth, context: context,
-                fontSize: base.pointSize - 1, active: active
+            let grid = TableGrid.measure(
+                table, maxWidth: contentWidth, context: context, fontSize: base.pointSize - 1
             )
             guard grid.size.height > 0 else { return }
-            // Set after the measurement, which is cached: two identical tables
-            // in one note share a grid and differ only in where they sit.
-            grid.documentStart = range.location
-            grid.accent = context.resolved(context.accentColor)
-            hideWhole(range, in: storage, text: text, reserving: grid.contentSize.height)
+            hideWhole(range, in: storage, text: text, reserving: grid.size.height)
             layout.blocks[lineStart] = .table(grid)
 
         case .blockMath(let latex):
@@ -676,7 +646,7 @@ enum LiveStyler {
             // rendering exists to avoid.
             if drawsWidgets, !revealed {
                 let glyph: ListGlyph = switch kind {
-                case .bullet(let shape): .bullet(shape)
+                case .bullet: .bullet
                 case .task(let checked): .checkbox(checked, accent: context.accentColor)
                 case .ordered: .ordered(orderedLabel(marker))
                 }
