@@ -205,6 +205,31 @@ enum AppIntegrationCheck {
             "pressing Return inserts the incremented ordered marker"
         )
 
+        // A callout is filled one line at a time, each clipped to its own
+        // slice. A corner may only be round where the block actually ends, or
+        // interior lines draw their own roof and the card comes out notched.
+        let slice = CGRect(x: 0, y: 100, width: 300, height: 20)
+        let radius: CGFloat = 8
+        func grown(_ edge: QuoteEdge) -> CGRect {
+            HeftLayoutFragment.grownFill(slice, edge: edge, radius: radius)
+        }
+        expect(
+            grown(.first).minY == slice.minY && grown(.first).maxY > slice.maxY,
+            "the first line keeps its rounded top and runs straight off the bottom"
+        )
+        expect(
+            grown(.last).minY < slice.minY && grown(.last).maxY == slice.maxY,
+            "the last line keeps its rounded bottom and runs straight off the top"
+        )
+        expect(
+            grown(.middle).minY < slice.minY && grown(.middle).maxY > slice.maxY,
+            "a middle line runs straight off both ends, so it shows no corners"
+        )
+        expect(
+            grown(.first).width == slice.width && grown(.middle).width == slice.width,
+            "growing a slice never changes its width"
+        )
+
         // Return on an empty nested item steps out one level rather than
         // abandoning the list, so the levels above it survive.
         func returnOnEmptyItem(_ source: String) -> String {

@@ -934,6 +934,26 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     }
 
     /// Rounds only the corners this line actually owns.
+    /// The rounded rect to fill for one line of a multi-line quote or callout.
+    ///
+    /// Each line is filled separately, clipped to its own slice, so a corner
+    /// is only round where the block genuinely ends. The rect is therefore
+    /// pushed `radius` past every end the block continues through, putting
+    /// those corners outside the clip and leaving a straight edge to meet the
+    /// next line with.
+    static func grownFill(_ rect: CGRect, edge: QuoteEdge, radius: CGFloat) -> CGRect {
+        let opensAbove = edge != .first   // .first owns the top of the card
+        let opensBelow = edge != .last    // .last owns the bottom
+        return CGRect(
+            x: rect.minX,
+            y: opensAbove ? rect.minY - radius : rect.minY,
+            width: rect.width,
+            height: rect.height
+                + (opensAbove ? radius : 0)
+                + (opensBelow ? radius : 0)
+        )
+    }
+
     private func fill(_ rect: CGRect, edge: QuoteEdge, radius: CGFloat, in context: CGContext) {
         switch edge {
         case .only:
@@ -942,14 +962,13 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ))
             context.fillPath()
         case .first, .last, .middle:
-            // Grow past the open end so its corners fall outside the clip and
-            // the fill meets the neighbouring paragraph with a straight edge.
-            let grown = CGRect(
-                x: rect.minX,
-                y: edge == .last ? rect.minY - radius : rect.minY,
-                width: rect.width,
-                height: rect.height + (edge == .middle ? radius * 2 : radius)
-            )
+            // Grow past every *open* end, so those corners fall outside the
+            // clip and the fill meets the neighbouring paragraph with a
+            // straight edge. A middle line has two open ends and must grow at
+            // both: growing only downwards left its rounded top corners
+            // sitting on the clip's edge, so every interior line of a callout
+            // drew its own little roof and the card came out notched.
+            let grown = Self.grownFill(rect, edge: edge, radius: radius)
             context.saveGState()
             context.clip(to: rect)
             context.addPath(CGPath(

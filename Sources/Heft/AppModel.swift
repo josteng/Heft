@@ -1465,6 +1465,40 @@ final class AppModel: ObservableObject {
         status = folder.map { "Focused on \($0.relativePath)" } ?? "Showing the entire vault"
     }
 
+    /// True when the vault has no agent guidance yet, so the menu can say
+    /// whether this would create the file or refresh it.
+    var hasAgentGuide: Bool {
+        guard let vaultRoot else { return false }
+        let text = try? String(
+            contentsOf: vaultRoot.appendingPathComponent("CLAUDE.md"), encoding: .utf8
+        )
+        return text?.contains(AgentGuide.markerStart) == true
+    }
+
+    /// Writes the vault's `CLAUDE.md` so an agent started in that folder knows
+    /// to propose changes rather than write notes.
+    ///
+    /// Offered rather than done silently on open: this writes a file into
+    /// somebody's vault, and a vault is not ours to add things to unasked.
+    func setUpAgentAccess() {
+        guard let vaultRoot else { promptForVault(); return }
+        let target = vaultRoot.appendingPathComponent("CLAUDE.md")
+        let existing = try? String(contentsOf: target, encoding: .utf8)
+
+        let binary = Bundle.main.executablePath ?? "heft"
+        let merged = AgentGuide.merged(
+            into: existing, section: AgentGuide.section(binaryPath: binary)
+        )
+        do {
+            try merged.write(to: target, atomically: true, encoding: .utf8)
+            status = existing == nil
+                ? "Wrote CLAUDE.md: agents in this vault will propose changes"
+                : "Updated CLAUDE.md for agents"
+        } catch {
+            status = "Could not write CLAUDE.md: \(error.localizedDescription)"
+        }
+    }
+
     /// Asks for a path and goes wherever it points.
     ///
     /// The system's own Go to Folder sheet is not ours to preprocess, and it

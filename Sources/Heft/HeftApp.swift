@@ -155,6 +155,16 @@ struct HeftCommands: Commands {
             // cannot be given a shell-escaped path, which is the form one is
             // almost always copied in, so this is Heft's own way in.
             Button("Go to Path…") { model?.promptToGoToPath() }
+            // The proposal verbs are only reachable if something tells an
+            // agent they exist, and a vault of markdown says nothing. This
+            // writes that into the vault's CLAUDE.md, where a session started
+            // in the folder will read it.
+            Button(
+                model?.hasAgentGuide == true
+                    ? "Update Agent Access…"
+                    : "Set Up Agent Access…"
+            ) { model?.setUpAgentAccess() }
+                .disabled(model?.vaultRoot == nil)
         }
         CommandGroup(after: .textEditing) {
             Menu("Format") {

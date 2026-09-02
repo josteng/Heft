@@ -1182,6 +1182,49 @@ public enum SelfCheck {
             "an already-clean path is unchanged"
         )
 
+        // MARK: The agent guide written into a vault
+        let guide = AgentGuide.section(binaryPath: "/Applications/Heft.app/Contents/MacOS/Heft")
+        expectTrue(guide.contains("heft propose"), "the guide tells an agent how to propose")
+        expectTrue(
+            guide.contains("Do not use Write or Edit"),
+            "the guide tells an agent not to write notes directly"
+        )
+        expectTrue(
+            guide.contains("/Applications/Heft.app/Contents/MacOS/Heft"),
+            "the guide points at the installed binary"
+        )
+
+        // A fresh vault gets the section on its own.
+        let fresh = AgentGuide.merged(into: nil, section: guide)
+        expectTrue(fresh.contains(AgentGuide.markerStart), "a fresh CLAUDE.md carries the markers")
+
+        // Someone else's CLAUDE.md keeps every word of its own.
+        let mine = "# My vault\n\nPersonal conventions I care about.\n"
+        let appended = AgentGuide.merged(into: mine, section: guide)
+        expectTrue(
+            appended.contains("Personal conventions I care about."),
+            "an existing CLAUDE.md is not overwritten"
+        )
+        expectTrue(appended.contains("heft propose"), "the guide is appended to it")
+
+        // Re-running after an upgrade replaces the section rather than
+        // stacking a second copy, and still leaves the rest untouched.
+        let upgraded = AgentGuide.section(binaryPath: "/opt/heft/Heft")
+        let rerun = AgentGuide.merged(into: appended, section: upgraded)
+        expectTrue(
+            rerun.components(separatedBy: AgentGuide.markerStart).count == 2,
+            "re-running does not stack a second copy of the guide"
+        )
+        expectTrue(rerun.contains("/opt/heft/Heft"), "re-running refreshes the binary path")
+        expectTrue(
+            !rerun.contains("/Applications/Heft.app/Contents/MacOS/Heft"),
+            "the stale binary path is gone"
+        )
+        expectTrue(
+            rerun.contains("Personal conventions I care about."),
+            "re-running still leaves the rest of the file alone"
+        )
+
         // MARK: Nested bullet shapes
         expectTrue(BulletShape.forLevel(0) == .disc, "the outermost bullet is a filled dot")
         expectTrue(BulletShape.forLevel(1) == .circle, "one level in is a hollow ring")

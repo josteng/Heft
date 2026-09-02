@@ -38,7 +38,7 @@ enum TableSurfaceCheck {
 
         let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
         let editor = LiveTextEditor(
-            text: .constant(document), generation: 0, findSelection: nil,
+            text: .constant(document), generation: 0, generationKeepsPosition: false, findSelection: nil,
             context: context, onAttachment: { _ in nil }, onFollowLink: { _ in },
             onVimSearch: { _ in }
         )

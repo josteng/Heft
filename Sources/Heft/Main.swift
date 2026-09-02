@@ -62,6 +62,39 @@ enum HeftMain {
             }
             exit(0)
         }
+        // `agent-setup <vault>` writes the vault's CLAUDE.md, so a coding
+        // agent started in that folder knows to propose rather than write.
+        // Without it the proposal verbs exist but nothing ever calls them.
+        if arguments.first == "agent-setup", arguments.count > 1 {
+            let root = URL(
+                fileURLWithPath: PathInput.normalize(arguments[1]) ?? arguments[1]
+            ).standardizedFileURL
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isFolder),
+                  isFolder.boolValue else {
+                FileHandle.standardError.write(Data("no such vault: \(arguments[1])\n".utf8))
+                exit(1)
+            }
+
+            // The path an agent should call is this binary, wherever it is
+            // installed, rather than a guess at /Applications.
+            let binary = Bundle.main.executablePath ?? CommandLine.arguments[0]
+            let target = root.appendingPathComponent("CLAUDE.md")
+            let existing = try? String(contentsOf: target, encoding: .utf8)
+            let merged = AgentGuide.merged(
+                into: existing, section: AgentGuide.section(binaryPath: binary)
+            )
+            do {
+                try merged.write(to: target, atomically: true, encoding: .utf8)
+                print("\(existing == nil ? "wrote" : "updated") \(target.path)")
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(
+                    Data("could not write \(target.path): \(error.localizedDescription)\n".utf8)
+                )
+                exit(1)
+            }
+        }
         // `open [path]` is what the `heft` shell command runs. It resolves the
         // path and hands it to the *bundled* app as a URL rather than doing
         // anything itself: arguments given to `open --args` are dropped unless
