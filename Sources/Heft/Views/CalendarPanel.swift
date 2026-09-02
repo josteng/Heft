@@ -468,6 +468,18 @@ private struct DayCell: View {
         .onHover { isHovering = $0 }
         .help(MomentFormat.format(date, pattern: "dddd, MMMM Do YYYY"))
         .contextMenu { DayMenu(date: date, note: note, onCreate: action) }
+        // A day that has a note drags it out, the way its row in the file list
+        // would. An empty day has nothing to drag: creating a note by dragging
+        // one would be a surprise, and clicking already does that. The note may
+        // leave Heft but not be rearranged inside it, for the reason `DayMenu`
+        // gives for withholding Rename and Move to….
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 6)
+                .onChanged { _ in
+                    guard let note else { return }
+                    beginFileDrag(for: note.url, allowsInternalMove: false)
+                }
+        )
     }
 }
 
