@@ -1643,6 +1643,64 @@ public enum SelfCheck {
             "a caret on the marker shows its real source, like any block"
         )
 
+        // MARK: Inserting a table
+        let blank = TableEditing.blankTable(rows: 2, columns: 3, newlinesBefore: 0)
+        expectTrue(
+            blank.text.hasPrefix("|     |     |     |\n| --- | --- | --- |\n"),
+            "a new table is a header row and a delimiter row, cells aligned to the rule"
+        )
+        expectTrue(
+            blank.text.components(separatedBy: "\n").filter { !$0.isEmpty }.count == 4,
+            "a 2-row table is a header, a delimiter and two body rows"
+        )
+        expectTrue(
+            String(Array(blank.text)[blank.caretOffset]) == " ",
+            "the caret lands inside the first header cell"
+        )
+        // It has to parse as a table, which is the whole point of inserting it.
+        expectTrue(
+            LiveDecorator.decorations(in: blank.text).contains {
+                if case .table = $0.style { return true }
+                return false
+            },
+            "an inserted table is recognised as one"
+        )
+
+        // A table only begins a block at the start of a line.
+        expectTrue(
+            TableEditing.newlinesNeededForBlock(in: "" as NSString, at: 0) == 0,
+            "an empty note needs no lead"
+        )
+        expectTrue(
+            TableEditing.newlinesNeededForBlock(in: "text\n\n" as NSString, at: 6) == 0,
+            "a blank line already starts a block"
+        )
+        expectTrue(
+            TableEditing.newlinesNeededForBlock(in: "text\n" as NSString, at: 5) == 1,
+            "the start of a fresh line needs one newline to leave a gap"
+        )
+        expectTrue(
+            TableEditing.newlinesNeededForBlock(in: "some prose" as NSString, at: 10) == 2,
+            "mid-paragraph needs a blank line, or the table stays prose"
+        )
+        // The case that proves the rule matters.
+        let inline = TableEditing.blankTable(rows: 1, columns: 2, newlinesBefore: 0)
+        expectTrue(
+            !LiveDecorator.decorations(in: "some prose" + inline.text).contains {
+                if case .table = $0.style { return true }
+                return false
+            },
+            "a table typed onto the end of a paragraph is not a table"
+        )
+        let separated = TableEditing.blankTable(rows: 1, columns: 2, newlinesBefore: 2)
+        expectTrue(
+            LiveDecorator.decorations(in: "some prose" + separated.text).contains {
+                if case .table = $0.style { return true }
+                return false
+            },
+            "with the lead the rule asks for, it is"
+        )
+
         // MARK: Nested bullet shapes
         expectTrue(BulletShape.forLevel(0) == .disc, "the outermost bullet is a filled dot")
         expectTrue(BulletShape.forLevel(1) == .circle, "one level in is a hollow ring")

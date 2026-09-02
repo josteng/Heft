@@ -101,6 +101,14 @@ struct AppCommand: Identifiable {
             action: { $0.openDailyNote(for: Date()) }
         ),
         Self(
+            id: "insertTable",
+            title: "Insert table",
+            symbol: "tablecells",
+            searchTerms: "table grid insert add rows columns markdown",
+            enabled: { $0.current != nil },
+            action: { $0.insertTable() }
+        ),
+        Self(
             id: "dailyNoteSettings",
             title: "Daily note settings",
             symbol: "gearshape",

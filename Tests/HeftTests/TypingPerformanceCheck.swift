@@ -74,7 +74,7 @@ enum TypingPerformanceCheck {
         let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
         let editor = LiveTextEditor(
             text: .constant(document), documentIdentity: "bench.md", generation: 0,
-            generationKeepsPosition: false, findSelection: nil, context: context,
+            generationKeepsPosition: false, findSelection: nil, insertion: nil, context: context,
             onAttachment: { _ in nil }, onFollowLink: { _ in }, onVimSearch: { _ in }
         )
         let coordinator = LiveTextEditor.Coordinator(editor)

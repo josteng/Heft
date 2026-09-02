@@ -369,6 +369,7 @@ struct EditorPane: View {
                 generation: model.documentGeneration,
                 generationKeepsPosition: model.documentGenerationKeepsPosition,
                 findSelection: findSelection,
+                insertion: model.pendingInsertion,
                 context: context,
                 onAttachment: handleAttachment,
                 onFollowLink: { url in

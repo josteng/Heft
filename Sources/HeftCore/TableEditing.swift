@@ -122,6 +122,44 @@ public enum TableEditing {
     /// The cell after `cursor`, wrapping to the next row and growing the table
     /// by one row past the last cell, the way Tab does in every other editor
     /// with tables.
+    /// How many newlines a block needs before it at `offset`: none at the
+    /// start of an empty line, one to finish the current line, two to leave a
+    /// blank line after prose. A table only parses as one when it begins a
+    /// line, so one asked for mid-paragraph would otherwise stay prose.
+    public static func newlinesNeededForBlock(in text: NSString, at offset: Int) -> Int {
+        let caret = max(0, min(offset, text.length))
+        guard caret > 0 else { return 0 }
+        if caret >= 2, text.substring(with: NSRange(location: caret - 2, length: 2)) == "\n\n" {
+            return 0
+        }
+        if text.substring(with: NSRange(location: caret - 1, length: 1)) == "\n" { return 1 }
+        return 2
+    }
+
+    /// A blank table to start from, and where the caret goes inside it.
+    ///
+    /// Written in the canonical `| a | b |` form the column operations already
+    /// produce, so a table made this way and a table grown by adding a column
+    /// are the same shape. The caret lands in the first header cell, because
+    /// that is the cell the user is about to name.
+    ///
+    /// `newlinesBefore` keeps a table off the end of a line of prose: a table
+    /// only parses as one when it starts a line, and one typed after text
+    /// would silently stay text.
+    public static func blankTable(
+        rows: Int, columns: Int, newlinesBefore: Int
+    ) -> (text: String, caretOffset: Int) {
+        let columns = max(1, columns)
+        let rows = max(1, rows)
+        let lead = String(repeating: "\n", count: max(0, newlinesBefore))
+        let header = "| " + (0..<columns).map { _ in "   " }.joined(separator: " | ") + " |"
+        let divider = "| " + (0..<columns).map { _ in "---" }.joined(separator: " | ") + " |"
+        let body = (0..<rows).map { _ in header }.joined(separator: "\n")
+        let text = lead + header + "\n" + divider + "\n" + body + "\n"
+        // Just inside the first header cell, past "| ".
+        return (text, lead.count + 2)
+    }
+
     public static func nextCell(
         in table: TableLayout, from cursor: TableCursor, tableStart: Int
     ) -> Action? {

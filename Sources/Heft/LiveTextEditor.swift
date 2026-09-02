@@ -9,6 +9,16 @@ struct FindSelection: Equatable {
     let generation: Int
 }
 
+/// Text a command asked the editor to type at the caret.
+struct EditorInsertion: Equatable {
+    let text: String
+    let caretOffset: Int
+    /// Whether it has to start a line of its own. A table typed onto the end
+    /// of a paragraph is not a table.
+    let startsBlock: Bool
+    let generation: Int
+}
+
 /// The editing surface: one continuous TextKit 2 text view.
 ///
 /// Replaces the block-swapping editor. That design rendered each block as a
@@ -40,6 +50,7 @@ struct LiveTextEditor: NSViewRepresentable {
     /// meaningful and must survive.
     let generationKeepsPosition: Bool
     let findSelection: FindSelection?
+    let insertion: EditorInsertion?
     let context: RenderContext
     let onAttachment: (NSPasteboard) -> String?
     let onFollowLink: (URL) -> Void
@@ -130,6 +141,22 @@ struct LiveTextEditor: NSViewRepresentable {
         // binding only represents committed source. Comparing and replacing
         // them mid-composition discards the next dead-key character.
         guard !textView.hasMarkedText() else { return }
+
+        if let insertion,
+           nsContext.coordinator.lastInsertionGeneration != insertion.generation {
+            nsContext.coordinator.lastInsertionGeneration = insertion.generation
+            let lead = insertion.startsBlock
+                ? String(repeating: "\n", count: TableEditing.newlinesNeededForBlock(
+                    in: textView.string as NSString, at: textView.selectedRange().location
+                ))
+                : ""
+            let typed = lead + insertion.text
+            textView.insertText(typed, replacementRange: textView.selectedRange())
+            let caret = textView.selectedRange().location
+                - (typed as NSString).length + lead.count + insertion.caretOffset
+            textView.setSelectedRange(NSRange(location: max(0, caret), length: 0))
+            nsContext.coordinator.restyle(textView)
+        }
 
         if let findSelection,
            nsContext.coordinator.lastFindGeneration != findSelection.generation {
@@ -249,6 +276,7 @@ struct LiveTextEditor: NSViewRepresentable {
         var layout = LiveLayout()
         var indexFingerprint = ""
         var lastFindGeneration = -1
+        var lastInsertionGeneration = -1
         private var reveal = Reveal.none
         private var revealedSpans = ""
         private var needsRevealRestyle = false

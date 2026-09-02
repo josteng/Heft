@@ -177,6 +177,10 @@ final class AppModel: ObservableObject {
     /// Line the editor should jump to once the note is open, 1-based. Consumed
     /// by the editor, which clears it.
     @Published var pendingLineReveal: Int?
+    /// Text a command asked to be typed at the caret. Stamped with a
+    /// generation so the editor performs it exactly once, the way a find
+    /// selection is applied.
+    @Published private(set) var pendingInsertion: EditorInsertion?
 
     var recentNotes: [NoteRef] {
         (session?.recentPaths ?? [])
@@ -1219,6 +1223,27 @@ final class AppModel: ObservableObject {
         } else {
             isInboxCapturePresented = true
         }
+    }
+
+    /// Types `text` at the caret, putting the caret `caretOffset` into it.
+    ///
+    /// Goes through the editor rather than the buffer so it joins the same
+    /// undo, autosave and styling path as anything typed by hand.
+    func insertAtCaret(_ text: String, caretOffset: Int) {
+        pendingInsertion = EditorInsertion(
+            text: text, caretOffset: caretOffset, startsBlock: false,
+            generation: (pendingInsertion?.generation ?? 0) + 1
+        )
+    }
+
+    /// Types a blank table at the caret. How many newlines it needs in front
+    /// of it depends on where the caret is, which only the editor knows.
+    func insertTable(rows: Int = 2, columns: Int = 2) {
+        let table = TableEditing.blankTable(rows: rows, columns: columns, newlinesBefore: 0)
+        pendingInsertion = EditorInsertion(
+            text: table.text, caretOffset: table.caretOffset, startsBlock: true,
+            generation: (pendingInsertion?.generation ?? 0) + 1
+        )
     }
 
     func commandPaletteDidDismiss() {
