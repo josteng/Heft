@@ -59,6 +59,30 @@ enum HeftMain {
             }
             exit(0)
         }
+        // `open [path]` is what the `heft` shell command runs. It resolves the
+        // path and hands it to the *bundled* app as a URL rather than doing
+        // anything itself: arguments given to `open --args` are dropped unless
+        // the app is being launched fresh, and a running Heft is the usual
+        // case. Run directly from a shell, this process inherits the working
+        // directory, so a relative path — `heft .` above all — resolves
+        // against where it was typed.
+        if arguments.first == "open" {
+            let requested = arguments.count > 1 ? arguments[1] : "."
+            let expanded = PathInput.normalize(requested) ?? requested
+            let resolved = URL(
+                fileURLWithPath: expanded,
+                relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            ).standardizedFileURL
+
+            guard FileManager.default.fileExists(atPath: resolved.path) else {
+                FileHandle.standardError.write(
+                    Data("heft: no such file or folder: \(requested)\n".utf8)
+                )
+                exit(1)
+            }
+            guard let url = HeftURL.open(path: resolved.path) else { exit(1) }
+            exit(NSWorkspace.shared.open(url) ? 0 : 1)
+        }
         HeftApp.main()
     }
 
@@ -124,7 +148,6 @@ enum HeftMain {
             case .image(let image): "image \(size(image.size))"
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
-                    + describeActiveCell(of: grid)
             case .properties(let card):
                 "properties \(card.rows.count) rows \(size(card.size))"
             case .embed(let embed):
@@ -192,19 +215,6 @@ enum HeftMain {
             print("  line \(line(offset)): \(fmt(frame.height)) / \(fmt(textHeight)) / \(fmt(lead)) / \(fmt(trail))")
             return true
         }
-    }
-
-    /// Which cell of a drawn table the caret is in, and where the editor would
-    /// paint the caret inside it. Reported here because it is the one part of
-    /// the table surface that has no source of its own to inspect: the buffer
-    /// still holds plain pipes whichever cell is active.
-    private static func describeActiveCell(of grid: TableGrid) -> String {
-        guard let active = grid.active,
-              let cell = grid.cell(row: active.row, column: active.column)
-        else { return "" }
-        let caret = grid.caretRect(in: cell, offset: cell.text.length)
-        return ", active cell r\(active.row)c\(active.column)"
-            + " source \(cell.source) caret at \(fmt(caret.minX)),\(fmt(caret.minY))"
     }
 
     private static func size(_ s: CGSize) -> String { "\(fmt(s.width))x\(fmt(s.height))" }

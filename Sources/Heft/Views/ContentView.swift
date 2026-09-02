@@ -39,7 +39,7 @@ struct ContentView: View {
             // app puts it there. It used to sit in a row of its own below,
             // which cost a strip of height and left the toolbar looking empty.
             .navigationTitle(model.current?.name ?? "Heft")
-            .navigationSubtitle(subtitle)
+            .navigationSubtitle(model.windowSubtitle)
         }
         .inspector(isPresented: $model.isInspectorVisible) {
             BacklinksPanel()
@@ -125,20 +125,6 @@ struct ContentView: View {
         .environment(\.openURL, OpenURLAction { url in
             model.handle(url: url) ? .handled : .systemAction
         })
-    }
-
-    /// Folder, or the note count when nothing is open, mirroring how Notes
-    /// captions its title.
-    private var subtitle: String {
-        guard let current = model.current else {
-            return model.vaultRoot == nil ? "" : "\(model.scopedNotes.count) notes · \(model.scopeName)"
-        }
-        let folder = current.folder
-        let where_ = folder.isEmpty ? "Vault root" : folder
-        var parts = [where_]
-        if !model.isInScope(current) { parts.append("Outside \(model.scopeName)") }
-        if model.isDirty { parts.append("Edited") }
-        return parts.joined(separator: " · ")
     }
 
     private func openAsNewVault(_ url: URL) {

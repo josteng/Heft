@@ -1123,6 +1123,159 @@ public enum SelfCheck {
             expectTrue(false, "arrow substitution produces an edit")
         }
 
+        // MARK: Pasted paths
+        //
+        // The escaped form is what Finder and a terminal hand over, and it is
+        // the one that used to fail: the backslashes are shell syntax, not
+        // part of any folder's name.
+        let home = "/Users/tester"
+        func path(_ raw: String) -> String {
+            PathInput.normalize(raw, home: home) ?? "<nil>"
+        }
+        let vault = "/Users/tester/Library/Mobile Documents/iCloud~md~obsidian/Documents"
+
+        expect(
+            path("/Users/tester/Library/Mobile\\ Documents/iCloud\\~md\\~obsidian/Documents"),
+            vault,
+            "a shell-escaped path loses its escapes"
+        )
+        expect(
+            path("\(vault)/PersonalVault/MSc\\ Thesis/Meetings/2026-07-30\\ Questions.md"),
+            "\(vault)/PersonalVault/MSc Thesis/Meetings/2026-07-30 Questions.md",
+            "an escaped note path resolves"
+        )
+        // A tilde inside a name is an ordinary character; only a leading one
+        // is the home directory. An Obsidian vault path contains both.
+        expect(
+            path("~/Library/Mobile\\ Documents/iCloud~md~obsidian"),
+            "/Users/tester/Library/Mobile Documents/iCloud~md~obsidian",
+            "a leading tilde expands and an inner one survives"
+        )
+        expect(path("~"), home, "a lone tilde is the home directory")
+        expect(
+            path("\"\(vault)/MSc Thesis\""),
+            "\(vault)/MSc Thesis",
+            "a quoted path loses its quotes"
+        )
+        expect(
+            path("'\(vault)/MSc Thesis'"),
+            "\(vault)/MSc Thesis",
+            "a single-quoted path loses its quotes"
+        )
+        expect(
+            path("file:///Users/tester/Notes/A%20Note.md"),
+            "/Users/tester/Notes/A Note.md",
+            "a file URL is decoded rather than unescaped"
+        )
+        expect(
+            path("\(vault)/MSc Thesis/"),
+            "\(vault)/MSc Thesis",
+            "a trailing separator is dropped"
+        )
+        expect(path("  /tmp/notes  "), "/tmp/notes", "surrounding whitespace is ignored")
+        expect(path("/"), "/", "the root path survives the trailing-slash rule")
+        expectTrue(PathInput.normalize("   ", home: home) == nil, "blank input resolves to nothing")
+        // Nothing above may damage a path that was already correct.
+        expect(
+            path("\(vault)/PersonalVault/MSc Thesis"),
+            "\(vault)/PersonalVault/MSc Thesis",
+            "an already-clean path is unchanged"
+        )
+
+        // MARK: Recent vaults
+        let vaultA = "/Users/tester/Vaults/PersonalVault"
+        let vaultB = "/Users/tester/Sandbox/PersonalVault"
+        let vaultC = "/Users/tester/Vaults/Scratch"
+
+        expect(
+            RecentVaults.recording(vaultA, in: []).joined(separator: "|"),
+            vaultA,
+            "the first vault opened starts the list"
+        )
+        expect(
+            RecentVaults.recording(vaultB, in: [vaultA]).joined(separator: "|"),
+            "\(vaultB)|\(vaultA)",
+            "a newly opened vault goes to the front"
+        )
+        // Switching back and forth is the whole point: reopening must promote
+        // rather than append, or the pair never settles at the top.
+        expect(
+            RecentVaults.recording(vaultA, in: [vaultB, vaultA, vaultC]).joined(separator: "|"),
+            "\(vaultA)|\(vaultB)|\(vaultC)",
+            "reopening a vault promotes it instead of duplicating it"
+        )
+        expectTrue(
+            RecentVaults.recording("/x", in: (1...RecentVaults.limit).map { "/v\($0)" }).count
+                == RecentVaults.limit,
+            "the list is capped"
+        )
+        expect(
+            RecentVaults.recording("/x", in: (1...RecentVaults.limit).map { "/v\($0)" }).last ?? "",
+            "/v\(RecentVaults.limit - 1)",
+            "the cap drops the least recent, not the most"
+        )
+
+        // A test copy sitting beside the real vault is the case that breaks a
+        // menu of bare folder names.
+        expect(
+            RecentVaults.labels(for: [vaultA, vaultB]).joined(separator: "|"),
+            "PersonalVault — Vaults|PersonalVault — Sandbox",
+            "vaults sharing a name are told apart by their parent folder"
+        )
+        expect(
+            RecentVaults.labels(for: [vaultA, vaultC]).joined(separator: "|"),
+            "PersonalVault|Scratch",
+            "distinct names stay short"
+        )
+
+        // MARK: heft:// URLs
+        //
+        // The path that matters is the awkward one: a vault under "Mobile
+        // Documents" carries a space, which without encoding produces a URL
+        // that does not parse at all.
+        let spacedVault = "/Users/tester/Library/Mobile Documents/PersonalVault"
+        if let opened = HeftURL.open(path: spacedVault) {
+            expect(opened.scheme ?? "", "heft", "an open URL uses the heft scheme")
+            expect(opened.host ?? "", "open", "an open URL is addressed to the open host")
+            expectTrue(
+                !opened.absoluteString.contains(" "),
+                "a path with a space is percent-encoded"
+            )
+            expect(
+                HeftURL.openedPath(in: opened) ?? "<nil>",
+                spacedVault,
+                "a path with a space survives the round trip"
+            )
+        } else {
+            expectTrue(false, "an open URL can be built for a path with a space")
+        }
+
+        // The internal link scheme must not be mistaken for a command.
+        if let follow = InlineText_heftURLForTesting(target: "Some Note") {
+            expectTrue(
+                HeftURL.openedPath(in: follow) == nil,
+                "a link-following URL is not read as an open command"
+            )
+        }
+        expectTrue(
+            HeftURL.openedPath(in: URL(string: "https://example.com?path=/tmp")!) == nil,
+            "another scheme is not read as an open command"
+        )
+        expectTrue(
+            HeftURL.openedPath(in: URL(string: "heft://open")!) == nil,
+            "an open URL without a path asks for nothing"
+        )
+
         return r
+    }
+
+    /// Mirrors `InlineText.heftURL`, which lives in the app target and so
+    /// cannot be reached from a HeftCore check.
+    private static func InlineText_heftURLForTesting(target: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "heft"
+        components.host = "follow"
+        components.queryItems = [URLQueryItem(name: "target", value: target)]
+        return components.url
     }
 }

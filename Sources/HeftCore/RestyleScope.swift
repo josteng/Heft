@@ -143,7 +143,7 @@ public enum RestyleScope {
                     dirty.append(after.range)
                     continue
                 }
-                if old.reveal.state(of: before) != new.reveal.state(of: after) {
+                if old.reveal.reveals(before) != new.reveal.reveals(after) {
                     dirty.append(after.range)
                 }
             }
@@ -161,13 +161,13 @@ public enum RestyleScope {
         // dirty on the spot.
         struct Entry {
             let decoration: MarkdownDecoration
-            let revealed: RevealState
+            let revealed: Bool
             var used = false
         }
         var carried: [Int: [Entry]] = [:]
         for decoration in old.decorations {
             let range = decoration.range
-            let revealed = old.reveal.state(of: decoration)
+            let revealed = old.reveal.reveals(decoration)
             if NSMaxRange(range) <= edit.previous.location {
                 carried[range.location, default: []].append(
                     Entry(decoration: decoration, revealed: revealed)
@@ -207,7 +207,7 @@ public enum RestyleScope {
             carried[range.location] = entries
             // Same construct, but the caret moved into or out of it, so its
             // markup has to collapse or come back.
-            if entries[index].revealed != new.reveal.state(of: decoration) {
+            if entries[index].revealed != new.reveal.reveals(decoration) {
                 dirty.append(range)
             }
         }

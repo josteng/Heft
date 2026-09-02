@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "srgb:0.353,0.325,0.855,1.0",
-      "srgb:0.451,0.239,0.702,1.0"
+      "srgb:0.992,0.988,0.976,1.0",
+      "srgb:0.957,0.945,0.929,1.0"
     ]
   },
   "fill-specializations" : [
@@ -10,8 +10,8 @@
       "appearance" : "dark",
       "value" : {
         "linear-gradient" : [
-          "srgb:0.192,0.169,0.451,1.0",
-          "srgb:0.243,0.122,0.376,1.0"
+          "srgb:0.125,0.122,0.137,1.0",
+          "srgb:0.078,0.075,0.086,1.0"
         ]
       }
     }
@@ -20,12 +20,12 @@
     {
       "layers" : [
         {
-          "image-name" : "Spine.svg",
-          "name" : "Spine"
+          "image-name" : "Lines.svg",
+          "name" : "Lines"
         },
         {
-          "image-name" : "Page.svg",
-          "name" : "Page"
+          "image-name" : "Spine.svg",
+          "name" : "Spine"
         }
       ],
       "shadow" : {

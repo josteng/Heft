@@ -80,50 +80,14 @@ public struct MarkdownDecoration: Sendable, Equatable {
 /// Cells stay as markdown source: the editor runs the decorator over each one
 /// again when it draws, so `**bold**` and `[[links]]` inside a cell get the
 /// same treatment they do in prose.
-///
-/// Every cell also carries where it came from. That is what lets the caret sit
-/// *inside* a drawn table rather than dissolving it back into pipes: the
-/// editor maps an insertion point to a cell, draws that one cell as source,
-/// and leaves the rest of the grid rendered.
 public struct TableLayout: Sendable, Hashable {
     /// Row 0 is the header.
     public let rows: [[String]]
     public let alignments: [MDColumnAlignment]
-    /// The same cells as they are written in the file, with `\|` left escaped.
-    /// `rows` unescapes for display, which changes the length; this does not,
-    /// so `rawRows[r][c]` is exactly the text `cellRanges[r][c]` covers and a
-    /// caret offset in one is an offset in the other.
-    public let rawRows: [[String]]
-    /// Source range of each cell's trimmed content, relative to the table's
-    /// own start. Parallel to `rows`.
-    public let cellRanges: [[NSRange]]
-    /// Each content row's line, terminator excluded, relative to the table's
-    /// start. Parallel to `rows`.
-    public let rowRanges: [NSRange]
-    /// The `---` line, relative to the table's start. It has no row of its own
-    /// because it holds no content, so a caret landing on it is the one place
-    /// the whole table falls back to plain source.
-    public let delimiterRange: NSRange
-    /// Length of the source the table was parsed from, so an offset past the
-    /// last cell can still be clamped into one.
-    public let sourceLength: Int
 
-    public init(
-        rows: [[String]],
-        alignments: [MDColumnAlignment],
-        rawRows: [[String]] = [],
-        cellRanges: [[NSRange]] = [],
-        rowRanges: [NSRange] = [],
-        delimiterRange: NSRange = NSRange(location: NSNotFound, length: 0),
-        sourceLength: Int = 0
-    ) {
+    public init(rows: [[String]], alignments: [MDColumnAlignment]) {
         self.rows = rows
         self.alignments = alignments
-        self.rawRows = rawRows.isEmpty ? rows : rawRows
-        self.cellRanges = cellRanges
-        self.rowRanges = rowRanges
-        self.delimiterRange = delimiterRange
-        self.sourceLength = sourceLength
     }
 
     public var columnCount: Int { rows.map(\.count).max() ?? 0 }
@@ -192,18 +156,6 @@ public enum ListMarkerKind: Sendable, Equatable {
 /// A heading's `#` comes back as soon as the caret is anywhere on its line; a
 /// `**bold**` pair comes back only when the caret is inside *that* span, so the
 /// rest of the sentence stays rendered.
-/// What one reveal pass decided about a single construct.
-///
-/// `cell` exists because a table is never wholly revealed while it is being
-/// edited: the grid stays drawn and one cell shows its markdown source. The
-/// restyle diff compares these values, so moving the caret from one cell to
-/// the next is a change even though both are "not revealed".
-public enum RevealState: Equatable, Sendable {
-    case hidden
-    case revealed
-    case cell(row: Int, column: Int)
-}
-
 public struct Reveal: Equatable, Sendable {
     public var line: NSRange
     public var selection: NSRange
@@ -225,38 +177,11 @@ public struct Reveal: Equatable, Sendable {
     }
 
     public func reveals(_ decoration: MarkdownDecoration) -> Bool {
-        state(of: decoration) == .revealed
-    }
-
-    /// How `decoration` is styled under this reveal.
-    ///
-    /// Two states for everything except a table, which has a third: the grid
-    /// is drawn whether or not the caret is inside it, and only which *cell*
-    /// shows its source changes. That is what stops clicking a table from
-    /// dissolving the whole thing into pipes, and it is why the restyle diff
-    /// compares this rather than a bare "is it revealed".
-    public func state(of decoration: MarkdownDecoration) -> RevealState {
-        if case .table(let table) = decoration.style {
-            guard touchesLine(decoration.range) else { return .hidden }
-            guard let cursor = table.cursor(
-                for: selection, tableStart: decoration.range.location
-            ) else {
-                // The delimiter row, or a selection spanning cells: there is no
-                // one cell to edit, so fall back to plain source.
-                return .revealed
-            }
-            return .cell(row: cursor.row, column: cursor.column)
-        }
         if Self.revealsWithItsLine(decoration.style) {
-            return touchesLine(decoration.range) ? .revealed : .hidden
+            guard line.location != NSNotFound else { return false }
+            return NSIntersectionRange(decoration.range, line).length > 0
         }
         return Self.touches(decoration.revealRange ?? decoration.range, selection)
-            ? .revealed : .hidden
-    }
-
-    private func touchesLine(_ range: NSRange) -> Bool {
-        guard line.location != NSNotFound else { return false }
-        return NSIntersectionRange(range, line).length > 0
     }
 
     /// True for markup belonging to the line as a whole, so that putting the
@@ -482,147 +407,55 @@ public enum LiveDecorator {
 
     /// Splits a matched table into cells. Returns nil when the delimiter row
     /// does not line up, which means it was not a table after all.
-    ///
-    /// Everything is measured in UTF-16 offsets from the start of `source`,
-    /// because that is what the editor has to work with: a decoration range in
-    /// the document, plus a caret somewhere inside it.
     static func parseTable(_ source: String) -> TableLayout? {
-        let text = source as NSString
-        let lines = contentLines(of: text)
+        let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0) }
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         guard lines.count >= 2 else { return nil }
 
-        let delimiterCells = splitRow(text, lines[1])
+        let delimiterCells = splitRow(lines[1])
         guard !delimiterCells.isEmpty,
-              delimiterCells.allSatisfy({
-                  $0.text.range(of: #"^:?-+:?$"#, options: .regularExpression) != nil
-              })
+              delimiterCells.allSatisfy({ $0.range(of: #"^:?-+:?$"#, options: .regularExpression) != nil })
         else { return nil }
 
         let alignments: [MDColumnAlignment] = delimiterCells.map { cell in
-            switch (cell.text.hasPrefix(":"), cell.text.hasSuffix(":")) {
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
             case (true, true): .center
             case (false, true): .trailing
             default: .leading
             }
         }
 
-        let contentRows = [lines[0]] + lines.dropFirst(2)
-        let split = contentRows.map { splitRow(text, $0) }
-        return TableLayout(
-            rows: split.map { $0.map { unescapePipes($0.text) } },
-            alignments: alignments,
-            rawRows: split.map { $0.map(\.text) },
-            cellRanges: split.map { $0.map(\.range) },
-            rowRanges: contentRows,
-            delimiterRange: lines[1],
-            sourceLength: text.length
-        )
+        var rows = [splitRow(lines[0])]
+        rows.append(contentsOf: lines.dropFirst(2).map(splitRow))
+        return TableLayout(rows: rows, alignments: alignments)
     }
 
-    /// The non-blank lines of `text`, terminators excluded.
-    private static func contentLines(of text: NSString) -> [NSRange] {
-        var result: [NSRange] = []
-        var location = 0
-        while location < text.length {
-            let line = text.lineRange(for: NSRange(location: location, length: 0))
-            var content = line
-            while content.length > 0 {
-                let character = text.character(at: NSMaxRange(content) - 1)
-                guard character == 10 || character == 13 else { break }
-                content.length -= 1
-            }
-            if !text.substring(with: content).trimmingCharacters(in: .whitespaces).isEmpty {
-                result.append(content)
-            }
-            let next = NSMaxRange(line)
-            guard next > location else { break }
-            location = next
-        }
-        return result
-    }
-
-    /// `| a | b |` to `["a", "b"]`, each with the range its text occupies.
-    ///
-    /// Obsidian writes `\|` for a literal pipe inside a cell, so that escape
-    /// has to survive the split: an escaped pipe is not a cell boundary. The
-    /// text keeps its backslash here, because unescaping changes the length
-    /// and the range has to stay a description of what is in the file.
-    static func splitRow(_ text: NSString, _ line: NSRange) -> [(text: String, range: NSRange)] {
-        var boundaries: [Int] = []
+    /// `| a | b |` to `["a", "b"]`. Obsidian writes `\|` for a literal pipe
+    /// inside a cell, so that escape must survive the split.
+    private static func splitRow(_ line: String) -> [String] {
+        var cells: [String] = []
+        var current = ""
         var escaped = false
-        var index = line.location
-        while index < NSMaxRange(line) {
-            let character = text.character(at: index)
+        for character in line.trimmingCharacters(in: .whitespaces) {
             if escaped {
-                escaped = false
-            } else if character == 92 {
-                escaped = true
-            } else if character == 124 {
-                boundaries.append(index)
-            }
-            index += 1
-        }
-
-        var spans: [NSRange] = []
-        var cursor = line.location
-        for pipe in boundaries {
-            spans.append(NSRange(location: cursor, length: pipe - cursor))
-            cursor = pipe + 1
-        }
-        spans.append(NSRange(location: cursor, length: NSMaxRange(line) - cursor))
-
-        func isBlank(_ range: NSRange) -> Bool {
-            text.substring(with: range).trimmingCharacters(in: .whitespaces).isEmpty
-        }
-        // A well-formed row is bracketed by pipes, which leaves an empty span
-        // at each end.
-        if let first = spans.first, isBlank(first) { spans.removeFirst() }
-        if spans.count > 1, let last = spans.last, isBlank(last) { spans.removeLast() }
-
-        return spans.map { span in
-            let trimmed = trimming(text, span)
-            return (text.substring(with: trimmed), trimmed)
-        }
-    }
-
-    /// `span` with its surrounding spaces and tabs removed. An all-blank span
-    /// collapses onto the position just inside its leading pad, which is where
-    /// typing into an empty cell should land: `| x |`, not `|x  |`.
-    private static func trimming(_ text: NSString, _ span: NSRange) -> NSRange {
-        var start = span.location
-        var end = NSMaxRange(span)
-        while start < end {
-            let character = text.character(at: start)
-            guard character == 32 || character == 9 else { break }
-            start += 1
-        }
-        while end > start {
-            let character = text.character(at: end - 1)
-            guard character == 32 || character == 9 else { break }
-            end -= 1
-        }
-        if start == end, span.length > 0 {
-            return NSRange(location: min(span.location + 1, NSMaxRange(span)), length: 0)
-        }
-        return NSRange(location: start, length: end - start)
-    }
-
-    private static func unescapePipes(_ cell: String) -> String {
-        guard cell.contains("\\") else { return cell }
-        var result = ""
-        var escaped = false
-        for character in cell {
-            if escaped {
-                result.append(character == "|" ? "|" : character)
+                current.append(character == "|" ? "|" : character)
                 escaped = false
             } else if character == "\\" {
                 escaped = true
+            } else if character == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
             } else {
-                result.append(character)
+                current.append(character)
             }
         }
-        if escaped { result.append("\\") }
-        return result
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        // A well-formed row is bracketed by pipes, which yields an empty cell
+        // at each end.
+        if cells.first?.isEmpty == true { cells.removeFirst() }
+        if cells.last?.isEmpty == true { cells.removeLast() }
+        return cells
     }
 
     /// True when nothing but whitespace shares the construct's first and last lines.

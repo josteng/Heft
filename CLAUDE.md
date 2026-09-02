@@ -63,40 +63,6 @@ Four files carry it:
 - `LiveStyler`: turns decorations into attributes, and decides which widgets to draw.
 - `LiveWidgets`: measures tables and draws every widget.
 
-### Tables are edited in place
-
-A table is the one construct with a third reveal state. Everything else is
-either rendered or shown as source; a table stays a drawn grid *while the caret
-is in it*, and only the one cell being typed into shows its markdown. So
-`Reveal.state(of:)` returns `RevealState` — `.hidden`, `.revealed`, or
-`.cell(row:column:)` — and `RestyleScope` diffs that rather than a bare
-"is it revealed", which is what makes moving between two cells a restyle.
-
-`TableLayout` therefore carries where every cell came from: `cellRanges[r][c]`
-is exactly the span of the file that `rawRows[r][c]` was read from (`rows`
-unescapes `\|` for display, which changes the length, so the raw form is kept
-alongside). `TableLayout.cursor(for:tableStart:)` turns a document selection
-into a cell and an offset inside it, and returns nil for the delimiter row and
-for a selection spanning cells — both of which fall back to plain source, so
-the `---` row is the deliberate way to edit a table as text.
-
-The caret inside a cell cannot be TextKit's. The grid bears no relation to the
-lines its source occupies — a four-row table is one 150pt paragraph followed by
-three hairlines — so TextKit puts the insertion point at the table's left edge
-whichever cell is active. `TableCaretOverlay` (a subview, like the Vim block
-cursor) draws it instead, positioned from the measured grid, with the native
-insertion point switched to `.clear` while it is up. For the same reason clicks
-inside a table are hit-tested against the grid in `mouseDown` and never reach
-`super`, including drag-selection, which runs its own tracking loop confined to
-the cell it started in.
-
-`TableEditing` in HeftCore holds the structural edits — rows and columns in and
-out, and the cell walk Tab, Shift-Tab, Return and the arrow keys perform. Pure,
-like `MarkdownEditing`: a replacement range and where the selection ends up.
-Row operations splice a single line and leave the rest of the source untouched;
-column operations rewrite the table into canonical `| a | b |` form, because
-hand-aligned padding no longer lines up once a column has been added anyway.
-
 ### Restyling only what changed
 
 A keystroke used to re-decorate, re-attribute and re-lay out the whole note —
@@ -222,32 +188,6 @@ answer for one position.
   therefore copies. Symptom when it does not: the diff compares the document
   against itself, finds nothing changed, and the surface stops restyling
   entirely.
-- **`NSLayoutManager` does not retain its `NSTextStorage`.** Laying a table
-  cell out on the side to find a caret position, and dropping the storage on
-  the same line (`let (manager, container, _) = typeset(cell)` — `_` keeps
-  nothing), does not crash. It quietly answers 0 for every position, which
-  reads as a caret pinned to the left edge of the cell and a selection with no
-  rectangles at all. `TableGrid.typeset` takes a closure and wraps the body in
-  `withExtendedLifetime` so the lifetime cannot be got wrong.
-- **`enumerateEnclosingRects` wants `{NSNotFound, 0}` for
-  `withinSelectedGlyphRange`** when you just want the boxes a range covers.
-  Passing the same range twice asks for its intersection with a selection the
-  layout manager does not have, and comes back empty every time.
-- **A subview of an `NSTextView` composites over the text the view drew**, so a
-  selection highlight filled in an overlay covers the glyphs it is meant to sit
-  behind. `TableCaretOverlay` paints the active cell's string again on top of
-  its own fill; the layout is identical, so the second pass lands exactly where
-  the first did.
-- **The space the table `+` strips occupy is reserved whether or not they are
-  drawn.** They only appear while the caret is in the table, and reserving
-  their height on demand would shove the rest of the note down by 17pt on every
-  click into a table and back up on every click out.
-- **Showing a cell's markers makes its text longer**, so the row can wrap and
-  grow, which moves everything below it in the document. Where the table is
-  narrower than the text column, `TableGrid.compute` spends the spare width on
-  the active column instead — no other column changes, so nothing outside the
-  table moves. Column widths are always measured from the *rendered* text, so
-  entering and leaving a cell never resizes a column on its own.
 - **`String.range(of:options:.regularExpression)` builds a fresh
   `NSRegularExpression` every call.** Fine once, ruinous per line: quote-marker
   detection alone was most of the cost of decorating a long note. The
@@ -328,11 +268,6 @@ answer for one position.
 - Lists and headings inside a `>` block are not detected: the block matchers are
   anchored to the start of the line, so `> - item` is quoted text, not a list.
 - Callout folding (`[!note]-`) parses and hides the marker but does not fold.
-- A table selection cannot span two cells: dragging is confined to the cell it
-  began in, and a selection made any other way (Select All, a find match)
-  drops the table back to plain source rather than highlighting across pipes.
-- Column alignment cannot be changed from the grid; edit the `---` row, which
-  is what a caret on it shows the table as source for.
 - Renaming a *folder* does not repoint path-shaped links into it; renaming a
   note does.
 - Native tabbing is not customized; workspace windows are independent windows.
