@@ -271,8 +271,10 @@ answer for one position.
 - Renaming a *folder* does not repoint path-shaped links into it; renaming a
   note does.
 - Native tabbing is not customized; workspace windows are independent windows.
-- Deferred: Vim editing (the plan is embedding real Neovim via VimR's `NvimView`,
-  not reimplementing modal editing), graph view, plugins, settings UI.
+- Vim mode is experimental. Ex commands, named and system registers, mappings,
+  macros, marks and jump lists, blockwise put, and `H M L` are not implemented;
+  `Docs/VimMode.md` tracks the full command surface.
+- Deferred: graph view, plugins.
 
 ## The icon
 
@@ -287,3 +289,15 @@ parser and link index, which is not worth the Gradle/SKIE boundary, and iOS is t
 next target and is Swift anyway. See the `Apude` repo for what that boundary costs.
 
 A web-based renderer was rejected outright. This is a native app.
+
+Embedding real Neovim (via VimR's `NvimView`) was the earlier plan for Vim mode
+and was reversed. An embedded editor wants to own its own buffer, which would
+have forked the one thing this app is built around: TextKit 2 is the single
+buffer, and with it autosave, live styling, undo, and input methods. It also
+keeps a GPL program out of the shipping binary. `HeftVimCore` is instead an
+original Foundation-only state machine that returns transactions for the
+existing `NSTextView` to apply, and is portable to a future iPadOS shell.
+Neovim still earns its keep as a *test* oracle: the suite drives
+`nvim --clean --headless` as a separate process when it is installed, and every
+disagreement it has found is preserved as a local regression that runs without
+it. See `Docs/VimMode.md`, which also records the licensing boundary.
