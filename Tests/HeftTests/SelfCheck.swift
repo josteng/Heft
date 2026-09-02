@@ -1182,6 +1182,52 @@ public enum SelfCheck {
             "an already-clean path is unchanged"
         )
 
+        // MARK: Recent vaults
+        let vaultA = "/Users/tester/Vaults/PersonalVault"
+        let vaultB = "/Users/tester/Sandbox/PersonalVault"
+        let vaultC = "/Users/tester/Vaults/Scratch"
+
+        expect(
+            RecentVaults.recording(vaultA, in: []).joined(separator: "|"),
+            vaultA,
+            "the first vault opened starts the list"
+        )
+        expect(
+            RecentVaults.recording(vaultB, in: [vaultA]).joined(separator: "|"),
+            "\(vaultB)|\(vaultA)",
+            "a newly opened vault goes to the front"
+        )
+        // Switching back and forth is the whole point: reopening must promote
+        // rather than append, or the pair never settles at the top.
+        expect(
+            RecentVaults.recording(vaultA, in: [vaultB, vaultA, vaultC]).joined(separator: "|"),
+            "\(vaultA)|\(vaultB)|\(vaultC)",
+            "reopening a vault promotes it instead of duplicating it"
+        )
+        expectTrue(
+            RecentVaults.recording("/x", in: (1...RecentVaults.limit).map { "/v\($0)" }).count
+                == RecentVaults.limit,
+            "the list is capped"
+        )
+        expect(
+            RecentVaults.recording("/x", in: (1...RecentVaults.limit).map { "/v\($0)" }).last ?? "",
+            "/v\(RecentVaults.limit - 1)",
+            "the cap drops the least recent, not the most"
+        )
+
+        // A test copy sitting beside the real vault is the case that breaks a
+        // menu of bare folder names.
+        expect(
+            RecentVaults.labels(for: [vaultA, vaultB]).joined(separator: "|"),
+            "PersonalVault — Vaults|PersonalVault — Sandbox",
+            "vaults sharing a name are told apart by their parent folder"
+        )
+        expect(
+            RecentVaults.labels(for: [vaultA, vaultC]).joined(separator: "|"),
+            "PersonalVault|Scratch",
+            "distinct names stay short"
+        )
+
         return r
     }
 }

@@ -131,13 +131,51 @@ final class VaultRegistry: ObservableObject {
         CaptureVaultPreference.url
     }
 
+    static let recentVaultsKey = "dev.stenglein.Heft.recentVaults"
+
+    /// Every vault opened, most recent first. Stored as written; what is
+    /// still *there* is decided at read time by `recentVaults`.
+    @Published private(set) var recentVaultPaths: [String] =
+        UserDefaults.standard.stringArray(forKey: VaultRegistry.recentVaultsKey) ?? []
+
+    /// The recents that can actually be opened right now.
+    ///
+    /// A vault in iCloud Drive can be evicted, moved or renamed between
+    /// sessions, and a menu entry that errors when clicked is worse than one
+    /// that is not offered. The stored list is left alone, so a vault on a
+    /// volume that comes back is not forgotten for having been away.
+    var recentVaults: [(url: URL, label: String)] {
+        let live = recentVaultPaths.filter {
+            FileManager.default.fileExists(atPath: $0)
+        }
+        return zip(live, RecentVaults.labels(for: live)).map {
+            (URL(fileURLWithPath: $0, isDirectory: true), $1)
+        }
+    }
+
+    func clearRecentVaults() {
+        recentVaultPaths = []
+        UserDefaults.standard.removeObject(forKey: Self.recentVaultsKey)
+    }
+
     func session(for url: URL) -> VaultSession {
         let root = url.standardizedFileURL
+        // Recorded before the early return: reopening a vault that is already
+        // running has to promote it too, or the pair being switched between
+        // never reorders.
+        recordRecentVault(root.path)
         if let existing = sessions[root.path]?.value { return existing }
         let session = VaultSession(root: root)
         sessions[root.path] = WeakSession(session)
         UserDefaults.standard.set(root.path, forKey: CaptureVaultPreference.defaultsKey)
         return session
+    }
+
+    private func recordRecentVault(_ path: String) {
+        let updated = RecentVaults.recording(path, in: recentVaultPaths)
+        guard updated != recentVaultPaths else { return }
+        recentVaultPaths = updated
+        UserDefaults.standard.set(updated, forKey: Self.recentVaultsKey)
     }
 
     func activeSession(containing url: URL) -> VaultSession? {

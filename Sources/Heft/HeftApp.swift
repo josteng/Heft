@@ -85,7 +85,10 @@ private struct WorkspaceWindow: View {
 }
 
 struct HeftCommands: Commands {
-    let registry: VaultRegistry
+    // Observed, not merely held: Open Recent has to reorder as vaults are
+    // opened, and a plain `let` would leave the menu showing whatever the
+    // list was when the scene was built.
+    @ObservedObject var registry: VaultRegistry
     @FocusedValue(\.workspaceModel) private var model
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var appearance = AppearanceSettings.shared
@@ -121,6 +124,18 @@ struct HeftCommands: Commands {
             Divider()
             Button("Open Vault in New Window…") { openVaultInNewWindow() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+            Menu("Open Recent") {
+                ForEach(registry.recentVaults, id: \.url) { recent in
+                    // Switches this window rather than opening another: the
+                    // point of the menu is moving between a test vault and the
+                    // real one, not accumulating windows.
+                    Button(recent.label) { openRecentVault(recent.url) }
+                }
+                if !registry.recentVaults.isEmpty { Divider() }
+                Button("Clear Menu") { registry.clearRecentVaults() }
+                    .disabled(registry.recentVaults.isEmpty)
+            }
+            .disabled(registry.recentVaults.isEmpty)
             // No ⇧⌘G: that is Find Previous. The system's Go to Folder sheet
             // cannot be given a shell-escaped path, which is the form one is
             // almost always copied in, so this is Heft's own way in.
@@ -186,6 +201,20 @@ struct HeftCommands: Commands {
             get: { model?[keyPath: keyPath] ?? false },
             set: { model?[keyPath: keyPath] = $0 }
         )
+    }
+
+    /// Switches the focused window to a vault from Open Recent.
+    ///
+    /// `AppModel.openVault` is what the picker uses too, so a switch flushes
+    /// a pending save and refuses a vault nested inside an open one, exactly
+    /// as choosing it by hand would. With no window focused there is nothing
+    /// to switch, so the vault gets one of its own.
+    private func openRecentVault(_ url: URL) {
+        if let model {
+            model.openVault(at: url)
+        } else {
+            openWindow(value: WorkspaceDescriptor(vaultPath: url.path))
+        }
     }
 
     private func openVaultInNewWindow() {

@@ -219,12 +219,21 @@ enum AppIntegrationCheck {
         let defaults = UserDefaults.standard
         let lastVaultKey = "dev.stenglein.Heft.vaultPath"
         let previousLastVault = defaults.object(forKey: lastVaultKey)
+        // Recents are app-wide and persist, so a test run must put the real
+        // list back rather than leave its disposable vaults in someone's
+        // Open Recent menu.
+        let previousRecents = defaults.object(forKey: VaultRegistry.recentVaultsKey)
         defer {
             try? manager.removeItem(at: root)
             if let previousLastVault {
                 defaults.set(previousLastVault, forKey: lastVaultKey)
             } else {
                 defaults.removeObject(forKey: lastVaultKey)
+            }
+            if let previousRecents {
+                defaults.set(previousRecents, forKey: VaultRegistry.recentVaultsKey)
+            } else {
+                defaults.removeObject(forKey: VaultRegistry.recentVaultsKey)
             }
         }
 
@@ -706,6 +715,41 @@ enum AppIntegrationCheck {
         )
         let decoded = try? JSONDecoder().decode([CustomSubstitution].self, from: legacy)
         expect(decoded?.first?.firing == .immediately, "an older stored rule still decodes")
+
+        // Open Recent. Its own registry, so recording a throwaway vault cannot
+        // disturb the sessions the checks above are still holding; the list
+        // itself is app-wide and shared, which is what makes it worth writing.
+        let recentsProbe = VaultRegistry()
+        let ghostVault = manager.temporaryDirectory
+            .appendingPathComponent("heft-ghost-\(UUID().uuidString)", isDirectory: true)
+        try? manager.createDirectory(at: ghostVault, withIntermediateDirectories: true)
+        let ghostPath = ghostVault.standardizedFileURL.path
+
+        _ = recentsProbe.session(for: ghostVault)
+        expectEqual(
+            recentsProbe.recentVaultPaths.first, ghostPath,
+            "opening a vault puts it at the front of the recents"
+        )
+        expect(
+            recentsProbe.recentVaults.contains { $0.url.standardizedFileURL.path == ghostPath },
+            "a vault that is still there is offered"
+        )
+
+        // A vault in iCloud Drive can move or be evicted between sessions. It
+        // stops being offered, but is not forgotten: a volume that comes back
+        // should bring its vault back with it.
+        try? manager.removeItem(at: ghostVault)
+        expect(
+            !recentsProbe.recentVaults.contains { $0.url.standardizedFileURL.path == ghostPath },
+            "a vault that has gone is not offered"
+        )
+        expect(
+            recentsProbe.recentVaultPaths.contains(ghostPath),
+            "a vault that has gone is still remembered"
+        )
+
+        recentsProbe.clearRecentVaults()
+        expect(recentsProbe.recentVaults.isEmpty, "clearing empties the menu")
 
         files.closeWorkspace()
         return result
