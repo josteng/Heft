@@ -92,6 +92,28 @@ struct TypingPerformanceTests {
     }
 
     @MainActor
+    @Test("What backspace costs")
+    func deletingCost() {
+        for sample in TypingPerformanceCheck.runDeleting() {
+            print(String(
+                format: "DEL %@ (%d chars): median %.1fms, worst %.1fms, spread %.0fx",
+                sample.label, sample.characters, sample.median, sample.worst,
+                sample.worst / max(0.01, sample.median)
+            ))
+            // Deleting must coalesce while the key is held, exactly as typing
+            // does. Prose is the case with nothing to force a synchronous
+            // pass, so it is the one that can be held to a budget; a caret
+            // inside a table deliberately styles at once and is not.
+            if sample.label == "prose held" {
+                #expect(
+                    sample.median < 3,
+                    Comment(rawValue: "held backspace costs \(sample.median)ms in prose")
+                )
+            }
+        }
+    }
+
+    @MainActor
     @Test("A keystroke costs less than a key repeat")
     func typingCost() {
         for sample in TypingPerformanceCheck.run() {

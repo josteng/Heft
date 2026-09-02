@@ -117,6 +117,66 @@ enum TypingPerformanceCheck {
         )
     }
 
+    /// The same, but deleting. Backspace does work typing does not: it can
+    /// revert a typing substitution, and it removes characters that may be the
+    /// only thing making a line a list or a heading.
+    @MainActor
+    static func measureDeleting(
+        in document: String, label: String, keystrokes: Int, burst: Bool
+    ) -> Sample {
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let editor = LiveTextEditor(
+            text: .constant(document), documentIdentity: "bench.md", generation: 0,
+            generationKeepsPosition: false, findSelection: nil, insertion: nil, context: context,
+            onAttachment: { _ in nil }, onFollowLink: { _ in }, onVimSearch: { _ in }
+        )
+        let coordinator = LiveTextEditor.Coordinator(editor)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isVerticallyResizable = true
+        view.frame = NSRect(x: 0, y: 0, width: 700, height: 900)
+        view.textContainerInset = NSSize(width: 28, height: 28)
+        view.textContainer?.size = NSSize(width: 644, height: 1_000_000)
+        view.textLayoutManager?.delegate = coordinator
+        view.delegate = coordinator
+        view.string = document
+        coordinator.restyle(view)
+
+        let caret = (document as NSString).length / 2
+        var timings: [Double] = []
+        for index in 0..<keystrokes {
+            view.setSelectedRange(NSRange(location: caret - index, length: 0))
+            if burst {
+                coordinator.pretendEditsAreArrivingInABurst()
+            } else {
+                coordinator.pretendLastEditWasLongAgo()
+            }
+            let start = DispatchTime.now().uptimeNanoseconds
+            view.deleteBackward(nil)
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+            timings.append(elapsed)
+        }
+        let sorted = timings.sorted()
+        return Sample(
+            label: label, characters: (document as NSString).length,
+            median: sorted[sorted.count / 2], worst: sorted.last ?? 0,
+            restyleMedian: 0, restyleWorst: 0
+        )
+    }
+
+    @MainActor
+    static func runDeleting() -> [Sample] {
+        let medium = document(paragraphs: 25)
+        let large = document(paragraphs: 60)
+        return [
+            measureDeleting(in: medium, label: "medium held", keystrokes: 40, burst: true),
+            measureDeleting(in: medium, label: "medium single", keystrokes: 40, burst: false),
+            measureDeleting(in: large, label: "large held", keystrokes: 40, burst: true),
+            measureDeleting(in: large, label: "large single", keystrokes: 40, burst: false),
+            measureDeleting(in: prose(words: 4000), label: "prose held", keystrokes: 40, burst: true),
+            measureDeleting(in: prose(words: 4000), label: "prose single", keystrokes: 40, burst: false),
+        ]
+    }
+
     @MainActor
     static func run() -> [Sample] {
         [

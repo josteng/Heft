@@ -287,6 +287,61 @@ enum IncrementalStylingCheck {
                 }
                 compare("typed \(character.debugDescription) at \(index * 3)")
             }
+            // Typing with a pause between keystrokes must style at once.
+            // Deferring there is visible: the character lands a frame before
+            // its styling, so a continued list item shows "- " as markup
+            // before it becomes a bullet.
+            view.setSelectedRange(NSRange(location: 0, length: 0))
+            for (label, action) in [
+                ("a character", { view.insertText("x", replacementRange: view.selectedRange()) }),
+                ("Return", { view.insertNewline(nil) }),
+                ("a list item", {
+                    view.insertText("- item", replacementRange: view.selectedRange())
+                }),
+            ] as [(String, () -> Void)] {
+                coordinator.pretendLastEditWasLongAgo()
+                let completed = coordinator.completedRestyleCount
+                action()
+                if coordinator.completedRestyleCount == completed {
+                    result.failures.append(
+                        "editor \(name): \(label) typed after a pause was not styled at once"
+                    )
+                } else {
+                    result.passed += 1
+                }
+            }
+
+            // Return makes structure — a continued list item, a quote marker —
+            // so it styles at once even mid-burst, unlike ordinary characters.
+            view.setSelectedRange(NSRange(location: 0, length: 0))
+            view.insertText("- item", replacementRange: view.selectedRange())
+            coordinator.pretendEditsAreArrivingInABurst()
+            let beforeReturn = coordinator.completedRestyleCount
+            view.insertNewline(nil)
+            if coordinator.completedRestyleCount == beforeReturn {
+                result.failures.append(
+                    "editor \(name): Return deferred its styling, so the new item's "
+                        + "marker is drawn as markup before it becomes a bullet"
+                )
+            } else {
+                result.passed += 1
+            }
+
+            // An ordinary character mid-burst does defer: that is what lets a
+            // held key repeat faster than a restyle takes.
+            coordinator.pretendEditsAreArrivingInABurst()
+            let beforeCharacter = coordinator.completedRestyleCount
+            view.insertText("z", replacementRange: view.selectedRange())
+            if coordinator.completedRestyleCount != beforeCharacter {
+                result.failures.append(
+                    "editor \(name): a character mid-burst styled synchronously, "
+                        + "which is what stops a held key repeating"
+                )
+            } else {
+                result.passed += 1
+            }
+            coordinator.restyle(view)
+
             // Backspace, which is where markup that failed to reset shows up.
             for step in 0..<6 {
                 view.setSelectedRange(NSRange(

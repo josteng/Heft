@@ -340,12 +340,19 @@ struct LiveTextEditor: NSViewRepresentable {
             // has already scheduled a pass, and it will compute this same
             // reveal; a caret move that is *only* a caret move still styles
             // at once, so arrow keys keep their responsiveness.
-            // Not in a table. A table's caret is drawn by this view from the
-            // measured grid, and its cell ranges come from the same layout,
-            // so deferring there would leave both describing the text as it
+            // Deferring is a trade, not a free win: the character lands a
+            // frame before its styling, so a new `- ` is briefly visible as
+            // markup before it becomes a bullet. Worth it only when the
+            // alternative is dropping keystrokes — that is, while a held key
+            // is repeating faster than a restyle takes. Ordinary typing leaves
+            // gaps and styles at once, so nothing is ever seen half-rendered.
+            //
+            // Not in a table either way: a table's caret is drawn by this view
+            // from the measured grid, and its cell ranges come from the same
+            // layout, so deferring would leave both describing the text as it
             // was before the keystroke.
             let inTable = (textView as? HeftTextKit2View)?.activeTable != nil
-            if !inTable, let styled,
+            if !inTable, editGap < Self.burstGap, let styled,
                styled.source.length != (textView.string as NSString).length {
                 scheduleRestyle(textView)
                 return
@@ -409,6 +416,23 @@ struct LiveTextEditor: NSViewRepresentable {
         /// incremental check asserts this moves, so deferring can never be
         /// mistaken for not needing a restyle at all.
         private(set) var scheduledRestyleCount = 0
+        /// Passes actually performed. Lets a test tell "styled at once" from
+        /// "styled a frame later", which is the difference between a bullet
+        /// appearing with its line and the raw `- ` being visible first.
+        private(set) var completedRestyleCount = 0
+
+        /// For tests: makes the next edit look like the start of fresh typing
+        /// rather than the continuation of a held key.
+        func pretendLastEditWasLongAgo() {
+            lastEditAt = nil
+            editGap = .infinity
+        }
+
+        /// For tests: makes the next edit look like one repeat of a held key.
+        func pretendEditsAreArrivingInABurst() {
+            lastEditAt = DispatchTime.now().uptimeNanoseconds
+            editGap = 0
+        }
 
         private func scheduleRestyle(_ textView: NSTextView) {
             scheduledRestyleCount += 1
@@ -460,6 +484,7 @@ struct LiveTextEditor: NSViewRepresentable {
                 return
             }
 
+            completedRestyleCount += 1
             let selection = textView.selectedRange()
             let source = textView.string as NSString
             reveal = revealsSelection ? Reveal(selection: selection, in: source) : .none
@@ -1950,6 +1975,12 @@ final class HeftTextKit2View: NSTextView {
     /// left empty — the behaviour every editor has and the block version never
     /// got right.
     override func insertNewline(_ sender: Any?) {
+        // Return is where structure appears: a continued list item, a quote
+        // marker, an outdent. Those must be drawn as the line is made, not a
+        // frame later, so this one key never defers even mid-burst. A restyle
+        // that finds nothing changed costs almost nothing, so covering every
+        // exit from here is cheaper than reasoning about which ones matter.
+        defer { restyleNow() }
         if acceptLinkCompletion() { return }
         // Inside a table, Return means the row below. A literal newline there
         // splits the table in two, which is never what was meant.
@@ -1998,6 +2029,8 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func insertTab(_ sender: Any?) {
+        // Indenting changes a bullet's shape, which is drawn, not styled.
+        defer { restyleNow() }
         if acceptLinkCompletion() { return }
         if handleTableTab(forward: true) { return }
         guard adjustListIndent(outdent: false) else {
@@ -2007,6 +2040,8 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func insertBacktab(_ sender: Any?) {
+        // Indenting changes a bullet's shape, which is drawn, not styled.
+        defer { restyleNow() }
         if handleTableTab(forward: false) { return }
         guard adjustListIndent(outdent: true) else {
             super.insertBacktab(sender)
