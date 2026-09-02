@@ -63,6 +63,9 @@ struct ContentView: View {
         .sheet(isPresented: $model.isInboxCapturePresented) {
             InboxCaptureView()
         }
+        .sheet(item: $model.reviewing) { proposal in
+            ProposalReviewView(proposal: proposal).environmentObject(model)
+        }
         .alert(
             "This Note Changed Outside Heft",
             isPresented: Binding(
@@ -319,12 +322,20 @@ struct EditorPane: View {
                 findBar
             }
 
+            if !model.proposalsForCurrentNote.isEmpty {
+                if !model.isFindPresented {
+                    Color.clear.frame(height: topChromeHeight)
+                }
+                ProposalBanner()
+            }
+
             // One surface, always. Source and preview modes were removed once
             // live mode could render everything they could: keeping them meant
             // three editors to fix every bug in.
             LiveTextEditor(
                 text: $model.text,
                 generation: model.documentGeneration,
+                generationKeepsPosition: model.documentGenerationKeepsPosition,
                 findSelection: findSelection,
                 context: context,
                 onAttachment: handleAttachment,

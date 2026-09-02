@@ -9,22 +9,33 @@ text rows. Drawing our own squircle here would produce a rounded rectangle
 inside a rounded rectangle.
 
 The icon is full-bleed, the shape Notes and TextEdit use: there is no inset
-glyph, and **the paper is the background `fill` rather than a layer**. That
-leaves the system squircle's corners as the only corners in the icon. The layers
-run to the canvas edge; the system clips them.
+glyph, and **the page is the background `fill` rather than a layer**. That
+leaves the system squircle's corners as the only corners in the icon, and it is
+what lets the page flip with the system — cream in light, the system's
+near-black in dark — while the rows stay one mid grey and read dark on the light
+page and light on the dark one. One artwork, two appearances, which is the only
+way to get both: nothing renders differently for dark however it is authored,
+as the format notes below record.
 
-**The rows are a single mid charcoal, and that is what makes both appearances
-work.** The paper flips — cream in light, near-black in dark, because the system
-paints its own dark ground — while `#45424E` stays put, so it reads as dark
-writing on a white page in light and as light writing on a black page in dark.
-One colour, both readings, no second artwork.
+**`translucency` is off, and that is what makes the dark side work.** It blends
+every layer toward the ground, which on a near-black page drags the rows down
+with it: the same grey measures 2.51 : 1 with it on and 4.73 : 1 with it off.
+`specular` is a separate switch and stays on, so the icon keeps its sheen; what
+it gives up is the glassiness, which the spine reads better without anyway. The
+rows sit at 2.49 : 1 in light and 4.73 : 1 in dark — deliberately unbalanced,
+because the dark side is where the icon has to hold its own against a black
+Dock.
 
-That indirection is necessary, not clever: **a layer cannot vary by appearance**
-(see the note below), so pure black rows would vanish in dark and pure white
-rows would vanish in light. Only a mid tone survives both grounds. The charcoal
-measures 2.43 : 1 in light and 2.51 : 1 in dark — deliberately balanced, and
-both better than the 2.00 : 1 an indigo managed in light. Apple ships Notes'
-rules at 1.33 : 1.
+Two arrangements were tried and rejected, both worth knowing about:
+
+- **The page as a layer** pins it bright in both appearances. It fixes a dull
+  dark icon and overshoots: a lit white tile in a dark Dock. Layers keep their
+  colour, only the background darkens, so this is the lever for anything that
+  must stay bright — it is simply too strong for the page itself.
+- **Two row layers, `darken` over `lighten`,** to invert against whichever page
+  is behind. It cannot work: both cover the same pixels, so the composite is
+  `min(max(P, A), B)`, and no A and B make that dark on white *and* light on
+  black. The format has no `difference` blend mode to do it properly.
 
 Open it with Icon Composer (bundled inside Xcode, under
 `Xcode.app/Contents/Applications/`) to edit it visually, or edit `icon.json` by
@@ -134,15 +145,20 @@ to come down to three. Row count is not a fixed rule; it is whatever passes this
 test at the size the rows actually get. Detail is cheap to add and always costs
 legibility first.
 
-**Contrast, bar against paper, in *both* appearances.** The rows sit at 2.43 : 1
-in light and 2.51 : 1 in dark; a change that lifts one usually drops the other,
+**Presence, against the neighbours.** Render the icon at Dock size next to
+Finder and Mail on a dark ground and look at it as a row. Contrast inside the
+icon can be fine while the icon as a whole still reads dull, which is a
+different fault and only visible in company — it is what turned `translucency`
+off.
+
+**Contrast, bar against paper, in *both* appearances.** The rows sit at 2.49 : 1
+in light and 4.73 : 1 in dark; a change that lifts one usually drops the other,
 so judge them as a pair rather than tuning the one in front of you. Sample by
 coordinate, not by luminance histogram: a histogram assumes the rows are darker
 than the paper and silently inverts once they are lighter, which is how an
-earlier pass produced a plausible and wrong 2.22 : 1. Note also that
-`translucency` blends every layer toward the ground, so a row renders much
-closer to the paper than its hex suggests — `#45424E` lands at 159 on cream.
-Pick the colour by measuring the render, never by reading the SVG.
+earlier pass produced a plausible and wrong 2.22 : 1. And measure the render,
+never the SVG — `specular` alone lifts `#6B6875` to 157 on cream, and with
+`translucency` on it would be lighter still.
 
 **Thickness buys nothing.** Measured at 64 and 96pt, thickening the rows leaves
 the contrast ratio flat: they already reach full colour density, so more weight

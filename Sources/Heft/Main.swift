@@ -9,6 +9,9 @@ enum HeftMain {
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
 
+        // The agent verbs: propose, proposals, diff, drop, read, find.
+        if AgentCLI.run(arguments) { return }
+
         if arguments.first == "stats", arguments.count > 1 {
             runStats(vaultPath: arguments[1])
             return
@@ -148,6 +151,7 @@ enum HeftMain {
             case .image(let image): "image \(size(image.size))"
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
+                    + describeActiveCell(of: grid)
             case .properties(let card):
                 "properties \(card.rows.count) rows \(size(card.size))"
             case .embed(let embed):
@@ -215,6 +219,19 @@ enum HeftMain {
             print("  line \(line(offset)): \(fmt(frame.height)) / \(fmt(textHeight)) / \(fmt(lead)) / \(fmt(trail))")
             return true
         }
+    }
+
+    /// Which cell of a drawn table the caret is in, and where the editor would
+    /// paint the caret inside it. Reported here because it is the one part of
+    /// the table surface that has no source of its own to inspect: the buffer
+    /// still holds plain pipes whichever cell is active.
+    private static func describeActiveCell(of grid: TableGrid) -> String {
+        guard let active = grid.active,
+              let cell = grid.cell(row: active.row, column: active.column)
+        else { return "" }
+        let caret = grid.caretRect(in: cell, offset: cell.text.length)
+        return ", active cell r\(active.row)c\(active.column)"
+            + " source \(cell.source) caret at \(fmt(caret.minX)),\(fmt(caret.minY))"
     }
 
     private static func size(_ s: CGSize) -> String { "\(fmt(s.width))x\(fmt(s.height))" }

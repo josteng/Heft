@@ -29,6 +29,30 @@ struct LiveSurfaceTests {
     }
 }
 
+@Suite("Tables")
+struct TableTests {
+    @Test("Cell ranges, cursors, and structural edits")
+    func tableChecks() {
+        let result = TableCheck.run()
+        for failure in result.failures {
+            Issue.record(Comment(rawValue: failure))
+        }
+        #expect(result.ok)
+        #expect(result.passed > 0)
+    }
+
+    @Test("Editing a table in place through the real editor")
+    @MainActor
+    func tableSurface() {
+        let result = TableSurfaceCheck.run()
+        for failure in result.failures {
+            Issue.record(Comment(rawValue: failure))
+        }
+        #expect(result.ok)
+        #expect(result.passed > 0)
+    }
+}
+
 @Suite("Heft App")
 struct HeftAppIntegrationTests {
     @Test("Disposable vault workflow")

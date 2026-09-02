@@ -65,6 +65,25 @@ struct AppCommand: Identifiable {
             action: { $0.presentInboxCapture() }
         ),
         Self(
+            id: "reviewProposals",
+            title: "Review agent proposals",
+            symbol: "sparkles",
+            searchTerms: "agent claude ai proposal review diff changes pending accept",
+            displayTitle: { model in
+                let count = model.proposals.count
+                return count == 0
+                    ? "Review agent proposals"
+                    : "Review agent proposals (\(count))"
+            },
+            enabled: { !$0.proposals.isEmpty },
+            action: { model in
+                // The one for the open note if there is one, since that is
+                // what the reviewer is already looking at.
+                let next = model.proposalsForCurrentNote.first ?? model.proposals.first
+                if let next { model.openAndReview(next) }
+            }
+        ),
+        Self(
             id: "startPresentation",
             title: "Start presentation",
             symbol: "play.rectangle",

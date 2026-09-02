@@ -236,7 +236,7 @@ enum IncrementalStylingCheck {
 
         for (name, document) in corpus {
             let editor = LiveTextEditor(
-                text: .constant(document), generation: 0, findSelection: nil,
+                text: .constant(document), generation: 0, generationKeepsPosition: false, findSelection: nil,
                 context: context, onAttachment: { _ in nil }, onFollowLink: { _ in },
                 onVimSearch: { _ in }
             )

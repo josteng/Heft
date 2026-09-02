@@ -109,6 +109,11 @@ final class AppModel: ObservableObject {
     /// Bumped whenever `text` is replaced from outside the editor, so the
     /// NSTextView knows to reset rather than treat it as user typing.
     @Published private(set) var documentGeneration = 0
+    /// Whether that replacement was the same note changing underneath the
+    /// reader — in which case caret and scroll survive it — or a different
+    /// note being opened. Set in lockstep with `documentGeneration`, which is
+    /// what the view observes.
+    private(set) var documentGenerationKeepsPosition = false
 
     // MARK: UI state
     @Published var isCalendarVisible = true
@@ -137,6 +142,10 @@ final class AppModel: ObservableObject {
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
     @Published var status: String = ""
+    /// Edits agents have proposed and nobody has answered yet, vault-wide.
+    @Published private(set) var proposals: [Proposal] = []
+    /// The proposal whose review sheet is open.
+    @Published var reviewing: Proposal?
     @Published private(set) var saveConflict: SaveConflict?
     /// Set when `promptForScope()`'s folder panel returns a folder outside
     /// the current vault. That can't become a focus folder, so the picker
@@ -305,7 +314,9 @@ final class AppModel: ObservableObject {
         }
         diskChangeSubscription = session.$diskChangeGeneration.dropFirst().sink { [weak self] _ in
             self?.reloadCurrentIfChangedExternally()
+            self?.refreshProposals()
         }
+        refreshProposals()
         objectWillChange.send()
     }
 
@@ -345,7 +356,7 @@ final class AppModel: ObservableObject {
         lastKnownModification = modified
         lastKnownDiskText = fresh
         if fresh != text {
-            setText(fresh)
+            setText(fresh, keepingPosition: true)
             status = "Reloaded \(current.relativePath) from disk"
         }
     }
@@ -516,11 +527,12 @@ final class AppModel: ObservableObject {
         return try? String(contentsOf: url, encoding: .isoLatin1)
     }
 
-    private func setText(_ new: String) {
+    private func setText(_ new: String, keepingPosition: Bool = false) {
         // Assign through the backing store so didSet does not mark it dirty.
         isApplyingExternalText = true
         text = new
         isApplyingExternalText = false
+        documentGenerationKeepsPosition = keepingPosition
         documentGeneration += 1
     }
 
@@ -1659,6 +1671,120 @@ final class AppModel: ObservableObject {
 
     func insertAtCursor(_ snippet: String) {
         NotificationCenter.default.post(name: .heftInsertSnippet, object: snippet)
+    }
+
+    // MARK: - Agent proposals
+
+    /// Re-reads `.heft/proposals`. Cheap: a handful of small JSON files, and
+    /// only when the vault reports a change or a review is acted on.
+    func refreshProposals() {
+        guard let vaultRoot else {
+            proposals = []
+            return
+        }
+        let found = ProposalStore.all(in: vaultRoot)
+        guard found != proposals else { return }
+        proposals = found
+        if let reviewing, !found.contains(where: { $0.id == reviewing.id }) {
+            self.reviewing = nil
+        }
+    }
+
+    var proposalsForCurrentNote: [Proposal] {
+        guard let current else { return [] }
+        return proposals.filter { $0.notePath == current.relativePath }
+    }
+
+    /// The note a proposal is about, as it stands right now. The open buffer
+    /// wins over the file: what the user is looking at is what they are
+    /// deciding about, even if the autosave has not fired yet.
+    func currentText(for proposal: Proposal) -> String {
+        if let current, current.relativePath == proposal.notePath { return text }
+        guard let vaultRoot else { return "" }
+        return (try? String(
+            contentsOf: vaultRoot.appendingPathComponent(proposal.notePath), encoding: .utf8
+        )) ?? ""
+    }
+
+    func beginReview(of proposal: Proposal) {
+        reviewing = proposal
+    }
+
+    /// Opens the note a proposal is about, then reviews it.
+    func openAndReview(_ proposal: Proposal) {
+        if current?.relativePath != proposal.notePath,
+           let note = index.notes.first(where: { $0.relativePath == proposal.notePath }) {
+            open(note)
+        }
+        reviewing = proposal
+    }
+
+    /// Accepts or rejects one hunk. Either way the proposal is rewritten to
+    /// hold only what is still undecided, so a half-reviewed proposal is a
+    /// smaller proposal rather than a lost one.
+    func decide(_ proposal: Proposal, hunk: Int, accept: Bool) {
+        guard let vaultRoot else { return }
+        let before = currentText(for: proposal)
+        do {
+            let outcome = try ProposalStore.settle(
+                proposal,
+                currentText: before,
+                accepted: accept ? [hunk] : [],
+                rejected: accept ? [] : [hunk],
+                in: vaultRoot
+            )
+            if accept { write(outcome.noteText, to: proposal.notePath) }
+            reviewing = outcome.remaining
+            refreshProposals()
+            status = accept
+                ? "Applied one change to \(proposal.noteName)"
+                : "Rejected one change to \(proposal.noteName)"
+        } catch {
+            status = "Could not update the proposal: \(error.localizedDescription)"
+        }
+    }
+
+    func acceptAll(_ proposal: Proposal) {
+        guard let vaultRoot else { return }
+        let before = currentText(for: proposal)
+        write(proposal.body, to: proposal.notePath)
+        ProposalStore.remove(proposal.id, in: vaultRoot)
+        reviewing = nil
+        refreshProposals()
+        let diff = proposal.diff(against: before)
+        status = "Applied \(diff.hunks.count) change(s) to \(proposal.noteName)"
+    }
+
+    func discard(_ proposal: Proposal) {
+        guard let vaultRoot else { return }
+        ProposalStore.remove(proposal.id, in: vaultRoot)
+        reviewing = nil
+        refreshProposals()
+        status = "Discarded \(proposal.agent)'s proposal for \(proposal.noteName)"
+    }
+
+    /// Writes an accepted change. Through the open buffer when it is the note
+    /// on screen, so the edit joins the normal autosave and undo path instead
+    /// of racing it; straight to disk otherwise.
+    private func write(_ new: String, to relativePath: String) {
+        if let current, current.relativePath == relativePath {
+            text = new
+            documentGenerationKeepsPosition = true
+            documentGeneration += 1
+            save()
+            return
+        }
+        guard let vaultRoot else { return }
+        let url = vaultRoot.appendingPathComponent(relativePath)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try new.write(to: url, atomically: true, encoding: .utf8)
+            reload(immediately: true)
+        } catch {
+            status = "Could not write \(relativePath): \(error.localizedDescription)"
+        }
     }
 }
 
