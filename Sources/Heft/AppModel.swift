@@ -247,8 +247,18 @@ final class AppModel: ObservableObject {
         return dailyNotes.relativePath(for: Date()).hasPrefix(scopePath + "/")
     }
 
-    init(registry: VaultRegistry, descriptor: WorkspaceDescriptor? = nil) {
+    /// Everything a file operation needs from the application around it.
+    /// Injected so the operations can be driven in a test, where a modal
+    /// panel has no answer to give and `runModal` would block.
+    let host: VaultHost
+
+    init(
+        registry: VaultRegistry,
+        descriptor: WorkspaceDescriptor? = nil,
+        host: VaultHost = AppKitHost()
+    ) {
         self.registry = registry
+        self.host = host
         workspaceID = descriptor?.id ?? UUID()
         scopePath = descriptor?.scopePath
         // `--vault <path>` and `--open <relative-path>` let a launch go
@@ -361,14 +371,11 @@ final class AppModel: ObservableObject {
     // MARK: - Vault lifecycle
 
     func promptForVault() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open Vault"
-        panel.message = "Choose a folder of markdown notes. An existing Obsidian vault works as-is."
-        if let existing = vaultRoot { panel.directoryURL = existing.deletingLastPathComponent() }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = host.chooseFolder(
+            prompt: "Open Vault",
+            message: "Choose a folder of markdown notes. An existing Obsidian vault works as-is.",
+            startingAt: vaultRoot?.deletingLastPathComponent()
+        ) else { return }
         openVault(at: url)
     }
 
@@ -558,7 +565,7 @@ final class AppModel: ObservableObject {
 
     private func open(_ ref: NoteRef, recordingNavigation: Bool) {
         guard ref.isMarkdown else {
-            NSWorkspace.shared.open(ref.url)
+            host.openExternally(ref.url)
             return
         }
         if current?.url.standardizedFileURL != ref.url.standardizedFileURL,
@@ -694,7 +701,9 @@ final class AppModel: ObservableObject {
     func follow(_ link: WikiLink) {
         guard let vaultRoot else { return }
         if let target = index.resolve(link, from: current) {
-            if target.isMarkdown { open(target) } else { NSWorkspace.shared.open(target.url) }
+            // Not tested for markdown here: `open` already hands anything
+            // else to the system, and asking twice let the two answers drift.
+            open(target)
             return
         }
         // An unresolved link proposes a note beside the current one when it
@@ -715,7 +724,7 @@ final class AppModel: ObservableObject {
         }
 
         let title = (target.lastPathComponent as NSString).deletingPathExtension
-        guard FilePrompt.confirm(
+        guard host.confirm(
             title: "Create Note?",
             message: "\(title) does not exist. Create it at \(relativePath(of: target))?",
             confirm: "Create Note"
@@ -753,7 +762,7 @@ final class AppModel: ObservableObject {
         let suggestion = (uniqueURL(in: directory, base: "Untitled", extension: "md")
             .lastPathComponent as NSString).deletingPathExtension
 
-        guard let entered = FilePrompt.name(
+        guard let entered = host.name(
             title: "New Note", message: "In \(describe(directory))",
             initial: suggestion, confirm: "Create"
         ) else { return }
@@ -782,7 +791,7 @@ final class AppModel: ObservableObject {
 
     func createFolder(in parent: URL) {
         guard vaultRoot != nil else { return }
-        guard let name = FilePrompt.name(
+        guard let name = host.name(
             title: "New Folder", message: "Name for the new folder.", initial: "Untitled",
             confirm: "Create"
         ) else { return }
@@ -868,7 +877,7 @@ final class AppModel: ObservableObject {
         if let proposedName {
             entered = proposedName
         } else {
-            guard let prompted = FilePrompt.name(
+            guard let prompted = host.name(
                 title: "Rename \(item.isFolder ? "Folder" : "Note")",
                 message: item.relativePath, initial: item.name, confirm: "Rename"
             ) else { return false }
@@ -1038,7 +1047,7 @@ final class AppModel: ObservableObject {
         let detail = item.isFolder
             ? "The folder and its \(count) file\(count == 1 ? "" : "s") will be moved to the Trash."
             : "It will be moved to the Trash."
-        guard FilePrompt.confirm(
+        guard host.confirm(
             title: "Delete \(item.name)?", message: detail, confirm: "Delete", destructive: true
         ) else { return }
 
@@ -1206,14 +1215,11 @@ final class AppModel: ObservableObject {
     /// from a list.
     func promptToMove(_ item: VaultItem) {
         guard let vaultRoot else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = item.url.deletingLastPathComponent()
-        panel.prompt = "Move"
-        panel.message = "Choose a folder inside the vault to move \(item.name) into."
-        guard panel.runModal() == .OK, let target = panel.url else { return }
+        guard let target = host.chooseFolder(
+            prompt: "Move",
+            message: "Choose a folder inside the vault to move \(item.name) into.",
+            startingAt: item.url.deletingLastPathComponent()
+        ) else { return }
 
         guard VaultOperations.isInside(target, vaultRoot: vaultRoot) else {
             status = "That folder is outside the vault"
@@ -1222,9 +1228,7 @@ final class AppModel: ObservableObject {
         move([item.url], into: target)
     }
 
-    func revealInFinder(_ url: URL) {
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
+    func revealInFinder(_ url: URL) { host.revealInFinder(url) }
 
     // MARK: - Export
 
@@ -1235,28 +1239,12 @@ final class AppModel: ObservableObject {
     func exportPDF() {
         guard let current else { status = "No note to export"; return }
 
-        let panel = NSSavePanel()
-        panel.title = "Export as PDF"
-        panel.nameFieldStringValue = (current.url.lastPathComponent as NSString)
-            .deletingPathExtension + ".pdf"
-        panel.allowedContentTypes = [.pdf]
-        panel.canCreateDirectories = true
-        // Wherever the last export went, if it is still there. Exports tend
-        // to leave the vault — a Downloads folder, a shared drive — so
-        // beside the note is a poor second guess, and it was the only one.
-        panel.directoryURL = PDFExportSettings.shared.lastDirectory
-            ?? current.url.deletingLastPathComponent()
-
-        // The options ride inside the save panel rather than in a sheet of
-        // their own: where the file goes and what it looks like are one
-        // decision, and asking twice for one export is a step too many.
-        let accessory = NSHostingView(rootView: PDFExportAccessory())
-        // Taller than it was: the colour row was added.
-        accessory.frame = NSRect(x: 0, y: 0, width: 460, height: 226)
-        panel.accessoryView = accessory
-        panel.isExtensionHidden = false
-
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        guard let destination = host.exportDestination(
+            suggestedName: (current.url.lastPathComponent as NSString)
+                .deletingPathExtension + ".pdf",
+            startingAt: PDFExportSettings.shared.lastDirectory
+                ?? current.url.deletingLastPathComponent()
+        ) else { return }
 
         // Pending edits first: exporting a note that is 700ms out of date
         // would be a strange thing to discover later in a PDF.
@@ -1297,8 +1285,7 @@ final class AppModel: ObservableObject {
     }
 
     func copyToPasteboard(_ string: String, describedAs label: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(string, forType: .string)
+        host.copyToPasteboard(string)
         status = "Copied \(label)"
     }
 
@@ -1335,7 +1322,7 @@ final class AppModel: ObservableObject {
 
         let exists = daily.exists(for: date)
         if !exists {
-            guard FilePrompt.confirm(
+            guard host.confirm(
                 title: "Create Daily Note?",
                 message: "No daily note exists for \(date.formatted(date: .long, time: .omitted)). Create it at \(daily.relativePath(for: date))?",
                 confirm: "Create Note"
@@ -1861,7 +1848,7 @@ final class AppModel: ObservableObject {
     /// simply fails to resolve. This is the entry point that accepts the forms
     /// a path is actually copied in; `PathInput` documents which and why.
     func promptToGoToPath() {
-        guard let entered = FilePrompt.path(
+        guard let entered = host.path(
             title: "Go to Path",
             message: "Paste a path to a note or folder. Escaped paths, quoted "
                 + "paths and file:// URLs are all accepted."
@@ -1932,14 +1919,11 @@ final class AppModel: ObservableObject {
 
     func promptForScope() {
         guard let vaultRoot else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = scopeRoot ?? vaultRoot
-        panel.prompt = "Focus"
-        panel.message = "Choose a folder inside \(vaultName)."
-        guard panel.runModal() == .OK, let chosen = panel.url else { return }
+        guard let chosen = host.chooseFolder(
+            prompt: "Focus",
+            message: "Choose a folder inside \(vaultName).",
+            startingAt: scopeRoot ?? vaultRoot
+        ) else { return }
         let rootPath = vaultRoot.standardizedFileURL.path
         let chosenPath = chosen.standardizedFileURL.path
         guard chosenPath == rootPath || chosenPath.hasPrefix(rootPath + "/") else {
