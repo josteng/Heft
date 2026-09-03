@@ -6,15 +6,11 @@ import SwiftUI
 /// exists; clicking an empty day offers to create it from the configured template.
 struct CalendarPanel: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var settings = CalendarSettings.shared
     @State private var isWarningPresented = false
 
-    /// ISO calendar so weeks start on Monday, matching the vault's `YYYY-[W]WW`
-    /// weekly notes.
-    private var calendar: Calendar {
-        var c = Calendar(identifier: .iso8601)
-        c.timeZone = .current
-        return c
-    }
+    /// The grid's calendar, which carries the user's chosen first weekday.
+    private var calendar: Calendar { settings.gridCalendar }
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 7)
 
@@ -127,6 +123,7 @@ struct CalendarPanel: View {
                 DayCell(
                     date: day.date,
                     isToday: calendar.isDateInToday(day.date),
+                    marksMissing: settings.marksMissingToday,
                     isSelected: isOpen(day.date),
                     note: note(for: day.date),
                     isOutsideMonth: !day.isInMonth
@@ -155,8 +152,10 @@ struct CalendarPanel: View {
     private var days: [CalendarDay] {
         guard let interval = calendar.dateInterval(of: .month, for: model.calendarMonth) else { return [] }
         let first = interval.start
-        // weekday is 1=Sunday; shift so Monday is 0.
-        let leading = (calendar.component(.weekday, from: first) + 5) % 7
+        let leading = WeekLayout.leadingDays(
+            firstOfMonth: calendar.component(.weekday, from: first),
+            firstWeekday: calendar.firstWeekday
+        )
         guard let gridStart = calendar.date(byAdding: .day, value: -leading, to: first) else { return [] }
 
         let month = calendar.component(.month, from: first)
@@ -182,8 +181,7 @@ struct CalendarPanel: View {
     }
 
     private var weekdaySymbols: [String] {
-        // Monday-first, two letters, matching the ISO grid above.
-        ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+        WeekLayout.symbols(firstWeekday: calendar.firstWeekday)
     }
 
     /// Looked up in the in-memory index rather than on the filesystem: this
@@ -429,6 +427,9 @@ private struct DayCell: View {
 
     let date: Date
     let isToday: Bool
+    /// Whether today's *missing* note is worth showing. Today is outlined
+    /// either way; this is about the dot.
+    var marksMissing = true
     let isSelected: Bool
     let note: NoteRef?
     var isOutsideMonth = false
@@ -443,12 +444,25 @@ private struct DayCell: View {
                     .font(.system(size: 10, weight: isToday ? .bold : .regular))
                     .monospacedDigit()
                     .foregroundStyle(isOutsideMonth ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.primary))
-                Circle()
-                    .fill(note != nil ? AnyShapeStyle(accent) : AnyShapeStyle(.clear))
-                    // A padding day's note still gets a dot, but a faint one:
-                    // it belongs to a month that is not on screen.
-                    .opacity(isOutsideMonth ? 0.4 : 1)
-                    .frame(width: 3, height: 3)
+                // A filled dot means the note exists. Today with no note gets
+                // a hollow one instead of nothing at all: the outline says
+                // "this is the day", and without a dot there is no way to tell
+                // an uncreated today from one whose note simply has no marker.
+                // Every other empty day stays blank, because a vault is mostly
+                // empty days and marking them all would say nothing.
+                Group {
+                    if note != nil {
+                        Circle().fill(accent)
+                    } else if isToday, marksMissing, !isOutsideMonth {
+                        Circle().stroke(accent, lineWidth: 1)
+                    } else {
+                        Circle().fill(.clear)
+                    }
+                }
+                // A padding day's note still gets a dot, but a faint one:
+                // it belongs to a month that is not on screen.
+                .opacity(isOutsideMonth ? 0.4 : 1)
+                .frame(width: 4, height: 4)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 22)

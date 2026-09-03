@@ -444,3 +444,80 @@ struct WidgetKeysWhileRepeating {
         #expect(hasMarker(at: secondLine + 6), "and the marker is still there")
     }
 }
+
+@Suite("Week layout")
+struct WeekLayoutTests {
+
+    /// The column the 1st lands in is the one off-by-one that stays invisible
+    /// until a month happens to start on the day the week starts on.
+    @Test("A month's first day lands in the right column")
+    func leadingDays() {
+        // September 2026 starts on a Tuesday (weekday 3).
+        #expect(WeekLayout.leadingDays(firstOfMonth: 3, firstWeekday: 2) == 1)  // Monday-first
+        #expect(WeekLayout.leadingDays(firstOfMonth: 3, firstWeekday: 1) == 2)  // Sunday-first
+        #expect(WeekLayout.leadingDays(firstOfMonth: 3, firstWeekday: 7) == 3)  // Saturday-first
+
+        // A month starting on the very day the week starts needs no padding,
+        // and must not wrap to a whole blank row.
+        for start in 1...7 {
+            #expect(WeekLayout.leadingDays(firstOfMonth: start, firstWeekday: start) == 0)
+        }
+
+        // And the day before it needs a full six.
+        for start in 1...7 {
+            let dayBefore = (start + 5) % 7 + 1
+            #expect(WeekLayout.leadingDays(firstOfMonth: dayBefore, firstWeekday: start) == 6)
+        }
+
+        // Never off the end of the grid, whatever the pairing.
+        for start in 1...7 {
+            for first in 1...7 {
+                let leading = WeekLayout.leadingDays(firstOfMonth: first, firstWeekday: start)
+                #expect(leading >= 0 && leading <= 6)
+            }
+        }
+    }
+
+    @Test("Column headings rotate with the first weekday")
+    func symbols() {
+        #expect(WeekLayout.symbols(firstWeekday: 1) == ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"])
+        #expect(WeekLayout.symbols(firstWeekday: 2) == ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"])
+        #expect(WeekLayout.symbols(firstWeekday: 7) == ["Sa", "Su", "Mo", "Tu", "We", "Th", "Fr"])
+
+        // Whatever the rotation, it is still the seven days exactly once.
+        for start in 1...7 {
+            #expect(Set(WeekLayout.symbols(firstWeekday: start)).count == 7)
+        }
+    }
+
+    /// The heading over a column has to name the day the cells beneath it
+    /// actually hold, which is the pairing the two functions are only correct
+    /// about *together*.
+    @Test("A day falls under its own heading")
+    func headingsMatchTheGrid() {
+        let names = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
+        for start in 1...7 {
+            let headings = WeekLayout.symbols(firstWeekday: start)
+            for weekday in 1...7 {
+                let column = WeekLayout.leadingDays(firstOfMonth: weekday, firstWeekday: start)
+                #expect(
+                    headings[column] == names[weekday - 1],
+                    "weekday \(weekday) with week starting \(start)"
+                )
+            }
+        }
+    }
+
+    @Test("Every option resolves to a real weekday")
+    func options() {
+        for option in FirstWeekday.allCases {
+            let index = option.resolved()
+            #expect(index >= 1 && index <= 7, "\(option.label) resolved to \(index)")
+        }
+        #expect(FirstWeekday.monday.resolved() == 2)
+        #expect(FirstWeekday.sunday.resolved() == 1)
+        #expect(FirstWeekday.saturday.resolved() == 7)
+        // System follows the locale rather than a fixed day.
+        #expect(FirstWeekday.system.weekdayIndex == nil)
+    }
+}

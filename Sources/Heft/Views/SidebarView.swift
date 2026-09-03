@@ -898,13 +898,6 @@ private struct NoteRow: View {
 
     private func rowContents(renameText: Binding<String>?) -> some View {
         HStack(spacing: 5) {
-            if let disclosure {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(disclosure ? 90 : 0))
-                    .frame(width: 10)
-            }
             Image(systemName: symbol)
                 .font(.system(size: 11))
                 .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
@@ -934,6 +927,23 @@ private struct NoteRow: View {
                 Image(systemName: "icloud.and.arrow.down")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
+            }
+            // Trailing rather than in front of the folder icon.
+            //
+            // Leading, it was indentation that only folders had: a file and a
+            // folder at the same depth started their icons 15pt apart, so the
+            // tree had no single left edge to read down. Against the right
+            // edge every chevron lines up in its own column instead, and the
+            // icons of everything at one depth finally agree.
+            if let disclosure {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(disclosure ? 90 : 0))
+                    .frame(width: 10)
+                    // Turned by the row's own action, so it must not eat the
+                    // click that gets there.
+                    .allowsHitTesting(false)
             }
         }
         .padding(.leading, CGFloat(depth) * 12 + 6)
