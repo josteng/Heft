@@ -164,6 +164,12 @@ folder, filename format and template, attachment folder, and wikilink-vs-
 Markdown link preference. `.obsidian`, `.trash`, `.makemd` and `.space` are
 skipped.
 
+One deliberate difference: with an attachment folder set to a subfolder
+(`./assets`), Heft uses the nearest such folder *above* the note rather than
+always making one beside it, so a project keeps one attachment folder instead
+of growing one per subfolder. Nothing is created by that search: with no such
+folder anywhere above, the answer is still the one beside the note.
+
 Two syntax details that trip up naive parsers, both found in a real vault and
 both handled:
 

@@ -872,3 +872,123 @@ struct QuotedBlockTests {
         #expect(covered == 4, "`> ` and `- ` are both syntax (covered \(covered))")
     }
 }
+
+@Suite("Attachment folders")
+struct AttachmentFolderTests {
+
+    private func vault(_ folders: [String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-attach-\(UUID().uuidString)")
+        for folder in folders {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(folder), withIntermediateDirectories: true
+            )
+        }
+        return root
+    }
+
+    /// A vault has one attachment folder per project, not one per subfolder.
+    /// Creating a second `assets` beside a note the first time something is
+    /// pasted into a subfolder scatters attachments across the tree.
+    @Test("A subfolder attachment path finds the nearest one above the note")
+    func walksUp() throws {
+        let root = try vault(["Projects/Heft/assets", "Projects/Heft/Notes"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var settings = ObsidianSettings()
+        settings.attachmentFolderPath = "./assets"
+
+        let deep = root.appendingPathComponent("Projects/Heft/Notes/design.md")
+        #expect(
+            settings.attachmentDirectory(vaultRoot: root, noteURL: deep).standardizedFileURL.path
+                == root.appendingPathComponent("Projects/Heft/assets").standardizedFileURL.path
+        )
+
+        // A note sitting beside the folder still uses that one, not one above.
+        let beside = root.appendingPathComponent("Projects/Heft/plan.md")
+        #expect(
+            settings.attachmentDirectory(vaultRoot: root, noteURL: beside).standardizedFileURL.path
+                == root.appendingPathComponent("Projects/Heft/assets").standardizedFileURL.path
+        )
+    }
+
+    /// Nothing is created by the search, so with no such folder anywhere the
+    /// answer is unchanged: beside the note.
+    @Test("With none above, the folder beside the note is still the answer")
+    func fallsBackBesideTheNote() throws {
+        let root = try vault(["Projects/Heft/Notes"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var settings = ObsidianSettings()
+        settings.attachmentFolderPath = "./assets"
+        let note = root.appendingPathComponent("Projects/Heft/Notes/design.md")
+        #expect(
+            settings.attachmentDirectory(vaultRoot: root, noteURL: note).standardizedFileURL.path
+                == root.appendingPathComponent("Projects/Heft/Notes/assets").standardizedFileURL.path
+        )
+    }
+
+    /// The walk must stop at the vault. Reaching a folder of the same name
+    /// outside it would write attachments into somebody else's directory.
+    @Test("The walk never leaves the vault")
+    func staysInsideTheVault() throws {
+        let outer = try vault(["assets", "TheVault/Notes"])
+        defer { try? FileManager.default.removeItem(at: outer) }
+        let root = outer.appendingPathComponent("TheVault")
+
+        var settings = ObsidianSettings()
+        settings.attachmentFolderPath = "./assets"
+        let note = root.appendingPathComponent("Notes/design.md")
+        let resolved = settings.attachmentDirectory(vaultRoot: root, noteURL: note)
+        #expect(
+            resolved.standardizedFileURL.path
+                == root.appendingPathComponent("Notes/assets").standardizedFileURL.path
+        )
+        #expect(
+            resolved.standardizedFileURL.path != outer.appendingPathComponent("assets").standardizedFileURL.path,
+            "an assets folder outside the vault was used"
+        )
+    }
+
+    /// A file of that name is not a folder, and writing into it would fail.
+    @Test("A file of the same name is not mistaken for the folder")
+    func ignoresFiles() throws {
+        let root = try vault(["Projects/Notes"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "not a folder".write(
+            to: root.appendingPathComponent("Projects/assets"),
+            atomically: true, encoding: .utf8
+        )
+
+        var settings = ObsidianSettings()
+        settings.attachmentFolderPath = "./assets"
+        let note = root.appendingPathComponent("Projects/Notes/design.md")
+        #expect(
+            settings.attachmentDirectory(vaultRoot: root, noteURL: note).standardizedFileURL.path
+                == root.appendingPathComponent("Projects/Notes/assets").standardizedFileURL.path
+        )
+    }
+
+    /// The other three Obsidian forms are untouched.
+    @Test("The other attachment forms are unchanged")
+    func otherFormsUnchanged() throws {
+        let root = try vault(["Files", "Notes"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let note = root.appendingPathComponent("Notes/design.md")
+
+        var settings = ObsidianSettings()
+        #expect(settings.attachmentDirectory(vaultRoot: root, noteURL: note).path == root.path)
+
+        settings.attachmentFolderPath = "./"
+        #expect(
+            settings.attachmentDirectory(vaultRoot: root, noteURL: note).standardizedFileURL.path
+                == root.appendingPathComponent("Notes").standardizedFileURL.path
+        )
+
+        settings.attachmentFolderPath = "Files"
+        #expect(
+            settings.attachmentDirectory(vaultRoot: root, noteURL: note).standardizedFileURL.path
+                == root.appendingPathComponent("Files").standardizedFileURL.path
+        )
+    }
+}

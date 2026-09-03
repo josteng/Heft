@@ -111,6 +111,14 @@ public struct ObsidianSettings: Equatable, Sendable {
 
     /// Resolves where a pasted or dropped attachment should be written.
     /// `noteURL` matters only for the `./relative` form.
+    ///
+    /// For that form, the nearest folder of that name *walking up* from the
+    /// note is preferred over one beside it. A vault with `Projects/Heft/assets`
+    /// and a note at `Projects/Heft/Notes/design.md` means the one attachment
+    /// folder to use, not a second `Projects/Heft/Notes/assets` created the
+    /// first time something is pasted into a subfolder. Nothing is created by
+    /// the search: when no such folder exists anywhere above, the answer is
+    /// still the one beside the note, exactly as before.
     public func attachmentDirectory(vaultRoot: URL, noteURL: URL?) -> URL {
         let path = attachmentFolderPath.trimmingCharacters(in: .whitespaces)
         if path.isEmpty { return vaultRoot }
@@ -118,9 +126,40 @@ public struct ObsidianSettings: Equatable, Sendable {
         if path.hasPrefix("./") {
             let sub = String(path.dropFirst(2))
             let base = noteURL?.deletingLastPathComponent() ?? vaultRoot
-            return sub.isEmpty ? base : base.appendingPathComponent(sub, isDirectory: true)
+            guard !sub.isEmpty else { return base }
+            if let existing = Self.nearestFolder(named: sub, from: base, notAbove: vaultRoot) {
+                return existing
+            }
+            return base.appendingPathComponent(sub, isDirectory: true)
         }
         return vaultRoot.appendingPathComponent(path, isDirectory: true)
+    }
+
+    /// The closest existing `name` folder at or above `start`, never leaving
+    /// the vault.
+    static func nearestFolder(
+        named name: String, from start: URL, notAbove root: URL,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        let rootPath = root.standardizedFileURL.path
+        var folder = start.standardizedFileURL
+
+        // Bounded by the path's own depth, so a symlink loop or a note that
+        // is somehow outside the vault cannot spin here.
+        for _ in 0..<64 {
+            guard folder.path == rootPath || folder.path.hasPrefix(rootPath + "/") else { return nil }
+            let candidate = folder.appendingPathComponent(name, isDirectory: true)
+            var isFolder: ObjCBool = false
+            if fileManager.fileExists(atPath: candidate.path, isDirectory: &isFolder),
+               isFolder.boolValue {
+                return candidate
+            }
+            if folder.path == rootPath { return nil }
+            let parent = folder.deletingLastPathComponent().standardizedFileURL
+            guard parent.path != folder.path else { return nil }
+            folder = parent
+        }
+        return nil
     }
 
     private static func json(at url: URL) -> [String: Any]? {
