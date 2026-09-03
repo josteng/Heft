@@ -128,6 +128,17 @@ enum AgentCLI {
             fail("could not write the proposal: \(error.localizedDescription)")
         }
 
+        // Recorded in the *agent's* index, never the reader's.
+        //
+        // Only on `propose`, which is the moment an agent decided a note
+        // needed changing. Not on `read` or `find`: an agent reads twenty
+        // notes to decide about one, so counting reads would rank the vault by
+        // fan-out and mean nothing. This is also the only record that outlives
+        // the proposal — once it is accepted, `.heft/proposals/` forgets it.
+        MainActor.assumeIsolated {
+            FrecencyStore.agentNotes(forVaultAt: root.standardizedFileURL.path).record(relative)
+        }
+
         let diff = proposal.diff(against: current ?? "")
         print("proposed \(proposal.id)")
         print("note:    \(relative)\(current == nil ? " (new)" : "")")

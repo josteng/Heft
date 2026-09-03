@@ -143,6 +143,10 @@ changed, rather than re-attributing the whole note twice per character.
   from the vault's configured template.
 - **Backlinks** panel with the referencing line as context.
 - **Quick open** (⌘O), **content search** (⇧⌘F), **command palette** (⌘P).
+  Quick open and the palette rank by how often you use something, discounted
+  by how long ago — so with nothing typed they open on what you actually
+  work in, not on an alphabetical directory listing. Typing still puts the
+  better match first; familiarity only breaks ties.
 - **Export as PDF** (⇧⌘E) of the *rendered* note — tables, callouts, bullets,
   checkboxes and typeset LaTeX, not the Markdown source. It prints the live
   surface itself rather than a second renderer, so the page matches the editor.
@@ -167,6 +171,9 @@ heft agent-setup <vault>        # teach an agent in that vault to propose
 heft find <vault> <query>       # full-text search
 heft read <vault> <note>        # a note's source
 heft files <vault>              # every note, vault-relative
+    # --by-use   most-used first, the order Quick Open opens on
+    # --by-agent what an agent has proposed changes to, kept separately
+    # --scores   show each note's score   --limit N
 heft proposals <vault>          # what is waiting for review
 heft diff <vault> <id>          # what one of them would change
 heft stats <vault>              # read-only index report

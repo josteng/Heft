@@ -64,11 +64,20 @@ final class VaultSession: ObservableObject {
         "dev.stenglein.Heft.recents.\(root.path)"
     }
 
+    /// How often each note is opened, discounted by how long ago.
+    ///
+    /// Kept alongside `recentPaths` rather than replacing it: the two answer
+    /// different questions. The sidebar's Recent list is a history and has to
+    /// stay in the order things happened; this is a ranking, and a note opened
+    /// every morning should outrank one opened once by accident an hour ago.
+    private(set) lazy var noteFrecency = FrecencyStore.notes(forVaultAt: root.path)
+
     func recordRecent(_ relativePath: String) {
         recentPaths.removeAll { $0 == relativePath }
         recentPaths.insert(relativePath, at: 0)
         if recentPaths.count > 40 { recentPaths.removeLast(recentPaths.count - 40) }
         UserDefaults.standard.set(recentPaths, forKey: recentsKey)
+        noteFrecency.record(relativePath)
     }
 
     func replaceRecentPath(_ oldPath: String, with newPath: String) {

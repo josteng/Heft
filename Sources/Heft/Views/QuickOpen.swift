@@ -16,7 +16,20 @@ struct QuickOpenView: View {
         // Quick Open is a vault-wide switcher. Restricting it to a window's
         // focused folder made existing notes look as though they had fallen
         // out of the index, with no indication that scope was the reason.
-        model.index.search(query, limit: 60)
+        //
+        // Ordered by what the reader actually opens. With nothing typed that
+        // is the whole ranking — an alphabetical list of every note in a vault
+        // is a directory listing, not a switcher, and the note wanted is
+        // almost always one of the last few. With something typed it is only a
+        // nudge within a tier: a better match always wins.
+        let frecency = model.noteFrecency
+        return model.index.search(query, limit: 60) { note in
+            guard let frecency else { return 0 }
+            // Saturating: four uses in a half-life is "familiar", and more
+            // than that must not keep pulling ahead, or one heavily-used note
+            // would sit at the top of every search it matches at all.
+            return min(1, frecency.score(note.relativePath) / 4)
+        }
     }
 
     var body: some View {

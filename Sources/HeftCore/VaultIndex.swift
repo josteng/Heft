@@ -339,10 +339,44 @@ public final class VaultIndex: @unchecked Sendable {
     /// Conservative filename search for Quick Open and the sidebar. Literal
     /// matches rank first; compact or word-boundary fuzzy matches are accepted,
     /// while loose subsequences such as `eee` across a long title are rejected.
-    public func search(_ query: String, limit: Int = 50) -> [NoteRef] {
+    /// - Parameter boost: 0...1 per note, folded into the score so a note the
+    ///   reader actually uses wins a tie against a stranger that matches
+    ///   equally well. Deliberately small: at most `boostWeight`, which is
+    ///   less than the gap between any two match tiers, so familiarity
+    ///   reorders results *within* a tier and can never lift a substring match
+    ///   above a prefix one. An unfamiliar note that matches better still
+    ///   wins, which is what keeps typing predictable.
+    public static let boostWeight = 60
+
+    public func search(
+        _ query: String,
+        limit: Int = 50,
+        boost: ((NoteRef) -> Double)? = nil
+    ) -> [NoteRef] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else {
-            return Array(notes.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }.prefix(limit))
+            let alphabetical = notes.sorted {
+                $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+            // With nothing typed there is no match to rank by, so this is
+            // *only* the boost: what you use, most-used first. Alphabetical
+            // order is the fallback for everything unused, and the whole list
+            // for a vault nobody has opened yet.
+            guard let boost else { return Array(alphabetical.prefix(limit)) }
+            // Sorted with the original index as the tiebreak, because Swift's
+            // sort is not stable: without it every note scoring zero — which
+            // in a fresh vault is all of them — would come back in whatever
+            // order the sort happened to leave them, and the list would
+            // reshuffle itself between openings.
+            var byFamiliarity: [(offset: Int, note: NoteRef, score: Double)] = []
+            byFamiliarity.reserveCapacity(alphabetical.count)
+            for (offset, note) in alphabetical.enumerated() {
+                byFamiliarity.append((offset, note, boost(note)))
+            }
+            byFamiliarity.sort { left, right in
+                left.score == right.score ? left.offset < right.offset : left.score > right.score
+            }
+            return byFamiliarity.prefix(limit).map(\.note)
         }
         var scored: [(NoteRef, Int)] = []
         for note in notes {
@@ -356,10 +390,18 @@ public final class VaultIndex: @unchecked Sendable {
                 score = 100 + fuzzy
             }
             else { continue }
-            scored.append((note, score))
+            let familiarity = boost.map { Int(($0(note)).clamped(to: 0...1) * Double(Self.boostWeight)) } ?? 0
+            scored.append((note, score + familiarity))
         }
-        return scored
-            .sorted { a, b in a.1 == b.1 ? a.0.name.count < b.0.name.count : a.1 > b.1 }
+        return scored.enumerated()
+            .sorted { a, b in
+                if a.element.1 != b.element.1 { return a.element.1 > b.element.1 }
+                if a.element.0.name.count != b.element.0.name.count {
+                    return a.element.0.name.count < b.element.0.name.count
+                }
+                return a.offset < b.offset
+            }
+            .map(\.element)
             .prefix(limit)
             .map(\.0)
     }
@@ -387,5 +429,11 @@ enum FuzzyMatch {
         guard qi == q.count else { return nil }
         // Shorter candidates win ties.
         return total - min(c.count / 4, 20)
+    }
+}
+
+extension Double {
+    fileprivate func clamped(to range: ClosedRange<Double>) -> Double {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

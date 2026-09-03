@@ -317,6 +317,63 @@ tags or URLs — `SmartTypography.allowsSubstitution` is a cheap own scan rather
 than a `LiveDecorator` pass, because it runs on every keystroke and only has to
 answer for one position.
 
+### Ranking the switchers
+
+Quick Open and the command palette both order by **frecency**: how often
+something is used, discounted by how long ago. `Frecency` in HeftCore holds
+one Double and one date per item — a use adds 1, and the score halves every
+three days, with the decay applied on read. That is algebraically a sum of
+`0.5 ^ (age / halfLife)` over every past use, without keeping a history.
+
+Recency alone was the obvious alternative and is wrong: an MRU list puts a
+note opened once by accident above one opened every morning. Frequency alone
+never lets go of last year's project. `VaultSession.recentPaths` stays as it
+is, because the sidebar's Recent list is a *history* and has to keep the order
+things happened; this is a *ranking*.
+
+With nothing typed, frecency is the whole order — an alphabetical list of every
+note is a directory listing, not a switcher. With something typed it is worth
+at most `VaultIndex.boostWeight` (60), which is less than the gap between any
+two match tiers, so familiarity reorders results *within* a tier and can never
+lift a substring match above a prefix one. Both sorts carry the original index
+as a final tiebreak, because Swift's sort is not stable and every unused note
+scores the same: without it a fresh vault's list would reshuffle between
+openings.
+
+#### What counts as a use
+
+Only the reader's own opens. `recordRecent` is reached from `AppModel.open`
+and nowhere else, so `heft open` and `heft .` count — a person opening a note
+from a terminal is the same act of attention as opening it in the window — and
+the agent verbs record nothing, because `AgentCLI` never touches `AppModel`.
+
+That is deliberate, not an oversight. The store is a model of *one person's*
+attention, and it is the thing Quick Open opens on. A single `heft propose`
+loop over thirty notes would write thirty uses and displace weeks of the
+reader's own signal, with no way back short of deleting the store. `propose`
+does not even edit the note it names — it writes a file under
+`.heft/proposals/` and leaves the note alone.
+
+There is already a precise channel for "an agent touched this": the proposal
+list, which names the note, survives until it is reviewed, and clears when it
+is. A decaying score is a much worse version of that. It is the same reasoning
+that makes the vault watcher ignore Heft's own writes.
+
+`heft files <vault> --by-use` exposes the ranking read-only, which is what an
+agent should use: "what is this person working in" is a far better prior than
+alphabetical order or a modification date, which every sync disturbs.
+
+An agent's own work is kept in a **second index** under a different key and
+surfaced by `--by-agent`. `heft propose` records there, and nothing else does:
+an agent reads twenty notes to decide about one, so counting reads would rank
+the vault by fan-out. It is also the only record that outlives a proposal —
+once one is accepted, `.heft/proposals/` forgets the note was ever touched.
+
+A store loads its copy from `UserDefaults` once, at init. A test that asks an
+instance built *before* a write therefore passes even when both stores share a
+key, which is how the separation test first passed against a mutation that
+merged them. Read through a fresh instance.
+
 ### Completion
 
 `[[` and `> [!` are the same interaction and share one panel, so
@@ -423,6 +480,15 @@ depends on changes.
   empty trailing page removed. Emptiness is decided by **rasterising**: half of
   what this editor draws is painted by a layout fragment and is not in the text
   layer, so a page holding only a table reports no string.
+- **`swift run Heft` and the installed app do not share `UserDefaults`.** The
+  development binary has no bundle identifier, so `UserDefaults.standard`
+  resolves to a different domain and every stored setting reads back empty.
+  Anything on the CLI that reads app state — `files --by-use` does — has to be
+  tested through the *installed* `heft`, not `swift run`.
+- **`standardizedFileURL` rewrites `/private/tmp` to `/tmp`.** Both the vault
+  session and the CLI standardize before building a per-vault defaults key, so
+  they agree; anything computing such a key by hand must standardize too, or it
+  writes to a key nothing ever reads.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
 - **Launching the GUI at a sandbox vault repoints Spotlight capture at it.**

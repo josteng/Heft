@@ -2028,3 +2028,265 @@ struct PDFExportSettingsTests {
         #expect(PDFExportOptions(decoding: defaults.data(forKey: key)) == chosen)
     }
 }
+
+@Suite("Frecency")
+struct FrecencyTests {
+
+    private let day: TimeInterval = 24 * 60 * 60
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    /// Pure recency puts a note opened once by accident above one opened every
+    /// morning; pure frequency never lets go of last year's project. The point
+    /// of one decaying score is that neither happens.
+    @Test("Often beats once, and recent beats stale")
+    func combinesBoth() {
+        var store = Frecency()
+        // Opened every day for a week, last used a day ago.
+        for offset in 1...7 { store.record("habit", at: now.addingTimeInterval(-Double(offset) * day)) }
+        // Opened once, an hour ago.
+        store.record("accident", at: now.addingTimeInterval(-3600))
+        #expect(store.score("habit", at: now) > store.score("accident", at: now))
+
+        var stale = Frecency()
+        // Heavily used, but a month ago.
+        for _ in 1...20 { stale.record("old", at: now.addingTimeInterval(-30 * day)) }
+        stale.record("fresh", at: now)
+        #expect(stale.score("fresh", at: now) > stale.score("old", at: now))
+    }
+
+    @Test("A use halves in value every half-life")
+    func decaysByHalves() {
+        var store = Frecency()
+        store.record("note", at: now)
+        let immediate = store.score("note", at: now)
+        let oneLife = store.score("note", at: now.addingTimeInterval(Frecency.halfLife))
+        let twoLives = store.score("note", at: now.addingTimeInterval(2 * Frecency.halfLife))
+        #expect(abs(oneLife - immediate / 2) < 0.0001)
+        #expect(abs(twoLives - immediate / 4) < 0.0001)
+    }
+
+    @Test("Anything never used scores nothing")
+    func unknownIsZero() {
+        var store = Frecency()
+        store.record("seen", at: now)
+        #expect(store.score("unseen", at: now) == 0)
+        #expect(!store.hasRecord(of: "unseen"))
+        #expect(store.hasRecord(of: "seen"))
+    }
+
+    /// An untouched vault has to open the switcher in a sensible order rather
+    /// than in whatever order a dictionary happened to enumerate.
+    @Test("Items with no history keep the fallback order")
+    func stableWithoutHistory() {
+        let store = Frecency()
+        let names = ["Charlie", "alpha", "Bravo"]
+        let ranked = store.ranked(names, at: now, by: { $0 }, tiebreak: {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        })
+        #expect(ranked == ["alpha", "Bravo", "Charlie"])
+    }
+
+    @Test("Ranking puts the most used first and keeps the rest ordered")
+    func ranksByScore() {
+        var store = Frecency()
+        store.record("Bravo", at: now.addingTimeInterval(-day))
+        store.record("Bravo", at: now)
+        store.record("Charlie", at: now)
+        let ranked = store.ranked(["alpha", "Bravo", "Charlie", "delta"], at: now, by: { $0 }, tiebreak: {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        })
+        #expect(ranked.prefix(2) == ["Bravo", "Charlie"])
+        #expect(ranked.suffix(2) == ["alpha", "delta"], "unused entries stay alphabetical")
+    }
+
+    /// A clock that has gone backwards — a timezone change, a restored
+    /// backup — must not inflate a score into permanence.
+    @Test("A backwards clock cannot inflate a score")
+    func backwardsClock() {
+        var store = Frecency()
+        store.record("note", at: now)
+        let past = store.score("note", at: now.addingTimeInterval(-10 * day))
+        #expect(past == store.score("note", at: now))
+    }
+
+    @Test("The store survives a round trip and bad data")
+    func persistence() {
+        var store = Frecency()
+        store.record("note", at: now)
+        let restored = Frecency(decoding: store.encoded)
+        #expect(abs(restored.score("note", at: now) - store.score("note", at: now)) < 0.0001)
+        #expect(Frecency(decoding: nil) == Frecency())
+        #expect(Frecency(decoding: Data("not json".utf8)) == Frecency())
+    }
+
+    /// A vault used for years must not grow an unbounded store.
+    @Test("The store stays bounded")
+    func prunes() {
+        var store = Frecency()
+        for index in 0..<900 { store.record("note-\(index)", at: now) }
+        var kept = 0
+        for index in 0..<900 where store.hasRecord(of: "note-\(index)") { kept += 1 }
+        #expect(kept <= 400, "kept \(kept) entries")
+        // And what it keeps is what was used most recently.
+        #expect(store.hasRecord(of: "note-899"))
+    }
+}
+
+@Suite("Switcher ranking")
+struct SwitcherRankingTests {
+
+    private func index(_ names: [String]) -> VaultIndex {
+        let root = URL(fileURLWithPath: "/tmp/heft-rank")
+        let items = names.map { name in
+            VaultItem(
+                url: root.appendingPathComponent("\(name).md"),
+                relativePath: "\(name).md",
+                kind: .markdown,
+                name: name
+            )
+        }
+        return VaultIndex.build(root: VaultItem(
+            url: root, relativePath: "", kind: .folder, name: "", children: items
+        ))
+    }
+
+    /// An alphabetical list of every note in a vault is a directory listing,
+    /// not a switcher: the note wanted is almost always one of the last few.
+    @Test("With nothing typed, the most-used notes come first")
+    func emptyQueryRanksByUse() {
+        let index = index(["Alpha", "Beta", "Gamma", "Delta"])
+        let plain = index.search("", limit: 10).map(\.name)
+        #expect(plain == ["Alpha", "Beta", "Delta", "Gamma"], "unranked is alphabetical")
+
+        var frecency = Frecency()
+        frecency.record("Gamma.md")
+        frecency.record("Gamma.md")
+        frecency.record("Delta.md")
+        let ranked = index.search("", limit: 10) { frecency.score($0.relativePath) }.map(\.name)
+        #expect(ranked.prefix(2) == ["Gamma", "Delta"])
+        // And everything unused keeps its alphabetical order rather than
+        // reshuffling between openings, which an unstable sort would do.
+        #expect(ranked.suffix(2) == ["Alpha", "Beta"])
+    }
+
+    /// Familiarity is a nudge inside a tier, never across one. A note you have
+    /// never opened that matches better still wins, which is what keeps typing
+    /// predictable.
+    @Test("A better match beats a more familiar one")
+    func matchQualityWins() {
+        let index = index(["Meeting", "Weekly Meeting Notes"])
+        var frecency = Frecency()
+        for _ in 1...50 { frecency.record("Weekly Meeting Notes.md") }
+
+        let ranked = index.search("meet", limit: 10) {
+            min(1, frecency.score($0.relativePath) / 4)
+        }.map(\.name)
+        // "Meeting" is a prefix match, the other only contains it. No amount
+        // of use may reorder that.
+        #expect(ranked.first == "Meeting", "got \(ranked)")
+    }
+
+    /// Within one tier, though, familiarity should decide.
+    ///
+    /// Both names here are prefix matches, and unranked the *shorter* one wins
+    /// on the index's own tiebreak. The longer one is the familiar one, so
+    /// this measures the boost overcoming that rather than agreeing with an
+    /// order the index would have produced anyway.
+    @Test("Between equal matches, the familiar one wins")
+    func familiarityBreaksTies() {
+        let index = index(["Report Alpha", "Report Beta"])
+        #expect(
+            index.search("report", limit: 10).map(\.name).first == "Report Beta",
+            "unranked, the shorter name wins"
+        )
+
+        var frecency = Frecency()
+        for _ in 1...4 { frecency.record("Report Alpha.md") }
+        let ranked = index.search("report", limit: 10) {
+            min(1, frecency.score($0.relativePath) / 4)
+        }.map(\.name)
+        #expect(ranked.first == "Report Alpha", "got \(ranked)")
+    }
+
+    @Test("An unused vault still returns everything, in order")
+    func unusedVault() {
+        let index = index(["Charlie", "alpha", "Bravo"])
+        let empty = Frecency()
+        let ranked = index.search("", limit: 10) { empty.score($0.relativePath) }.map(\.name)
+        #expect(ranked == ["alpha", "Bravo", "Charlie"])
+    }
+}
+
+@Suite("Separate use indices")
+@MainActor
+struct FrecencyStoreSeparationTests {
+
+    /// The reader's ranking and the agent's are different questions for
+    /// different readers, and merging them has a specific failure: one
+    /// `heft propose` loop over thirty notes would displace weeks of the
+    /// reader's own signal in a switcher they never asked to have reordered.
+    @Test("An agent's work never reaches the reader's ranking")
+    func storesAreSeparate() {
+        let vault = "/tmp/heft-separation-\(UUID().uuidString)"
+        let reader = FrecencyStore.notes(forVaultAt: vault)
+        let agent = FrecencyStore.agentNotes(forVaultAt: vault)
+        defer {
+            for key in [
+                "dev.stenglein.Heft.frecency.notes.\(vault)",
+                "dev.stenglein.Heft.frecency.agent.\(vault)",
+            ] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
+        agent.record("proposed.md")
+        agent.record("proposed.md")
+        #expect(agent.score("proposed.md") > 0)
+
+        // Read through a *fresh* instance. A store loads its copy once at
+        // init, so asking the one built before the write would pass even if
+        // both were writing to the same key — which is exactly the mistake
+        // this test exists to catch.
+        #expect(
+            FrecencyStore.notes(forVaultAt: vault).score("proposed.md") == 0,
+            "an agent's proposal reached the reader's index"
+        )
+
+        reader.record("opened.md")
+        #expect(reader.score("opened.md") > 0)
+        #expect(
+            FrecencyStore.agentNotes(forVaultAt: vault).score("opened.md") == 0,
+            "a reader's open reached the agent's index"
+        )
+    }
+
+    /// Two vaults are two rankings: "the note I keep opening" is a fact about
+    /// a vault, not about the app.
+    @Test("Two vaults keep separate rankings")
+    func vaultsAreSeparate() {
+        let one = "/tmp/heft-vault-one-\(UUID().uuidString)"
+        let two = "/tmp/heft-vault-two-\(UUID().uuidString)"
+        defer {
+            for path in [one, two] {
+                UserDefaults.standard.removeObject(
+                    forKey: "dev.stenglein.Heft.frecency.notes.\(path)"
+                )
+            }
+        }
+        FrecencyStore.notes(forVaultAt: one).record("note.md")
+        #expect(FrecencyStore.notes(forVaultAt: one).score("note.md") > 0)
+        #expect(FrecencyStore.notes(forVaultAt: two).score("note.md") == 0)
+    }
+
+    /// A store reads what a previous instance wrote, which is the whole point
+    /// of it outliving a session.
+    @Test("A use survives a new instance")
+    func persistsAcrossInstances() {
+        let vault = "/tmp/heft-persist-\(UUID().uuidString)"
+        defer {
+            UserDefaults.standard.removeObject(forKey: "dev.stenglein.Heft.frecency.notes.\(vault)")
+        }
+        FrecencyStore.notes(forVaultAt: vault).record("note.md")
+        #expect(FrecencyStore.notes(forVaultAt: vault).score("note.md") > 0)
+    }
+}

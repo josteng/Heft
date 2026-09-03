@@ -93,6 +93,10 @@ final class AppModel: ObservableObject {
 
     /// "1 note" or "12 notes" — a count that reads as English wherever it is
     /// shown, rather than "1 notes".
+    /// How often each note in this vault is opened, discounted by how long
+    /// ago. Exposed rather than the session itself, which is private.
+    var noteFrecency: FrecencyStore? { session?.noteFrecency }
+
     var scopedNoteCountLabel: String {
         scopedNotes.count == 1 ? "1 note" : "\(scopedNotes.count) notes"
     }

@@ -65,10 +65,55 @@ enum HeftMain {
             )
             return
         }
+        // `files <vault> [--by-use] [--limit N] [--scores]`.
+        //
+        // `--by-use` is the same ranking Quick Open opens on: how often the
+        // *reader* opens a note, discounted by how long ago. "Which notes is
+        // this person actually working in" is a far better prior than
+        // alphabetical order or a modification date, which every sync and
+        // every reformat disturbs.
+        //
+        // `--by-agent` is the same question about the agent's own work, kept
+        // in a separate index so neither can drown out the other.
         if arguments.first == "files", arguments.count > 1 {
             let root = URL(fileURLWithPath: (arguments[1] as NSString).expandingTildeInPath)
-            for item in VaultScanner.scan(root: root).flattened() where !item.isFolder {
-                print(item.relativePath)
+                .standardizedFileURL
+            let flags = Array(arguments.dropFirst(2))
+            let byUse = flags.contains("--by-use")
+            let byAgent = flags.contains("--by-agent")
+            let showScores = flags.contains("--scores")
+            var limit = Int.max
+            if let index = flags.firstIndex(of: "--limit"), index + 1 < flags.count,
+               let value = Int(flags[index + 1]) {
+                limit = max(0, value)
+            }
+
+            let notes = VaultScanner.scan(root: root).flattened().filter { !$0.isFolder }
+            guard byUse || byAgent || showScores else {
+                for item in notes.prefix(limit) { print(item.relativePath) }
+                exit(0)
+            }
+
+            // Two separate indices: what the reader opens, and what an agent
+            // has proposed changes to. Never merged, because they answer
+            // different questions for different readers.
+            let store = MainActor.assumeIsolated {
+                byAgent
+                    ? FrecencyStore.agentNotes(forVaultAt: root.path)
+                    : FrecencyStore.notes(forVaultAt: root.path)
+            }
+            let ranked = MainActor.assumeIsolated {
+                store.ranked(notes, by: \.relativePath) {
+                    $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
+                }
+            }
+            for item in (byUse || byAgent ? ranked : notes).prefix(limit) {
+                if showScores {
+                    let score = MainActor.assumeIsolated { store.score(item.relativePath) }
+                    print(String(format: "%8.3f  %@", score, item.relativePath))
+                } else {
+                    print(item.relativePath)
+                }
             }
             exit(0)
         }

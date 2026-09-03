@@ -72,11 +72,20 @@ struct AppCommand: Identifiable {
             title: "Review agent proposals",
             symbol: "sparkles",
             searchTerms: "agent claude ai proposal review diff changes pending accept",
+            // Says *where*, rather than hiding itself.
+            //
+            // The count is vault-wide, so on an unrelated note this read as
+            // though the open note had proposals waiting. Gating it to the
+            // current note instead would be worse: a review queue nobody can
+            // find is a queue that never gets reviewed. So it stays reachable
+            // from anywhere and tells the truth about what it will open.
             displayTitle: { model in
-                let count = model.proposals.count
-                return count == 0
-                    ? "Review agent proposals"
-                    : "Review agent proposals (\(count))"
+                let here = model.proposalsForCurrentNote.count
+                let total = model.proposals.count
+                if total == 0 { return "Review agent proposals" }
+                if here == 0 { return "Review agent proposals elsewhere in the vault (\(total))" }
+                if here == total { return "Review agent proposals for this note (\(here))" }
+                return "Review agent proposals for this note (\(here) of \(total))"
             },
             enabled: { !$0.proposals.isEmpty },
             action: { model in
@@ -175,7 +184,10 @@ struct AppCommand: Identifiable {
         return query.isEmpty || "\(title) \(searchTerms)".localizedCaseInsensitiveContains(query)
     }
 
-    @MainActor func perform(on model: AppModel) { action(model) }
+    @MainActor func perform(on model: AppModel) {
+        FrecencyStore.commands.record(id)
+        action(model)
+    }
 }
 
 struct CommandPaletteView: View {
@@ -186,7 +198,12 @@ struct CommandPaletteView: View {
     @FocusState private var isFocused: Bool
 
     private var results: [AppCommand] {
-        AppCommand.registry.filter { $0.matches(query) }
+        // Ranked by what this reader actually runs. `matches` is a yes/no, so
+        // with or without a query every survivor is equally good and the only
+        // sensible order left is familiarity — falling back to the registry's
+        // own order, which is what a fresh install sees.
+        let matching = AppCommand.registry.filter { $0.matches(query) }
+        return FrecencyStore.commands.ranked(matching, by: \.id) { _, _ in false }
     }
 
     var body: some View {
