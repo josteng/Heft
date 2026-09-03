@@ -181,18 +181,125 @@ extension View {
 /// content, which only happens automatically when the height is left
 /// unconstrained.
 struct SettingsWindow: View {
-    var body: some View {
-        TabView {
-            AppearanceSettingsView()
-                .tabItem { Label("Appearance", systemImage: "paintpalette") }
-            TypingSettingsView()
-                .tabItem { Label("Typing", systemImage: "keyboard") }
-            CalendarSettingsView()
-                .tabItem { Label("Calendar", systemImage: "calendar") }
-            VimSettingsView()
-                .tabItem { Label("Vim (Experimental)", systemImage: "terminal") }
+
+    /// The tabs, as one table. The window measures the selected pane to size
+    /// itself, so a second hand-written list of which view is in which tab
+    /// would be a thing to keep in step and a thing to get wrong.
+    enum Tab: String, CaseIterable, Hashable, Identifiable {
+        case appearance, startup, typing, calendar, attachments, vim
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .appearance: "Appearance"
+            case .startup: "Startup"
+            case .typing: "Typing"
+            case .calendar: "Calendar"
+            case .attachments: "Attachments"
+            case .vim: "Vim (Experimental)"
+            }
         }
-        .frame(width: 630)
+
+        var symbol: String {
+            switch self {
+            case .appearance: "paintpalette"
+            case .startup: "sunrise"
+            case .typing: "keyboard"
+            case .calendar: "calendar"
+            case .attachments: "paperclip"
+            case .vim: "terminal"
+            }
+        }
+
+        @ViewBuilder var content: some View {
+            switch self {
+            case .appearance: AppearanceSettingsView()
+            case .startup: StartupSettingsView()
+            case .typing: TypingSettingsView()
+            case .calendar: CalendarSettingsView()
+            case .attachments: AttachmentSettingsView()
+            case .vim: VimSettingsView()
+            }
+        }
+    }
+
+    @EnvironmentObject private var registry: VaultRegistry
+    // Observed so the window re-measures when a pane changes shape, not only
+    // when the tab does: choosing a rule that needs a folder name, or a startup
+    // note that needs a path, grows the pane by a row, and a window sized once
+    // per tab then clips it.
+    @ObservedObject private var startup = StartupSettings.shared
+    @ObservedObject private var attachments = AttachmentSettings.shared
+    @ObservedObject private var typing = TypingSettings.shared
+    @State private var tab: Tab = .appearance
+
+    /// Measured on every pass rather than cached: it is one hosting view for a
+    /// window nobody opens in a loop, and anything cached here has to be
+    /// invalidated by whatever might change a pane's height, which is a list
+    /// that would rot.
+    private var paneHeight: CGFloat {
+        Self.idealHeight(of: tab, registry: registry)
+    }
+
+    var body: some View {
+        TabView(selection: $tab) {
+            ForEach(Tab.allCases) { tab in
+                tab.content
+                    .tabItem { Label(tab.title, systemImage: tab.symbol) }
+                    .tag(tab)
+            }
+        }
+        // Pinned to the pane that is showing, rather than left to the tab
+        // view's own idea of its size. Asking the window afterwards measured
+        // the tab on its way out, so the window was always one tab behind:
+        // right on the one it opened with, too tall or too short for the rest.
+        .frame(width: Self.paneWidth, height: paneHeight > 0 ? paneHeight : nil)
+        .background(FitsItsWindow(trigger: paneHeight))
+    }
+
+    static let paneWidth: CGFloat = 630
+
+    /// What a pane would take if nothing constrained it.
+    ///
+    /// Measured by laying the pane out on the side rather than by asking the
+    /// window: a `TabView`'s own fitting size is the tallest tab's, whichever
+    /// one is showing, which is exactly the number that made every short pane
+    /// sit in a window sized for the long one.
+    @MainActor
+    static func idealHeight(of tab: Tab, registry: VaultRegistry) -> CGFloat {
+        let host = NSHostingView(
+            rootView: AnyView(tab.content.environmentObject(registry))
+        )
+        host.frame = NSRect(x: 0, y: 0, width: paneWidth, height: 10)
+        host.layoutSubtreeIfNeeded()
+        return host.fittingSize.height
+    }
+}
+
+/// Resizes the Settings window to whichever tab is showing.
+///
+/// A SwiftUI Settings window grows for a taller tab and never shrinks back, so
+/// one visit to the longest pane leaves every short one in a window mostly
+/// empty. Measured: the Calendar pane wants 276pt against the 720 Typing needs.
+private struct FitsItsWindow: NSViewRepresentable {
+    /// Only there to make SwiftUI run `updateNSView` when the pane changes size.
+    let trigger: CGFloat
+
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        // After this layout pass, so the content is the height just asked for.
+        // The tab bar's own height comes along in `fittingSize`, which is the
+        // showing pane plus that chrome, so there is nothing to work out.
+        DispatchQueue.main.async {
+            guard let window = view.window, let content = window.contentView else { return }
+            let wanted = content.fittingSize.height
+            // A tolerance, because setting the size a window already has posts
+            // a resize, which lays out and asks again.
+            guard wanted > 0, abs(content.frame.height - wanted) > 1 else { return }
+            window.setContentSize(NSSize(width: content.frame.width, height: wanted))
+        }
     }
 }
 

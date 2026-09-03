@@ -6,3 +6,8 @@
 # Compiled from Resources/Heft.icon by actool during bundling.
 Resources/Heft.icns
 Resources/Assets.car
+
+# Personal working notes and dev-environment config. Ignored globally too, but
+# this repo says so itself: a single `git add -A` would otherwise sweep in a
+# backlog, a worktree, and whatever else lives here.
+.claude/

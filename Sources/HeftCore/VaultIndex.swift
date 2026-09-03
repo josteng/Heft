@@ -77,10 +77,18 @@ public final class VaultIndex: @unchecked Sendable {
     private let notesByTag: [String: [NoteRef]]
     private let tagSpelling: [String: String]
     private let tagsByPath: [String: [String]]
+    /// Where the notes in each folder already keep their attachments: the
+    /// note's folder, then the attachment's folder, then how many references.
+    ///
+    /// Counted from the same read that builds the link graph, so it costs
+    /// nothing beyond the parse — the bargain tags already take. Counting any
+    /// mention of an attachment's filename rather than embeds alone is what
+    /// makes it see a vault that keeps book covers in a `Cover:` property.
+    private let attachmentUsage: [String: [String: Int]]
 
     public static let empty = VaultIndex(
         notes: [], allFiles: [], byPath: [:], byName: [:], outgoing: [:], backlinks: [:],
-        notesByTag: [:], tagSpelling: [:], tagsByPath: [:]
+        notesByTag: [:], tagSpelling: [:], tagsByPath: [:], attachmentUsage: [:]
     )
 
     private init(
@@ -88,7 +96,7 @@ public final class VaultIndex: @unchecked Sendable {
         byPath: [String: NoteRef], byName: [String: [NoteRef]],
         outgoing: [String: [WikiLink]], backlinks: [String: [Backlink]],
         notesByTag: [String: [NoteRef]], tagSpelling: [String: String],
-        tagsByPath: [String: [String]]
+        tagsByPath: [String: [String]], attachmentUsage: [String: [String: Int]]
     ) {
         self.notes = notes
         self.allFiles = allFiles
@@ -99,6 +107,7 @@ public final class VaultIndex: @unchecked Sendable {
         self.notesByTag = notesByTag
         self.tagSpelling = tagSpelling
         self.tagsByPath = tagsByPath
+        self.attachmentUsage = attachmentUsage
     }
 
     // MARK: - Building
@@ -139,7 +148,8 @@ public final class VaultIndex: @unchecked Sendable {
         let notes = allFiles.filter(\.isMarkdown)
         let partial = VaultIndex(
             notes: notes, allFiles: allFiles, byPath: byPath, byName: byName,
-            outgoing: [:], backlinks: [:], notesByTag: [:], tagSpelling: [:], tagsByPath: [:]
+            outgoing: [:], backlinks: [:], notesByTag: [:], tagSpelling: [:],
+            tagsByPath: [:], attachmentUsage: [:]
         )
 
         // Second pass: read note bodies and build the link graph. Resolution
@@ -149,6 +159,15 @@ public final class VaultIndex: @unchecked Sendable {
         var notesByTag: [String: [NoteRef]] = [:]
         var tagSpelling: [String: String] = [:]
         var tagsByPath: [String: [String]] = [:]
+        var attachmentUsage: [String: [String: Int]] = [:]
+
+        // Basename to the folders holding a file of that name. Attachments
+        // only: a note mentioning another note says nothing about where files
+        // are kept.
+        var attachmentFolders: [String: Set<String>] = [:]
+        for file in allFiles where !file.isMarkdown {
+            attachmentFolders[file.name.lowercased(), default: []].insert(file.folder)
+        }
 
         for note in notes {
             guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { continue }
@@ -168,6 +187,16 @@ public final class VaultIndex: @unchecked Sendable {
             }
             if !links.isEmpty { outgoing[note.relativePath] = links }
 
+            // Where this note keeps its attachments, from the same read.
+            if !attachmentFolders.isEmpty {
+                for name in AttachmentNames.mentioned(in: text) {
+                    guard let folders = attachmentFolders[name] else { continue }
+                    for folder in folders {
+                        attachmentUsage[note.folder, default: [:]][folder, default: 0] += 1
+                    }
+                }
+            }
+
             // Tags come from the same read, so indexing them costs nothing
             // beyond the parse.
             let tags = NoteTags.all(in: text)
@@ -186,8 +215,38 @@ public final class VaultIndex: @unchecked Sendable {
         return VaultIndex(
             notes: notes, allFiles: allFiles, byPath: byPath, byName: byName,
             outgoing: outgoing, backlinks: backlinks,
-            notesByTag: notesByTag, tagSpelling: tagSpelling, tagsByPath: tagsByPath
+            notesByTag: notesByTag, tagSpelling: tagSpelling, tagsByPath: tagsByPath,
+            attachmentUsage: attachmentUsage
         )
+    }
+
+    /// The folder the notes at or under `folder` most often keep attachments
+    /// in, looking one level further up each time nothing is found.
+    ///
+    /// The vault root is deliberately never consulted as a *level*. Aggregated
+    /// there, the answer is whatever the busiest corner of the vault does, so a
+    /// daily note in a vault with a large thesis folder would be told to file
+    /// its screenshots with the thesis. A folder that has never held an
+    /// attachment has no habit, and saying so lets the next rule answer.
+    public func attachmentDestination(near folder: String) -> String? {
+        var level = folder
+        while !level.isEmpty {
+            var totals: [String: Int] = [:]
+            for (noteFolder, destinations) in attachmentUsage
+            where noteFolder == level || noteFolder.hasPrefix(level + "/") {
+                for (destination, count) in destinations {
+                    totals[destination, default: 0] += count
+                }
+            }
+            // Ties break on the name, so the answer cannot change between two
+            // runs over an unchanged vault.
+            if let best = totals.max(by: { ($0.value, $1.key) < ($1.value, $0.key) }) {
+                return best.key
+            }
+            guard let slash = level.lastIndex(of: "/") else { break }
+            level = String(level[level.startIndex..<slash])
+        }
+        return nil
     }
 
     // MARK: - Queries

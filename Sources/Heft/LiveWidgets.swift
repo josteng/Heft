@@ -24,8 +24,10 @@ enum BlockWidget {
     /// A labelled rule where the agent guide begins or ends.
     case agentGuide(isEnd: Bool)
     case blockMath(NSImage)
-    /// A picture, and whatever the line it claimed still owes the reader.
-    case image(NSImage, lead: BlockLead = BlockLead())
+    /// A picture at the size it is drawn, and whatever the line it claimed
+    /// still owes the reader. The size is settled at style time, where the
+    /// link's own `|500` is in scope.
+    case image(NSImage, size: CGSize, lead: BlockLead = BlockLead())
     /// Drawn as a grid; the widget owns every line of the table.
     case table(TableGrid)
     /// One line's slice of a quote bar, or of a callout's tinted card.
@@ -308,7 +310,7 @@ struct TableGrid {
 
         // Every cell is styled through the same decorator the prose uses, so a
         // link or `**bold**` inside a cell looks the same as it does outside.
-        let display: [[NSAttributedString]] = layout.rows.enumerated().map { rowIndex, row in
+        var display: [[NSAttributedString]] = layout.rows.enumerated().map { rowIndex, row in
             (0..<columnCount).map { column in
                 let source = column < row.count ? row[column] : ""
                 return CellText.render(
@@ -357,6 +359,21 @@ struct TableGrid {
             }
         }
 
+        // A second pass over the cells that hold a picture, now that the
+        // columns have been measured from the words. The first pass sized them
+        // nominally so a picture could not decide its own column's width and
+        // then be fitted to it.
+        for (rowIndex, row) in layout.rows.enumerated() {
+            for column in 0..<columnCount {
+                let source = column < row.count ? row[column] : ""
+                guard CellText.holdsPicture(source) else { continue }
+                display[rowIndex][column] = CellText.render(
+                    source, bold: rowIndex == 0, fontSize: fontSize, context: context,
+                    pictureWidth: max(1, widths[column] - padding.width * 2)
+                )
+            }
+        }
+
         var styled = display
         if let active, active.row < styled.count, active.column < styled[active.row].count {
             // The cell under the caret shows what is actually in the file, so
@@ -397,7 +414,18 @@ struct TableGrid {
             var measured: [(NSAttributedString, CGFloat)] = []
             for (column, cell) in row.enumerated() {
                 let available = widths[column] - padding.width * 2
-                let bounds = cell.boundingRect(
+                // Measured from the *rendered* cell even where the caret is in
+                // it, for the same reason the widths are. The revealed cell
+                // holds different text — its markup, and no picture where a
+                // picture was — so measuring what is drawn made a row change
+                // height the instant it was clicked into. That moved every row
+                // below it out from under the pointer, and the rest of the
+                // note with them: measured at 148pt against 96pt for a table
+                // holding one picture.
+                let stable = rowIndex < display.count && column < display[rowIndex].count
+                    ? display[rowIndex][column]
+                    : cell
+                let bounds = stable.boundingRect(
                     with: CGSize(width: max(available, 1), height: .greatestFiniteMagnitude),
                     options: [.usesLineFragmentOrigin, .usesFontLeading]
                 )
@@ -707,9 +735,18 @@ enum CellText {
     /// - Parameter revealed: show the cell's markup rather than collapsing it.
     ///   True for the one cell the caret is in, so that what is on screen is
     ///   what is in the file and a caret offset means the same thing in both.
+    /// Whether the cell holds anything that would be drawn as a picture.
+    /// Cheap enough to ask before rendering a second time at a known width.
+    static func holdsPicture(_ source: String) -> Bool {
+        source.contains("![")
+    }
+
+    /// - Parameter pictureWidth: the room a picture may fill, once the column
+    ///   it is in has been measured. Nil during the first pass, when the widths
+    ///   are still being worked out from the text.
     static func render(
         _ source: String, bold: Bool, fontSize: CGFloat, context: RenderContext,
-        revealed: Bool = false
+        revealed: Bool = false, pictureWidth: CGFloat? = nil
     ) -> NSAttributedString {
         let base = bold
             ? NSFont.systemFont(ofSize: fontSize, weight: .semibold)
@@ -729,8 +766,81 @@ enum CellText {
             baseFont: base,
             drawsWidgets: false
         )
+        // A cell is drawn as attributed text, not as a fragment, so the widget
+        // pass that draws pictures everywhere else is switched off here and an
+        // embed came out as its filename in blue. An attachment is how a
+        // picture goes into attributed text: the existing measurement and
+        // drawing then handle it with no changes at all.
+        //
+        // Never in the revealed cell. That one shows the file's own characters
+        // so an offset into it means the same thing as an offset into the
+        // document, which is what the caret inside a table is placed from.
+        if !revealed {
+            attachPictures(
+                to: storage, source: source, context: context, width: pictureWidth
+            )
+        }
         return storage
     }
+
+    /// What a picture in a cell is measured at before its column is known.
+    ///
+    /// Small, so a column is sized by its words rather than by a picture that
+    /// is about to be fitted to whatever width those words settle on. Not zero,
+    /// so a column holding nothing but pictures still asks for room.
+    static let nominalPictureWidth: CGFloat = 120
+
+    private static func attachPictures(
+        to storage: NSTextStorage, source: String, context: RenderContext, width: CGFloat?
+    ) {
+        let text = source as NSString
+        // Backwards, so replacing one span cannot move the next.
+        for decoration in LiveDecorator.decorations(in: source).sorted(by: {
+            $0.range.location > $1.range.location
+        }) {
+            guard NSMaxRange(decoration.range) <= text.length else { continue }
+            let url: URL?
+            switch decoration.style {
+            case .image(let resource, _):
+                url = context.resolveResource(resource)
+            case .wikiLink(let link) where link.isEmbed:
+                let hit = context.resolve(link)
+                url = hit.flatMap { $0.isMarkdown ? nil : $0.url }
+            default:
+                continue
+            }
+            guard let url, let image = ImageCache.image(at: url) else { continue }
+
+            var wanted: (width: Int?, height: Int?) = (nil, nil)
+            if case .wikiLink(let link) = decoration.style {
+                wanted = (link.embedWidth, link.embedHeight)
+            }
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            // In the first pass — no column width yet — a size written into the
+            // link is what the cell is asking its column for. Measuring it at
+            // the nominal width instead threw that away: two cells asking for
+            // 500 were sized by the words above them, and the pictures then
+            // filled those narrow columns. The table is still scaled to fit the
+            // text column afterwards, so asking for more than there is room for
+            // costs nothing.
+            let room = width ?? max(nominalPictureWidth, CGFloat(wanted.width ?? 0))
+            attachment.bounds = CGRect(origin: .zero, size: ImageDisplaySize.resolve(
+                natural: image.size,
+                width: wanted.width, height: wanted.height,
+                maxWidth: room,
+                // Fitted to the column, the way Obsidian draws one: a picture
+                // in a cell that stayed at thumbnail size while the column was
+                // three times as wide read as broken next to the same table
+                // there.
+                fills: width != nil
+            ))
+            storage.replaceCharacters(
+                in: decoration.range, with: NSAttributedString(attachment: attachment)
+            )
+        }
+    }
+
 }
 
 // MARK: - Fragment
@@ -752,7 +862,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     private var contentSize: CGSize? {
         switch widget {
         case .blockMath(let image): image.size
-        case .image(let image, _): Self.displaySize(for: image)
+        case .image(_, let size, _): size
         case .table(let grid): grid.contentSize
         case .embed(let embed, _): embed.size
         case .properties(let card): card.size
@@ -763,7 +873,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     /// What the line this widget claimed still owes the reader, if anything.
     private var blockLead: BlockLead? {
         switch widget {
-        case .image(_, let lead), .embed(_, let lead): lead
+        case .image(_, _, let lead), .embed(_, let lead): lead
         default: nil
         }
     }
@@ -772,7 +882,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     /// Non-zero only for one sitting on a list or quote line.
     private var blockIndent: CGFloat {
         switch widget {
-        case .image(_, let lead), .embed(_, let lead): lead.indent
+        case .image(_, _, let lead), .embed(_, let lead): lead.indent
         default: 0
         }
     }
@@ -812,7 +922,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         // that list's bullet in the same gutter, and a clip starting at the
         // fragment's own origin shaves it off completely. A quote's card is
         // painted back to the container's own edge, which is further still.
-        case .image(_, let lead), .embed(_, let lead):
+        case .image(_, _, let lead), .embed(_, let lead):
             if lead.quote != nil {
                 bounds = bounds.union(CGRect(
                     x: -lead.indent, y: -2, width: containerWidth, height: bounds.height + 4
@@ -876,8 +986,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             // The source is fully collapsed, so there is no text to draw.
             drawCentred(image, size: image.size, at: point, in: context)
             return
-        case .image(let image, let lead):
-            let size = Self.displaySize(for: image)
+        case .image(let image, let size, let lead):
             drawBesideBlock(lead.bullet, height: size.height, at: point, in: context)
             drawLeading(image, size: size, at: point, in: context)
             return
@@ -1198,12 +1307,17 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
 
     // MARK: Blocks
 
-    static func displaySize(for image: NSImage) -> CGSize {
-        let natural = image.size
-        guard natural.width > 0 else { return natural }
-        let maxWidth: CGFloat = 460
-        guard natural.width > maxWidth else { return natural }
-        return CGSize(width: maxWidth, height: natural.height * (maxWidth / natural.width))
+    /// The room a picture in prose may take, which is narrower than the text
+    /// column: a picture running its full width reads as a banner.
+    static let maximumPictureWidth: CGFloat = 460
+
+    static func displaySize(
+        for image: NSImage, width: Int? = nil, height: Int? = nil,
+        maxWidth: CGFloat = maximumPictureWidth
+    ) -> CGSize {
+        ImageDisplaySize.resolve(
+            natural: image.size, width: width, height: height, maxWidth: maxWidth
+        )
     }
 
     /// The height of line fragments holding no characters at all.

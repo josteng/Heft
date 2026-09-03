@@ -36,7 +36,7 @@ Any of these:
 Heft remembers the last vault and reopens it. `File ▸ Open Recent` switches
 between vaults, which is how you keep a real vault and a scratch copy apart.
 
-## Five things worth trying first
+## Six things worth trying first
 
 1. **Type some Markdown.** There is no preview pane and no source mode — the
    markup hides itself as you leave each construct and comes back when your
@@ -47,10 +47,14 @@ between vaults, which is how you keep a real vault and a scratch copy apart.
 3. **Make a table.** Command palette ▸ *Insert table*. It stays a drawn grid
    while you type in it; Tab walks the cells. The `---` row is the deliberate
    way to edit one as plain text.
-4. **⇧⌘E.** Export the note as a PDF of what you see — tables, callouts,
+4. **Paste a picture.** Onto a bullet, inside a quote, into a table cell — it
+   is drawn where you put it. `![[shot.png|500]]` sets the width, `|500x300`
+   both. Inside a table a pipe has to be escaped, and typing one there writes
+   the `\|` for you.
+5. **⇧⌘E.** Export the note as a PDF of what you see — tables, callouts,
    checkboxes, typeset LaTeX. Page size, margin and text size are in the save
    panel and are remembered.
-5. **Set up agent review** (below). It is the reason Heft exists.
+6. **Set up agent review** (below). It is the reason Heft exists.
 
 ## Daily notes and capture
 
@@ -65,6 +69,20 @@ Heft stays where it was.
 
 `Docs/TemplatesAndSlides.md` covers templates, the date tokens, typing
 snippets, and how `---` turns a note into a slide deck.
+
+## Two settings worth a look
+
+**Settings ▸ Attachments** decides where a pasted or dropped file goes. The
+default names no folder: it looks at where the notes in that part of the vault
+already keep theirs, so a vault with `Thesis_Figures` in one corner and
+`Covers` in another gets both right with nothing configured. The rules are
+tried top to bottom and you can reorder them; only *one folder for the whole
+vault* ever creates a folder.
+
+**Settings ▸ Startup** is per vault: open nothing, the note you were last on,
+today's daily note, one named note, or a path worked out from the date —
+`Weeks/{{date:GGGG-[W]WW}}.md` for a weekly note, using the same tokens a
+daily-note template uses. `heft open <note>` still wins over all of it.
 
 ## Working with Claude Code
 

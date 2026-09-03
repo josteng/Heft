@@ -487,8 +487,8 @@ enum HeftMain {
             case .thematicBreak: "thematic break"
             case .agentGuide(let isEnd): "agent guide \(isEnd ? "end" : "start")"
             case .blockMath(let image): "block math \(size(image.size))"
-            case .image(let image, let lead):
-                "image \(size(image.size))" + describeCarried(lead)
+            case .image(_, let drawn, let lead):
+                "image \(size(drawn))" + describeCarried(lead)
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
                     + describeActiveCell(of: grid)

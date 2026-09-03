@@ -52,49 +52,53 @@ defaults delete "$SUITE" 2>/dev/null
 # passed with the bug reintroduced.
 defaults write "$SUITE" "dev.stenglein.Heft.vaultPath" -string "$VAULT"
 
-# 1. A bare exec first, which is the cheapest way to catch the exact bug this
-# script exists for: the app answered an empty command line with `heft help`,
-# printed usage to a stdout nobody was reading, and exited. Streams are
-# captured here, which a LaunchServices launch cannot do.
+# Launched the way the Dock and Finder do, which is the launch that was broken:
+# `heft help` answered an empty command line, printed usage to a stdout nobody
+# was reading, and exited. `open` can capture that stdout itself, so this is one
+# launch rather than two — and it has to be a real, visible launch, because an
+# app started hidden or in the background does not reliably finish creating its
+# window, records no vault, and fails this check for a reason that has nothing
+# to do with the app.
+#
+# `--env` is what makes a sandboxed launch possible this way, and `-n` starts a
+# new instance rather than activating an installed copy already running.
 echo "Launching with no arguments, the way the Dock does..."
-HEFT_DEFAULTS_SUITE="$SUITE" nohup "$APP/Contents/MacOS/Heft" \
-    >/tmp/heft-smoke.out 2>/tmp/heft-smoke.err &
-BARE_PID=$!
-disown "$BARE_PID" 2>/dev/null || true
-sleep 6
+FRONT_BEFORE=$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null)
+rm -f /tmp/heft-smoke.out /tmp/heft-smoke.err
+open -n --env "HEFT_DEFAULTS_SUITE=$SUITE" \
+    --stdout /tmp/heft-smoke.out --stderr /tmp/heft-smoke.err "$APP" \
+    || fail "LaunchServices would not start it"
 
-if ! kill -0 "$BARE_PID" 2>/dev/null; then
+# Give the window a moment to exist, then get out of the way: this runs while
+# somebody is working, and holding their screen for the whole check is rude.
+sleep 2
+APP_PID=$(pgrep -n -f "XcodeDerivedData.*Heft.app/Contents/MacOS/Heft")
+[[ -n "$APP_PID" ]] || fail "nothing was running after LaunchServices started it"
+osascript -e "tell application \"System Events\" to set visible of \
+    (first application process whose unix id is $APP_PID) to false" >/dev/null 2>&1
+[[ -n "$FRONT_BEFORE" ]] \
+    && osascript -e "tell application \"$FRONT_BEFORE\" to activate" >/dev/null 2>&1
+sleep 5
+
+# 1. Still alive. The failure this exists for is an immediate exit.
+if ! kill -0 "$APP_PID" 2>/dev/null; then
     echo "--- stdout ---"; head -20 /tmp/heft-smoke.out
     echo "--- stderr ---"; head -20 /tmp/heft-smoke.err
     fail "the app exited instead of starting"
 fi
-# A GUI app that prints is one taking a command-line path.
+
+# 2. Nothing on stdout. A GUI app that prints is one taking a command-line path.
 if [[ -s /tmp/heft-smoke.out ]]; then
     echo "--- stdout ---"; head -20 /tmp/heft-smoke.out
     fail "the app wrote to stdout, so it took a command-line path"
 fi
-kill -9 "$BARE_PID" 2>/dev/null
-
-# 2. Then again through LaunchServices, which is how the Dock and Finder really
-# start it, to prove it opened something.
-#
-# It has to be this way round for the check below to mean anything. A bare exec
-# is not a registered application process: AppleScript cannot address it, so it
-# can only be killed, and a Cocoa app killed by signal never flushes its
-# preferences — leaving this test reading whatever cfprefsd happened to have
-# cached, which passes or fails by timing. `--env` is what makes a sandboxed
-# launch possible this way; `-n` forces a new instance rather than activating
-# an installed copy that is already running.
-echo "Launching again through LaunchServices..."
-open -n --env "HEFT_DEFAULTS_SUITE=$SUITE" "$APP" || fail "LaunchServices would not start it"
-sleep 7
-APP_PID=$(pgrep -n -f "XcodeDerivedData.*Heft.app/Contents/MacOS/Heft")
-[[ -n "$APP_PID" ]] || fail "nothing was running after LaunchServices started it"
 
 # 3. Quit it, then read what it wrote.
 #
 # Preferences written by a running process are not visible to `defaults read`:
 # cfprefsd caches them per process until the writer flushes, which is on quit.
+# Addressed by process id, not by bundle identifier: the installed app shares
+# the identifier, so `tell application id` would ask that one to quit.
 echo "Quitting..."
 osascript -e "tell application \"System Events\" to tell \
     (first application process whose unix id is $APP_PID) to quit" >/dev/null 2>&1

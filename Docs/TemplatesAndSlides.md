@@ -86,6 +86,11 @@ there.
 
 Literal text goes in square brackets: `YYYY-[W]WW` gives `2026-W36`.
 
+The same tokens answer in three places, because they go through the same
+`MomentFormat`: a daily-note filename and template, the replacement text of a
+typing substitution, and the startup note in **Settings ▸ Startup**, where
+`Weeks/{{date:GGGG-[W]WW}}.md` opens this week's note on launch.
+
 ## 3. Typing substitutions
 
 The other thing that looks like templating, and the one that is *not*

@@ -603,7 +603,7 @@ struct LiveTextEditor: NSViewRepresentable {
             }
 
             settleLayout(textView)
-            textView.scrollRangeToVisible(selection)
+            keepCaretVisible(selection, in: textView)
             // Revealing or collapsing markup reflows the line, so overlays
             // calculated from TextKit geometry must be moved after layout has
             // settled. In particular, collapsed wikilink suffixes can report
@@ -649,6 +649,51 @@ struct LiveTextEditor: NSViewRepresentable {
             // attributes. Recompute its insertion fragment without restarting
             // the user's blink cadence.
             textView.updateInsertionPointStateAndRestartTimer(false)
+        }
+
+        /// Where the caret was when this last scrolled to it, so a styling pass
+        /// that did not move it does not move the page either.
+        private var lastScrolledTo: NSRange?
+
+        /// Brings the caret back on screen, and only when it is off it.
+        ///
+        /// This used to be a flat `scrollRangeToVisible` on every pass. Two
+        /// things then moved the page for no reason the reader could see: a
+        /// restyle the caret had nothing to do with — a deferred pass arriving
+        /// late, a widget refresh — and a click that landed somewhere already
+        /// perfectly visible, which was still enough to scroll. The first click
+        /// after opening a note hit both at once, which is why it jumped and
+        /// nothing after it did.
+        ///
+        /// Scrolling to something already on screen is not a no-op here: the
+        /// rectangle comes from the layout, and asking for one deep in a
+        /// document TextKit has only estimated gives an answer that is wrong by
+        /// however far the estimate is out.
+        private func keepCaretVisible(_ selection: NSRange, in textView: NSTextView) {
+            defer { lastScrolledTo = selection }
+            // A pass that did not move the caret has no business scrolling.
+            guard selection != lastScrolledTo else { return }
+            guard let caret = caretRect(for: selection, in: textView) else {
+                textView.scrollRangeToVisible(selection)
+                return
+            }
+            // Already in view, including the line it sits on: leave the page
+            // exactly where the reader put it.
+            guard !textView.visibleRect.contains(caret) else { return }
+            textView.scrollRangeToVisible(selection)
+        }
+
+        /// The caret's box in the text view's own coordinates.
+        private func caretRect(for selection: NSRange, in textView: NSTextView) -> CGRect? {
+            guard let manager = textView.textLayoutManager,
+                  let content = manager.textContentManager,
+                  let start = content.location(
+                    content.documentRange.location, offsetBy: selection.location
+                  ),
+                  let fragment = manager.textLayoutFragment(for: start)
+            else { return nil }
+            let inset = textView.textContainerInset
+            return fragment.layoutFragmentFrame.offsetBy(dx: inset.width, dy: inset.height)
         }
 
         /// Lays the whole document out now instead of letting TextKit 2 do it
@@ -1852,6 +1897,15 @@ final class HeftTextKit2View: NSTextView {
                 updateLinkCompletion(allowStart: true)
                 return
             }
+        }
+        // A literal pipe inside a table has to be written `\|`, or it is read
+        // as the end of the cell — which is what markdown says and what
+        // Obsidian writes. Typing one into `![[shot.png|500]]` therefore split
+        // the row and left `]]` in the cell after it, taking the table's shape
+        // with it. Obsidian escapes it as you type, and so does this.
+        if inserted == "|", selection.length == 0, activeTable != nil {
+            super.insertText("\\|", replacementRange: replacementRange)
+            return
         }
         super.insertText(insertString, replacementRange: replacementRange)
         applySubstitution(after: inserted)

@@ -517,6 +517,31 @@ file and may hold their own instructions, which is the same rule proposals
 exist to enforce. Bump `AgentGuide.version` whenever the wording an agent
 depends on changes.
 
+### What opens when Heft starts
+
+`StartupNote` in HeftCore, stored per vault. Per vault because "always open
+`Thesis/Overview`" names a note, and a note only exists in one vault.
+
+Five answers, and the default is to leave things alone, or an update would
+change where everybody's editor opens. "Nothing" and "the note you were last
+on" are not the same: the first relies on macOS restoring the window, and a
+cold start with nothing to restore comes up empty. The other three are today's
+daily note, one named note, and a path worked out from the date in the same
+moment tokens a daily-note template uses — `Weeks/{{date:GGGG-[W]WW}}.md` for a
+weekly note, which the daily-note settings cannot describe.
+
+Three sources decide, in order of how deliberate they are: a note named on the
+command line (`heft open`, `--open`) wins outright, then the startup setting,
+then a restored window's own note. The setting has to outrank restoration
+rather than defer to it — a launch from the Dock restores the last window, so a
+setting that stepped aside for that would never do anything at all — and it is
+claimed once per process, because opening a second window is not starting the
+app.
+
+Only the daily note is *created*. It is what the setting means and the vault
+has a template for it. A path typed into a settings field is not a request to
+litter the vault with empty files on every launch.
+
 ## Gotchas, all of them hard-won
 
 - **Xcode 26.6 is installed, but `xcode-select` points at the Command Line Tools.**
@@ -730,6 +755,65 @@ depends on changes.
   drawn.** They only appear while the caret is in the table, and reserving
   their height on demand would shove the rest of the note down by 17pt on every
   click into a table and back up on every click out.
+- **A cell's height must be measured from what it looks like at rest**, never
+  from what is drawn. The revealed cell holds different text — its markup, and
+  no picture where a picture was — so measuring the drawn cell made a row
+  change height the instant it was clicked into, moving the row out from under
+  the pointer and the rest of the note with it. Measured at 148pt against 96pt
+  for a table holding one picture. The widths were already measured this way,
+  for the same reason.
+- **A `TextField`'s title is the row's label in a `Form`, not its
+  placeholder.** Passing the example as the title put `Inbox.md` in the margin
+  with an empty box beside it, reading as a caption on the row above. Give the
+  row a real label and the example goes in `prompt:`.
+- **`NSApp` is an implicitly unwrapped optional and is nil until an
+  application instance exists.** Anything reachable from outside the app — a
+  snapshot harness, a test — crashes on it. `NSApplication.shared` makes one if
+  there is none.
+- **A settings pane must not fill itself in on appear, and its height must be
+  measured on every pass.** The window measures each pane off screen to size
+  itself, and that has gone wrong twice, both times looking like a tab clipped
+  halfway down a control. `onAppear` never fires for a view that is never on
+  screen, so a pane that copied its state in there measured as its own empty
+  placeholder — read the state in the body and write it back through a
+  `Binding`. And a height measured once per tab misses a pane that changes
+  shape: choosing a startup note that needs a path runs 301pt to 691pt as a
+  field and a token list appear. `SettingsWindow` observes the settings stores
+  and measures in `body`, so anything that can change a pane's height already
+  invalidates it.
+- **A pipe typed inside a table is written `\|`.** A literal pipe is the end
+  of a cell, which is what markdown says and what Obsidian escapes for you.
+  Typing one into `![[shot.png|500]]` split the row and left `]]` in the cell
+  after it, taking the table's shape with it. Only inside a table: a backslash
+  appearing in prose is nobody's idea of helpful.
+- **A size written into a table cell is that cell asking its column for
+  room.** Measuring a picture at a nominal width in the first pass threw the
+  request away: two cells asking for `|500` were sized by the words above them,
+  and the pictures then filled those narrow columns — a table of charts came
+  out a third of the size the same table has in Obsidian. The table is still
+  scaled to fit the text column afterwards, so asking for more than there is
+  room for costs nothing, and two cells asking for the same thing get the same
+  width. Obsidian gets that last part wrong, and it is worth not copying.
+- **A size written into a link may use the whole text column.** The narrower
+  460pt cap is for a picture dropped in at whatever size it was saved at, so
+  it does not read as a banner; a number written by hand is not that, and
+  clamping it looked like the picture being cut off at some arbitrary point.
+- **`ImageDisplaySize` is the one rule for how big a picture is drawn**, and
+  it is used by prose, quoted lines, bullets and table cells alike. A size in
+  the link wins (`![[shot.png|500]]`, `|500x300`), nothing is ever wider than
+  the room it has, and `fills` is what separates a cell from prose: Obsidian
+  fits a picture to its column, while in prose a small picture stays small
+  rather than being blown up to the width of the page. A table measures its
+  columns from the words first and fits the pictures afterwards, or a picture
+  would decide the width of the column it is then fitted to.
+- **A picture inside a table cell is an `NSTextAttachment`.** Cells are drawn
+  as attributed text rather than as layout fragments, so `drawsWidgets` is off
+  for them and the widget pass that draws every other picture never runs; an
+  embed came out as its filename in blue. An attachment goes through the
+  measurement and drawing already there. Never in the *revealed* cell, which
+  shows the file's own characters so that an offset into it means the same
+  thing as an offset into the document — which is what the caret inside a
+  table is placed from.
 - **Showing a cell's markers makes its text longer**, so the row can wrap and
   grow, which moves everything below it in the document. Where the table is
   narrower than the text column, `TableGrid.compute` spends the spare width on
@@ -755,6 +839,15 @@ depends on changes.
   detection alone was most of the cost of decorating a long note. The
   document-wide sweeps go through the cached `regex(_:)`; anything per line or
   per match is scanned by hand.
+- **A styling pass must not scroll.** `scrollRangeToVisible` ran on every
+  pass, so any pass that did real work pulled the page to wherever the caret
+  happened to be — and after a note opens the caret is at the very top. Open a
+  note, scroll down, click: the first pass to do real work yanked the page back
+  up, and nothing after it did, because by then the caret was where the reader
+  was looking. `keepCaretVisible` scrolls only when the caret has actually
+  moved *and* is off screen. Restyling an unchanged document takes an early
+  exit and never reaches the scroll, so a test that restyles twice proves
+  nothing: it has to reset the styling first.
 - **Lay the document out eagerly** (`ensureLayout`) after every restyle. TextKit 2
   estimates the height of regions it has not reached, assuming ordinary lines. This
   editor's fragments are nothing like ordinary (a six-line table is one 148pt
@@ -830,8 +923,6 @@ depends on changes.
 
 ## Known gaps
 
-- Embed display widths are ignored: `![[img.png|700]]` renders at natural size,
-  capped at 460pt.
 - A transcluded note is styled but gets no widgets of its own, so a table or
   picture inside an embed shows as source. This is also the recursion guard.
 - An embedded note is clipped at 420pt and faded, because a layout fragment

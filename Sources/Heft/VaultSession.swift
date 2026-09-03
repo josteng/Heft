@@ -195,6 +195,26 @@ final class VaultRegistry: ObservableObject {
         HeftDefaults.shared.set(updated, forKey: Self.recentVaultsKey)
     }
 
+    /// The model of the window in front, for panes that have to say something
+    /// about the vault actually open rather than about settings in the abstract.
+    ///
+    /// Settings is its own scene and owns no vault, so without this a pane can
+    /// only describe rules; with it, it can show what those rules would do to
+    /// the note being looked at.
+    var frontmostModel: AppModel? {
+        // `NSApplication.shared` rather than `NSApp`: the latter is an
+        // implicitly unwrapped optional and is nil until an application
+        // instance exists, which crashes anything asking this outside the app —
+        // a snapshot harness, say.
+        for window in NSApplication.shared.orderedWindows where window.isVisible {
+            guard let owner = workspaceWindows.first(where: { $0.value.value === window })?.key,
+                  let model = workspaceModels[owner]?.value
+            else { continue }
+            return model
+        }
+        return workspaceModels.values.compactMap(\.value).first
+    }
+
     func activeSession(containing url: URL) -> VaultSession? {
         let path = url.standardizedFileURL.path
         return sessions.values.compactMap(\.value)

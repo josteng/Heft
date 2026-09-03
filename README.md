@@ -165,6 +165,19 @@ changed, rather than re-attributing the whole note twice per character.
   **points on the page** — 12pt by default, against an editor that draws at 15
   — so it means the same thing on any display. The editor's type is sized to
   be read at arm's length; a book sets its body around 10pt.
+- **Paste a picture anywhere** — onto a bullet, inside a quote or callout, in
+  a table cell — and it is drawn there, at the size the link asks for
+  (`![[shot.png|500]]`, or `|500x300`). Where it lands is a rule you choose in
+  **Settings ▸ Attachments**, and the default names no folder at all: it looks
+  at where the notes in that part of the vault already keep theirs. On the
+  vault this was built against that finds `Thesis_Figures`,
+  `Covers` and `Attachemnts` — three folders, three spellings, nothing
+  configured. Only the one rule that names a single folder ever creates one.
+- **What opens on startup** (**Settings ▸ Startup**, per vault): nothing, the
+  note you were last on, today's daily note, one named note, or a path worked
+  out from the date in the same tokens a daily-note template uses —
+  `Weeks/{{date:GGGG-[W]WW}}.md` for a weekly note. A note named on the command
+  line still wins.
 - **Multiple windows** over the same or different vaults, with an optional
   folder-focused view that scopes the tree, search and quick open without
   turning that folder into a second vault.
@@ -239,7 +252,9 @@ Comments are hidden in both spellings: HTML's `<!-- -->` and Obsidian's own
 Two syntax details that trip up naive parsers, both found in a real vault and
 both handled:
 
-- `![[chart.png\|500]]` — the pipe is escaped inside tables.
+- `![[chart.png\|500]]` — the pipe is escaped inside tables. Heft reads that
+  and writes it: typing a `|` inside a table escapes it for you, because an
+  unescaped one ends the cell.
 - `\[[[Paper Name]]` — a literal bracket abutting a link; the link is the
   innermost pair.
 
@@ -331,7 +346,7 @@ rewrite the Spotlight capture destination or Open Recent.
 nothing in the suite notices an app that starts and immediately exits. One
 shipped that way. It launches with no arguments, the way the Dock does.
 
-The suite is 174 tests across 40 suites: pure checks over parsing, formatting,
+The suite is 242 tests across 55 suites: pure checks over parsing, formatting,
 links, paths and settings; a live-surface check that runs edit scripts through
 both an incrementally styled buffer and a from-scratch one and compares every
 attribute on every character; a differential decoration check that drives the
@@ -362,7 +377,11 @@ runtime, and the checks skip when `nvim` is absent.
 - Advanced Vim: Ex commands, system and clipboard registers, mappings, jump
   lists beyond the previous-position mark, full blockwise put.
 - A table selection cannot span two cells; column alignment is changed by
-  editing the `---` row.
+  editing the `---` row. A table wider than the text column is scaled down to
+  fit rather than scrolling sideways, so two cells asking for `|500` in a
+  narrower column both come out proportionally smaller.
+- A drawn block on the very last line of a file reserves its height twice, so a
+  note ending in a picture or a formula has a gap under it.
 
 ## Licence
 

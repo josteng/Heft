@@ -576,18 +576,25 @@ struct EditorPane: View {
     /// view handle the pasteboard normally.
     private func handleAttachment(_ pasteboard: NSPasteboard) -> String? {
         guard let vaultRoot = model.vaultRoot else { return nil }
+        let destination = Attachments.Destination(
+            rules: AttachmentSettings.shared.rules,
+            index: model.index,
+            settings: model.settings
+        )
         do {
             if let payload = Attachments.imagePayload(from: pasteboard) {
                 return try Attachments.save(
                     imageData: payload.data, preferredName: payload.name,
-                    vaultRoot: vaultRoot, noteURL: model.current?.url, settings: model.settings
+                    vaultRoot: vaultRoot, noteURL: model.current?.url,
+                    settings: model.settings, destination: destination
                 )
             }
             if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
                let file = urls.first, file.isFileURL {
                 return try Attachments.importFile(
                     at: file, vaultRoot: vaultRoot,
-                    noteURL: model.current?.url, settings: model.settings
+                    noteURL: model.current?.url, settings: model.settings,
+                    destination: destination
                 )
             }
         } catch {

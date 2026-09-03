@@ -279,22 +279,83 @@ final class AppModel: ObservableObject {
 
         isCalendarVisible = descriptor?.calendarVisible ?? dailyNotesAreInScope
 
-        let requestedNote = descriptor?.notePath ?? arguments.firstIndex(of: "--open").flatMap {
+        // Three sources, in order of how deliberate they are.
+        //
+        // A note named on the command line — `heft open`, or `--open` during
+        // development — is somebody asking for that note right now, and wins
+        // outright. The startup setting comes next, and only for the first
+        // window of a launch: opening a second window is not starting the app.
+        // A restored window's own note is the fallback, which is what happens
+        // when the setting is "leave it as it was".
+        //
+        // The setting has to outrank restoration rather than defer to it: a
+        // launch from the Dock restores the last window, so a setting that
+        // stepped aside for that would never do anything at all.
+        let namedOnTheCommandLine = arguments.firstIndex(of: "--open").flatMap {
             $0 + 1 < arguments.count ? arguments[$0 + 1] : nil
         }
-        if let relative = requestedNote {
-            // The index builds asynchronously, so resolve against the file
-            // system rather than waiting on it.
-            if let root = vaultRoot {
-                let url = root.appendingPathComponent(relative)
-                if let ref = NoteRef(url: url, vaultRoot: root),
-                   FileManager.default.fileExists(atPath: url.path) {
-                    open(ref)
-                }
-            }
-        }
+        var opened = namedOnTheCommandLine.map(openIfPresent) ?? false
+        if !opened, Self.claimStartupOpening() { opened = openStartupNote() }
+        if !opened, let restored = descriptor?.notePath { opened = openIfPresent(restored) }
 
         startExternalChangePolling()
+    }
+
+    /// The startup note is for starting the app, not for every window it goes
+    /// on to open. Claimed once per process, by whichever window is built first.
+    private static var startupOpeningUnclaimed = true
+
+    private static func claimStartupOpening() -> Bool {
+        defer { startupOpeningUnclaimed = false }
+        return startupOpeningUnclaimed
+    }
+
+    /// Opens a vault-relative note if the file is really there.
+    ///
+    /// Resolved against the file system rather than the index, which builds
+    /// asynchronously and is not ready this early.
+    @discardableResult
+    private func openIfPresent(_ relative: String) -> Bool {
+        guard let root = vaultRoot else { return false }
+        let url = root.appendingPathComponent(relative)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let ref = NoteRef(url: url, vaultRoot: root)
+        else { return false }
+        open(ref)
+        return true
+    }
+
+    /// Opens whatever this vault is set to open on launch.
+    ///
+    /// Today's daily note is *made* if it is not there, because that is what
+    /// the setting means and the vault has a template for it — the same thing
+    /// `Open today's note` does, minus the confirmation, which nobody wants as
+    /// the first thing they see. A named note or a pattern is only opened: a
+    /// path typed into a settings field is not a request to litter the vault
+    /// with empty files on every launch.
+    @discardableResult
+    private func openStartupNote() -> Bool {
+        guard let root = vaultRoot else { return false }
+        let setting = StartupSettings.shared.setting(for: root)
+        guard let relative = setting.relativePath(
+            on: Date(),
+            dailyPath: { dailyNotes?.relativePath(for: $0) },
+            lastNote: { self.session?.recentPaths.first }
+        ) else { return false }
+
+        if setting.choice == .dailyNote, let daily = dailyNotes {
+            guard let url = try? daily.ensureNote(for: Date()),
+                  let ref = NoteRef(url: url, vaultRoot: root)
+            else { return false }
+            open(ref)
+            return true
+        }
+
+        guard openIfPresent(relative) else {
+            status = "Nothing at \(relative) to open on startup"
+            return false
+        }
+        return true
     }
 
     // MARK: - Vault lifecycle

@@ -121,7 +121,7 @@ struct PastedPictureTests {
     @Test("A picture pasted onto a bullet is drawn, and keeps its bullet")
     func drawsPictureOnABullet() throws {
         try withPictureVault { _, context in
-            guard case .image(let image, let lead)? =
+            guard case .image(let image, _, let lead)? =
                 firstBlock("- ![[shot.png]]\n", context)
             else {
                 Issue.record("a bullet's embed produced no picture")
@@ -141,7 +141,7 @@ struct PastedPictureTests {
     @Test("Every kind of list marker keeps its own glyph")
     func carriesEveryGlyph() throws {
         try withPictureVault { _, context in
-            guard case .image(_, let ordered)? = firstBlock("1. ![[shot.png]]\n", context),
+            guard case .image(_, _, let ordered)? = firstBlock("1. ![[shot.png]]\n", context),
                   case .ordered(let label)? = ordered.bullet?.glyph
             else {
                 Issue.record("an ordered item lost its numeral")
@@ -149,7 +149,7 @@ struct PastedPictureTests {
             }
             #expect(label == "1.")
 
-            guard case .image(_, let task)? = firstBlock("- [x] ![[shot.png]]\n", context),
+            guard case .image(_, _, let task)? = firstBlock("- [x] ![[shot.png]]\n", context),
                   case .checkbox(let state, _)? = task.bullet?.glyph
             else {
                 Issue.record("a task lost its checkbox")
@@ -162,8 +162,8 @@ struct PastedPictureTests {
     @Test("A nested item indents the picture further than a top-level one")
     func indentsWithTheList() throws {
         try withPictureVault { _, context in
-            guard case .image(_, let top)? = firstBlock("- ![[shot.png]]\n", context),
-                  case .image(_, let deeper)? = firstBlock("\t- ![[shot.png]]\n", context)
+            guard case .image(_, _, let top)? = firstBlock("- ![[shot.png]]\n", context),
+                  case .image(_, _, let deeper)? = firstBlock("\t- ![[shot.png]]\n", context)
             else {
                 Issue.record("a nested picture produced no widget")
                 return
@@ -178,7 +178,7 @@ struct PastedPictureTests {
     @Test("A markdown image on a bullet keeps its bullet too")
     func markdownImageKeepsItsBullet() throws {
         try withPictureVault { _, context in
-            guard case .image(_, let lead)? = firstBlock("- ![](shot.png)\n", context) else {
+            guard case .image(_, _, let lead)? = firstBlock("- ![](shot.png)\n", context) else {
                 Issue.record("a markdown image on a bullet produced no picture")
                 return
             }
@@ -202,14 +202,14 @@ struct PastedPictureTests {
     func drawsPictureInAQuote() throws {
         try withPictureVault { _, context in
             // The two-space form, which is what the reader actually had.
-            guard case .image(_, let lead)? = firstBlock(">  ![[shot.png]]\n", context) else {
+            guard case .image(_, _, let lead)? = firstBlock(">  ![[shot.png]]\n", context) else {
                 Issue.record("a quoted embed produced no picture")
                 return
             }
             #expect(lead.quote?.line.depth == 1)
             #expect(lead.indent > 0)
 
-            guard case .image(_, let nested)? = firstBlock("> - ![[shot.png]]\n", context) else {
+            guard case .image(_, _, let nested)? = firstBlock("> - ![[shot.png]]\n", context) else {
                 Issue.record("a picture on a quoted bullet produced nothing")
                 return
             }
@@ -223,7 +223,7 @@ struct PastedPictureTests {
     @Test("A picture may be a callout's whole title")
     func drawsPictureAsACalloutTitle() throws {
         try withPictureVault { _, context in
-            guard case .image(_, let lead)? =
+            guard case .image(_, _, let lead)? =
                 firstBlock("> [!note]  ![[shot.png]]\n", context)
             else {
                 Issue.record("a picture as a callout title produced no picture")
@@ -256,5 +256,262 @@ struct PastedPictureTests {
                 return
             }
         }
+    }
+}
+
+/// A cell is drawn as attributed text rather than as a layout fragment, so the
+/// widget pass that draws pictures everywhere else is switched off for it. An
+/// embed in a table therefore came out as its filename in blue — which is what
+/// a meeting note full of screenshots in a table looks like.
+@Suite("Pictures in table cells")
+@MainActor
+struct TableCellPictureTests {
+
+    private func withPictureVault(_ body: (RenderContext) throws -> Void) throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("heft-cell-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        func write(_ name: String, _ size: NSSize) throws {
+            let image = NSImage(size: size)
+            image.lockFocus()
+            NSColor.systemBlue.setFill()
+            NSRect(origin: .zero, size: size).fill()
+            image.unlockFocus()
+            try NSBitmapImageRep(data: image.tiffRepresentation!)!
+                .representation(using: .png, properties: [:])!
+                .write(to: root.appendingPathComponent(name))
+        }
+        try write("shot.png", NSSize(width: 400, height: 300))
+        // Smaller than any column it is measured against, which is the only
+        // case where growing into the column differs from shrinking to fit it.
+        try write("icon.png", NSSize(width: 40, height: 30))
+
+        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        try body(RenderContext(index: index, current: nil, vaultRoot: root))
+    }
+
+    /// The attachments in a rendered cell, with the size each is drawn at.
+    private func attachments(
+        _ source: String, _ context: RenderContext,
+        revealed: Bool = false, width: CGFloat? = nil
+    ) -> [CGSize] {
+        let rendered = CellText.render(
+            source, bold: false, fontSize: 13, context: context,
+            revealed: revealed, pictureWidth: width
+        )
+        var sizes: [CGSize] = []
+        rendered.enumerateAttribute(
+            .attachment, in: NSRange(location: 0, length: rendered.length)
+        ) { value, _, _ in
+            guard let attachment = value as? NSTextAttachment, attachment.image != nil else { return }
+            sizes.append(attachment.bounds.size)
+        }
+        return sizes
+    }
+
+    @Test("Both spellings of an embed draw in a cell")
+    func cellsDrawPictures() throws {
+        try withPictureVault { context in
+            #expect(attachments("![[shot.png]]", context).count == 1)
+            #expect(attachments("![](shot.png)", context).count == 1)
+            #expect(attachments("no picture here", context).isEmpty)
+            // A note is not a picture, and a missing file is not one either.
+            #expect(attachments("![[nowhere.png]]", context).isEmpty)
+        }
+    }
+
+    /// Obsidian fits a picture to its column, and one left at thumbnail size in
+    /// a column three times as wide reads as broken beside the same table there.
+    @Test("A picture fills the column it is measured against")
+    func picturesFillTheirColumn() throws {
+        try withPictureVault { context in
+            let narrow = try #require(attachments("![[shot.png]]", context, width: 100).first)
+            let wide = try #require(attachments("![[shot.png]]", context, width: 300).first)
+            #expect(narrow.width == 100)
+            #expect(wide.width == 300)
+            // Fitted, not squashed: 400x300 keeps its shape at either width.
+            #expect(abs(wide.width / wide.height - 4.0 / 3.0) < 0.05, "got \(wide)")
+
+            // A picture smaller than its column grows into it. Shrinking alone
+            // cannot tell the two apart, which is why this one is here.
+            let small = try #require(attachments("![[icon.png]]", context, width: 300).first)
+            #expect(small.width == 300, "a small picture should fill its column, got \(small)")
+        }
+    }
+
+    /// `![[shot.png|500]]` is the reader saying how big, and it outranks the
+    /// column: it was ignored everywhere until now.
+    @Test("A size written into the link wins")
+    func linkSizeWins() throws {
+        try withPictureVault { context in
+            let asked = try #require(
+                attachments("![[shot.png|80]]", context, width: 300).first
+            )
+            #expect(asked.width == 80)
+            let both = try #require(
+                attachments("![[shot.png|60x20]]", context, width: 300).first
+            )
+            #expect(both == CGSize(width: 60, height: 20))
+            // Still never wider than the room it has.
+            let clamped = try #require(
+                attachments("![[shot.png|900]]", context, width: 200).first
+            )
+            #expect(clamped.width == 200)
+        }
+    }
+
+    /// The cell the caret is in shows the file's own characters, so an offset
+    /// into it means the same thing as an offset into the document — which is
+    /// what the caret inside a table is placed from. A picture there would
+    /// stand where several characters do.
+    @Test("The cell being edited shows its source, not a picture")
+    func revealedCellKeepsItsSource() throws {
+        try withPictureVault { context in
+            #expect(attachments("![[shot.png]]", context, revealed: true).isEmpty)
+        }
+    }
+
+    /// A size written into a cell is that cell asking its column for room.
+    /// Measured at a nominal width instead, two cells asking for 500 were sized
+    /// by the words above them and the pictures then filled those narrow
+    /// columns — which is what made a table of charts here a third the size of
+    /// the same table in Obsidian.
+    @Test("A size written in a cell widens its column")
+    func requestedSizeWidensTheColumn() throws {
+        try withPictureVault { context in
+            func columns(_ cells: String) -> [CGFloat] {
+                let source = [
+                    "| Recurrence | Survival |", "| --- | --- |", cells, "",
+                ].joined(separator: "\n")
+                let storage = NSTextStorage(string: source)
+                let layout = LiveStyler.apply(
+                    to: storage, reveal: .none, context: context, contentWidth: 700
+                )
+                guard case .table(let grid)? = layout.blocks[0] else { return [] }
+                return grid.columnWidths
+            }
+
+            let asked = columns("| ![[shot.png\\|500]] | ![[shot.png\\|500]] |")
+            let plain = columns("| words | words |")
+            #expect(asked.count == 2 && plain.count == 2)
+            #expect(
+                asked[0] > plain[0],
+                "a cell asking for 500 should want more room than a word: \(asked) vs \(plain)"
+            )
+
+            // Two cells asking for the same thing get the same room. Obsidian
+            // gets this wrong — the column further right comes out smaller
+            // until the numbers are made to differ — and it is worth not
+            // copying.
+            #expect(asked[0] == asked[1], "columns asking for the same size differ: \(asked)")
+
+            // And asking for more gets more. Both numbers are above the width
+            // a picture is measured at before its column is known, or clamping
+            // to that would order them correctly for the wrong reason.
+            let uneven = columns("| ![[shot.png\\|500]] | ![[shot.png\\|300]] |")
+            #expect(uneven[0] > uneven[1], "got \(uneven)")
+        }
+    }
+
+    /// The table a caret is in must be exactly the size it was before, or the
+    /// row clicked on moves out from under the pointer and takes the rest of
+    /// the note with it. Measured at 148pt against 96pt for a table holding one
+    /// picture: half the table's height, on a click.
+    @Test("Clicking into a table does not change its size")
+    func caretDoesNotResizeTheTable() throws {
+        try withPictureVault { context in
+            let source = [
+                "| what | picture | notes |",
+                "| --- | --- | --- |",
+                "| one | ![[shot.png]] | a longer piece of text in this cell |",
+                "| two | plain | more |",
+                "",
+            ].joined(separator: "\n")
+            let text = source as NSString
+
+            /// The grid the surface would draw with the caret at `caret`.
+            func grid(caret: Int?) -> TableGrid? {
+                let storage = NSTextStorage(string: source)
+                let layout = LiveStyler.apply(
+                    to: storage,
+                    reveal: caret.map {
+                        Reveal(selection: NSRange(location: $0, length: 0), in: text)
+                    } ?? .none,
+                    context: context,
+                    contentWidth: 600
+                )
+                guard case .table(let grid)? = layout.blocks[0] else { return nil }
+                return grid
+            }
+
+            let resting = try #require(grid(caret: nil), "no table was drawn")
+            #expect(resting.size.height > 0)
+
+            for cell in ["![[shot.png]]", "| one |", "plain", "a longer piece"] {
+                let caret = text.range(of: cell).location + 1
+                let clicked = try #require(grid(caret: caret), "no table with the caret in \(cell)")
+                #expect(
+                    clicked.size == resting.size,
+                    "clicking \(cell) resized the table: \(resting.size) -> \(clicked.size)"
+                )
+            }
+        }
+    }
+}
+
+
+/// A literal pipe inside a table has to be written `\\|`, or it reads as the end
+/// of the cell. Typing one into `![[shot.png|500]]` split the row and left `]]`
+/// in the cell after it, taking the table's shape with it.
+@Suite("Typing a pipe inside a table")
+@MainActor
+struct TablePipeEscapeTests {
+
+    /// A real view, laid out, with the caret at `caret`.
+    private func view(_ document: String, caret: Int) -> HeftTextKit2View {
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let editor = LiveTextEditor(
+            text: .constant(document), documentIdentity: "p.md", generation: 0,
+            generationKeepsPosition: false, findSelection: nil, insertion: nil,
+            context: context, onAttachment: { _ in nil }, onFollowLink: { _ in },
+            onVimSearch: { _ in }
+        )
+        let coordinator = LiveTextEditor.Coordinator(editor)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isVerticallyResizable = true
+        view.frame = NSRect(x: 0, y: 0, width: 700, height: 900)
+        view.textContainer?.size = NSSize(width: 644, height: 1_000_000)
+        view.textLayoutManager?.delegate = coordinator
+        view.textStorage?.delegate = coordinator
+        view.delegate = coordinator
+        view.string = document
+        view.setSelectedRange(NSRange(location: caret, length: 0))
+        coordinator.restyle(view)
+        return view
+    }
+
+    @Test("A pipe typed in a cell is escaped, so the row keeps its shape")
+    func pipeIsEscapedInATable() {
+        let document = "| a | b |\n| --- | --- |\n| ![[shot.png]] | x |\n"
+        let caret = (document as NSString).range(of: "shot.png").upperBound
+        let editor = view(document, caret: caret)
+        #expect(editor.activeTable != nil, "the caret has to be in the table for this to apply")
+
+        editor.insertText("|", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(editor.string.contains("![[shot.png\\|]]"))
+        // Still one row of two cells, not two rows of rubble.
+        #expect(editor.string.components(separatedBy: "\n")[2].contains("| x |"))
+    }
+
+    /// Outside a table a pipe is an ordinary character, and escaping it there
+    /// would put a backslash into prose that nobody asked for.
+    @Test("A pipe typed in prose is left alone")
+    func pipeIsLiteralOutsideATable() {
+        let editor = view("just prose here\n", caret: 4)
+        #expect(editor.activeTable == nil)
+        editor.insertText("|", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(editor.string.hasPrefix("just| prose"))
     }
 }

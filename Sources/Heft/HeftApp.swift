@@ -63,7 +63,7 @@ struct HeftApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 720)
 
-        Settings { SettingsWindow().appAccentTint() }
+        Settings { SettingsWindow().environmentObject(registry).appAccentTint() }
     }
 }
 

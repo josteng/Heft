@@ -360,11 +360,12 @@ enum LiveStyler {
             guard let url = context.resolveResource(source), let image = ImageCache.image(at: url)
             else { return }
             let lead = blockLead(range, text: text, lineStart: lineStart, in: storage, layout: layout)
+            let size = HeftLayoutFragment.displaySize(for: image)
             hideWhole(
                 range, in: storage, text: text, indent: lead.indent,
-                reserving: HeftLayoutFragment.displaySize(for: image).height
+                reserving: size.height
             )
-            layout.blocks[lineStart] = .image(image, lead: lead)
+            layout.blocks[lineStart] = .image(image, size: size, lead: lead)
 
         case .wikiLink(let link):
             guard link.isEmbed,
@@ -388,11 +389,25 @@ enum LiveStyler {
             }
 
             guard let image = ImageCache.image(at: hit.url) else { return }
+            // `![[shot.png|500]]` says how wide to draw it, and was ignored.
+            //
+            // A size in the link may use the whole text column. The narrower
+            // cap is there so a picture dropped in at whatever size it was
+            // saved at does not read as a banner; a number written by hand is
+            // not that, and clamping it to 460 looked like the picture being
+            // cut off at some arbitrary point.
+            let asked = link.embedWidth != nil || link.embedHeight != nil
+            let size = HeftLayoutFragment.displaySize(
+                for: image, width: link.embedWidth, height: link.embedHeight,
+                maxWidth: asked
+                    ? max(contentWidth - lead.indent, 1)
+                    : HeftLayoutFragment.maximumPictureWidth
+            )
             hideWhole(
                 range, in: storage, text: text, indent: lead.indent,
-                reserving: HeftLayoutFragment.displaySize(for: image).height
+                reserving: size.height
             )
-            layout.blocks[lineStart] = .image(image, lead: lead)
+            layout.blocks[lineStart] = .image(image, size: size, lead: lead)
 
         case .thematicBreak:
             // The dashes collapse to nothing, so without a reserved height the

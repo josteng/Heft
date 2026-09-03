@@ -801,8 +801,8 @@ public enum SelfCheck {
                     relativePath: "Ideas/Ideas.md", kind: .markdown, name: "Ideas"
                 ),
                 VaultItem(
-                    url: searchRootURL.appendingPathComponent("MSc Thesis/Ideas.md"),
-                    relativePath: "MSc Thesis/Ideas.md", kind: .markdown, name: "Ideas"
+                    url: searchRootURL.appendingPathComponent("Thesis/Ideas.md"),
+                    relativePath: "Thesis/Ideas.md", kind: .markdown, name: "Ideas"
                 ),
                 VaultItem(
                     url: searchRootURL.appendingPathComponent("2025_11_07_Meeting.md"),
@@ -1140,8 +1140,8 @@ public enum SelfCheck {
             "a shell-escaped path loses its escapes"
         )
         expect(
-            path("\(vault)/PersonalVault/MSc\\ Thesis/Meetings/2026-07-30\\ Questions.md"),
-            "\(vault)/PersonalVault/MSc Thesis/Meetings/2026-07-30 Questions.md",
+            path("\(vault)/PersonalVault/Field\\ Notes/Meetings/2026-07-30\\ Questions.md"),
+            "\(vault)/PersonalVault/Field Notes/Meetings/2026-07-30 Questions.md",
             "an escaped note path resolves"
         )
         // A tilde inside a name is an ordinary character; only a leading one
@@ -1153,13 +1153,13 @@ public enum SelfCheck {
         )
         expect(path("~"), home, "a lone tilde is the home directory")
         expect(
-            path("\"\(vault)/MSc Thesis\""),
-            "\(vault)/MSc Thesis",
+            path("\"\(vault)/Thesis\""),
+            "\(vault)/Thesis",
             "a quoted path loses its quotes"
         )
         expect(
-            path("'\(vault)/MSc Thesis'"),
-            "\(vault)/MSc Thesis",
+            path("'\(vault)/Thesis'"),
+            "\(vault)/Thesis",
             "a single-quoted path loses its quotes"
         )
         expect(
@@ -1168,8 +1168,8 @@ public enum SelfCheck {
             "a file URL is decoded rather than unescaped"
         )
         expect(
-            path("\(vault)/MSc Thesis/"),
-            "\(vault)/MSc Thesis",
+            path("\(vault)/Thesis/"),
+            "\(vault)/Thesis",
             "a trailing separator is dropped"
         )
         expect(path("  /tmp/notes  "), "/tmp/notes", "surrounding whitespace is ignored")
@@ -1177,8 +1177,8 @@ public enum SelfCheck {
         expectTrue(PathInput.normalize("   ", home: home) == nil, "blank input resolves to nothing")
         // Nothing above may damage a path that was already correct.
         expect(
-            path("\(vault)/PersonalVault/MSc Thesis"),
-            "\(vault)/PersonalVault/MSc Thesis",
+            path("\(vault)/PersonalVault/Thesis"),
+            "\(vault)/PersonalVault/Thesis",
             "an already-clean path is unchanged"
         )
 

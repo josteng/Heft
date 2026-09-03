@@ -7,6 +7,57 @@ import UniformTypeIdentifiers
 /// hands back the markdown to insert.
 enum Attachments {
 
+    /// Everything the destination depends on, gathered at the call site so the
+    /// rules can be resolved anywhere — including a settings pane showing what
+    /// a paste *would* do, before one has happened.
+    struct Destination {
+        let rules: AttachmentRules
+        let index: VaultIndex
+        let settings: ObsidianSettings
+
+        /// Where a file pasted into `noteURL` should go, and the rule that
+        /// said so.
+        func resolve(vaultRoot: URL, noteURL: URL?) -> AttachmentRules.Destination {
+            let folder = noteURL.map { url -> String in
+                let note = url.standardizedFileURL.path
+                let root = vaultRoot.standardizedFileURL.path
+                guard note.hasPrefix(root + "/") else { return "" }
+                let relative = String(note.dropFirst(root.count + 1))
+                let parts = relative.split(separator: "/")
+                return parts.count > 1 ? parts.dropLast().joined(separator: "/") : ""
+            } ?? ""
+
+            return rules.destination(in: AttachmentRules.Context(
+                noteFolder: folder,
+                obsidianSetting: settings.attachmentFolderPath,
+                learned: index.attachmentDestination(near: folder),
+                folderExists: { candidate in
+                    guard !candidate.isEmpty else { return true }
+                    var isFolder: ObjCBool = false
+                    let exists = FileManager.default.fileExists(
+                        atPath: vaultRoot.appendingPathComponent(candidate).path,
+                        isDirectory: &isFolder
+                    )
+                    return exists && isFolder.boolValue
+                }
+            ))
+        }
+
+        /// The folder to write into, made first only if the rule that chose it
+        /// is allowed to. Every other rule names somewhere that already exists,
+        /// so nothing appears in a vault that the reader did not make.
+        func directory(vaultRoot: URL, noteURL: URL?) throws -> URL {
+            let chosen = resolve(vaultRoot: vaultRoot, noteURL: noteURL)
+            guard !chosen.folder.isEmpty else { return vaultRoot }
+            let url = vaultRoot.appendingPathComponent(chosen.folder, isDirectory: true)
+            if chosen.needsCreating {
+                guard chosen.rule.mayCreate else { return vaultRoot }
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            }
+            return url
+        }
+    }
+
     /// Saves image data, reusing an existing file when the identical bytes are
     /// already in the vault. Pasting the same screenshot twice should not
     /// leave two copies for iCloud to sync.
@@ -15,10 +66,10 @@ enum Attachments {
         preferredName: String?,
         vaultRoot: URL,
         noteURL: URL?,
-        settings: ObsidianSettings
+        settings: ObsidianSettings,
+        destination: Destination
     ) throws -> String {
-        let directory = settings.attachmentDirectory(vaultRoot: vaultRoot, noteURL: noteURL)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try destination.directory(vaultRoot: vaultRoot, noteURL: noteURL)
 
         let (data, ext) = normalise(imageData)
         let digest = SHA256.hash(data: data).prefix(6)
@@ -47,7 +98,8 @@ enum Attachments {
         at source: URL,
         vaultRoot: URL,
         noteURL: URL?,
-        settings: ObsidianSettings
+        settings: ObsidianSettings,
+        destination: Destination
     ) throws -> String {
         // Files already inside the vault are linked in place, not duplicated.
         if source.path.hasPrefix(vaultRoot.path) {
@@ -57,12 +109,12 @@ enum Attachments {
         if VaultScanner.imageExtensions.contains(source.pathExtension.lowercased()) {
             return try save(
                 imageData: data, preferredName: source.lastPathComponent,
-                vaultRoot: vaultRoot, noteURL: noteURL, settings: settings
+                vaultRoot: vaultRoot, noteURL: noteURL, settings: settings,
+                destination: destination
             )
         }
 
-        let directory = settings.attachmentDirectory(vaultRoot: vaultRoot, noteURL: noteURL)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try destination.directory(vaultRoot: vaultRoot, noteURL: noteURL)
         var target = directory.appendingPathComponent(source.lastPathComponent)
         var counter = 1
         while FileManager.default.fileExists(atPath: target.path) {

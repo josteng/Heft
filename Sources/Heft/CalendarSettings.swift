@@ -43,6 +43,7 @@ final class CalendarSettings: ObservableObject {
 
 struct CalendarSettingsView: View {
     @ObservedObject private var settings = CalendarSettings.shared
+    @EnvironmentObject private var registry: VaultRegistry
 
     var body: some View {
         Form {
@@ -64,6 +65,28 @@ struct CalendarSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Where the daily-note folder, filename format and template live.
+            //
+            // Not here, and it would be wrong to move them: they belong to the
+            // vault, not to this reader, and two vaults open at once want two
+            // different answers. But this is where anyone would look for them
+            // first, so say where they are and offer to open them.
+            Section {
+                LabeledContent {
+                    Button("Open Daily Note Settings…") {
+                        registry.frontmostModel?.presentDailyNotesSettings()
+                    }
+                    .disabled(registry.frontmostModel?.vaultRoot == nil)
+                } label: {
+                    Text("Folder, filename format and template")
+                    Text(
+                        "These belong to the vault rather than to you, so they "
+                            + "live with the vault. Also on the calendar's own "
+                            + "menu, and in the command palette."
+                    )
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(maxWidth: .infinity, alignment: .leading)

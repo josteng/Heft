@@ -637,31 +637,31 @@ enum AppIntegrationCheck {
         // Going to a path in the form one is actually copied in. Finder and a
         // terminal both escape spaces for the shell, and the system's own Go
         // to Folder sheet takes the escaped text literally and finds nothing.
-        let spacedFolder = root.appendingPathComponent("MSc Thesis", isDirectory: true)
+        let spacedFolder = root.appendingPathComponent("Thesis", isDirectory: true)
         try? manager.createDirectory(at: spacedFolder, withIntermediateDirectories: true)
         try? "# Meeting".write(
             to: spacedFolder.appendingPathComponent("Questions To Ask.md"),
             atomically: true, encoding: .utf8
         )
         let spacedAppeared = await waitUntil {
-            files.tree?.flattened().contains { $0.relativePath == "MSc Thesis" } == true
+            files.tree?.flattened().contains { $0.relativePath == "Thesis" } == true
         }
         expect(spacedAppeared, "a folder with a space appears in the tree")
 
         let escapedFolder = spacedFolder.path.replacingOccurrences(of: " ", with: "\\ ")
         expect(files.goToPath(escapedFolder), "an escaped folder path is accepted")
-        expectEqual(files.scopePath, "MSc Thesis", "an escaped folder path focuses that folder")
+        expectEqual(files.scopePath, "Thesis", "an escaped folder path focuses that folder")
 
         let escapedNote = spacedFolder
             .appendingPathComponent("Questions To Ask.md").path
             .replacingOccurrences(of: " ", with: "\\ ")
         let noteIndexed = await waitUntil {
-            files.index.note(atRelativePath: "MSc Thesis/Questions To Ask.md") != nil
+            files.index.note(atRelativePath: "Thesis/Questions To Ask.md") != nil
         }
         expect(noteIndexed, "a note in a spaced folder is indexed")
         expect(files.goToPath(escapedNote), "an escaped note path is accepted")
         expectEqual(
-            files.current?.relativePath, "MSc Thesis/Questions To Ask.md",
+            files.current?.relativePath, "Thesis/Questions To Ask.md",
             "an escaped note path opens that note"
         )
 
