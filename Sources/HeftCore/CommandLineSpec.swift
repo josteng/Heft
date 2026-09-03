@@ -38,16 +38,23 @@ public enum CommandLineSpec {
         public let flags: [Flag]
         /// True when the verb only reads, so it is safe against a live vault.
         public let isReadOnly: Bool
+        /// True for verbs that report on Heft's internals rather than on the
+        /// vault. They are listed apart, because `render` describing layout
+        /// fragments and reserved heights means nothing to someone who just
+        /// wants their notes, and putting it beside `export` and `find`
+        /// implies it is for them.
+        public let isDiagnostic: Bool
 
         public init(
             _ name: String, _ arguments: String, _ summary: String,
-            flags: [Flag] = [], isReadOnly: Bool = true
+            flags: [Flag] = [], isReadOnly: Bool = true, isDiagnostic: Bool = false
         ) {
             self.name = name
             self.arguments = arguments
             self.summary = summary
             self.flags = flags
             self.isReadOnly = isReadOnly
+            self.isDiagnostic = isDiagnostic
         }
 
         public var usage: String {
@@ -74,7 +81,8 @@ public enum CommandLineSpec {
         Verb("backlinks", "<vault> <note>", "Notes linking to this one, with context."),
         Verb("tags", "<vault> [tag]", "Tags with counts, or the notes carrying one."),
         Verb("config", "<vault>", "The vault's settings, as JSON."),
-        Verb("stats", "<vault>", "Index report: counts, timings, link resolution."),
+        Verb("stats", "<vault>", "Index report: counts, timings, link resolution.",
+             isDiagnostic: true),
 
         // Proposing changes
         Verb("propose", "<vault> <note>", "Propose a new body for a note, from stdin.", flags: [
@@ -97,7 +105,9 @@ public enum CommandLineSpec {
         ], isReadOnly: false),
         Verb("daily", "<vault> [YYYY-MM-DD]", "Create a daily note from the template.",
              isReadOnly: false),
-        Verb("render", "<vault> <note> [caret]", "What the live surface would draw, headless."),
+        Verb("render", "<vault> <note> [caret]",
+             "What the live surface would draw, fragment by fragment.",
+             isDiagnostic: true),
         Verb("agent-setup", "<vault>", "Teach an agent in that vault to propose.",
              isReadOnly: false),
     ]
@@ -123,13 +133,25 @@ public enum CommandLineSpec {
         // Summaries all start in one column, flags included: a flag's line
         // begins six spaces in, so it needs that much less padding.
         let column = max(verbs.map(\.usage.count).max() ?? 0, 34)
-        for verb in verbs where verb.name != "open" && verb.name != "help" {
+
+        func describe(_ verb: Verb) {
             let usage = verb.usage.padding(toLength: column, withPad: " ", startingAt: 0)
             lines.append("  \(usage)  \(verb.summary)")
             for flag in verb.flags {
                 let pad = String(repeating: " ", count: max(1, column - flag.usage.count - 2))
                 lines.append("      \(flag.usage)\(pad)\(flag.summary)")
             }
+        }
+
+        for verb in verbs
+        where verb.name != "open" && verb.name != "help" && !verb.isDiagnostic {
+            describe(verb)
+        }
+        let diagnostics = verbs.filter(\.isDiagnostic)
+        if !diagnostics.isEmpty {
+            lines.append("")
+            lines.append("Diagnostics — about Heft's rendering rather than about your notes:")
+            diagnostics.forEach(describe)
         }
         lines.append("")
         lines.append("Verbs marked read-only in `heft help --json` are safe against a live vault.")
