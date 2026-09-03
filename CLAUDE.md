@@ -68,6 +68,26 @@ Four files carry it:
 - `LiveStyler`: turns decorations into attributes, and decides which widgets to draw.
 - `LiveWidgets`: measures tables and draws every widget.
 
+### Emphasis while it is still being typed
+
+`**bold**` only styled once the closing pair arrived, so text stayed plain
+until the span was finished. `.pendingEmphasis` styles from the *opening*
+delimiter, the way Obsidian does.
+
+Three things keep it from being a menace. It carries **no `syntax`**, so
+nothing is collapsed: an unclosed `**` is literal text in the file, and hiding
+it would misrepresent the buffer. It is the one style **applied** on the
+caret's line rather than undone there — it rides `revealsWithItsLine`, which
+is what stops an unclosed `*` left in a note years ago from italicising the
+rest of its line forever. And a delimiter that a *closed* span already starts
+on is skipped, or `**bold**` would open a second, unending span at the same
+offset.
+
+The scan is by hand rather than by regex because the pattern has to reach the
+end of the line, and `matches(_:excluding:)` rejects any candidate that so
+much as touches a protected range — which any line holding one code span
+would.
+
 ### Blocks written inside a quote
 
 The block matchers are anchored to the start of a line, so everything after a

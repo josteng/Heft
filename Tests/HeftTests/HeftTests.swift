@@ -1493,3 +1493,88 @@ struct DailyCaptureTests {
         }
     }
 }
+
+@Suite("Emphasis while typing")
+@MainActor
+struct PendingEmphasisTests {
+
+    /// Whether the character at `offset` is drawn bold / italic once the
+    /// document has been styled with the caret at `caret`.
+    private func traits(_ source: String, caret: Int, at offset: Int) -> (bold: Bool, italic: Bool) {
+        let storage = NSTextStorage(string: source)
+        let text = source as NSString
+        _ = LiveStyler.apply(
+            to: storage,
+            reveal: Reveal(selection: NSRange(location: caret, length: 0), in: text),
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 600
+        )
+        let font = storage.attribute(.font, at: offset, effectiveRange: nil) as? NSFont
+        let traits = font.map { NSFontManager.shared.traits(of: $0) } ?? []
+        return (traits.contains(.boldFontMask), traits.contains(.italicFontMask))
+    }
+
+    /// `**bold**` only styled once the closing pair arrived, so text stayed
+    /// plain until the span was finished. Obsidian styles from the opening
+    /// delimiter.
+    @Test("An unclosed delimiter styles the text after it")
+    func stylesWhileTyping() {
+        let source = "Typing **bold now"
+        let offset = (source as NSString).range(of: "bold now").location
+        #expect(traits(source, caret: source.count, at: offset).bold)
+
+        let italic = "Typing *slanted now"
+        let slanted = (italic as NSString).range(of: "slanted now").location
+        #expect(traits(italic, caret: italic.count, at: slanted).italic)
+    }
+
+    /// The whole safety of the feature. An unclosed `*` left in a note years
+    /// ago must not italicise the rest of its line forever, so the styling
+    /// only lands on the line the caret is on.
+    @Test("It applies only on the caret's line")
+    func onlyOnTheCaretLine() {
+        let source = "Typing **bold now\n\nA later paragraph."
+        let offset = (source as NSString).range(of: "bold now").location
+        #expect(traits(source, caret: source.count, at: offset).bold == false)
+        #expect(traits(source, caret: offset, at: offset).bold)
+    }
+
+    /// The delimiter stays on screen while the span is open: it carries no
+    /// `syntax`, so nothing is collapsed. An unclosed `**` is literal text in
+    /// the file and hiding it would misrepresent it.
+    @Test("The open delimiter is not hidden")
+    func delimiterStaysVisible() {
+        let source = "Typing **bold now"
+        let stars = (source as NSString).range(of: "**").location
+        let storage = NSTextStorage(string: source)
+        _ = LiveStyler.apply(
+            to: storage,
+            reveal: Reveal(selection: NSRange(location: source.count, length: 0), in: source as NSString),
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 600
+        )
+        let font = storage.attribute(.font, at: stars, effectiveRange: nil) as? NSFont
+        #expect((font?.pointSize ?? 0) > 1, "the open `**` was collapsed")
+    }
+
+    @Test("Things that are not emphasis are left alone")
+    func notEmphasis() {
+        // A space after the delimiter means it cannot open.
+        #expect(!traits("Cost is 5 * 3 dollars", caret: 21, at: 14).italic)
+        // `_` never opens inside a word.
+        #expect(!traits("A snake_case name", caret: 17, at: 14).italic)
+        // A list marker is a marker, not an opening delimiter.
+        #expect(!traits("* an item", caret: 9, at: 4).italic)
+    }
+
+    /// A closed span keeps its own styling and does not also start a pending
+    /// one, which is what `closedStarts` is for.
+    @Test("A closed span is not also treated as open")
+    func closedSpansWin() {
+        let source = "Closed **bold** and plain after."
+        let after = (source as NSString).range(of: "and plain after").location
+        #expect(!traits(source, caret: source.count, at: after).bold)
+        let inside = (source as NSString).range(of: "bold").location
+        #expect(traits(source, caret: source.count, at: inside).bold)
+    }
+}

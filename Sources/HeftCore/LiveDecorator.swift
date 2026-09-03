@@ -38,6 +38,11 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case footnoteReference(label: String)
         /// `[^1]:` opening a definition line.
         case footnoteDefinition(label: String)
+        /// An emphasis delimiter that has been opened and not yet closed:
+        /// `**bold` while it is still being typed. `level` is 1 for `*` and 2
+        /// for `**`. Carries no `syntax`, because an unclosed delimiter is
+        /// literal text in the file and hiding it would misrepresent it.
+        case pendingEmphasis(level: Int)
         case inlineMath(String)
         case blockMath(String)
         case thematicBreak
@@ -368,6 +373,12 @@ public struct Reveal: Equatable, Sendable {
         case .listMarker, .bold, .italic, .strikethrough, .highlight, .inlineCode,
              .link, .tag, .inlineMath, .footnoteReference:
             false
+        // Not really a reveal: this is the one style that is *applied* on the
+        // caret's line rather than undone there. Riding the line rule is what
+        // keeps it to the line being typed — an unclosed `*` left in a note
+        // years ago must not italicise the rest of its line forever.
+        case .pendingEmphasis:
+            true
         }
     }
 
@@ -1128,6 +1139,81 @@ public enum LiveDecorator {
 
     // MARK: - Inline constructs
 
+    /// Unclosed `*`/`**`/`_`/`__` runs, one per line at most.
+    ///
+    /// Hand-scanned rather than matched, because the pattern would have to
+    /// reach to the end of the line and `matches(_:excluding:)` rejects any
+    /// candidate that so much as touches a protected range — which a line
+    /// holding one code span would.
+    private static func pendingEmphasis(
+        _ text: NSString, protected: ProtectedRanges, closedStarts: Set<Int>
+    ) -> [MarkdownDecoration] {
+        let asterisk = UInt16(42)
+        let underscore = UInt16(95)
+        var result: [MarkdownDecoration] = []
+
+        var location = 0
+        while location < text.length {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            var end = NSMaxRange(line)
+            while end > line.location, isNewline(text.character(at: end - 1)) { end -= 1 }
+
+            var index = line.location
+            while index < end {
+                let character = text.character(at: index)
+                guard character == asterisk || character == underscore else {
+                    index += 1
+                    continue
+                }
+                var runEnd = index
+                while runEnd < end, text.character(at: runEnd) == character { runEnd += 1 }
+                let length = runEnd - index
+                defer { index = runEnd }
+
+                // `***` is ambiguous mid-typing and three-deep emphasis is rare
+                // enough that guessing wrong is worse than doing nothing.
+                guard length == 1 || length == 2 else { continue }
+                // A closed span starts here, so this delimiter is not open.
+                guard !closedStarts.contains(index) else { continue }
+                guard !protected.intersects(NSRange(location: index, length: length)) else { continue }
+
+                // Must open: something has to follow, and not a space — which
+                // is also what keeps a `* ` list marker and a lone `5 * 3` out.
+                guard runEnd < end else { continue }
+                let next = text.character(at: runEnd)
+                guard !isBlank(next), next != character else { continue }
+
+                // `_` never opens inside a word, so `snake_case` is a name and
+                // not the start of an emphasis span.
+                if character == underscore, index > line.location {
+                    let previous = text.character(at: index - 1)
+                    guard !isWordCharacter(previous), previous != underscore else { continue }
+                }
+                if character == asterisk, index > line.location,
+                   text.character(at: index - 1) == asterisk {
+                    continue
+                }
+
+                result.append(MarkdownDecoration(
+                    range: NSRange(location: index, length: end - index),
+                    style: .pendingEmphasis(level: length)
+                ))
+                break
+            }
+
+            let next = NSMaxRange(line)
+            guard next > location else { break }
+            location = next
+        }
+        return result
+    }
+
+    private static func isWordCharacter(_ character: unichar) -> Bool {
+        (character >= UInt16(48) && character <= UInt16(57))
+            || (character >= UInt16(65) && character <= UInt16(90))
+            || (character >= UInt16(97) && character <= UInt16(122))
+    }
+
     private static func inlineDecorations(_ text: NSString, protected initial: ProtectedRanges) -> [MarkdownDecoration] {
         var result: [MarkdownDecoration] = []
         var protected = initial
@@ -1146,6 +1232,20 @@ public enum LiveDecorator {
         wrapped(#"\*\*(?=\S)([^\n]+?)(?<=\S)\*\*"#, 2, .bold)
         wrapped(#"(?<![*\w])\*(?=[^\s*])([^\n*]+?)(?<=[^\s*])\*(?![*\w])"#, 1, .italic)
         wrapped(#"(?<![_\w])_(?=\S)([^\n_]+?)(?<=\S)_(?![_\w])"#, 1, .italic)
+        // Emphasis while it is still being typed. `**bold**` only styled once
+        // the closing pair arrived, so text stayed plain until the span was
+        // finished; Obsidian styles from the opening delimiter.
+        //
+        // Every closed span has already been matched above, so a delimiter
+        // that no closed span starts on is an open one.
+        let closedStarts = Set(result.compactMap { decoration -> Int? in
+            switch decoration.style {
+            case .bold, .italic: decoration.range.location
+            default: nil
+            }
+        })
+        result.append(contentsOf: pendingEmphasis(text, protected: protected, closedStarts: closedStarts))
+
         wrapped(#"~~(?=\S)([^\n]+?)(?<=\S)~~"#, 2, .strikethrough)
         wrapped(#"==(?=\S)([^\n]+?)(?<=\S)=="#, 2, .highlight)
 

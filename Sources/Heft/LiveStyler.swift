@@ -796,6 +796,20 @@ enum LiveStyler {
         case .image:
             storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: range)
 
+        case .pendingEmphasis(let level):
+            // Applied only while the caret is on this line, which is what
+            // `revealsWithItsLine` arranges: this is emphasis being typed, and
+            // an unclosed delimiter elsewhere in the note is literal text.
+            //
+            // Nothing is collapsed — the decoration carries no `syntax` — so
+            // the `**` stays on screen while it is being written, which is
+            // what tells you the span is still open.
+            guard revealed else { break }
+            addTrait(
+                level >= 2 ? .boldFontMask : .italicFontMask,
+                to: storage, range: range, base: base
+            )
+
         case .footnoteReference:
             // Raised and small, the way a footnote marker has looked in print
             // for four hundred years. An attribute rather than a widget: this

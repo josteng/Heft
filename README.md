@@ -90,6 +90,11 @@ right: block markup (heading hashes, list and quote markers, fences) reveals
 when the caret is anywhere on its line, while inline spans (`**bold**`,
 `$math$`, links) reveal only when the caret is inside that span.
 
+Emphasis styles from the **opening** delimiter, so `**bold` is already bold
+while you are still typing it. The open `**` stays visible — it is literal
+text until the span closes — and the styling never leaves the line the caret
+is on, so an unclosed `*` elsewhere in the note changes nothing.
+
 - **Tables are edited in place.** A table stays a drawn grid while the caret is
   inside it; only the cell being typed into shows its Markdown. Tab walks
   cells, rows and columns can be added without dissolving the grid, and the
