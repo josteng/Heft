@@ -106,7 +106,7 @@ enum ListGlyph {
     /// scope, for the same reason `headingAccent` carries its colour: reading
     /// `AppearanceSettings` here instead would sidestep the restyle-on-change
     /// path and leave open windows showing the old colour.
-    case checkbox(Bool, accent: NSColor)
+    case checkbox(TaskState, accent: NSColor)
 }
 
 /// Widget placement for one restyle pass, keyed by the document offset of the
@@ -1401,14 +1401,15 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
                 ))
             }
 
-        case .checkbox(let checked, let accent):
+        case .checkbox(let state, let accent):
             let side: CGFloat = 13
             let box = CGRect(
                 x: markerCentre - side / 2, y: centreY - side / 2,
                 width: side, height: side
             )
             let path = CGPath(roundedRect: box, cornerWidth: 3.5, cornerHeight: 3.5, transform: nil)
-            if checked {
+            switch state {
+            case .done:
                 context.setFillColor(accent.cgColor)
                 context.addPath(path)
                 context.fillPath()
@@ -1420,11 +1421,33 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
                 context.addLine(to: CGPoint(x: box.minX + 5.4, y: box.maxY - 3.4))
                 context.addLine(to: CGPoint(x: box.maxX - 3.0, y: box.minY + 3.6))
                 context.strokePath()
-            } else {
+            case .unchecked:
                 context.setStrokeColor(NSColor.tertiaryLabelColor.cgColor)
                 context.setLineWidth(1.3)
                 context.addPath(path)
                 context.strokePath()
+            case .other(let marker):
+                // The character itself inside the box, which is what the
+                // conventions mean and what every theme that popularised them
+                // draws: `/` in progress, `-` abandoned, `?` uncertain. Drawing
+                // a tick or a blank instead would state something the author
+                // did not write.
+                context.setStrokeColor(accent.cgColor)
+                context.setLineWidth(1.3)
+                context.addPath(path)
+                context.strokePath()
+                let glyph = NSAttributedString(
+                    string: String(marker),
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: side * 0.72, weight: .semibold),
+                        .foregroundColor: accent,
+                    ]
+                )
+                let size = glyph.size()
+                glyph.draw(at: CGPoint(
+                    x: box.midX - size.width / 2,
+                    y: box.midY - size.height / 2
+                ))
             }
         }
     }

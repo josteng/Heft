@@ -1819,7 +1819,7 @@ final class HeftTextKit2View: NSTextView {
         let centre = textContainerInset.width
             + LiveStyler.listIndent(depth: depth)
             + LiveStyler.listGlyphOffset(
-                marker: visible, kind: .task(checked: false), font: Theme.liveFont
+                marker: visible, kind: .task(.unchecked), font: Theme.liveFont
             )
         return (centre - 10)...(centre + 10)
     }

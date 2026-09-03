@@ -796,8 +796,8 @@ struct QuotedBlockTests {
         #expect(depth == 0)
         #expect(marker == "- ")
 
-        #expect(found[1].quote.nested == .list(kind: .task(checked: false), depth: 0, marker: "- [ ] "))
-        #expect(found[2].quote.nested == .list(kind: .task(checked: true), depth: 0, marker: "- [x] "))
+        #expect(found[1].quote.nested == .list(kind: .task(.unchecked), depth: 0, marker: "- [ ] "))
+        #expect(found[2].quote.nested == .list(kind: .task(.done), depth: 0, marker: "- [x] "))
         #expect(found[3].quote.nested == .list(kind: .ordered, depth: 0, marker: "1. "))
         #expect(found[4].quote.nested == .list(kind: .ordered, depth: 0, marker: "2) "))
 
@@ -1204,5 +1204,190 @@ struct ExternalChangePollingTests {
 
         model.reloadCurrentIfChangedExternally()
         #expect(model.text == "rewritten\n", "a same-second rewrite was skipped on a matching date")
+    }
+}
+
+@Suite("Obsidian comments")
+struct ObsidianCommentTests {
+
+    private func comments(_ source: String) -> [String] {
+        let text = source as NSString
+        return LiveDecorator.decorations(in: source).compactMap { decoration in
+            guard case .comment = decoration.style else { return nil }
+            return text.substring(with: decoration.range)
+        }
+    }
+
+    /// A vault written in Obsidian is full of `%%` comments, and they showed
+    /// here as literal text, percent signs and all.
+    @Test("Both comment spellings are comments")
+    func bothSpellings() {
+        #expect(comments("Before %%hidden%% after.") == ["%%hidden%%"])
+        #expect(comments("Before <!--hidden--> after.") == ["<!--hidden-->"])
+        #expect(comments("%%\nA block\nspanning lines\n%%") == ["%%\nA block\nspanning lines\n%%"])
+    }
+
+    /// The two shapes are matched separately on purpose. One loose pattern for
+    /// both would let an *inline* comment leap across lines and swallow the
+    /// prose between two unrelated `%%` — which prose about percentages
+    /// really can contain.
+    @Test("An inline comment cannot swallow the lines between two percentages")
+    func inlineDoesNotSpanLines() {
+        let found = comments("Grew 20%% last year.\n\nShrank 5%% this year.")
+        #expect(found.isEmpty, "matched \(found)")
+    }
+
+    @Test("A comment inside a fence is code, not a comment")
+    func fencesWin() {
+        #expect(comments("```\n%%not a comment%%\n```").isEmpty)
+        #expect(comments("```\n<!-- not a comment -->\n```").isEmpty)
+    }
+
+    @Test("A lone marker is not a comment")
+    func loneMarkers() {
+        #expect(comments("100% done").isEmpty)
+        #expect(comments("A %% with no partner").isEmpty)
+    }
+}
+
+@Suite("Footnotes")
+struct FootnoteTests {
+
+    private func footnotes(_ source: String) -> [(kind: String, label: String, text: String)] {
+        let text = source as NSString
+        return LiveDecorator.decorations(in: source).compactMap { decoration in
+            switch decoration.style {
+            case .footnoteReference(let label):
+                ("ref", label, text.substring(with: decoration.range))
+            case .footnoteDefinition(let label):
+                ("def", label, text.substring(with: decoration.range))
+            default:
+                nil
+            }
+        }
+    }
+
+    @Test("References and definitions are told apart")
+    func detection() {
+        let found = footnotes("""
+        A claim[^1] and another[^cox].
+
+        [^1]: First note.
+        [^cox]: Second note.
+        """)
+        #expect(found.filter { $0.kind == "ref" }.map(\.label) == ["1", "cox"])
+        #expect(found.filter { $0.kind == "def" }.map(\.label) == ["1", "cox"])
+
+        // A definition is not a reference that happens to be followed by a
+        // colon, which is why definitions are matched first.
+        #expect(footnotes("[^1]: A note").allSatisfy { $0.kind == "def" })
+    }
+
+    @Test("A label may repeat, and each use is its own reference")
+    func repeatedLabels() {
+        let refs = footnotes("One[^1] and again[^1].").filter { $0.kind == "ref" }
+        #expect(refs.count == 2)
+        #expect(refs.allSatisfy { $0.label == "1" })
+    }
+
+    @Test("Bracket pairs that are not footnotes are left alone")
+    func nonFootnotes() {
+        #expect(footnotes("[a link](https://example.com)").isEmpty)
+        #expect(footnotes("[^ ] has a space").isEmpty)
+        #expect(footnotes("[^] is empty").isEmpty)
+        #expect(footnotes("A caret ^ on its own").isEmpty)
+        #expect(footnotes("[plain]").isEmpty)
+    }
+
+    /// A reference is an inline span and reveals only with the caret inside
+    /// it, or a sentence with three footnotes in it would dissolve into
+    /// brackets the moment it was clicked. A definition owns its line.
+    @Test("A reference reveals per caret, a definition per line")
+    func revealPolicy() {
+        #expect(!Reveal.revealsWithItsLine(.footnoteReference(label: "1")))
+        #expect(Reveal.revealsWithItsLine(.footnoteDefinition(label: "1")))
+    }
+
+    /// The markers hide and the label stays, so a collapsed reference is the
+    /// bare number and a definition still reads as the numbered note it is.
+    @Test("Only the brackets are markup")
+    func syntaxRanges() throws {
+        let source = "A claim[^12] here."
+        let decoration = try #require(
+            LiveDecorator.decorations(in: source).first {
+                if case .footnoteReference = $0.style { return true }
+                return false
+            }
+        )
+        let text = source as NSString
+        let hidden = decoration.syntax.map { text.substring(with: $0) }
+        #expect(hidden == ["[^", "]"])
+        #expect(text.substring(with: decoration.range) == "[^12]")
+    }
+}
+
+@Suite("Task states")
+struct TaskStateTests {
+
+    private func kinds(_ source: String) -> [ListMarkerKind] {
+        LiveDecorator.decorations(in: source).compactMap {
+            guard case .listMarker(let kind, _) = $0.style else { return nil }
+            return kind
+        }
+    }
+
+    /// Obsidian puts a checkbox on any `- [c]` and carries the character
+    /// through for a theme to style, which is where `[/]`, `[-]` and `[>]`
+    /// come from. Reading only `[ ]` and `[x]` made every one of those render
+    /// as a plain bullet, so a note full of half-done work looked like prose.
+    @Test("Any single character between the brackets is a task")
+    func customStates() {
+        #expect(kinds("- [ ] a") == [.task(.unchecked)])
+        #expect(kinds("- [x] a") == [.task(.done)])
+        #expect(kinds("- [X] a") == [.task(.done)])
+        #expect(kinds("- [/] a") == [.task(.other("/"))])
+        #expect(kinds("- [-] a") == [.task(.other("-"))])
+        #expect(kinds("- [>] a") == [.task(.other(">"))])
+        #expect(kinds("- [?] a") == [.task(.other("?"))])
+        #expect(kinds("- [!] a") == [.task(.other("!"))])
+    }
+
+    /// Only `[x]` is finished. `[/]` is in progress and `[-]` is abandoned,
+    /// and striking either through would say the work was completed.
+    @Test("Only a ticked task counts as done")
+    func onlyTickedIsDone() {
+        #expect(TaskState(marker: "x").isDone)
+        #expect(TaskState(marker: "X").isDone)
+        #expect(!TaskState(marker: " ").isDone)
+        #expect(!TaskState(marker: "/").isDone)
+        #expect(!TaskState(marker: "-").isDone)
+        #expect(!TaskState(marker: ">").isDone)
+    }
+
+    @Test("Brackets that are not a task stay a plain bullet")
+    func notTasks() {
+        // Two characters is not a state.
+        #expect(kinds("- [ab] a") == [.bullet(shape: .forLevel(0))])
+        // No brackets at all.
+        #expect(kinds("- plain") == [.bullet(shape: .forLevel(0))])
+        #expect(kinds("1. plain") == [.ordered])
+        // An ordered *task* is still a task: the box wins over the numeral,
+        // which is what Obsidian draws for `1. [ ] a` too.
+        #expect(kinds("1. [ ] a") == [.task(.unchecked)])
+    }
+
+    /// The same reading applies inside a quote, where the marker is found by
+    /// a separate hand-written scan rather than by the list regex.
+    @Test("A quoted task reads its state the same way")
+    func quotedTasks() {
+        func quoted(_ source: String) -> QuotedBlock? {
+            for decoration in LiveDecorator.decorations(in: source) {
+                if case .quoteLine(let quote) = decoration.style { return quote.nested }
+            }
+            return nil
+        }
+        #expect(quoted("> - [ ] a") == .list(kind: .task(.unchecked), depth: 0, marker: "- [ ] "))
+        #expect(quoted("> - [x] a") == .list(kind: .task(.done), depth: 0, marker: "- [x] "))
+        #expect(quoted("> - [/] a") == .list(kind: .task(.other("/")), depth: 0, marker: "- [/] "))
     }
 }

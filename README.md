@@ -106,6 +106,13 @@ when the caret is anywhere on its line, while inline spans (`**bold**`,
 - **Wikilinks** — `[[note]]`, `[[note|alias]]`, `[[note#heading]]`,
   `[[note#^block]]`, embeds `![[image.png|400]]`. Typing `[[` opens filename
   completion. Unresolved links render dimmed and create the note when clicked.
+- **Task states** — `[ ]` and `[x]`, and the widespread conventions Obsidian
+  also boxes: `[/]` in progress, `[-]` abandoned, `[>]` deferred, `[?]`
+  uncertain. The character is drawn inside its box. Only `[x]` is struck
+  through, because only `[x]` means finished.
+- **Footnotes** — `[^1]` in the prose is drawn raised and small, the way a
+  footnote marker has looked in print for four hundred years, and `[^1]:`
+  opens a definition with a hanging indent.
 - **Callout completion** — typing `> [!` lists the thirteen kinds with their
   icons, and finds one by any of its Obsidian spellings (`tldr` offers
   `abstract`). Accepting writes the canonical name and the closing `] `.
@@ -172,6 +179,9 @@ One deliberate difference: with an attachment folder set to a subfolder
 always making one beside it, so a project keeps one attachment folder instead
 of growing one per subfolder. Nothing is created by that search: with no such
 folder anywhere above, the answer is still the one beside the note.
+
+Comments are hidden in both spellings: HTML's `<!-- -->` and Obsidian's own
+`%%…%%`, inline or as a block with `%%` on its own line.
 
 Two syntax details that trip up naive parsers, both found in a real vault and
 both handled:

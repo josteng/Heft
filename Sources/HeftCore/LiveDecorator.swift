@@ -33,6 +33,11 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case wikiLink(WikiLink)
         case link(destination: String)
         case tag
+        /// `[^1]` in the prose. The label is kept so the editor can draw the
+        /// reference raised, and so a click could one day find its definition.
+        case footnoteReference(label: String)
+        /// `[^1]:` opening a definition line.
+        case footnoteDefinition(label: String)
         case inlineMath(String)
         case blockMath(String)
         case thematicBreak
@@ -239,7 +244,34 @@ public enum ListMarkerKind: Sendable, Equatable {
     /// `1.` / `1)`: the numeral stays legible, so it is only dimmed.
     case ordered
     /// `- [ ]` / `- [x]`: replaced by a drawn checkbox.
-    case task(checked: Bool)
+    case task(TaskState)
+}
+
+/// What is written between a task's brackets.
+///
+/// Obsidian puts a checkbox on *any* `- [c]`, whatever the character, and
+/// carries that character through for a theme to style — which is how the
+/// `[/]`, `[-]`, `[>]` and `[?]` conventions came to be so widespread. Reading
+/// only `[ ]` and `[x]` made every one of those render as a plain bullet, so a
+/// note full of half-done work looked like a note full of prose.
+public enum TaskState: Sendable, Equatable {
+    case unchecked
+    case done
+    /// Anything else between the brackets, kept so it can be drawn.
+    case other(Character)
+
+    public init(marker: Character) {
+        switch marker {
+        case " ", "\t": self = .unchecked
+        case "x", "X": self = .done
+        default: self = .other(marker)
+        }
+    }
+
+    /// Whether the item counts as finished. Only `[x]` does: `[/]` is in
+    /// progress and `[-]` is abandoned, and striking either through would say
+    /// the work was completed.
+    public var isDone: Bool { self == .done }
 }
 
 /// What the caret currently exposes as literal markdown source.
@@ -325,13 +357,16 @@ public struct Reveal: Equatable, Sendable {
     public static func revealsWithItsLine(_ style: MarkdownDecoration.Style) -> Bool {
         switch style {
         case .frontmatter, .comment, .codeBlock, .heading, .quoteLine,
-             .table, .thematicBreak, .blockMath, .image, .agentGuideBoundary:
+             .table, .thematicBreak, .blockMath, .image, .agentGuideBoundary,
+             // A definition *is* its line, and its `[^1]:` sits at the start
+             // of it, where a caret arriving from the line above lands.
+             .footnoteDefinition:
             true
         // An embed owning its line is drawn as a block, so it behaves like one.
         case .wikiLink(let link):
             link.isEmbed
         case .listMarker, .bold, .italic, .strikethrough, .highlight, .inlineCode,
-             .link, .tag, .inlineMath:
+             .link, .tag, .inlineMath, .footnoteReference:
             false
         }
     }
@@ -476,10 +511,26 @@ public enum LiveDecorator {
             }
         }
 
-        // HTML comments are metadata, not visible prose. Keep them in the
-        // buffer and reveal them on their line for editing, while shielding
-        // any markdown-looking text inside from further decoration.
-        for match in matches(#"<!--[\s\S]*?-->"#, text, excluding: protected) {
+        // Comments are metadata, not visible prose. Keep them in the buffer
+        // and reveal them on their line for editing, while shielding any
+        // markdown-looking text inside from further decoration.
+        //
+        // Both spellings: `<!-- -->` is HTML's and `%% %%` is Obsidian's own,
+        // which a vault written in Obsidian is full of and which showed here
+        // as literal text with the percent signs and all. Both forms span
+        // lines, because both are allowed to.
+        // Obsidian's own form has two shapes and they are matched separately:
+        // `%%` alone on a line opens a block comment that runs to the next
+        // such line, while `%%…%%` inside a line is an inline one. Matching
+        // one loose `%%[\s\S]*?%%` for both would let an inline comment leap
+        // across lines and swallow the prose between two unrelated `%%` —
+        // which prose about percentages really can contain.
+        for match in matches(
+            #"<!--[\s\S]*?-->"#
+                + #"|(?m)^[ \t]*%%[ \t]*$[\s\S]*?^[ \t]*%%[ \t]*$"#
+                + #"|%%[^\n]*?%%"#,
+            text, excluding: protected
+        ) {
             result.append(MarkdownDecoration(
                 range: match,
                 syntax: [match],
@@ -747,7 +798,15 @@ public enum LiveDecorator {
 
         result.append(contentsOf: quoteDecorations(text, protected: protected))
 
-        for match in matches(#"(?m)^[ \t]*([-*+]|\d+[.)])[ \t]+(\[[ xX]\][ \t]+)?"#, text, excluding: protected) {
+        // Any single character between the brackets, not just ` `, `x` and
+        // `X`: Obsidian puts a checkbox on every `- [c]` and carries the
+        // character through for a theme to style, which is where the `[/]`,
+        // `[-]` and `[>]` conventions come from. Narrowing it here made all of
+        // those render as plain bullets, so a note full of half-done work
+        // looked like a note full of prose.
+        for match in matches(
+            #"(?m)^[ \t]*([-*+]|\d+[.)])[ \t]+(\[[^\]\n]\][ \t]+)?"#, text, excluding: protected
+        ) {
             let marker = text.substring(with: match)
             let leading = marker.prefix { $0 == " " || $0 == "\t" }
             // Two spaces or one tab per nesting level, which is what both
@@ -760,7 +819,7 @@ public enum LiveDecorator {
             // scan that found the item.
             let kind: ListMarkerKind
             if let box = checkboxState(in: marker) {
-                kind = .task(checked: box)
+                kind = .task(box)
             } else if marker.contains(where: \.isNumber) {
                 kind = .ordered
             } else {
@@ -950,7 +1009,7 @@ public enum LiveDecorator {
         if !isOrdered {
             let rest = NSRange(location: bulletStart, length: end - bulletStart)
             if let box = checkboxState(in: text.substring(with: rest)) {
-                kind = .task(checked: box)
+                kind = .task(box)
                 // The box is markup too, so the collapsed run has to reach
                 // past it or `[ ]` is left sitting beside the drawn checkbox.
                 if let boxEnd = checkboxEnd(from: index, limit: end, text) {
@@ -1016,16 +1075,21 @@ public enum LiveDecorator {
 
     /// Whether a list marker carries a `[ ]`, `[x]` or `[X]` box, and whether
     /// it is ticked. Nil when the marker is a plain bullet or numeral.
-    private static func checkboxState(in marker: String) -> Bool? {
+    /// The state written in a task's brackets, or nil when there are none.
+    ///
+    /// Any single character counts, as it does in Obsidian. The brackets have
+    /// to be immediately adjacent, which is what keeps a link label like
+    /// `[a]` from being read as a task.
+    private static func checkboxState(in marker: String) -> TaskState? {
         let source = marker as NSString
         guard source.length >= 3 else { return nil }
         for index in 0...(source.length - 3) where source.character(at: index) == UInt16(91) {
             guard source.character(at: index + 2) == UInt16(93) else { continue }
-            switch source.character(at: index + 1) {
-            case UInt16(32): return false
-            case UInt16(120), UInt16(88): return true
-            default: continue
-            }
+            let inner = source.character(at: index + 1)
+            // A newline between brackets is not a task, it is a broken line.
+            guard inner != UInt16(10), inner != UInt16(13) else { continue }
+            guard let scalar = Unicode.Scalar(inner) else { continue }
+            return TaskState(marker: Character(scalar))
         }
         return nil
     }
@@ -1109,6 +1173,49 @@ public enum LiveDecorator {
                 ?? WikiLink(target: body, isEmbed: isEmbed)
             result.append(MarkdownDecoration(
                 range: match, syntax: syntax, style: .wikiLink(link)
+            ))
+            protected.insert(match)
+        }
+
+        // Footnotes before links, because `[^1]` is a bracket pair a looser
+        // link matcher would be entitled to. Definitions before references,
+        // because `[^1]:` opening a line is a definition and not a reference
+        // that happens to be followed by a colon.
+        //
+        // The reference pattern's `(?!:)` is defence in depth rather than the
+        // thing that separates them: a definition is matched and protected
+        // first, so removing the lookahead changes nothing today, which
+        // mutation confirms. It is kept because that is a property of the
+        // ordering, not of the pattern.
+        for match in matches(#"(?m)^[ \t]*\[\^([^\]\s]+)\]:"#, text, excluding: protected) {
+            let raw = text.substring(with: match)
+            guard let open = raw.range(of: "[^"), let close = raw.range(of: "]:") else { continue }
+            let label = String(raw[open.upperBound..<close.lowerBound])
+            let openStart = match.location + raw.distance(from: raw.startIndex, to: open.lowerBound)
+            result.append(MarkdownDecoration(
+                range: match,
+                // `[^` and `]:` hide; the label stays, so a definition still
+                // reads as the numbered note it is rather than as a stray
+                // paragraph that happens to sit at the bottom of the file.
+                syntax: [
+                    NSRange(location: openStart, length: 2),
+                    NSRange(location: match.location + match.length - 2, length: 2),
+                ],
+                style: .footnoteDefinition(label: label)
+            ))
+            protected.insert(match)
+        }
+
+        for match in matches(#"\[\^([^\]\s]+)\](?!:)"#, text, excluding: protected) {
+            let raw = text.substring(with: match)
+            let label = String(raw.dropFirst(2).dropLast())
+            result.append(MarkdownDecoration(
+                range: match,
+                syntax: [
+                    NSRange(location: match.location, length: 2),
+                    NSRange(location: NSMaxRange(match) - 1, length: 1),
+                ],
+                style: .footnoteReference(label: label)
             ))
             protected.insert(match)
         }

@@ -585,7 +585,7 @@ enum LiveStyler {
                 if drawsWidgets, !revealed {
                     let glyph: ListGlyph = switch kind {
                     case .bullet(let shape): .bullet(shape)
-                    case .task(let checked): .checkbox(checked, accent: context.accentColor)
+                    case .task(let state): .checkbox(state, accent: context.accentColor)
                     case .ordered: .ordered(orderedLabel(marker))
                     }
                     quotedBullet = QuotedBullet(
@@ -727,7 +727,7 @@ enum LiveStyler {
             if drawsWidgets, !revealed {
                 let glyph: ListGlyph = switch kind {
                 case .bullet(let shape): .bullet(shape)
-                case .task(let checked): .checkbox(checked, accent: context.accentColor)
+                case .task(let state): .checkbox(state, accent: context.accentColor)
                 case .ordered: .ordered(orderedLabel(marker))
                 }
                 layout.blocks[line.location] = .list(
@@ -735,7 +735,10 @@ enum LiveStyler {
                 )
             }
 
-            guard case .task(true) = kind else { break }
+            // Only a finished task is struck through. `[/]` is in progress
+            // and `[-]` is abandoned; striking either would say the work was
+            // completed.
+            guard case .task(let state) = kind, state.isDone else { break }
             let rest = NSRange(
                 location: NSMaxRange(range), length: max(0, NSMaxRange(line) - NSMaxRange(range))
             )
@@ -792,6 +795,38 @@ enum LiveStyler {
 
         case .image:
             storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: range)
+
+        case .footnoteReference:
+            // Raised and small, the way a footnote marker has looked in print
+            // for four hundred years. An attribute rather than a widget: this
+            // is exactly what baseline offset is for, and a drawn glyph would
+            // have to be positioned against text that reflows.
+            //
+            // Only while it is collapsed. Revealed, the line holds the real
+            // `[^1]` and raising that would lift the brackets being edited off
+            // the baseline with it.
+            if revealed {
+                storage.addAttribute(.foregroundColor, value: context.linkColor, range: range)
+            } else {
+                storage.addAttributes([
+                    .font: NSFont.systemFont(ofSize: max(7, base.pointSize * 0.72)),
+                    .baselineOffset: base.pointSize * 0.32,
+                    .foregroundColor: context.linkColor,
+                ], range: range)
+            }
+
+        case .footnoteDefinition:
+            // The label keeps the reference's colour so the two read as a
+            // pair; the definition's prose is left alone.
+            storage.addAttribute(.foregroundColor, value: context.linkColor, range: range)
+            // A hanging indent, so a definition running to several lines stays
+            // a block under its own number instead of unwrapping to the margin.
+            let definition = NSMutableParagraphStyle()
+            definition.lineSpacing = Theme.lineSpacing
+            definition.headIndent = 18
+            storage.addAttribute(
+                .paragraphStyle, value: definition, range: text.lineRange(for: range)
+            )
 
         case .tag:
             // The pill behind it is drawn by the layout fragment, not set as
