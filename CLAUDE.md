@@ -13,7 +13,10 @@ swift test                                      # core, live-surface, and dispos
 swift run Heft stats <vault>                    # read-only index report; safe on the real vault
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
+swift run Heft help [--json]                    # every verb and flag, from CommandLineSpec
 swift run Heft proposals <vault>                # agent edits waiting for review
+swift run Heft backlinks|links|outline <vault> <note>   # the resolved link index
+swift run Heft tags|config <vault>              # tags with counts; settings as JSON
 swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headless
     # --text-size N --paper a4|letter|legal|tabloid --landscape --margin narrow|normal|wide --title
 ```
@@ -316,6 +319,26 @@ Nothing fires inside code, math, frontmatter, wiki links, link destinations,
 tags or URLs — `SmartTypography.allowsSubstitution` is a cheap own scan rather
 than a `LiveDecorator` pass, because it runs on every keystroke and only has to
 answer for one position.
+
+### One place the verbs are declared
+
+`CommandLineSpec` in HeftCore is the only list of what the command line can
+do. `heft help` prints it, `heft help --json` is what an agent reads, and
+`Scripts/install.sh` asks the freshly built binary for `help --verbs` and
+bakes the answer into the shell wrapper.
+
+That last one is why the table exists at all. The wrapper's verb list was a
+second, hand-written copy of the dispatch, and it drifted the first time a
+verb was added: `heft export` was rewritten to `heft open export` and reported
+"no such file or folder: export" from a binary that handled it perfectly well.
+A hand-written help text would have been a third copy and would have rotted
+the same way.
+
+Dispatch in `Main.swift` is still hand-written — making it table-driven is a
+bigger change than the problem warrants — so two tests hold the invariant
+instead: every dispatched verb is in the spec, and every declared verb is
+dispatched. A verb missing from the spec is a verb no agent can discover *and*
+one the wrapper turns into `open`.
 
 ### Ranking the switchers
 

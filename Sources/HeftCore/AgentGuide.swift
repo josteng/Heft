@@ -24,7 +24,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 4
+    public static let version = 5
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -114,11 +114,43 @@ public enum AgentGuide {
         ## Finding things
 
         ```bash
+        heft help                # every verb and flag; --json for the machine form
         heft find . <query>      # full-text search across the vault
         heft files .             # every note, vault-relative
+        heft files . --by-use    # ordered by what this person actually opens
         heft proposals .         # what is already waiting for review
         heft diff . <id>         # what one of them would change
         ```
+
+        `heft help` is the whole surface, so nothing here needs to list it
+        twice. Everything above is read-only and safe to run against a live
+        vault; `heft help --json` says which verbs are.
+
+        ## Ask the vault, do not grep it
+
+        Heft keeps a resolved link index. It knows things the filesystem does
+        not, and reimplementing them outside the app means reimplementing the
+        parser and getting it subtly wrong on the syntax it was written for —
+        `[[Note|alias]]`, `[[Note#Heading]]`, `![[chart.png\\|500]]`.
+
+        ```bash
+        heft backlinks . "Note"  # what links here, with the referencing line
+        heft links . "Note"      # what it links out to, resolved or not
+        heft outline . "Note"    # its headings, with line numbers
+        heft tags .              # tags with counts; add a tag to list its notes
+        heft config .            # daily-note folder, date format, attachments
+        ```
+
+        Read `heft config .` before writing anything that has to fit the
+        vault's conventions: it gives the daily-note folder and filename
+        format, the attachment folder, and whether this vault prefers
+        wikilinks over Markdown links. Guessing produces notes that look
+        wrong in the editor and links that do not resolve.
+
+        `heft outline` is usually the right thing to read before restructuring
+        a long note, and `heft backlinks` before renaming or moving one:
+        renaming repoints path-shaped links, but prose that mentions the old
+        name is yours to fix.
 
         ## After proposing
 

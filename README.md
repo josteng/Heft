@@ -167,6 +167,7 @@ changed, rather than re-attributing the whole note twice per character.
 
 ```bash
 heft [path]                     # open a folder or note, like `code .`
+heft help [--json]              # every verb and flag; --json for agents
 heft agent-setup <vault>        # teach an agent in that vault to propose
 heft find <vault> <query>       # full-text search
 heft read <vault> <note>        # a note's source
@@ -176,6 +177,11 @@ heft files <vault>              # every note, vault-relative
     # --scores   show each note's score   --limit N
 heft proposals <vault>          # what is waiting for review
 heft diff <vault> <id>          # what one of them would change
+heft outline <vault> <note>     # the note's headings, with line numbers
+heft links <vault> <note>       # links out, resolved and unresolved
+heft backlinks <vault> <note>   # what links here, with the referencing line
+heft tags <vault> [tag]         # tags with counts, or the notes carrying one
+heft config <vault>             # the vault's settings, as JSON
 heft stats <vault>              # read-only index report
 heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
 heft render <vault> <note>      # what the live surface would draw, headless
@@ -184,7 +190,16 @@ heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
     # --landscape --margin narrow|normal|wide --title
 ```
 
-`stats` and `render` are read-only and safe against a real vault.
+`heft help --json` says which verbs are read-only and therefore safe against a
+real vault; most of them are.
+
+The query verbs are the reason an agent is better off with Heft than with a
+folder of Markdown. Heft keeps a **resolved** link index, so `backlinks` and
+`links` understand `[[Note|alias]]`, `[[Note#Heading]]` and the escaped pipe
+inside `![[chart.png\|500]]` — none of which grep can resolve, and all of
+which appear in real vaults. `config` tells an agent the daily-note folder,
+filename format and attachment folder, so a note it writes fits the vault's
+conventions instead of guessing at them.
 
 ## Obsidian compatibility
 

@@ -557,7 +557,7 @@ public enum MarkdownModel {
         pattern: #"(?<![\w/&#])(#([A-Za-z][\w/-]*))"#
     )
 
-    static func plainText(_ inlines: some Sequence<MDInline>) -> String {
+    public static func plainText(_ inlines: some Sequence<MDInline>) -> String {
         inlines.map { inline -> String in
             switch inline {
             case .text(let s): s

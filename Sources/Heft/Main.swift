@@ -9,8 +9,30 @@ enum HeftMain {
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
 
+        // Discovery first, so `heft` alone and `heft help` both answer.
+        // Everything printed here comes from `CommandLineSpec`, which is also
+        // what the shell wrapper is generated from.
+        if arguments.isEmpty || arguments.first == "help"
+            || arguments.first == "--help" || arguments.first == "-h" {
+            if arguments.contains("--json") {
+                print(CommandLineSpec.helpJSON())
+            } else if arguments.contains("--verbs") {
+                // What `install.sh` reads to build the wrapper's verb list.
+                print(CommandLineSpec.verbNames)
+            } else {
+                print(CommandLineSpec.helpText())
+            }
+            exit(0)
+        }
+
         // The agent verbs: propose, proposals, diff, drop, read, find.
         if AgentCLI.run(arguments) { return }
+
+        if let verb = arguments.first,
+           ["outline", "links", "backlinks", "tags", "config"].contains(verb) {
+            runVaultQuery(verb: verb, arguments: Array(arguments.dropFirst()))
+            return
+        }
 
         if arguments.first == "stats", arguments.count > 1 {
             runStats(vaultPath: arguments[1])
@@ -230,6 +252,127 @@ enum HeftMain {
             index += 1
         }
         return options
+    }
+
+    /// The read-only vault questions an agent cannot answer with grep.
+    ///
+    /// A resolved link index is the thing Heft knows that the filesystem does
+    /// not: wikilinks with aliases, `#heading` and `#^block` targets, which
+    /// notes point back, which point nowhere. Reimplementing that outside the
+    /// app means reimplementing the parser, and getting it subtly wrong on the
+    /// same real-vault syntax the parser was written for.
+    private static func runVaultQuery(verb: String, arguments: [String]) {
+        guard let vaultPath = arguments.first else {
+            FileHandle.standardError.write(Data(
+                "\(CommandLineSpec.verb(named: verb)?.usage ?? "heft \(verb)")\n".utf8
+            ))
+            exit(1)
+        }
+        let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
+            .standardizedFileURL
+        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+
+        /// Resolved against **every** file, not only the Markdown ones.
+        ///
+        /// `heft files` lists attachments too, so a lookup that only searched
+        /// notes rejected paths it had just offered. It also refused the
+        /// question worth asking most about an attachment: what references
+        /// this image, before I delete it.
+        func file(_ name: String, markdownOnly: Bool = false) -> NoteRef {
+            let candidates = markdownOnly ? index.notes : index.allFiles
+            guard let ref = candidates.first(where: {
+                $0.relativePath == name || $0.name == name
+            }) else {
+                let what = markdownOnly ? "no such note" : "no such file"
+                FileHandle.standardError.write(Data("\(what): \(name)\n".utf8))
+                exit(1)
+            }
+            return ref
+        }
+
+        switch verb {
+        case "config":
+            let settings = ObsidianSettings.load(vaultRoot: root)
+            let daily = DailyNotes(vaultRoot: root, settings: settings)
+            let config: [String: Any] = [
+                "vault": root.path,
+                "notes": index.notes.count,
+                "dailyNotesFolder": daily.folder,
+                "dailyNotesFolderIsConfigured": settings.dailyNotesFolderIsConfigured,
+                "dailyNoteFormat": settings.dailyNoteFormat,
+                "dailyNoteTemplate": settings.dailyNoteTemplate as Any,
+                "attachmentFolderPath": settings.attachmentFolderPath,
+                "templatesFolder": settings.templatesFolder as Any,
+                "useWikilinks": settings.useWikilinks,
+                "strictLineBreaks": settings.strictLineBreaks,
+            ]
+            if let data = try? JSONSerialization.data(
+                withJSONObject: config, options: [.prettyPrinted, .sortedKeys]
+            ), let text = String(data: data, encoding: .utf8) {
+                print(text)
+            }
+
+        case "tags":
+            if arguments.count > 1 {
+                let tag = arguments[1].hasPrefix("#")
+                    ? String(arguments[1].dropFirst()) : arguments[1]
+                for ref in index.notes(taggedWith: tag) { print(ref.relativePath) }
+            } else {
+                for tag in index.allTags {
+                    print("\(index.noteCount(forTag: tag))\t#\(tag)")
+                }
+            }
+
+        case "outline":
+            guard arguments.count > 1 else {
+                FileHandle.standardError.write(Data("usage: heft outline <vault> <note>\n".utf8))
+                exit(1)
+            }
+            // Headings only exist in Markdown.
+            let ref = file(arguments[1], markdownOnly: true)
+            let source = (try? String(contentsOf: ref.url, encoding: .utf8)) ?? ""
+            let document = MarkdownModel.parseDocument(source)
+            for (offset, block) in document.blocks.enumerated() {
+                guard case .heading(let level, let inlines, let anchor) = block else { continue }
+                let line = document.lineRanges.indices.contains(offset)
+                    ? document.lineRanges[offset].lowerBound + 1 : 0
+                let indent = String(repeating: "  ", count: max(0, level - 1))
+                print("\(line)\t\(indent)\(String(repeating: "#", count: level)) "
+                    + "\(MarkdownModel.plainText(inlines))\t\(anchor)")
+            }
+
+        case "links":
+            guard arguments.count > 1 else {
+                FileHandle.standardError.write(Data("usage: heft links <vault> <note>\n".utf8))
+                exit(1)
+            }
+            let ref = file(arguments[1], markdownOnly: true)
+            let unresolved = Set(
+                index.unresolvedLinks(from: ref.relativePath, source: ref).map(\.target)
+            )
+            for link in index.outgoingLinks(from: ref.relativePath) {
+                let target = index.resolve(link, from: ref)
+                let mark = target == nil || unresolved.contains(link.target) ? "unresolved" : "ok"
+                print("\(mark)\t\(link.target)\t\(target?.relativePath ?? "")")
+            }
+
+        case "backlinks":
+            guard arguments.count > 1 else {
+                FileHandle.standardError.write(Data("usage: heft backlinks <vault> <note>\n".utf8))
+                exit(1)
+            }
+            // Any file: "what references this image" is the question worth
+            // asking before deleting an attachment.
+            let ref = file(arguments[1])
+            for backlink in index.backlinks(to: ref.relativePath) {
+                let context = backlink.context.trimmingCharacters(in: .whitespaces)
+                print("\(backlink.source.relativePath):\(backlink.line)\t\(context)")
+            }
+
+        default:
+            break
+        }
+        exit(0)
     }
 
     private static func runExport(

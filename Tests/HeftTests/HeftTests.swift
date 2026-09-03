@@ -1611,114 +1611,116 @@ struct PendingEmphasisTests {
     }
 }
 
-@Suite("Command line wrapper")
-struct CommandLineWrapperTests {
+@Suite("Command line spec")
+struct CommandLineSpecTests {
 
-    /// `Scripts/install.sh` writes a `heft` shell wrapper that forwards a
-    /// known verb and treats anything else as a path to open. That list is a
-    /// second copy of the dispatch, and adding `export` to `Main.swift`
-    /// without adding it there turned `heft export …` into
-    /// `heft open export …` — "no such file or folder: export", from a binary
-    /// that handled the verb perfectly well when called directly.
-    ///
-    /// So the two are compared. The list is deliberately explicit rather than
-    /// inferred, because `heft find …` must not become `open find …`; what it
-    /// must not be is *stale*.
-    @Test("Every dispatched verb is forwarded by the wrapper")
-    func wrapperKnowsEveryVerb() throws {
+    private func source(_ path: String) throws -> String {
         let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // HeftTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // package root
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+    }
 
-        func source(_ path: String) throws -> String {
-            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
-        }
+    private func matches(_ pattern: String, in text: String) -> Set<String> {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let full = NSRange(text.startIndex..., in: text)
+        return Set(regex.matches(in: text, range: full).compactMap { match in
+            // A pattern with no capture group has nothing at index 1, and
+            // asking for it raises rather than returning nil.
+            guard match.numberOfRanges > 1 else { return nil }
+            return Range(match.range(at: 1), in: text).map { String(text[$0]) }
+        })
+    }
 
-        func matches(_ pattern: String, in text: String) -> [String] {
-            let regex = try? NSRegularExpression(pattern: pattern)
-            let full = NSRange(text.startIndex..., in: text)
-            return (regex?.matches(in: text, range: full) ?? []).compactMap {
-                Range($0.range(at: 1), in: text).map { range in String(text[range]) }
-            }
-        }
-
+    /// `CommandLineSpec` is what `heft help` prints and what `install.sh`
+    /// bakes into the shell wrapper, so a verb missing from it is a verb no
+    /// agent can discover and the wrapper turns into `heft open <verb>`.
+    /// That is not hypothetical: it is what happened to `heft export`.
+    @Test("Every dispatched verb is in the spec")
+    func specCoversDispatch() throws {
         let main = try source("Sources/Heft/Main.swift")
         let agent = try source("Sources/Heft/AgentCLI.swift")
-        let script = try source("Scripts/install.sh")
 
-        var verbs = Set(matches(#"arguments\.first == "([a-z-]+)""#, in: main))
-        // AgentCLI's own switch, which handles the proposal verbs.
-        verbs.formUnion(matches(#"case "([a-z-]+)": \w+\(root:"#, in: agent))
-        #expect(verbs.count >= 10, "found only \(verbs.sorted()), the scrape is wrong")
-        #expect(verbs.contains("export"))
-        #expect(verbs.contains("stats"))
-
-        let forwarded = Set(
-            matches(#"\n    (open\|[a-z|-]+)\)"#, in: script)
-                .first?.components(separatedBy: "|") ?? []
-        )
-        #expect(!forwarded.isEmpty, "could not find the wrapper's verb list")
-
-        let missing = verbs.subtracting(forwarded).sorted()
-        #expect(
-            missing.isEmpty,
-            "Scripts/install.sh does not forward: \(missing.joined(separator: ", "))"
-        )
-    }
-}
-
-@Suite("Quoted block conformance")
-struct QuotedBlockConformanceTests {
-
-    /// Is a list inside a quote actually Markdown, or an invention?
-    ///
-    /// Settled against cmark-gfm, which Heft already bundles through
-    /// swift-markdown and which is the same parser GitHub renders with. If it
-    /// reports a list nested in a block quote, then `> - item` is a list by
-    /// the CommonMark spec and the live surface drawing it as one is
-    /// conformance, not an extension.
-    @Test("cmark-gfm parses a quoted list as a list")
-    func gfmAgrees() throws {
-        let (_, blocks) = MarkdownModel.parse("> - one\n> - two\n")
-        guard case .quote(_, _, let inner) = try #require(blocks.first) else {
-            Issue.record("`> - one` did not parse as a block quote")
-            return
+        // `[a-z]` first, so the `--help` and `-h` aliases compared on the same
+        // line are not mistaken for verbs of their own.
+        var dispatched = matches(#"arguments\.first == "([a-z][a-z-]*)""#, in: main)
+        dispatched.formUnion(matches(#"case "([a-z-]+)": \w+\(root:"#, in: agent))
+        // The vault queries share one dispatch line rather than a comparison
+        // each, so they are scraped from the list that line matches against.
+        if let line = main.range(of: #"\[("[a-z]+", )+"[a-z]+"\]\.contains\(verb\)"#,
+                                 options: .regularExpression) {
+            dispatched.formUnion(matches(#""([a-z-]+)""#, in: String(main[line])))
+        } else {
+            Issue.record("the vault-query dispatch list moved; this scrape needs updating")
         }
-        guard case .list(let ordered, _, let items) = try #require(inner.first) else {
-            Issue.record("the quote's content was not a list: \(inner)")
-            return
-        }
-        #expect(!ordered)
-        #expect(items.count == 2)
+        #expect(dispatched.count >= 14, "the scrape found only \(dispatched.sorted())")
+
+        let declared = Set(CommandLineSpec.verbs.map(\.name))
+        let missing = dispatched.subtracting(declared).sorted()
+        #expect(missing.isEmpty, "not in CommandLineSpec: \(missing.joined(separator: ", "))")
     }
 
-    @Test("cmark-gfm parses a quoted heading as a heading")
-    func gfmAgreesOnHeadings() throws {
-        let (_, blocks) = MarkdownModel.parse("> ## A heading\n")
-        guard case .quote(_, _, let inner) = try #require(blocks.first) else {
-            Issue.record("`> ## A heading` did not parse as a block quote")
-            return
+    /// And nothing is promised that does not exist, which would send an agent
+    /// after a verb the binary rejects.
+    @Test("Every declared verb is dispatched")
+    func dispatchCoversSpec() throws {
+        let main = try source("Sources/Heft/Main.swift")
+        let agent = try source("Sources/Heft/AgentCLI.swift")
+        let combined = main + agent
+        for verb in CommandLineSpec.verbs {
+            #expect(
+                combined.contains("\"\(verb.name)\""),
+                "`heft \(verb.name)` is promised by the spec but never dispatched"
+            )
         }
-        guard case .heading(let level, _, _) = try #require(inner.first) else {
-            Issue.record("the quote's content was not a heading: \(inner)")
-            return
-        }
-        #expect(level == 2)
     }
 
-    /// The live surface and the block parser must agree about the same text.
-    /// Before this, `> - item` was a list to `MarkdownModel` (so the
-    /// presentation view drew a bullet) and quoted prose to `LiveDecorator`
-    /// (so the editor did not) — the same note, two answers.
-    @Test("The live surface agrees with the block parser")
-    func surfaceAgreesWithParser() {
-        let source = "> - one\n> - two\n"
-        let quoted = LiveDecorator.decorations(in: source).compactMap { decoration -> QuotedBlock? in
-            guard case .quoteLine(let quote) = decoration.style else { return nil }
-            return quote.nested
+    /// The wrapper is generated by asking the binary, so this is the contract
+    /// `install.sh` depends on.
+    @Test("The verb list is machine-readable")
+    func verbNamesAreUsable() {
+        let names = CommandLineSpec.verbNames.split(separator: "\n").map(String.init)
+        #expect(names.count == CommandLineSpec.verbs.count)
+        #expect(names.contains("export"))
+        #expect(names.contains("backlinks"))
+        // A verb name with a shell metacharacter would break the `case` arm it
+        // is pasted into.
+        for name in names {
+            #expect(
+                name.allSatisfy { $0.isLowercase || $0 == "-" },
+                "`\(name)` is not safe to paste into the wrapper's case statement"
+            )
         }
-        #expect(quoted.count == 2, "the live surface found \(quoted.count) quoted lists")
+    }
+
+    @Test("Help is complete and parseable")
+    func helpIsUsable() throws {
+        let text = CommandLineSpec.helpText()
+        for verb in CommandLineSpec.verbs where verb.name != "open" && verb.name != "help" {
+            #expect(text.contains("heft \(verb.name)"), "`\(verb.name)` is missing from help")
+        }
+        // The JSON form is what an agent reads, so it has to survive a decode.
+        let data = Data(CommandLineSpec.helpJSON().utf8)
+        let decoded = try JSONDecoder().decode([CommandLineSpec.Verb].self, from: data)
+        #expect(decoded == CommandLineSpec.verbs)
+        // Every verb says something about itself.
+        for verb in decoded {
+            #expect(!verb.summary.isEmpty, "`\(verb.name)` has no summary")
+        }
+    }
+
+    /// `stats` and `render` are documented as safe against a live vault, and
+    /// the new query verbs are too. Anything that writes must not claim to be.
+    @Test("Read-only verbs are the ones that only read")
+    func readOnlyIsHonest() {
+        let writes = ["open", "propose", "drop", "daily", "export", "agent-setup"]
+        for verb in CommandLineSpec.verbs {
+            #expect(
+                verb.isReadOnly == !writes.contains(verb.name),
+                "`\(verb.name)` claims isReadOnly == \(verb.isReadOnly)"
+            )
+        }
     }
 }
 
