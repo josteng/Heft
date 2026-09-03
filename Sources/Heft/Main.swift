@@ -211,6 +211,18 @@ enum HeftMain {
             return number
         }
 
+        func describeNested(_ nested: QuotedBlock?, bullet: QuotedBullet?) -> String {
+            switch nested {
+            case .list(let kind, let depth, let marker):
+                " + list \(kind) depth \(depth) marker \"\(marker)\""
+                    + (bullet.map { " glyph \($0.glyph) offset \(fmt($0.markerOffset))" } ?? " NO GLYPH")
+            case .heading(let level):
+                " + heading h\(level)"
+            case nil:
+                ""
+            }
+        }
+
         print("decorations: \(LiveDecorator.decorations(in: source).count)")
         print("block widgets: \(layout.blocks.count)")
         for offset in layout.blocks.keys.sorted() {
@@ -231,8 +243,9 @@ enum HeftMain {
                 "properties \(card.rows.count) rows \(size(card.size))"
             case .embed(let embed):
                 "embed \"\(embed.title)\" \(size(embed.size))\(embed.isTruncated ? " truncated" : "")"
-            case .quote(let quote, let indent, _):
+            case .quote(let quote, let indent, _, let bullet):
                 "\(quote.rawCallout.map { "callout \($0)" } ?? "quote") depth \(quote.depth) \(quote.edge) indent \(fmt(indent))"
+                    + describeNested(quote.nested, bullet: bullet)
             }
             // Reserved height is what the paragraph style actually gives the
             // line; if it is ~0 the widget has nowhere to draw.

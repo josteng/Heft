@@ -30,11 +30,23 @@ enum BlockWidget {
     /// One line's slice of a quote bar, or of a callout's tinted card.
     /// `isRevealed` means the line's real source is on screen, so nothing may
     /// be drawn where that source sits.
-    case quote(QuoteLine, indent: CGFloat, isRevealed: Bool)
+    case quote(QuoteLine, indent: CGFloat, isRevealed: Bool, bullet: QuotedBullet? = nil)
     /// Another note's content, transcluded by `![[Note]]`.
     case embed(EmbeddedNote)
     /// YAML frontmatter, drawn as a key/value table.
     case properties(PropertiesCard)
+}
+
+/// A bullet, numeral or checkbox belonging to a list written inside a quote.
+///
+/// Carried by the quote widget rather than emitted as a `.list` of its own,
+/// because the editor draws one widget per line and the quote bar already
+/// owns that line's key. Same three numbers `.list` takes, so both go through
+/// exactly the same drawing code.
+struct QuotedBullet {
+    let glyph: ListGlyph
+    let markerOffset: CGFloat
+    let fontSize: CGFloat
 }
 
 /// A note's frontmatter, measured as a two-column table.
@@ -756,7 +768,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ))
         case .list:
             bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
-        case .quote(_, let indent, _):
+        case .quote(_, let indent, _, _):
             // The card and the bars are painted in the gutter the paragraph's
             // head indent opened up, which is to the left of every glyph.
             // Only a little vertical slack, for the callout icon centred on a
@@ -793,7 +805,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         if case .codeBlock(let edge, let language) = widget {
             drawCodeBlockBackground(edge: edge, language: language, at: point, in: context)
         }
-        if case .quote(let quote, let indent, let isRevealed) = widget {
+        if case .quote(let quote, let indent, let isRevealed, _) = widget {
             drawQuoteBackground(
                 quote, indent: indent, isRevealed: isRevealed, at: point, in: context
             )
@@ -833,6 +845,16 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             drawThematicBreak(at: point, in: context)
         case .agentGuide(let isEnd):
             drawAgentGuideBoundary(isEnd: isEnd, at: point, in: context)
+        case .quote(_, _, let isRevealed, let bullet):
+            // Nothing drawn while the source shows, for the same reason a
+            // plain list draws nothing then: the real `- ` is on screen and
+            // the glyph would sit beside it.
+            if let bullet, !isRevealed {
+                draw(
+                    bullet.glyph, markerOffset: bullet.markerOffset,
+                    fontSize: bullet.fontSize, at: point, in: context
+                )
+            }
         default:
             break
         }

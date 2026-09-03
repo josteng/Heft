@@ -94,6 +94,8 @@ when the caret is anywhere on its line, while inline spans (`**bold**`,
   inside it; only the cell being typed into shows its Markdown. Tab walks
   cells, rows and columns can be added without dissolving the grid, and the
   `---` row is the deliberate way to edit one as plain text.
+- **Lists and headings inside a quote** render as lists and headings, bullets,
+  numerals, checkboxes and all, rather than as quoted prose.
 - **Rendered in the editor**: headings, task lists, code blocks with syntax
   highlighting, block quotes, Obsidian callouts (`> [!warning]`),
   `==highlights==`, images, LaTeX, note transclusion, and YAML frontmatter as a

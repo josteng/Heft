@@ -139,6 +139,25 @@ public struct TableLayout: Sendable, Hashable {
 /// which of its corners to round.
 public enum QuoteEdge: Sendable, Equatable { case only, first, middle, last }
 
+/// A block construct written *inside* a quote, after its `>` markers.
+///
+/// The block matchers are anchored to the start of a line, so `> - item` used
+/// to be quoted prose: no bullet, no indent, and `> ## Heading` was quoted
+/// text at body size. A quote is where a lot of real notes keep their lists,
+/// so this is the difference between quoting a passage and quoting a document.
+///
+/// Carried on the quote line rather than emitted as its own decoration
+/// because the editor draws one widget per line: a bullet and a quote bar on
+/// the same line are one thing to draw, not two competing for the same key.
+public enum QuotedBlock: Sendable, Equatable {
+    /// `marker` is the literal source of the marker, `- ` or `1. ` or
+    /// `- [x] `, exactly as an unquoted list carries it. The glyph is
+    /// positioned from it, so revealing the source swaps in place instead of
+    /// making the bullet jump sideways.
+    case list(kind: ListMarkerKind, depth: Int, marker: String)
+    case heading(level: Int)
+}
+
 /// One `>`-prefixed line, described in terms of the block around it.
 public struct QuoteLine: Sendable, Equatable {
     /// Nesting level, counted from the number of `>` markers on the line.
@@ -157,16 +176,20 @@ public struct QuoteLine: Sendable, Equatable {
     /// kind's own name is drawn instead, as Obsidian does; anything else is the
     /// title the author wrote.
     public let title: String?
+    /// A list item or heading written inside the quote, if any.
+    public let nested: QuotedBlock?
 
     public init(
         depth: Int, edge: QuoteEdge, callout: CalloutKind? = nil,
-        rawCallout: String? = nil, title: String? = nil
+        rawCallout: String? = nil, title: String? = nil,
+        nested: QuotedBlock? = nil
     ) {
         self.depth = depth
         self.edge = edge
         self.callout = callout
         self.rawCallout = rawCallout
         self.title = title
+        self.nested = nested
     }
 
     public var isCallout: Bool { rawCallout != nil }
@@ -822,13 +845,25 @@ public enum LiveDecorator {
 
                 var syntax = [marker]
                 var title: String?
+                var isCalloutHeaderLine = false
                 if let callout {
                     if index == 0 {
                         // `[!note]-` is markup, but the title beside it is
                         // prose and stays visible.
                         syntax.append(callout.syntax)
                         title = callout.title
+                        isCalloutHeaderLine = true
                     }
+                }
+
+                // A list or heading written after the `>` markers. Never on a
+                // callout's header line, where `[!kind]` has already claimed
+                // what follows the marker.
+                var nested: QuotedBlock?
+                if !isCalloutHeaderLine,
+                   let found = quotedBlock(after: marker, in: line, text) {
+                    nested = found.block
+                    syntax.append(found.syntax)
                 }
 
                 result.append(MarkdownDecoration(
@@ -839,12 +874,119 @@ public enum LiveDecorator {
                         edge: edge,
                         callout: callout?.kind,
                         rawCallout: callout?.raw,
-                        title: title
+                        title: title,
+                        nested: nested
                     ))
                 ))
             }
         }
         return result
+    }
+
+    /// A list marker or ATX heading sitting just after a quote's `>` markers.
+    ///
+    /// Scanned by hand for the same reason `markerRange` is: this runs on
+    /// every line of every quote in the document, and building a regular
+    /// expression per line costs more than the whole scan that found it.
+    ///
+    /// Returns the block *and* the range of the markup that introduces it, so
+    /// the caller can collapse it exactly as the unquoted forms are collapsed.
+    private static func quotedBlock(
+        after marker: NSRange, in line: NSRange, _ text: NSString
+    ) -> (block: QuotedBlock, syntax: NSRange)? {
+        let start = NSMaxRange(marker)
+        var end = NSMaxRange(line)
+        while end > start, isNewline(text.character(at: end - 1)) { end -= 1 }
+        guard start < end else { return nil }
+
+        // Indentation *inside* the quote is what nests the list, so it is
+        // measured from where the quote's own markers stop rather than from
+        // the start of the line.
+        var index = start
+        var spaces = 0
+        var tabs = 0
+        while index < end, isBlank(text.character(at: index)) {
+            if text.character(at: index) == UInt16(9) { tabs += 1 } else { spaces += 1 }
+            index += 1
+        }
+        guard index < end else { return nil }
+
+        if text.character(at: index) == UInt16(35) {  // "#"
+            var level = 0
+            while index < end, text.character(at: index) == UInt16(35), level < 6 {
+                level += 1
+                index += 1
+            }
+            // CommonMark wants a space after the hashes; without one this is a
+            // tag, not a heading.
+            guard index < end, isBlank(text.character(at: index)) else { return nil }
+            while index < end, isBlank(text.character(at: index)) { index += 1 }
+            return (.heading(level: level), NSRange(location: start, length: index - start))
+        }
+
+        let depth = tabs + spaces / 2
+        let bulletStart = index
+        let character = text.character(at: index)
+        let isBullet = character == UInt16(45) || character == UInt16(42) || character == UInt16(43)
+        var isOrdered = false
+        if !isBullet {
+            var digits = 0
+            while index < end, isDigit(text.character(at: index)) {
+                digits += 1
+                index += 1
+            }
+            guard digits > 0, index < end else { return nil }
+            let delimiter = text.character(at: index)
+            guard delimiter == UInt16(46) || delimiter == UInt16(41) else { return nil }
+            isOrdered = true
+        }
+        index += 1
+        // A marker with nothing after it is not a list item, it is a stray
+        // character; `- ` needs its space exactly as it does outside a quote.
+        guard index < end, isBlank(text.character(at: index)) else { return nil }
+        while index < end, isBlank(text.character(at: index)) { index += 1 }
+
+        var kind: ListMarkerKind = isOrdered ? .ordered : .bullet(shape: .forLevel(depth))
+        if !isOrdered {
+            let rest = NSRange(location: bulletStart, length: end - bulletStart)
+            if let box = checkboxState(in: text.substring(with: rest)) {
+                kind = .task(checked: box)
+                // The box is markup too, so the collapsed run has to reach
+                // past it or `[ ]` is left sitting beside the drawn checkbox.
+                if let boxEnd = checkboxEnd(from: index, limit: end, text) {
+                    index = boxEnd
+                }
+            }
+        }
+        let syntax = NSRange(location: start, length: index - start)
+        // The marker as written, without the indentation before it: the same
+        // form `.listMarker` positions its glyph from.
+        let marker = text.substring(
+            with: NSRange(location: bulletStart, length: NSMaxRange(syntax) - bulletStart)
+        )
+        return (.list(kind: kind, depth: depth, marker: marker), syntax)
+    }
+
+    /// Where `[ ] ` ends, starting from the first character after the bullet.
+    private static func checkboxEnd(from start: Int, limit: Int, _ text: NSString) -> Int? {
+        var index = start
+        guard index < limit, text.character(at: index) == UInt16(91) else { return nil }  // "["
+        index += 1
+        guard index < limit else { return nil }
+        index += 1
+        guard index < limit, text.character(at: index) == UInt16(93) else { return nil }  // "]"
+        index += 1
+        guard index < limit, isBlank(text.character(at: index)) else { return nil }
+        while index < limit, isBlank(text.character(at: index)) { index += 1 }
+        return index
+    }
+
+    private static func isDigit(_ character: unichar) -> Bool {
+        character >= UInt16(48) && character <= UInt16(57)
+    }
+
+    private static func isNewline(_ character: unichar) -> Bool {
+        character == UInt16(10) || character == UInt16(13)
     }
 
     /// The `> ` (or `>>`, `> > `) prefix of a quote line, or nil for prose.

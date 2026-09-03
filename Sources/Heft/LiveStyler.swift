@@ -570,7 +570,31 @@ enum LiveStyler {
             }
 
         case .quoteLine(let quote):
-            let indent = quoteIndent(depth: quote.depth, callout: quote.isCallout)
+            let quoteEdge = quoteIndent(depth: quote.depth, callout: quote.isCallout)
+            // A list inside a quote is indented from the quote's own text
+            // edge, not from the page: the bullet belongs inside the card.
+            var indent = quoteEdge
+            var quotedBullet: QuotedBullet?
+            if case .list(let kind, let depth, let marker) = quote.nested {
+                // The full list indent, on top of the quote's own text edge:
+                // a quoted list steps in from quoted prose by exactly what an
+                // unquoted list steps in from the page. Anything less and the
+                // gutter is too narrow for the glyph, which then lands on the
+                // quote bar instead of inside the card.
+                indent = quoteEdge + listIndent(depth: depth)
+                if drawsWidgets, !revealed {
+                    let glyph: ListGlyph = switch kind {
+                    case .bullet(let shape): .bullet(shape)
+                    case .task(let checked): .checkbox(checked, accent: context.accentColor)
+                    case .ordered: .ordered(orderedLabel(marker))
+                    }
+                    quotedBullet = QuotedBullet(
+                        glyph: glyph,
+                        markerOffset: listGlyphOffset(marker: marker, kind: kind, font: base),
+                        fontSize: base.pointSize
+                    )
+                }
+            }
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = Theme.lineSpacing
             // Both edges use the same indent: the `>` markers are collapsed, so
@@ -620,14 +644,35 @@ enum LiveStyler {
                 addTrait(.boldFontMask, to: storage, range: range, base: base)
             }
 
+            // `> ## Heading` is a heading that happens to be quoted, and has
+            // to look like one, or a quoted document reads as flat prose.
+            if case .heading(let level) = quote.nested {
+                storage.addAttribute(
+                    .font,
+                    value: NSFont.systemFont(
+                        ofSize: headingSize(level), weight: level <= 2 ? .bold : .semibold
+                    ),
+                    range: range
+                )
+                // Enough room for the larger glyphs, which the quote's own
+                // line height knows nothing about.
+                paragraph.minimumLineHeight = ceil(headingSize(level) * 1.25)
+                storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
+            }
+
             // The card is drawn even while the source shows, so editing a
             // callout does not make it flicker out of existence. What must not
             // survive is the *drawn* title: with the source visible, the real
             // `> [!tip]` text is on the line and the painted label lands on
             // top of it.
             if drawsWidgets {
+                // The card is drawn back from the fragment's own origin, so
+                // this has to be the paragraph indent that origin came from —
+                // the nested one on a list line. Passing the quote's own edge
+                // instead leaves the fragment indented and the card not, which
+                // steps the whole card right on every list line.
                 layout.blocks[text.lineRange(for: range).location] =
-                    .quote(quote, indent: indent, isRevealed: revealed)
+                    .quote(quote, indent: indent, isRevealed: revealed, bullet: quotedBullet)
             }
 
         case .listMarker(let kind, let depth):

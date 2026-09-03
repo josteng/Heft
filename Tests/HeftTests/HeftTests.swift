@@ -754,3 +754,121 @@ struct PDFExportTests {
         #expect(contents.contains("Paragraph 240 of"), "the last paragraph reached the PDF")
     }
 }
+
+@Suite("Quoted blocks")
+struct QuotedBlockTests {
+
+    private func quoteLines(_ source: String) -> [(line: Int, quote: QuoteLine)] {
+        let text = source as NSString
+        var result: [(Int, QuoteLine)] = []
+        for decoration in LiveDecorator.decorations(in: source) {
+            guard case .quoteLine(let quote) = decoration.style else { continue }
+            var line = 1
+            for index in 0..<decoration.range.location
+            where text.character(at: index) == UInt16(10) { line += 1 }
+            result.append((line, quote))
+        }
+        return result.sorted { $0.0 < $1.0 }
+    }
+
+    /// The block matchers are anchored to the start of a line, so everything
+    /// after a `>` used to be quoted prose: no bullet, no indent, and
+    /// `> ## Heading` at body size. A quote is where a lot of real notes keep
+    /// their lists.
+    @Test("A list written inside a quote is a list")
+    func listsInQuotes() throws {
+        let found = quoteLines("""
+        > - a bullet
+        > - [ ] unchecked
+        > - [x] checked
+        > 1. first
+        > 2) second
+        >   - nested once
+        > \tnested by tab
+        """)
+        #expect(found.count == 7)
+
+        guard case .list(let kind, let depth, let marker) = found[0].quote.nested else {
+            Issue.record("a plain bullet in a quote was not a list")
+            return
+        }
+        #expect(kind == .bullet(shape: .forLevel(0)))
+        #expect(depth == 0)
+        #expect(marker == "- ")
+
+        #expect(found[1].quote.nested == .list(kind: .task(checked: false), depth: 0, marker: "- [ ] "))
+        #expect(found[2].quote.nested == .list(kind: .task(checked: true), depth: 0, marker: "- [x] "))
+        #expect(found[3].quote.nested == .list(kind: .ordered, depth: 0, marker: "1. "))
+        #expect(found[4].quote.nested == .list(kind: .ordered, depth: 0, marker: "2) "))
+
+        // Indentation is measured from where the quote's markers stop, not
+        // from the start of the line, or every quoted list would read as
+        // nested one level deeper than it is.
+        guard case .list(_, let nestedDepth, _) = found[5].quote.nested else {
+            Issue.record("an indented bullet in a quote was not a list")
+            return
+        }
+        #expect(nestedDepth == 1)
+    }
+
+    @Test("A heading written inside a quote is a heading")
+    func headingsInQuotes() {
+        let found = quoteLines("""
+        > # One
+        > ###### Six
+        > ####### Seven hashes is not a heading
+        > #tag is not a heading
+        > Plain quoted prose
+        """)
+        #expect(found.count == 5)
+        #expect(found[0].quote.nested == .heading(level: 1))
+        #expect(found[1].quote.nested == .heading(level: 6))
+        // Seven hashes: six are taken, and the seventh is not a space, so it
+        // is not a heading at all rather than an h6 whose title starts with #.
+        #expect(found[2].quote.nested == nil)
+        // A tag needs no space after the hash, which is exactly what tells the
+        // two apart.
+        #expect(found[3].quote.nested == nil)
+        #expect(found[4].quote.nested == nil)
+    }
+
+    /// A callout's header line is already spoken for: `[!kind]` claims what
+    /// follows the marker, and reading a bullet out of it would collapse the
+    /// callout's own syntax twice.
+    @Test("A callout header is not read as a nested block")
+    func calloutHeaderIsNotNested() {
+        let found = quoteLines("""
+        > [!note] A callout
+        > - with a list inside
+        """)
+        #expect(found.count == 2)
+        #expect(found[0].quote.isCalloutHeader)
+        #expect(found[0].quote.nested == nil)
+        #expect(found[1].quote.nested != nil, "the body line still gets its bullet")
+    }
+
+    @Test("A marker with nothing after it is not a list")
+    func strayMarkers() {
+        // `-` alone, and `-text` with no space, are not list items outside a
+        // quote either.
+        #expect(quoteLines("> -")[0].quote.nested == nil)
+        #expect(quoteLines("> -text")[0].quote.nested == nil)
+        #expect(quoteLines("> 1.text")[0].quote.nested == nil)
+        #expect(quoteLines("> 5 not ordered")[0].quote.nested == nil)
+    }
+
+    /// The markup that introduces the nested block has to be collapsed, or the
+    /// literal `- ` sits beside the drawn bullet.
+    @Test("The nested marker is collapsed with the quote's own")
+    func nestedMarkerIsSyntax() throws {
+        let source = "> - a bullet"
+        let decoration = try #require(
+            LiveDecorator.decorations(in: source).first {
+                if case .quoteLine = $0.style { return true }
+                return false
+            }
+        )
+        let covered = decoration.syntax.reduce(0) { $0 + $1.length }
+        #expect(covered == 4, "`> ` and `- ` are both syntax (covered \(covered))")
+    }
+}

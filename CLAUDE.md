@@ -68,6 +68,30 @@ Four files carry it:
 - `LiveStyler`: turns decorations into attributes, and decides which widgets to draw.
 - `LiveWidgets`: measures tables and draws every widget.
 
+### Blocks written inside a quote
+
+The block matchers are anchored to the start of a line, so everything after a
+`>` was quoted prose: `> - item` had no bullet and no indent, and `> ## H` was
+body text. `QuotedBlock` on `QuoteLine` carries a list marker or heading level
+found *after* the quote's own markers, and its markup joins the `>` in the
+decoration's `syntax` so both collapse together.
+
+It rides on the quote line rather than arriving as its own decoration because
+the editor draws **one widget per line**, keyed by line start: a bullet and a
+quote bar on the same line are one thing to draw, not two competing for the
+same key. So `.quote` carries an optional `QuotedBullet` and hands it to the
+same glyph drawing `.list` uses.
+
+Two numbers are load-bearing. Indentation inside a quote is measured from
+where the `>` markers stop, or every quoted list reads as one level deeper
+than it is. And the indent handed to the *widget* must be the paragraph's real
+indent, nested list included: the card is drawn back from the fragment's own
+origin, so passing the quote's own edge instead leaves the fragment indented
+and the card not, stepping the whole card right on every list line.
+
+A callout's header line is excluded: `[!kind]` has already claimed what
+follows the marker there.
+
 ### Tables are edited in place
 
 A table is the one construct with a third reveal state. Everything else is
@@ -481,8 +505,6 @@ depends on changes.
   picture inside an embed shows as source. This is also the recursion guard.
 - An embedded note is clipped at 420pt and faded, because a layout fragment
   cannot scroll.
-- Lists and headings inside a `>` block are not detected: the block matchers are
-  anchored to the start of the line, so `> - item` is quoted text, not a list.
 - Callout folding (`[!note]-`) parses and hides the marker but does not fold.
 - A table selection cannot span two cells: dragging is confined to the cell it
   began in, and a selection made any other way (Select All, a find match)
