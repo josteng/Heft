@@ -30,7 +30,7 @@ struct CaptureToInboxIntent: AppIntent {
         guard let vault = IntentVaultDestination.url else {
             throw InboxCaptureError.vaultUnavailable
         }
-        try await MainActor.run {
+        _ = try await MainActor.run {
             try IntentPresentation.preservingVisibility {
                 try InboxCapture(vaultRoot: vault).capture(note)
             }

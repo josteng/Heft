@@ -381,6 +381,13 @@ depends on changes.
   extending `renderingSurfaceBounds` to match.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
+- **Launching the GUI at a sandbox vault repoints Spotlight capture at it.**
+  Opening a vault writes `dev.stenglein.Heft.vaultPath`, which is where
+  `CaptureToInboxIntent` and `AddToTodaysNoteIntent` file things from outside
+  the app. So a test launch silently aims "Add to Today's Note" at a temporary
+  folder, and it stays aimed there after the folder is deleted. Put it back
+  afterwards:
+  `defaults write dev.stenglein.Heft dev.stenglein.Heft.vaultPath -string <real vault>`.
 - **Obsidian templates use moment.js tokens, which collide with ICU.** moment `DD` is
   day-of-month but ICU `DD` is day-of-year; moment `WW` is the ISO week but ICU `WW`
   is week-of-month; moment escapes with `[W]` where ICU uses `'W'`. `MomentFormat`
