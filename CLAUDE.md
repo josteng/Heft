@@ -518,6 +518,23 @@ depends on changes.
   writes to a key nothing ever reads.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
+- **A persisted settings struct needs a hand-written `init(from:)`.** The
+  synthesised `Codable` requires every field, so adding one setting made every
+  file written before it undecodable — and the fallback is the defaults, so a
+  remembered paper size, margin and text size would silently reset the first
+  time anyone exported after an update. `PDFExportOptions` decodes each field
+  with `decodeIfPresent` and a default. Same lesson as `TypingSettings`
+  storing the *disabled* groups: a settings file is a format, and a format
+  has to tolerate being older than the code reading it.
+- **The editor's palette is chosen against a screen, not paper.** A yellow
+  accent measures 1.51:1 against white, which is close to invisible.
+  Mirroring every colour setting for export was the obvious answer and the
+  wrong one — twelve more controls and two palettes to keep in step, for a
+  problem that is measurable rather than a matter of taste. `PrintColours`
+  keeps the hue and steps the brightness down until it clears 3:1, so that
+  yellow prints as `rgb(178, 143, 0)` at 3.08:1: the same colour, darker. 3:1
+  rather than 4.5:1 because these colours are emphasis, links, tags and
+  headings, never body text, which stays near-black.
 - **`SymbolConfiguration(paletteColors:)` flattens an SF Symbol.** It is the
   obvious way to tint one and it throws the detail away: every `.fill` symbol
   becomes a solid silhouette, so `pencil.circle.fill` and `info.circle.fill`

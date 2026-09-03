@@ -1206,15 +1206,18 @@ final class AppModel: ObservableObject {
             .deletingPathExtension + ".pdf"
         panel.allowedContentTypes = [.pdf]
         panel.canCreateDirectories = true
-        // Beside the note is where an export is usually wanted, and is a
-        // better guess than wherever a save panel was last pointed.
-        panel.directoryURL = current.url.deletingLastPathComponent()
+        // Wherever the last export went, if it is still there. Exports tend
+        // to leave the vault — a Downloads folder, a shared drive — so
+        // beside the note is a poor second guess, and it was the only one.
+        panel.directoryURL = PDFExportSettings.shared.lastDirectory
+            ?? current.url.deletingLastPathComponent()
 
         // The options ride inside the save panel rather than in a sheet of
         // their own: where the file goes and what it looks like are one
         // decision, and asking twice for one export is a step too many.
         let accessory = NSHostingView(rootView: PDFExportAccessory())
-        accessory.frame = NSRect(x: 0, y: 0, width: 460, height: 190)
+        // Taller than it was: the colour row was added.
+        accessory.frame = NSRect(x: 0, y: 0, width: 460, height: 226)
         panel.accessoryView = accessory
         panel.isExtensionHidden = false
 
@@ -1225,23 +1228,32 @@ final class AppModel: ObservableObject {
         flushPendingSave()
 
         let appearance = AppearanceSettings.shared
+        let options = PDFExportSettings.shared.options
+        // The editor's palette is chosen against a dark or light *screen*; on
+        // white paper a pale accent can be all but invisible. `PrintColours`
+        // keeps the hue and takes the brightness down until it clears a
+        // contrast floor, so nothing has to be configured twice.
+        func ink(_ colour: NSColor) -> NSColor {
+            PrintColours.adjusted(colour, for: options.colours)
+        }
         let context = RenderContext(
             index: index, current: current, vaultRoot: vaultRoot,
             strictLineBreaks: settings.strictLineBreaks,
             colorfulFormatting: appearance.colorfulFormattingEnabled,
-            accentColor: appearance.accentColor,
-            linkColor: appearance.linkColor,
-            tagColor: appearance.tagColor,
-            codeColor: appearance.codeColor,
-            boldColor: appearance.boldColor,
-            italicColor: appearance.italicColor,
-            headingColors: (1...6).map { appearance.headingColor($0) }
+            accentColor: ink(appearance.accentColor),
+            linkColor: ink(appearance.linkColor),
+            tagColor: ink(appearance.tagColor),
+            codeColor: ink(appearance.codeColor),
+            boldColor: ink(appearance.boldColor),
+            italicColor: ink(appearance.italicColor),
+            headingColors: (1...6).map { ink(appearance.headingColor($0)) }
         )
 
         let title = (current.url.lastPathComponent as NSString).deletingPathExtension
+        PDFExportSettings.shared.lastDirectory = destination.deletingLastPathComponent()
         if PDFExport.write(
             text: text, context: context, to: destination,
-            title: title, options: PDFExportSettings.shared.options
+            title: title, options: options
         ) {
             status = "Exported \(destination.lastPathComponent)"
         } else {

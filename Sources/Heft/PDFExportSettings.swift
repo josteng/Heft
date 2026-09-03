@@ -11,7 +11,28 @@ final class PDFExportSettings: ObservableObject {
 
     @Published var options: PDFExportOptions { didSet { persist() } }
 
+    /// Where the last export was saved, if that folder is still there.
+    ///
+    /// Checked on read rather than trusted: an export often goes somewhere
+    /// temporary, and a save panel opening on a folder that no longer exists
+    /// silently falls back to somewhere unhelpful.
+    var lastDirectory: URL? {
+        get {
+            guard let path = HeftDefaults.shared.string(forKey: Self.directoryKey) else {
+                return nil
+            }
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isFolder),
+                  isFolder.boolValue else { return nil }
+            return URL(fileURLWithPath: path)
+        }
+        set {
+            HeftDefaults.shared.set(newValue?.path, forKey: Self.directoryKey)
+        }
+    }
+
     private static let key = "dev.stenglein.Heft.export.pdf"
+    private static let directoryKey = "dev.stenglein.Heft.export.lastDirectory"
 
     private init() {
         options = PDFExportOptions(decoding: HeftDefaults.shared.data(forKey: Self.key))
@@ -42,6 +63,15 @@ struct PDFExportAccessory: View {
                     .frame(width: 130)
                     Toggle("Landscape", isOn: $settings.options.isLandscape)
                 }
+            }
+            GridRow {
+                Text("Colours")
+                Picker("", selection: $settings.options.colours) {
+                    ForEach(PDFExportOptions.Colours.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 190)
+                .gridColumnAlignment(.leading)
             }
             GridRow {
                 Text("Margin")

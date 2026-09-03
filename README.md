@@ -150,8 +150,13 @@ changed, rather than re-attributing the whole note twice per character.
 - **Export as PDF** (⇧⌘E) of the *rendered* note — tables, callouts, bullets,
   checkboxes and typeset LaTeX, not the Markdown source. It prints the live
   surface itself rather than a second renderer, so the page matches the editor.
-  Page size, orientation, margin, text size and whether to add the note's name
-  are chosen **in the save panel**, and remembered. Text size is set in
+  Page size, orientation, margin, text size, colours and whether to add the
+  note's name are chosen **in the save panel**, and remembered along with the
+  folder you last exported to. Colours default to *adjusted for paper*: the
+  hues you chose, darkened only where they would be too pale on white — a
+  yellow accent measures 1.51:1 against white and prints at 3.08:1, the same
+  colour but legible. *Match the editor* and *black and white* are the other
+  two. Text size is set in
   **points on the page** — 12pt by default, against an editor that draws at 15
   — so it means the same thing on any display. The editor's type is sized to
   be read at arm's length; a book sets its body around 10pt.

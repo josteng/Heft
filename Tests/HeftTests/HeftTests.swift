@@ -2036,14 +2036,34 @@ struct PDFExportSettingsTests {
     }
 
     /// Decoding re-runs the initialiser, so a stale file cannot put an
-    /// out-of-range scale into the print system.
-    @Test("A stored scale outside the range is clamped on the way back in")
-    func clampsOnDecode() throws {
-        var wild = PDFExportOptions()
-        // Encoded by hand, because the initialiser would have clamped it.
-        let json = Data(#"{"paper":"a4","isLandscape":false,"margin":"normal","bodyPointSize":9000,"includesTitle":false}"#.utf8)
-        wild = PDFExportOptions(decoding: json)
-        #expect(wild.bodyPointSize == PDFExportOptions.bodySizeRange.upperBound)
+    /// out-of-range size into the print system.
+    @Test("A stored size outside the range is clamped on the way back in")
+    func clampsOnDecode() {
+        // Written by hand, because the initialiser would have clamped it.
+        let json = Data(#"{"colours":"paper","paper":"a4","isLandscape":false,"margin":"normal","bodyPointSize":9000,"includesTitle":false}"#.utf8)
+        #expect(PDFExportOptions(decoding: json).bodyPointSize == PDFExportOptions.bodySizeRange.upperBound)
+    }
+
+    /// A file written before a setting existed must keep everything it did
+    /// say. The synthesised `Codable` requires every field, so adding one
+    /// made every older file undecodable and silently reset the lot.
+    @Test("A settings file older than the code keeps what it does say")
+    func toleratesMissingFields() {
+        // No `colours` key: exactly what was on disk before that was added.
+        let older = Data(#"{"paper":"legal","isLandscape":true,"margin":"wide","bodyPointSize":9.5,"includesTitle":true}"#.utf8)
+        let restored = PDFExportOptions(decoding: older)
+        #expect(restored.paper == .legal, "the stored paper size was lost")
+        #expect(restored.isLandscape)
+        #expect(restored.margin == .wide)
+        #expect(restored.bodyPointSize == 9.5)
+        #expect(restored.includesTitle)
+        // And the field it could not know about takes its default.
+        #expect(restored.colours == PDFExportOptions().colours)
+
+        // A file with only one field keeps that one and defaults the rest.
+        let sparse = Data(#"{"margin":"narrow"}"#.utf8)
+        #expect(PDFExportOptions(decoding: sparse).margin == .narrow)
+        #expect(PDFExportOptions(decoding: sparse).paper == PDFExportOptions().paper)
     }
 
     /// The store writes what it reads, against the real defaults, and puts
@@ -2636,5 +2656,85 @@ struct CalloutIconTests {
         let warmData = try #require(warm.tiffRepresentation)
         let coolData = try #require(cool.tiffRepresentation)
         #expect(warmData != coolData, "the same glyph came back for two different tints")
+    }
+}
+
+@Suite("Print colours")
+struct PrintColoursTests {
+
+    /// A yellow accent that reads well on a dark editor has almost no
+    /// contrast against white paper. That is measurable, not a matter of
+    /// taste, which is why the fix is automatic rather than a second palette
+    /// to configure.
+    @Test("A pale colour is darkened until it is legible on white")
+    func palesAreDarkened() {
+        // Roughly the yellow accent this came from.
+        let yellow = NSColor(srgbRed: 1, green: 0.8, blue: 0, alpha: 1)
+        #expect(
+            PrintColours.contrastWithWhite(yellow) < PrintColours.minimumContrast,
+            "the sample is not actually a low-contrast colour"
+        )
+
+        let onPaper = PrintColours.adjusted(yellow, for: .paper)
+        #expect(
+            PrintColours.contrastWithWhite(onPaper) >= PrintColours.minimumContrast,
+            "still too pale: contrast \(PrintColours.contrastWithWhite(onPaper))"
+        )
+
+        // The hue is kept, so it is still recognisably the colour that was
+        // chosen rather than a different one.
+        let before = yellow.usingColorSpace(.sRGB)!.hueComponent
+        let after = onPaper.usingColorSpace(.sRGB)!.hueComponent
+        #expect(abs(before - after) < 0.02, "the hue moved from \(before) to \(after)")
+    }
+
+    /// A colour that is already dark enough must be left exactly as it is —
+    /// darkening everything would flatten a carefully chosen palette.
+    @Test("A colour with enough contrast is untouched")
+    func darkColoursAreLeftAlone() {
+        for colour in [
+            NSColor(srgbRed: 0.1, green: 0.1, blue: 0.6, alpha: 1),
+            NSColor(srgbRed: 0.6, green: 0, blue: 0, alpha: 1),
+            NSColor.black,
+        ] {
+            let onPaper = PrintColours.adjusted(colour, for: .paper)
+            #expect(
+                PrintColours.luminance(onPaper) == PrintColours.luminance(colour),
+                "an already-dark colour was changed"
+            )
+        }
+    }
+
+    @Test("Matching the editor changes nothing")
+    func editorModeIsIdentity() {
+        let yellow = NSColor(srgbRed: 1, green: 0.8, blue: 0, alpha: 1)
+        let same = PrintColours.adjusted(yellow, for: .editor)
+        #expect(PrintColours.luminance(same) == PrintColours.luminance(yellow))
+    }
+
+    @Test("Black and white has no colour left in it")
+    func monochromeIsGrey() {
+        for colour in [
+            NSColor(srgbRed: 1, green: 0.8, blue: 0, alpha: 1),
+            NSColor(srgbRed: 0, green: 0.4, blue: 1, alpha: 1),
+            NSColor.systemRed,
+        ] {
+            let grey = PrintColours.adjusted(colour, for: .monochrome)
+                .usingColorSpace(.sRGB)!
+            #expect(abs(grey.redComponent - grey.greenComponent) < 0.001)
+            #expect(abs(grey.greenComponent - grey.blueComponent) < 0.001)
+            #expect(
+                PrintColours.contrastWithWhite(grey) >= PrintColours.minimumContrast,
+                "a grey that pale is no more legible than the colour was"
+            )
+        }
+    }
+
+    /// Every colour the export hands to the renderer goes through this, so a
+    /// mode that only fixed the accent would leave links and headings pale.
+    @Test("The default mode is the adjusted one")
+    func defaultIsPaper() {
+        #expect(PDFExportOptions().colours == .paper)
+        #expect(PDFExportOptions(decoding: PDFExportOptions().encoded).colours == .paper)
     }
 }

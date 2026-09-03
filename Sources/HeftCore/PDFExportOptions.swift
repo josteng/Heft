@@ -56,6 +56,27 @@ public struct PDFExportOptions: Equatable, Sendable, Codable {
         }
     }
 
+    /// What to do with the editor's colours on paper.
+    public enum Colours: String, CaseIterable, Sendable, Identifiable, Codable {
+        /// Exactly what the editor shows.
+        case editor
+        /// The same hues, darkened where they would be too pale on white.
+        case paper
+        /// No colour at all.
+        case monochrome
+
+        public var id: String { rawValue }
+
+        public var label: String {
+            switch self {
+            case .editor: "Match the editor"
+            case .paper: "Adjusted for paper"
+            case .monochrome: "Black and white"
+            }
+        }
+    }
+
+    public var colours: Colours
     public var paper: Paper
     public var isLandscape: Bool
     public var margin: Margin
@@ -82,12 +103,14 @@ public struct PDFExportOptions: Equatable, Sendable, Codable {
     public static let bodySizeRange: ClosedRange<Double> = 7...20
 
     public init(
+        colours: Colours = .paper,
         paper: Paper = .a4,
         isLandscape: Bool = false,
         margin: Margin = .normal,
         bodyPointSize: Double = 12,
         includesTitle: Bool = false
     ) {
+        self.colours = colours
         self.paper = paper
         self.isLandscape = isLandscape
         self.margin = margin
@@ -120,6 +143,33 @@ extension Double {
 }
 
 extension PDFExportOptions {
+    /// Decoded field by field, every one optional.
+    ///
+    /// The synthesised `Codable` requires all of them, so adding a single
+    /// setting made every file written before it undecodable — and the
+    /// fallback is the defaults, so everyone's remembered paper size, margin
+    /// and text size would have silently reset the first time they exported
+    /// after an update. A settings struct is a format, and a format has to
+    /// tolerate being older than the code reading it.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = PDFExportOptions()
+        self.init(
+            colours: try container.decodeIfPresent(Colours.self, forKey: .colours)
+                ?? defaults.colours,
+            paper: try container.decodeIfPresent(Paper.self, forKey: .paper)
+                ?? defaults.paper,
+            isLandscape: try container.decodeIfPresent(Bool.self, forKey: .isLandscape)
+                ?? defaults.isLandscape,
+            margin: try container.decodeIfPresent(Margin.self, forKey: .margin)
+                ?? defaults.margin,
+            bodyPointSize: try container.decodeIfPresent(Double.self, forKey: .bodyPointSize)
+                ?? defaults.bodyPointSize,
+            includesTitle: try container.decodeIfPresent(Bool.self, forKey: .includesTitle)
+                ?? defaults.includesTitle
+        )
+    }
+
     /// Round-tripped through JSON rather than a hand-written dictionary, so a
     /// field added later cannot be forgotten in one direction and silently
     /// stop being remembered.
@@ -149,6 +199,7 @@ extension PDFExportOptions {
         // Re-run through the initialiser so a hand-edited or stale file cannot
         // put an out-of-range scale into the print system.
         self = PDFExportOptions(
+            colours: decoded.colours,
             paper: decoded.paper,
             isLandscape: decoded.isLandscape,
             margin: decoded.margin,
