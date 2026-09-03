@@ -52,56 +52,66 @@ defaults delete "$SUITE" 2>/dev/null
 # passed with the bug reintroduced.
 defaults write "$SUITE" "dev.stenglein.Heft.vaultPath" -string "$VAULT"
 
+# 1. A bare exec first, which is the cheapest way to catch the exact bug this
+# script exists for: the app answered an empty command line with `heft help`,
+# printed usage to a stdout nobody was reading, and exited. Streams are
+# captured here, which a LaunchServices launch cannot do.
 echo "Launching with no arguments, the way the Dock does..."
-# Detached with its streams closed: a backgrounded GUI app otherwise holds
-# stdout open, and anything reading this script's output waits for it to quit.
 HEFT_DEFAULTS_SUITE="$SUITE" nohup "$APP/Contents/MacOS/Heft" \
     >/tmp/heft-smoke.out 2>/tmp/heft-smoke.err &
-APP_PID=$!
-sleep 7
+BARE_PID=$!
+disown "$BARE_PID" 2>/dev/null || true
+sleep 6
 
-# 1. Still alive. The failure this exists for is an immediate exit.
-if ! kill -0 "$APP_PID" 2>/dev/null; then
+if ! kill -0 "$BARE_PID" 2>/dev/null; then
     echo "--- stdout ---"; head -20 /tmp/heft-smoke.out
     echo "--- stderr ---"; head -20 /tmp/heft-smoke.err
     fail "the app exited instead of starting"
 fi
-
-# 2. Nothing on stdout. A GUI app that prints is one taking a CLI path.
+# A GUI app that prints is one taking a command-line path.
 if [[ -s /tmp/heft-smoke.out ]]; then
     echo "--- stdout ---"; head -20 /tmp/heft-smoke.out
     fail "the app wrote to stdout, so it took a command-line path"
 fi
+kill -9 "$BARE_PID" 2>/dev/null
+
+# 2. Then again through LaunchServices, which is how the Dock and Finder really
+# start it, to prove it opened something.
+#
+# It has to be this way round for the check below to mean anything. A bare exec
+# is not a registered application process: AppleScript cannot address it, so it
+# can only be killed, and a Cocoa app killed by signal never flushes its
+# preferences — leaving this test reading whatever cfprefsd happened to have
+# cached, which passes or fails by timing. `--env` is what makes a sandboxed
+# launch possible this way; `-n` forces a new instance rather than activating
+# an installed copy that is already running.
+echo "Launching again through LaunchServices..."
+open -n --env "HEFT_DEFAULTS_SUITE=$SUITE" "$APP" || fail "LaunchServices would not start it"
+sleep 7
+APP_PID=$(pgrep -n -f "XcodeDerivedData.*Heft.app/Contents/MacOS/Heft")
+[[ -n "$APP_PID" ]] || fail "nothing was running after LaunchServices started it"
 
 # 3. Quit it, then read what it wrote.
 #
 # Preferences written by a running process are not visible to `defaults read`:
 # cfprefsd caches them per process until the writer flushes, which is on quit.
-# So the checks that read settings have to come after the app is gone — and
-# quitting is also the only point at which AppKit saves a window frame, which
-# is the one available proof a window was ever on screen.
 echo "Quitting..."
-osascript -e 'tell application id "dev.stenglein.Heft" to quit' >/dev/null 2>&1 \
-    || kill -TERM "$APP_PID" 2>/dev/null
-for _ in $(seq 1 24); do
+osascript -e "tell application \"System Events\" to tell \
+    (first application process whose unix id is $APP_PID) to quit" >/dev/null 2>&1
+for _ in $(seq 1 40); do
     kill -0 "$APP_PID" 2>/dev/null || break
     sleep 0.25
 done
-kill -0 "$APP_PID" 2>/dev/null && kill -9 "$APP_PID" 2>/dev/null
+kill -9 "$APP_PID" 2>/dev/null
 sleep 1
 
 # 4. It opened the vault it was given.
 #
-# Compared after resolving symlinks: the app standardises the path, and on
-# macOS /var and /tmp are links into /private, so what it stores is not the
-# string that was passed in.
-# Proof it opened rather than merely started: the app records the vault it
-# has open, and a fresh recents list only gets an entry when a session is
-# created. The seed above set `vaultPath`, so `recentVaults` is what shows
-# the app did something with it.
+# Proof it opened rather than merely started: a fresh recents list only gets an
+# entry when a vault session is created, and the session is created by the
+# scene, so an entry means the UI came up.
 RECENTS=$(defaults read "$SUITE" "dev.stenglein.Heft.recentVaults" 2>/dev/null)
 [[ -n "$RECENTS" ]] || fail "the app started but never opened its vault"
-WANT=$(cd "$VAULT" && pwd -P)
 echo "$RECENTS" | grep -q "SmokeVault" \
     || fail "opened something else: $(echo "$RECENTS" | tr -d '\n')"
 echo "  opened the vault it had, with no arguments"
@@ -119,6 +129,6 @@ REAL=$(defaults read dev.stenglein.Heft 2>/dev/null | grep -c "SmokeVault")
 
 echo "SMOKE PASS: launched, stayed up, opened its vault, real settings untouched"
 if [[ "$KEEP" == "1" ]]; then
-    echo "  left running (pid $APP_PID); sandbox suite $SUITE"
+    echo "  sandbox suite $SUITE kept for inspection"
 fi
 exit 0

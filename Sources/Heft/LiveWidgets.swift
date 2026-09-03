@@ -935,10 +935,8 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         guard let line = textLineFragments.first else { return }
         let radius: CGFloat = 7
         let rect = CGRect(
-            x: point.x - 10,
-            y: point.y,
-            width: containerWidth,
-            height: max(line.typographicBounds.height, layoutFragmentFrame.height)
+            x: point.x - 10, y: point.y,
+            width: containerWidth, height: paintedBackgroundHeight
         )
 
         context.saveGState()
@@ -1007,8 +1005,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         // pushed the card a whole line past the block and it was drawn over
         // the paragraph underneath.
         let rect = CGRect(
-            x: left, y: point.y, width: containerWidth,
-            height: max(line.typographicBounds.height, layoutFragmentFrame.height)
+            x: left, y: point.y, width: containerWidth, height: paintedBackgroundHeight
         )
 
         context.saveGState()
@@ -1038,7 +1035,12 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         guard quote.isCalloutHeader else { return }
         drawCalloutIcon(
             quote, tint: tint, at: CGPoint(x: left + 16, y: point.y),
-            line: line, isRevealed: isRevealed, in: context
+            line: line, isRevealed: isRevealed, in: context,
+            // Beside the top of a picture rather than halfway down it, for the
+            // same reason a bullet is: the line is as tall as what it holds.
+            centredAt: blockLead == nil
+                ? nil
+                : point.y + Self.blockInset + Theme.bodySize * 0.62
         )
     }
 
@@ -1130,10 +1132,11 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
 
     private func drawCalloutIcon(
         _ quote: QuoteLine, tint: NSColor, at origin: CGPoint,
-        line: NSTextLineFragment, isRevealed: Bool, in context: CGContext
+        line: NSTextLineFragment, isRevealed: Bool, in context: CGContext,
+        centredAt overrideY: CGFloat? = nil
     ) {
         let side: CGFloat = 14
-        let centreY = origin.y + line.typographicBounds.midY
+        let centreY = overrideY ?? (origin.y + line.typographicBounds.midY)
         guard let symbol = Self.tintedSymbol(
             quote.callout?.symbol ?? "quote.bubble.fill", side: side, tint: tint
         ) else { return }
@@ -1201,6 +1204,36 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         let maxWidth: CGFloat = 460
         guard natural.width > maxWidth else { return natural }
         return CGSize(width: maxWidth, height: natural.height * (maxWidth / natural.width))
+    }
+
+    /// The height of line fragments holding no characters at all.
+    ///
+    /// TextKit lays an empty line fragment after a document's final newline
+    /// and puts it inside the last paragraph's layout fragment, so on the last
+    /// line of a note `layoutFragmentFrame` is a whole line taller than the
+    /// text in it. Anything painted to that height — a quote bar, a callout
+    /// card — stands a line proud of its own contents, which reads as a card
+    /// squashed around its title.
+    var emptyTrailingHeight: CGFloat {
+        textLineFragments
+            .filter { $0.characterRange.length == 0 }
+            .reduce(0) { $0 + $1.typographicBounds.height }
+    }
+
+    /// The height a background painted across this fragment should take: a
+    /// quote bar, a callout card, a code block's fill.
+    ///
+    /// The fragment's own frame is the natural answer and is wrong on the last
+    /// line of a note, where it also covers the empty fragment above. What is
+    /// left over is that fragment's share of the line spacing, about a fifth
+    /// of a line, which would take guessing at a paragraph style to remove and
+    /// is not worth it.
+    var paintedBackgroundHeight: CGFloat {
+        guard let line = textLineFragments.first else { return layoutFragmentFrame.height }
+        return max(
+            line.typographicBounds.height,
+            layoutFragmentFrame.height - emptyTrailingHeight
+        )
     }
 
     private var containerWidth: CGFloat {

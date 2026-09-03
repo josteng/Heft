@@ -62,9 +62,14 @@ struct PastedPictureTests {
         #expect(marker("> - [ ] ![[a.png]]", around: "![[a.png]]") == 8)
 
         #expect(marker("> see ![[a.png]]", around: "![[a.png]]") == nil)
-        // A callout's header has already claimed what follows its marker,
-        // which is the same line `QuotedBlock` refuses for the same reason.
-        #expect(marker("> [!note] ![[a.png]]", around: "![[a.png]]") == nil)
+
+        // A callout's marker leads too, but only when the construct is the
+        // whole title. Obsidian draws a picture there; a title with words in
+        // it is a title, and replacing the line would take the words with it.
+        #expect(marker("> [!note] ![[a.png]]", around: "![[a.png]]") == 10)
+        #expect(marker("> [!tip]  ![[a.png]]", around: "![[a.png]]") == 10)
+        #expect(marker("> [!note] See ![[a.png]]", around: "![[a.png]]") == nil)
+        #expect(marker("> [!note ![[a.png]]", around: "![[a.png]]") == nil)
     }
 
     @Test("Only the embed's own line is considered")
@@ -213,13 +218,28 @@ struct PastedPictureTests {
         }
     }
 
-    /// `[!kind]` claims what follows it on the header line, so an embed there
-    /// is the callout's title text rather than a picture of its own.
-    @Test("A callout's header line is not a picture")
-    func leavesCalloutHeadersAlone() throws {
+    /// A picture *is* the title, the way Obsidian draws it: the card and its
+    /// icon stay, and the picture takes the place of the words.
+    @Test("A picture may be a callout's whole title")
+    func drawsPictureAsACalloutTitle() throws {
         try withPictureVault { _, context in
-            guard case .quote? = firstBlock("> [!note] ![[shot.png]]\n", context) else {
-                Issue.record("a callout header stopped being a callout")
+            guard case .image(_, let lead)? =
+                firstBlock("> [!note]  ![[shot.png]]\n", context)
+            else {
+                Issue.record("a picture as a callout title produced no picture")
+                return
+            }
+            #expect(lead.quote?.line.callout != nil, "still a callout, so the card is drawn")
+        }
+    }
+
+    /// But a title with words in it is a title. Drawing it as a block would
+    /// reserve the picture's height on the line those words are on.
+    @Test("A callout title that has words keeps them")
+    func leavesTitledCalloutsAlone() throws {
+        try withPictureVault { _, context in
+            guard case .quote? = firstBlock("> [!note] See ![[shot.png]]\n", context) else {
+                Issue.record("a titled callout stopped being a callout")
                 return
             }
         }
@@ -236,5 +256,84 @@ struct PastedPictureTests {
                 return
             }
         }
+    }
+}
+
+/// TextKit puts an empty line fragment after a document's final newline, inside
+/// the last paragraph's own layout fragment. Anything painted to that
+/// fragment's full height — a quote bar, a callout card, a code block's
+/// background — therefore stood a whole line proud of its contents on the last
+/// line of a note, and only there.
+@Suite("The last line of a note")
+@MainActor
+struct TrailingLineFragmentTests {
+
+    /// Lays `source` out in a real TextKit 2 view and hands back its fragments.
+    private func fragments(_ source: String) -> [HeftLayoutFragment] {
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let editor = LiveTextEditor(
+            text: .constant(source), documentIdentity: "t.md", generation: 0,
+            generationKeepsPosition: false, findSelection: nil, insertion: nil,
+            context: context, onAttachment: { _ in nil }, onFollowLink: { _ in },
+            onVimSearch: { _ in }
+        )
+        let coordinator = LiveTextEditor.Coordinator(editor)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isVerticallyResizable = true
+        view.frame = NSRect(x: 0, y: 0, width: 700, height: 900)
+        view.textContainer?.size = NSSize(width: 644, height: 1_000_000)
+        view.textLayoutManager?.delegate = coordinator
+        view.textStorage?.delegate = coordinator
+        view.delegate = coordinator
+        view.string = source
+        coordinator.restyle(view)
+        view.textLayoutManager?.ensureLayout(for: view.textLayoutManager!.documentRange)
+
+        var found: [HeftLayoutFragment] = []
+        view.textLayoutManager?.enumerateTextLayoutFragments(from: nil, options: [.ensuresLayout]) {
+            if let fragment = $0 as? HeftLayoutFragment { found.append(fragment) }
+            return true
+        }
+        return found
+    }
+
+    /// Exactly what the card is painted to, rather than a restatement of it.
+    private func cardHeight(_ fragment: HeftLayoutFragment) -> CGFloat {
+        fragment.paintedBackgroundHeight
+    }
+
+    @Test("A callout's card is the same height last in a note as anywhere else")
+    func cardIsNotTallerOnTheLastLine() {
+        let callout = "> [!info] A title\n"
+        guard let last = fragments(callout).last,
+              let notLast = fragments(callout + "\nafter\n").first
+        else {
+            Issue.record("no fragments were laid out")
+            return
+        }
+        #expect(
+            last.emptyTrailingHeight > 0,
+            "the last line really does carry an empty trailing fragment"
+        )
+        // A whole line of difference is the bug; what is left is the line
+        // spacing that belonged to the empty fragment, about a fifth of a line
+        // and not worth guessing a paragraph style to remove.
+        let oneLine = notLast.textLineFragments[0].typographicBounds.height
+        #expect(
+            cardHeight(last) - cardHeight(notLast) < oneLine / 2,
+            "the card is within half a line of the same card elsewhere"
+        )
+        // Measuring a real difference: the raw frame is a full line taller,
+        // which is exactly what used to be painted.
+        #expect(
+            last.layoutFragmentFrame.height - notLast.layoutFragmentFrame.height >= oneLine
+        )
+    }
+
+    @Test("A line with something after it has no empty trailing fragment")
+    func onlyTheLastLineCarriesOne() {
+        let fragments = fragments("first\nsecond\n")
+        #expect(fragments.first?.emptyTrailingHeight == 0)
+        #expect(fragments.last?.emptyTrailingHeight ?? 0 > 0)
     }
 }

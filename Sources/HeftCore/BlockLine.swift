@@ -65,6 +65,18 @@ public enum BlockLine {
         // picture in a quote with no list involved.
         if quoted, i == characters.count { return true }
 
+        // And so is a callout's, when nothing but the construct follows it:
+        // `> [!tip] ![[shot.png]]` is a picture where the title would be,
+        // which is what Obsidian draws. A title with words in it is different
+        // — `> [!tip] See ![[shot.png]]` is a title that ends in an embed, and
+        // replacing the line with a picture would take the words with it.
+        if quoted, i + 1 < characters.count, characters[i] == "[", characters[i + 1] == "!" {
+            guard let close = characters[i...].firstIndex(of: "]") else { return false }
+            i = close + 1
+            _ = skipSpaces()
+            return i == characters.count
+        }
+
         guard i < characters.count else { return false }
         if characters[i] == "-" || characters[i] == "*" || characters[i] == "+" {
             i += 1

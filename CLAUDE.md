@@ -141,9 +141,10 @@ words *between* the marker and the embed was added.
 
 Quote markers lead for the same reason and compose with a list's, so
 `> ![[shot.png]]` and `> - ![[shot.png]]` are both pictures inside a quote. A
-callout's header is the exception: `[!kind]` has already claimed what follows
-the marker there, which is the same line `QuotedBlock` refuses for the same
-reason.
+callout's `[!kind]` leads too, but only when the construct is the *whole*
+title: `> [!tip] ![[shot.png]]` is a picture where the title would be, which
+is what Obsidian draws, while `> [!tip] See ![[shot.png]]` is a title that
+ends in an embed and must keep its words.
 
 The editor draws **one widget per line**, keyed by line start, so the picture
 takes the slot the marker's own `.list` or `.quote` widget was written into one
@@ -845,7 +846,11 @@ depends on changes.
   giving that final newline its own style changes nothing, because the style
   is read from the paragraph's first character. Anything with a line after it
   is unaffected. In a PDF export the same fragment also draws its content at
-  the wrong horizontal offset.
+  the wrong horizontal offset. What *is* fixed is anything painted across the
+  fragment — `paintedBackgroundHeight` subtracts the empty fragment, so a
+  quote, callout or code block last in a note is no longer a line taller than
+  its contents. About a fifth of a line of that fragment's line spacing is
+  still in there, which would take guessing at a paragraph style to remove.
 - Deferred: graph view, plugins.
 
 ## The icon
