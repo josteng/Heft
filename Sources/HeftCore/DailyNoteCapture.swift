@@ -59,7 +59,8 @@ public struct DailyNoteCapture: Sendable {
                     byCapturing: rawText,
                     in: existing,
                     at: date,
-                    calendar: calendar
+                    calendar: calendar,
+                    title: dailyNotes.stem(for: date)
                 )
                 try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -73,11 +74,14 @@ public struct DailyNoteCapture: Sendable {
         return url
     }
 
+    /// - Parameter title: the note's own name, used to give an empty note a
+    ///   heading before its first captured item.
     public static func contents(
         byCapturing rawText: String,
         in existing: String,
         at date: Date,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        title: String? = nil
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw DailyNoteCaptureError.emptyCapture }
@@ -106,7 +110,20 @@ public struct DailyNoteCapture: Sendable {
             return result
         }
 
-        guard !existing.isEmpty else { return entry + newline }
+        // An empty note gets a heading before its first item, the way
+        // `Inbox.md` does. Without it, capturing into a note that happens to
+        // be empty leaves a bare `- 14:32 …` as the whole file: the note has
+        // no title, and the first thing in it is a bullet with nothing above
+        // it to write under.
+        //
+        // Blank rather than strictly empty, because a note created and then
+        // left alone usually holds a newline or two, and those should not be
+        // the difference between a titled note and an untitled one.
+        if existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let title, !title.isEmpty else { return entry + newline }
+            return "# \(title)\(newline)\(newline)\(entry)\(newline)"
+        }
+
         return existing
             + (existing.hasSuffix(newline) ? "" : newline)
             + entry

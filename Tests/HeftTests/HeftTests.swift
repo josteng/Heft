@@ -1419,3 +1419,77 @@ struct PresentationDeckTests {
         #expect(slideCount("A Heading\n---\n\nBody") == 1)
     }
 }
+
+@Suite("Daily capture")
+struct DailyCaptureTests {
+
+    private func stamp(_ hour: Int, _ minute: Int) -> Date {
+        var components = DateComponents()
+        components.year = 2026; components.month = 9; components.day = 3
+        components.hour = hour; components.minute = minute
+        return Calendar.current.date(from: components)!
+    }
+
+    /// Capturing into a note that happens to be empty used to leave a bare
+    /// `- 14:32 …` as the whole file: no title, and the first thing in the
+    /// note a bullet with nothing above it to write under. `Inbox.md` already
+    /// scaffolded itself; the daily note did not.
+    @Test("An empty note gets a heading before its first item")
+    func scaffoldsAnEmptyNote() throws {
+        let written = try DailyNoteCapture.contents(
+            byCapturing: "first thought", in: "", at: stamp(14, 32), title: "2026-09-03"
+        )
+        #expect(written == "# 2026-09-03\n\n- 14:32 first thought\n")
+
+        // A note left holding only whitespace is empty for this purpose: a
+        // stray newline should not be the difference between a titled note
+        // and an untitled one.
+        let fromBlank = try DailyNoteCapture.contents(
+            byCapturing: "first thought", in: "\n\n", at: stamp(14, 32), title: "2026-09-03"
+        )
+        #expect(fromBlank == "# 2026-09-03\n\n- 14:32 first thought\n")
+    }
+
+    @Test("A note with content is appended to, not rewritten")
+    func appendsToAnExistingNote() throws {
+        let written = try DailyNoteCapture.contents(
+            byCapturing: "second", in: "# 2026-09-03\n\n- 09:00 first\n",
+            at: stamp(14, 32), title: "2026-09-03"
+        )
+        #expect(written == "# 2026-09-03\n\n- 09:00 first\n- 14:32 second\n")
+    }
+
+    /// The marker is the insertion point, and the *last* one wins: a body
+    /// pasted in or accepted from a proposal can bring a second, and taking
+    /// the first would split a day's log in two.
+    @Test("Items land above the last daily-log marker")
+    func insertsAboveTheLastMarker() throws {
+        let note = """
+        # 2026-09-03
+
+        ## Log
+        <!-- heft:daily-log -->
+
+        ## Pasted
+        <!-- heft:daily-log -->
+
+        ## Notes
+
+        """
+        let written = try DailyNoteCapture.contents(
+            byCapturing: "an item", in: note, at: stamp(14, 32), title: "2026-09-03"
+        )
+        let markers = written.components(separatedBy: DailyNoteCapture.insertionMarker).count - 1
+        #expect(markers == 2, "both markers survive")
+        let item = try #require(written.range(of: "- 14:32 an item"))
+        let firstMarker = try #require(written.range(of: DailyNoteCapture.insertionMarker))
+        #expect(item.lowerBound > firstMarker.upperBound, "the item went to the later marker")
+    }
+
+    @Test("Nothing is captured from nothing")
+    func rejectsEmptyCaptures() {
+        #expect(throws: DailyNoteCaptureError.self) {
+            try DailyNoteCapture.contents(byCapturing: "   \n ", in: "", at: stamp(9, 0))
+        }
+    }
+}
