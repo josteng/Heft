@@ -684,6 +684,15 @@ depends on changes.
   `LiveTextEditor.mapLocation` moves the caret by the size of the change above
   it. Scroll is restored *after* the restyle, never before: scrolling within an
   estimated height lands somewhere else.
+- **A line whose every character is collapsed markup has no height.** `> `
+  with nothing after it, or `- ` on its own, is entirely hairline font, and
+  TextKit gives it a fragment barely over zero high. Pressing Return inside a
+  quote made exactly that: the marker was inserted correctly and the new line
+  drew as a slot a fraction of a line tall with nowhere to put the caret. Both
+  the list and the quote paragraph styles therefore reserve an ordinary line's
+  height unconditionally. It has to be unconditional rather than "only when the
+  line is empty": the reservation is sized to the line the *revealed* source
+  produces, so a line moves neither when it is clicked into nor when it is left.
 - **Reserve widget height with `minimumLineHeight`, not by overriding
   `layoutFragmentFrame`.** Line height is ordinary paragraph geometry the layout
   manager must honour; the frame override did not survive contact with reality and

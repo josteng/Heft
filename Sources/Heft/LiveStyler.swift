@@ -659,21 +659,20 @@ enum LiveStyler {
                 : 0
             paragraph.paragraphSpacing = isLast ? Theme.quoteBlockPadding : 0
 
-            // A callout whose title line carries no text of its own still has
-            // an icon and a drawn label to fit. Without the reservation the
-            // line is only as tall as an empty paragraph and both get clipped.
+            // An ordinary line's height, always.
             //
-            // Only while that label is actually drawn, though. Revealed, the
-            // line holds the real `> [!tip]` text, which is shorter than the
-            // reservation — and the surplus goes above the glyphs, so the
-            // heading appeared to drop as soon as it was clicked. A titled
-            // callout never reserved anything and never moved, which is what
-            // made the two behave differently.
-            // Sized to the line the revealed source produces, so switching
-            // between the two states moves nothing at all.
-            if quote.needsDrawnTitle, !revealed {
-                paragraph.minimumLineHeight = ceil(base.ascender - base.descender + base.leading)
-            }
+            // Every character of `> ` is collapsed markup, so a quote line with
+            // no text of its own is entirely hairline font and TextKit gives it
+            // a fragment barely over zero high. Pressing Return inside a quote
+            // produced exactly that: a new line that drew as a slot a fraction
+            // of a line tall, with nowhere to put the caret.
+            //
+            // The same reservation is what gives a callout's drawn title and
+            // icon room when its header carries no text either. It is sized to
+            // the line the revealed source produces, so a line moves neither
+            // when it is clicked into nor when it is left, and a line that
+            // already holds text is unaffected: its natural height is this.
+            paragraph.minimumLineHeight = ceil(base.ascender - base.descender + base.leading)
             storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
 
             // Quoted text stays at full contrast. Dimming it is the obvious
