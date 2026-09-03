@@ -81,8 +81,21 @@ final class AppModel: ObservableObject {
         return root.appendingPathComponent(scopePath, isDirectory: true)
     }
 
-    var scopeName: String { scopePath?.split(separator: "/").last.map(String.init) ?? "Entire Vault" }
+    /// The folder this window is focused on, or the vault itself.
+    ///
+    /// Unscoped, this is the vault's own name rather than a phrase like
+    /// "Entire Vault": every caller reads as "<something> in \(scopeName)",
+    /// and a made-up proper noun there is worse than the name the user gave
+    /// the folder. It also makes two windows on two vaults tell themselves
+    /// apart at a glance.
+    var scopeName: String { scopePath?.split(separator: "/").last.map(String.init) ?? vaultName }
     var vaultName: String { vaultRoot?.lastPathComponent ?? "Heft" }
+
+    /// "1 note" or "12 notes" — a count that reads as English wherever it is
+    /// shown, rather than "1 notes".
+    var scopedNoteCountLabel: String {
+        scopedNotes.count == 1 ? "1 note" : "\(scopedNotes.count) notes"
+    }
 
     /// What the window shows beneath its title.
     ///
@@ -97,7 +110,7 @@ final class AppModel: ObservableObject {
     /// one; unsaved work is reported by `saveConflict`, which persists.
     var windowSubtitle: String {
         guard let current else {
-            return vaultRoot == nil ? "" : "\(scopedNotes.count) notes · \(scopeName)"
+            return vaultRoot == nil ? "" : "\(scopedNoteCountLabel) · \(scopeName)"
         }
         let folder = current.folder
         var parts = [folder.isEmpty ? "Vault root" : folder]

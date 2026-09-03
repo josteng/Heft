@@ -702,7 +702,7 @@ private struct EmptySelectionView: View {
             Image(systemName: "doc.text")
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.tertiary)
-            Text("\(model.scopedNotes.count) notes in \(model.scopeName)")
+            Text("\(model.scopedNoteCountLabel) in \(model.scopeName)")
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
             HStack {
