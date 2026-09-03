@@ -1137,3 +1137,72 @@ struct CompletionSurfaceTests {
         #expect(view.visibleCompletions.isEmpty)
     }
 }
+
+@Suite("External change polling")
+@MainActor
+struct ExternalChangePollingTests {
+
+    /// Reading the whole note once a second, per window, forever, is what an
+    /// idle Heft was costing — a full file read per second against an
+    /// iCloud-backed vault whether or not anyone was using it. The
+    /// modification date now answers almost all of those without opening the
+    /// file, and this is the claim that gate must not break: an edit made by
+    /// another program still arrives.
+    @Test("A note edited by another program is still picked up")
+    func externalEditStillReloads() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-poll-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let note = root.appendingPathComponent("Note.md")
+        try "first version\n".write(to: note, atomically: true, encoding: .utf8)
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+        #expect(model.current?.relativePath == "Note.md")
+        #expect(model.text == "first version\n")
+
+        // Nothing has changed, so a poll must leave the buffer alone.
+        model.reloadCurrentIfChangedExternally()
+        #expect(model.text == "first version\n")
+
+        try "second version\n".write(to: note, atomically: true, encoding: .utf8)
+        model.reloadCurrentIfChangedExternally()
+        #expect(model.text == "second version\n", "an external edit reached the buffer")
+    }
+
+    /// The date is only trusted once it has stood long enough to be: a write
+    /// landing in the same second as the one already recorded can leave the
+    /// timestamp untouched, so a fresh file is always read rather than
+    /// dismissed on a matching date.
+    @Test("A same-second rewrite is not dismissed on a matching date")
+    func sameSecondRewriteIsRead() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-poll-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let note = root.appendingPathComponent("Note.md")
+        try "first\n".write(to: note, atomically: true, encoding: .utf8)
+        // Stamped through the same path both times, so the two reads really
+        // are the same date rather than two doubles that merely print alike.
+        let stamp = Date()
+        try FileManager.default.setAttributes([.modificationDate: stamp], ofItemAtPath: note.path)
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+
+        // Rewritten with the modification date the model already recorded,
+        // which is exactly what a write in the same second looks like.
+        try "rewritten\n".write(to: note, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: stamp], ofItemAtPath: note.path)
+
+        model.reloadCurrentIfChangedExternally()
+        #expect(model.text == "rewritten\n", "a same-second rewrite was skipped on a matching date")
+    }
+}

@@ -364,7 +364,9 @@ final class AppModel: ObservableObject {
     /// Picks up edits made elsewhere (another device via iCloud, Obsidian, or
     /// an App Intent). Exact contents are authoritative: timestamps are only a
     /// hint and can remain unchanged for two writes in the same filesystem tick.
-    private func reloadCurrentIfChangedExternally() {
+    /// Internal rather than private so the poll's safety net can be asserted
+    /// without waiting on its timer.
+    func reloadCurrentIfChangedExternally() {
         guard let current else { return }
         let exists = FileManager.default.fileExists(atPath: current.url.path)
         guard exists else {
@@ -378,8 +380,27 @@ final class AppModel: ObservableObject {
             return
         }
 
-        guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else { return }
+        // Cheap gate in front of the expensive part.
+        //
+        // This ran every second, per window, forever, and read the whole note
+        // off disk each time — on an iCloud-backed vault, a full file read per
+        // second for as long as Heft was open, whether or not anyone was
+        // using it. That is what an idle window was costing.
+        //
+        // The modification date answers almost all of those without opening
+        // the file. It is only trusted once it is old enough to be: filesystem
+        // timestamps are coarse, so a write landing in the same second as the
+        // one already recorded can leave the date unchanged. Past that window
+        // an unchanged date really does mean unchanged content, which is the
+        // steady state this is here to make free.
         let modified = modificationDate(of: current.url)
+        if let modified, let known = lastKnownModification,
+           abs(modified.timeIntervalSince(known)) < Self.sameModificationDate,
+           Date().timeIntervalSince(modified) > Self.modificationDateGranularity {
+            return
+        }
+
+        guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else { return }
         guard fresh != lastKnownDiskText else {
             lastKnownModification = modified
             return
@@ -419,9 +440,29 @@ final class AppModel: ObservableObject {
             : "Save paused: \(current.name) was removed from disk"
     }
 
+    /// How long a modification date has to have stood before an unchanged one
+    /// can be taken as proof the file is unchanged. Filesystem timestamps are
+    /// coarse enough that a write in the same second as the last one can leave
+    /// the date alone.
+    private static let modificationDateGranularity: TimeInterval = 2
+
+    /// Two modification dates this close are the same date.
+    ///
+    /// Not `==`. A file's timestamp round-trips through `Date` as a binary
+    /// double, and two reads of one unchanged file have been seen to compare
+    /// unequal while printing identically — which would quietly stop the gate
+    /// above from ever firing and put the per-second file read straight back.
+    private static let sameModificationDate: TimeInterval = 0.000_5
+
     /// FSEvents remains the fast path. Polling one open file is a cheap safety
     /// net for same-process writers (which the vault watcher deliberately
     /// ignores), dropped events, and coarse filesystem modification dates.
+    ///
+    /// The interval stays one second, deliberately. Backing it off while the
+    /// app is in the background looks free and is not: a same-process write is
+    /// exactly what this poll exists to catch, FSEvents ignores those on
+    /// purpose, and the integration check that covers it fails the moment the
+    /// tick is slowed. The cost was never the tick, it was what the tick did.
     private func startExternalChangePolling() {
         externalChangePollTask?.cancel()
         externalChangePollTask = Task { [weak self] in

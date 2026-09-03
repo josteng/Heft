@@ -435,6 +435,20 @@ depends on changes.
   the active column instead — no other column changes, so nothing outside the
   table moves. Column widths are always measured from the *rendered* text, so
   entering and leaving a cell never resizes a column on its own.
+- **Two `Date`s read from the same unchanged file can compare unequal.** A
+  filesystem timestamp round-trips as a binary double, and two reads have been
+  seen to differ below the precision either one prints at. So `modified ==
+  known` silently answered "changed" every time, which would have left the
+  per-second file read in place while looking like it had been fixed. Compare
+  modification dates with a tolerance, never with `==`.
+- **The open note is polled once a second, and that tick must stay at one
+  second.** It is the only thing that catches a *same-process* write, which
+  the vault watcher ignores on purpose; backing the interval off while the app
+  is in the background looks free and fails the integration check that covers
+  it. What was expensive was never the tick, it was that the tick read the
+  whole note off disk every time — on an iCloud vault, a full file read per
+  second per window for as long as Heft was open. A modification-date gate in
+  front of the read fixes that without touching the interval.
 - **`String.range(of:options:.regularExpression)` builds a fresh
   `NSRegularExpression` every call.** Fine once, ruinous per line: quote-marker
   detection alone was most of the cost of decorating a long note. The
