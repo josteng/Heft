@@ -9,21 +9,21 @@ final class CalendarSettings: ObservableObject {
     static let shared = CalendarSettings()
 
     @Published var firstWeekday: FirstWeekday {
-        didSet { UserDefaults.standard.set(firstWeekday.rawValue, forKey: Self.firstWeekdayKey) }
+        didSet { HeftDefaults.shared.set(firstWeekday.rawValue, forKey: Self.firstWeekdayKey) }
     }
 
     /// Whether today is marked when its daily note does not exist yet.
     @Published var marksMissingToday: Bool {
-        didSet { UserDefaults.standard.set(marksMissingToday, forKey: Self.missingTodayKey) }
+        didSet { HeftDefaults.shared.set(marksMissingToday, forKey: Self.missingTodayKey) }
     }
 
     private static let firstWeekdayKey = "dev.stenglein.Heft.calendar.firstWeekday"
     private static let missingTodayKey = "dev.stenglein.Heft.calendar.marksMissingToday"
 
     private init() {
-        let stored = UserDefaults.standard.string(forKey: Self.firstWeekdayKey)
+        let stored = HeftDefaults.shared.string(forKey: Self.firstWeekdayKey)
         firstWeekday = stored.flatMap(FirstWeekday.init(rawValue:)) ?? .system
-        marksMissingToday = UserDefaults.standard.object(forKey: Self.missingTodayKey) as? Bool ?? true
+        marksMissingToday = HeftDefaults.shared.object(forKey: Self.missingTodayKey) as? Bool ?? true
     }
 
     /// The calendar the month grid is laid out with.

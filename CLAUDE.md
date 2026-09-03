@@ -518,7 +518,33 @@ depends on changes.
   writes to a key nothing ever reads.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
-- **Launching the GUI at a sandbox vault repoints Spotlight capture at it.**
+- **Checking the GUI without a screen: what works and what does not.** Four
+  routes were tried against a real settings pane.
+  `ImageRenderer` works, needs no permission and no window, and is what the
+  suite uses — but it cannot draw AppKit-backed controls, so every Picker,
+  Slider and Toggle comes out as a yellow placeholder. It sees layout, text
+  and custom drawing, which is most of what is Heft's own.
+  `cacheDisplay` / `bitmapImageRepForCachingDisplay` on an `NSHostingView`
+  return blank: SwiftUI's content is in CALayers, not `draw(_:)`.
+  `CGWindowListCreateImage` did work and was obsoleted in macOS 15.
+  `screencapture -l<windowNumber>` needs Screen Recording *and* a window the
+  window server is actually compositing — a window parked at -10000 is on no
+  display and captures blank.
+  So: `ImageRenderer` for custom drawing, `heft export` for the editing
+  surface (which is how the TextKit-1 downgrade, the clipped lines and the
+  blank pages were all caught), and structural tests for menus, which no
+  rendering technique reaches.
+- **`Scripts/run.sh --sandbox` is how to launch the GUI for testing.** It puts
+  every preference in its own suite (`--fresh` wipes it first), so a test
+  launch cannot rewrite `vaultPath`, Open Recent or the rankings. Everything
+  goes through `HeftDefaults.shared` rather than `UserDefaults.standard` for
+  exactly this reason, and a test fails if any call site reaches for the
+  latter: one setting escaping is enough to lose the property.
+- **A backgrounded GUI app holds the shell's stdout open.** `app &` on its own
+  makes any caller reading the script's output — a pipeline, a CI step, an
+  agent's shell — block until the app quits rather than returning. Launch it
+  with `nohup … >/dev/null 2>&1 &` and `disown`.
+- **Without `--sandbox`, launching the GUI repoints Spotlight capture.**
   Opening a vault writes `dev.stenglein.Heft.vaultPath`, which is where
   `CaptureToInboxIntent` and `AddToTodaysNoteIntent` file things from outside
   the app. So a test launch silently aims "Add to Today's Note" at a temporary

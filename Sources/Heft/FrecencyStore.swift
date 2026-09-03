@@ -13,12 +13,12 @@ final class FrecencyStore {
 
     init(key: String) {
         self.key = key
-        frecency = Frecency(decoding: UserDefaults.standard.data(forKey: key))
+        frecency = Frecency(decoding: HeftDefaults.shared.data(forKey: key))
     }
 
     func record(_ identifier: String) {
         frecency.record(identifier)
-        UserDefaults.standard.set(frecency.encoded, forKey: key)
+        HeftDefaults.shared.set(frecency.encoded, forKey: key)
     }
 
     func score(_ identifier: String) -> Double { frecency.score(identifier) }

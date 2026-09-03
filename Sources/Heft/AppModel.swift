@@ -1699,7 +1699,7 @@ final class AppModel: ObservableObject {
     /// turned down.
     var shouldOfferAgentSetup: Bool {
         guard let vaultRoot, agentGuideStatus != .current else { return false }
-        let dismissed = UserDefaults.standard.stringArray(
+        let dismissed = HeftDefaults.shared.stringArray(
             forKey: Self.agentOfferDismissedKey
         ) ?? []
         return !dismissed.contains(Self.offerKey(for: vaultRoot))
@@ -1709,13 +1709,13 @@ final class AppModel: ObservableObject {
     /// the banner is a one-time question rather than a recurring one.
     func dismissAgentSetupOffer() {
         guard let vaultRoot else { return }
-        var dismissed = UserDefaults.standard.stringArray(
+        var dismissed = HeftDefaults.shared.stringArray(
             forKey: Self.agentOfferDismissedKey
         ) ?? []
         let path = Self.offerKey(for: vaultRoot)
         guard !dismissed.contains(path) else { return }
         dismissed.append(path)
-        UserDefaults.standard.set(dismissed, forKey: Self.agentOfferDismissedKey)
+        HeftDefaults.shared.set(dismissed, forKey: Self.agentOfferDismissedKey)
         objectWillChange.send()
     }
 

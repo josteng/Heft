@@ -34,7 +34,7 @@ final class VaultSession: ObservableObject {
     init(root: URL) {
         self.root = root.standardizedFileURL
         settings = ObsidianSettings.load(vaultRoot: self.root)
-        recentPaths = UserDefaults.standard.stringArray(forKey: recentsKey) ?? []
+        recentPaths = HeftDefaults.shared.stringArray(forKey: recentsKey) ?? []
         reload()
         watcher = VaultWatcher(root: self.root) { [weak self] in
             self?.vaultDidChangeOnDisk()
@@ -76,13 +76,13 @@ final class VaultSession: ObservableObject {
         recentPaths.removeAll { $0 == relativePath }
         recentPaths.insert(relativePath, at: 0)
         if recentPaths.count > 40 { recentPaths.removeLast(recentPaths.count - 40) }
-        UserDefaults.standard.set(recentPaths, forKey: recentsKey)
+        HeftDefaults.shared.set(recentPaths, forKey: recentsKey)
         noteFrecency.record(relativePath)
     }
 
     func replaceRecentPath(_ oldPath: String, with newPath: String) {
         recentPaths = recentPaths.map { $0 == oldPath ? newPath : $0 }
-        UserDefaults.standard.set(recentPaths, forKey: recentsKey)
+        HeftDefaults.shared.set(recentPaths, forKey: recentsKey)
     }
 
     /// Coalesced because iCloud and atomic saves arrive as event bursts.
@@ -145,7 +145,7 @@ final class VaultRegistry: ObservableObject {
     /// Every vault opened, most recent first. Stored as written; what is
     /// still *there* is decided at read time by `recentVaults`.
     @Published private(set) var recentVaultPaths: [String] =
-        UserDefaults.standard.stringArray(forKey: VaultRegistry.recentVaultsKey) ?? []
+        HeftDefaults.shared.stringArray(forKey: VaultRegistry.recentVaultsKey) ?? []
 
     /// The recents that can actually be opened right now.
     ///
@@ -164,7 +164,7 @@ final class VaultRegistry: ObservableObject {
 
     func clearRecentVaults() {
         recentVaultPaths = []
-        UserDefaults.standard.removeObject(forKey: Self.recentVaultsKey)
+        HeftDefaults.shared.removeObject(forKey: Self.recentVaultsKey)
     }
 
     func session(for url: URL) -> VaultSession {
@@ -176,7 +176,7 @@ final class VaultRegistry: ObservableObject {
         if let existing = sessions[root.path]?.value { return existing }
         let session = VaultSession(root: root)
         sessions[root.path] = WeakSession(session)
-        UserDefaults.standard.set(root.path, forKey: CaptureVaultPreference.defaultsKey)
+        HeftDefaults.shared.set(root.path, forKey: CaptureVaultPreference.defaultsKey)
         return session
     }
 
@@ -184,7 +184,7 @@ final class VaultRegistry: ObservableObject {
         let updated = RecentVaults.recording(path, in: recentVaultPaths)
         guard updated != recentVaultPaths else { return }
         recentVaultPaths = updated
-        UserDefaults.standard.set(updated, forKey: Self.recentVaultsKey)
+        HeftDefaults.shared.set(updated, forKey: Self.recentVaultsKey)
     }
 
     func activeSession(containing url: URL) -> VaultSession? {

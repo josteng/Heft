@@ -14,11 +14,11 @@ final class PDFExportSettings: ObservableObject {
     private static let key = "dev.stenglein.Heft.export.pdf"
 
     private init() {
-        options = PDFExportOptions(decoding: UserDefaults.standard.data(forKey: Self.key))
+        options = PDFExportOptions(decoding: HeftDefaults.shared.data(forKey: Self.key))
     }
 
     private func persist() {
-        UserDefaults.standard.set(options.encoded, forKey: Self.key)
+        HeftDefaults.shared.set(options.encoded, forKey: Self.key)
     }
 }
 

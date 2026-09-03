@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import HeftCore
 
 /// User-chosen colours for the caret and checkboxes (accent), links, inline
 /// code, and the two colourful-formatting hues (bold, italic). App-wide
@@ -63,7 +64,7 @@ final class AppearanceSettings: ObservableObject {
     /// repaints every open window immediately.
     @Published var colorfulFormattingEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(colorfulFormattingEnabled, forKey: Self.colorfulFormattingKey)
+            HeftDefaults.shared.set(colorfulFormattingEnabled, forKey: Self.colorfulFormattingKey)
         }
     }
 
@@ -102,13 +103,13 @@ final class AppearanceSettings: ObservableObject {
         customBoldColor = Self.load(Self.boldKey)
         customItalicColor = Self.load(Self.italicKey)
         customHeadingColors = (0..<6).map { Self.load(Self.headingKey($0)) }
-        colorfulFormattingEnabled = UserDefaults.standard.object(forKey: Self.colorfulFormattingKey) == nil
+        colorfulFormattingEnabled = HeftDefaults.shared.object(forKey: Self.colorfulFormattingKey) == nil
             ? true
-            : UserDefaults.standard.bool(forKey: Self.colorfulFormattingKey)
+            : HeftDefaults.shared.bool(forKey: Self.colorfulFormattingKey)
     }
 
     private static func load(_ key: String) -> NSColor? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        guard let data = HeftDefaults.shared.data(forKey: key) else { return nil }
         return try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: data)
     }
 
@@ -118,10 +119,10 @@ final class AppearanceSettings: ObservableObject {
                 withRootObject: color, requiringSecureCoding: true
               )
         else {
-            UserDefaults.standard.removeObject(forKey: key)
+            HeftDefaults.shared.removeObject(forKey: key)
             return
         }
-        UserDefaults.standard.set(data, forKey: key)
+        HeftDefaults.shared.set(data, forKey: key)
     }
 }
 

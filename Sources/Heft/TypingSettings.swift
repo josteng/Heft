@@ -11,7 +11,7 @@ final class TypingSettings: ObservableObject {
     static let shared = TypingSettings()
 
     @Published var substitutionsEnabled: Bool {
-        didSet { UserDefaults.standard.set(substitutionsEnabled, forKey: Self.enabledKey) }
+        didSet { HeftDefaults.shared.set(substitutionsEnabled, forKey: Self.enabledKey) }
     }
 
     /// Persisted as the *disabled* set, not the enabled one.
@@ -30,7 +30,7 @@ final class TypingSettings: ObservableObject {
     @Published var customRules: [CustomSubstitution] {
         didSet {
             guard let data = try? JSONEncoder().encode(customRules) else { return }
-            UserDefaults.standard.set(data, forKey: Self.customKey)
+            HeftDefaults.shared.set(data, forKey: Self.customKey)
         }
     }
 
@@ -80,11 +80,11 @@ final class TypingSettings: ObservableObject {
 
     private static func persist(_ groups: Set<SmartTypographyGroup>) {
         let disabled = Set(SmartTypographyGroup.allCases).subtracting(groups)
-        UserDefaults.standard.set(disabled.map(\.rawValue).sorted(), forKey: disabledGroupsKey)
+        HeftDefaults.shared.set(disabled.map(\.rawValue).sorted(), forKey: disabledGroupsKey)
     }
 
     private init() {
-        let defaults = UserDefaults.standard
+        let defaults = HeftDefaults.shared
         substitutionsEnabled = defaults.object(forKey: Self.enabledKey) == nil
             ? true
             : defaults.bool(forKey: Self.enabledKey)

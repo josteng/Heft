@@ -6,7 +6,7 @@ public enum CaptureVaultPreference {
     public static let defaultsKey = "dev.stenglein.Heft.vaultPath"
 
     public static var url: URL? {
-        guard let path = UserDefaults.standard.string(forKey: defaultsKey) else { return nil }
+        guard let path = HeftDefaults.shared.string(forKey: defaultsKey) else { return nil }
         let url = URL(fileURLWithPath: path).standardizedFileURL
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }

@@ -2292,3 +2292,78 @@ struct FrecencyStoreSeparationTests {
         #expect(FrecencyStore.notes(forVaultAt: vault).score("note.md") > 0)
     }
 }
+
+@Suite("Sandboxed preferences")
+struct HeftDefaultsTests {
+
+    /// The isolation cannot be half-applied. One setting still reaching
+    /// `UserDefaults.standard` is enough to lose the property, and the one
+    /// that matters most is `vaultPath`: a test launch that rewrites it aims
+    /// Spotlight capture at a folder about to be deleted.
+    @Test("Nothing reaches UserDefaults.standard directly")
+    func everySettingGoesThroughTheAccessor() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        var offenders: [String] = []
+        for directory in ["Sources/Heft", "Sources/HeftCore", "Sources/Heft/Views"] {
+            let url = root.appendingPathComponent(directory)
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+            for name in names where name.hasSuffix(".swift") {
+                // The accessor itself is the one place allowed to say it.
+                guard name != "HeftDefaults.swift" else { continue }
+                let text = (try? String(contentsOf: url.appendingPathComponent(name), encoding: .utf8)) ?? ""
+                if text.contains("UserDefaults.standard") {
+                    offenders.append("\(directory)/\(name)")
+                }
+            }
+        }
+        #expect(offenders.isEmpty, "still using UserDefaults.standard: \(offenders.joined(separator: ", "))")
+    }
+
+    @Test("An empty or absent suite falls back to the real store")
+    func fallsBackWithoutASuite() {
+        // The environment is not set in the test process, so this is the
+        // default path: sandboxing must be opt-in, never accidental.
+        #expect(!HeftDefaults.isSandboxed)
+        #expect(HeftDefaults.shared == UserDefaults.standard)
+    }
+}
+
+@Suite("Offscreen view rendering")
+@MainActor
+struct OffscreenRenderTests {
+
+    @Test("A settings view renders to an image offscreen")
+    func rendersAccessory() throws {
+        let renderer = ImageRenderer(content: PDFExportAccessory().frame(width: 460, height: 190))
+        renderer.scale = 2
+        let image = try #require(renderer.nsImage, "ImageRenderer produced nothing")
+        #expect(image.size.width > 100 && image.size.height > 50, "got \(image.size)")
+
+        // Not a blank canvas: something was actually drawn.
+        let data = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: data))
+        var inked = 0
+        for x in stride(from: 0, to: rep.pixelsWide, by: 3) {
+            for y in stride(from: 0, to: rep.pixelsHigh, by: 3) {
+                guard let pixel = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if pixel.alphaComponent > 0.1 && pixel.brightnessComponent < 0.75 { inked += 1 }
+            }
+        }
+        #expect(inked > 50, "the render looks blank (\(inked) dark samples)")
+
+        // Written out so it can be looked at when something is wrong.
+        _ = inked
+        if let directory = ProcessInfo.processInfo.environment["HEFT_SNAPSHOT_DIR"] {
+            let url = URL(fileURLWithPath: directory)
+                .appendingPathComponent("PDFExportAccessory.png")
+            if let png = NSBitmapImageRep(data: data)?
+                .representation(using: .png, properties: [:]) {
+                try? png.write(to: url)
+            }
+        }
+    }
+}

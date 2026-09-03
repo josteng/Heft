@@ -1,5 +1,6 @@
 import HeftVimCore
 import SwiftUI
+import HeftCore
 
 @MainActor
 final class VimSettings: ObservableObject {
@@ -9,14 +10,14 @@ final class VimSettings: ObservableObject {
         didSet {
             guard !isApplyingVaultDefault else { return }
             followsVaultDefault = false
-            UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
+            HeftDefaults.shared.set(isEnabled, forKey: Self.enabledKey)
         }
     }
     @Published private(set) var mode: VimMode = .normal
     @Published private(set) var message: String?
     @Published var continuesMarkdownStructure: Bool {
         didSet {
-            UserDefaults.standard.set(
+            HeftDefaults.shared.set(
                 continuesMarkdownStructure,
                 forKey: Self.continuesMarkdownStructureKey
             )
@@ -24,7 +25,7 @@ final class VimSettings: ObservableObject {
     }
     @Published var matchesTypographicQuotes: Bool {
         didSet {
-            UserDefaults.standard.set(
+            HeftDefaults.shared.set(
                 matchesTypographicQuotes,
                 forKey: Self.matchesTypographicQuotesKey
             )
@@ -40,7 +41,7 @@ final class VimSettings: ObservableObject {
     private(set) var followsVaultDefault: Bool
 
     private init() {
-        let defaults = UserDefaults.standard
+        let defaults = HeftDefaults.shared
         followsVaultDefault = defaults.object(forKey: Self.enabledKey) == nil
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         continuesMarkdownStructure = defaults.object(

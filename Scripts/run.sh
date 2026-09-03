@@ -19,6 +19,20 @@ if [[ "${1:-}" == "--release" ]]; then
     shift
 fi
 
+# `--sandbox` isolates the app's preferences into their own suite, so a test
+# launch cannot touch the installed app's settings. Without it, opening a
+# throwaway vault rewrites `vaultPath` — where Spotlight capture files things —
+# and pushes a temporary folder into Open Recent.
+SANDBOX=0
+FRESH=0
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --sandbox) SANDBOX=1; shift ;;
+        --fresh)   SANDBOX=1; FRESH=1; shift ;;
+        *) echo "unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
 VAULT="${1:-}"
 NOTE="${2:-}"
 
@@ -55,13 +69,41 @@ if [[ -n "$VAULT" ]]; then
 fi
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then
+    # Launched as a bare process rather than through `open`, because LaunchServices
+    # does not forward the environment and the whole point of the sandbox is one
+    # environment variable. App Intents are not registered this way, which is fine:
+    # the sandbox exists to look at the window.
+    launch_sandboxed() {
+        local suite="dev.stenglein.Heft.sandbox"
+        if [[ "$FRESH" == "1" ]]; then
+            defaults delete "$suite" 2>/dev/null || true
+            echo "Sandbox preferences cleared."
+        fi
+        echo "Launching sandboxed (preferences in $suite; your real settings untouched)."
+        # Detached, with its streams closed. A backgrounded GUI app inherits
+        # stdout and stderr and holds them open for as long as it runs, so a
+        # caller reading this script's output — a terminal pipeline, a script,
+        # an agent's shell — waits for the app to quit rather than returning.
+        HEFT_DEFAULTS_SUITE="$suite" nohup "$APP/Contents/MacOS/Heft" "$@" \
+            >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+    }
+
     # Passing the app bundle itself opens this exact build. `open -a "$APP"`
     # lets Launch Services resolve by bundle identity and may silently reuse an
     # older /Applications/Heft.app, which makes a freshly built feature appear
     # to be missing.
-    open "$APP" --args "${ARGS[@]}"
+    if [[ "$SANDBOX" == "1" ]]; then
+        launch_sandboxed "${ARGS[@]}"
+    else
+        open "$APP" --args "${ARGS[@]}"
+    fi
 else
-    open "$APP"
+    if [[ "$SANDBOX" == "1" ]]; then
+        launch_sandboxed
+    else
+        open "$APP"
+    fi
 fi
 
 echo "Launched Heft (${CONFIG})${VAULT:+ on $VAULT}"
