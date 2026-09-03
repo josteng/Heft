@@ -809,6 +809,17 @@ enum LiveStyler {
                 level >= 2 ? .boldFontMask : .italicFontMask,
                 to: storage, range: range, base: base
             )
+            // The same colour the finished span gets. Styling the weight but
+            // not the colour made a span change appearance twice — once as it
+            // opened and again as it closed — which reads as a glitch rather
+            // than as the span being completed.
+            if context.colorfulFormatting {
+                storage.addAttribute(
+                    .foregroundColor,
+                    value: level >= 2 ? context.boldColor : context.italicColor,
+                    range: range
+                )
+            }
 
         case .footnoteReference:
             // Raised and small, the way a footnote marker has looked in print

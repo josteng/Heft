@@ -59,7 +59,10 @@ enum HeftMain {
         // without a window. The GUI's Export as PDF goes through exactly this,
         // so what a script produces is what the menu item produces.
         if arguments.first == "export", arguments.count > 3 {
-            runExport(vaultPath: arguments[1], note: arguments[2], output: arguments[3])
+            runExport(
+                vaultPath: arguments[1], note: arguments[2], output: arguments[3],
+                flags: Array(arguments.dropFirst(4))
+            )
             return
         }
         if arguments.first == "files", arguments.count > 1 {
@@ -140,7 +143,53 @@ enum HeftMain {
     /// Read-only report over a vault. Exists so indexing and link resolution
     /// can be checked against a real vault without launching the editor, which
     /// autosaves and would risk writing to notes that matter.
-    private static func runExport(vaultPath: String, note: String, output: String) {
+    /// `--text-size N` (points on the page), `--paper a4|letter|legal|tabloid`,
+    /// `--landscape`, `--margin narrow|normal|wide`, `--title`.
+    ///
+    /// `--scale N` is kept as a percentage of the editor's own size, which is
+    /// what this took before the setting became absolute.
+    private static func exportOptions(_ flags: [String]) -> PDFExportOptions {
+        var options = PDFExportOptions()
+        var index = 0
+        while index < flags.count {
+            let flag = flags[index]
+            let value = index + 1 < flags.count ? flags[index + 1] : nil
+            switch flag {
+            case "--text-size":
+                if let value, let points = Double(value) {
+                    options.bodyPointSize = points
+                    index += 1
+                }
+            case "--scale":
+                if let value, let percent = Double(value) {
+                    options.bodyPointSize = percent / 100 * Double(Theme.bodySize)
+                    index += 1
+                }
+            case "--paper":
+                if let value, let paper = PDFExportOptions.Paper(rawValue: value.lowercased()) {
+                    options.paper = paper
+                    index += 1
+                }
+            case "--margin":
+                if let value, let margin = PDFExportOptions.Margin(rawValue: value.lowercased()) {
+                    options.margin = margin
+                    index += 1
+                }
+            case "--landscape":
+                options.isLandscape = true
+            case "--title":
+                options.includesTitle = true
+            default:
+                FileHandle.standardError.write(Data("ignoring \(flag)\n".utf8))
+            }
+            index += 1
+        }
+        return options
+    }
+
+    private static func runExport(
+        vaultPath: String, note: String, output: String, flags: [String] = []
+    ) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
         let index = VaultIndex.build(root: VaultScanner.scan(root: root))
         guard let ref = index.notes.first(where: {
@@ -155,8 +204,12 @@ enum HeftMain {
             fileURLWithPath: (output as NSString).expandingTildeInPath
         ).standardizedFileURL
 
+        let options = exportOptions(flags)
         let wrote = MainActor.assumeIsolated {
-            PDFExport.write(text: source, context: context, to: destination)
+            PDFExport.write(
+                text: source, context: context, to: destination,
+                title: ref.name, options: options
+            )
         }
         guard wrote else {
             FileHandle.standardError.write(Data("could not write \(destination.path)\n".utf8))

@@ -1206,6 +1206,14 @@ final class AppModel: ObservableObject {
         // better guess than wherever a save panel was last pointed.
         panel.directoryURL = current.url.deletingLastPathComponent()
 
+        // The options ride inside the save panel rather than in a sheet of
+        // their own: where the file goes and what it looks like are one
+        // decision, and asking twice for one export is a step too many.
+        let accessory = NSHostingView(rootView: PDFExportAccessory())
+        accessory.frame = NSRect(x: 0, y: 0, width: 460, height: 190)
+        panel.accessoryView = accessory
+        panel.isExtensionHidden = false
+
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
         // Pending edits first: exporting a note that is 700ms out of date
@@ -1226,7 +1234,11 @@ final class AppModel: ObservableObject {
             headingColors: (1...6).map { appearance.headingColor($0) }
         )
 
-        if PDFExport.write(text: text, context: context, to: destination) {
+        let title = (current.url.lastPathComponent as NSString).deletingPathExtension
+        if PDFExport.write(
+            text: text, context: context, to: destination,
+            title: title, options: PDFExportSettings.shared.options
+        ) {
             status = "Exported \(destination.lastPathComponent)"
         } else {
             status = "Could not export \(destination.lastPathComponent)"

@@ -146,6 +146,11 @@ changed, rather than re-attributing the whole note twice per character.
 - **Export as PDF** (⇧⌘E) of the *rendered* note — tables, callouts, bullets,
   checkboxes and typeset LaTeX, not the Markdown source. It prints the live
   surface itself rather than a second renderer, so the page matches the editor.
+  Page size, orientation, margin, text size and whether to add the note's name
+  are chosen **in the save panel**, and remembered. Text size is set in
+  **points on the page** — 12pt by default, against an editor that draws at 15
+  — so it means the same thing on any display. The editor's type is sized to
+  be read at arm's length; a book sets its body around 10pt.
 - **Multiple windows** over the same or different vaults, with an optional
   folder-focused view that scopes the tree, search and quick open without
   turning that folder into a second vault.
@@ -168,6 +173,8 @@ heft stats <vault>              # read-only index report
 heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
 heft render <vault> <note>      # what the live surface would draw, headless
 heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
+    # --text-size 12  --paper a4|letter|legal|tabloid
+    # --landscape --margin narrow|normal|wide --title
 ```
 
 `stats` and `render` are read-only and safe against a real vault.

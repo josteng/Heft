@@ -70,7 +70,7 @@ cat > "$CLI_DIR/heft" <<EOF
 # for a folder called "find".
 BIN="$TARGET/Contents/MacOS/Heft"
 case "\${1:-}" in
-    open|agent-setup|stats|daily|render|files|find|read|propose|proposals|diff|drop)
+    open|agent-setup|stats|daily|render|export|files|find|read|propose|proposals|diff|drop)
         exec "\$BIN" "\$@" ;;
     *)
         exec "\$BIN" open "\$@" ;;

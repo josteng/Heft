@@ -15,6 +15,7 @@ swift run Heft render <vault> <note> [caret]    # what the live surface would dr
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
 swift run Heft proposals <vault>                # agent edits waiting for review
 swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headless
+    # --text-size N --paper a4|letter|legal|tabloid --landscape --margin narrow|normal|wide --title
 ```
 
 ## Architecture
@@ -399,6 +400,29 @@ depends on changes.
   does not.** So a block drawn across several paragraphs gets its top padding
   for free and has to paint its bottom padding into the reserved gap below,
   extending `renderingSurfaceBounds` to match.
+- **Exporting at the editor's own size is too big for paper.** The type is
+  chosen to be read on a display at arm's length; a book sets its body around
+  10pt. The same note came out four pages where Obsidian took three. The fix
+  is `NSPrintInfo.scalingFactor` plus a proportionally *wider* view, so every
+  relationship survives the shrink — fonts, widgets, tables, line spacing —
+  where restyling at a smaller font would not.
+- **The export size is stored in points, not as a percentage.** It was a
+  percentage of `Theme.bodySize` first, and that is the same number but the
+  wrong idea: it reads as though it might depend on the display (it never
+  did — a print point is 1/72 inch), and it would have silently changed
+  meaning the day the editor gained a font-size setting.
+  `scale(forEditorBodySize:)` takes the editor's size as an argument rather
+  than reading the constant, so 12pt on paper stays 12pt whatever the editor
+  does. A test measures the finished PDF to prove it.
+- **Print pagination will invent blank pages, in two different ways.**
+  `horizontalPagination = .automatic` splits a view a fraction of a point too
+  wide into two page-columns, giving content/blank/content/blank; `.clip` is
+  right, because the width is chosen deliberately and there is nothing to
+  decide. And the vertical arithmetic can still land one page past the last
+  line whatever the view's height, so the finished PDF is checked and a wholly
+  empty trailing page removed. Emptiness is decided by **rasterising**: half of
+  what this editor draws is painted by a layout fragment and is not in the text
+  layer, so a page holding only a table reports no string.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
 - **Launching the GUI at a sandbox vault repoints Spotlight capture at it.**

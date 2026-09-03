@@ -1557,6 +1557,38 @@ struct PendingEmphasisTests {
         #expect((font?.pointSize ?? 0) > 1, "the open `**` was collapsed")
     }
 
+    /// The finished span is coloured as well as weighted, so styling only the
+    /// weight while typing made a span change appearance twice — once as it
+    /// opened and again as it closed — which reads as a glitch rather than as
+    /// the span being completed.
+    @Test("Emphasis being typed takes the same colour as a finished span")
+    func coloursWhileTyping() {
+        func colour(_ source: String, at offset: Int) -> NSColor? {
+            let storage = NSTextStorage(string: source)
+            var context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+            context.colorfulFormatting = true
+            _ = LiveStyler.apply(
+                to: storage,
+                reveal: Reveal(
+                    selection: NSRange(location: source.count, length: 0), in: source as NSString
+                ),
+                context: context,
+                contentWidth: 600
+            )
+            return storage.attribute(.foregroundColor, at: offset, effectiveRange: nil) as? NSColor
+        }
+
+        let open = "Typing **bold now"
+        let closed = "Typing **bold now**"
+        let offset = (open as NSString).range(of: "bold now").location
+        #expect(colour(open, at: offset) == colour(closed, at: offset))
+        #expect(colour(open, at: offset) == AppearanceSettings.defaultBoldColor)
+
+        let openItalic = "Typing *slanted now"
+        let italicOffset = (openItalic as NSString).range(of: "slanted now").location
+        #expect(colour(openItalic, at: italicOffset) == AppearanceSettings.defaultItalicColor)
+    }
+
     @Test("Things that are not emphasis are left alone")
     func notEmphasis() {
         // A space after the delimiter means it cannot open.
@@ -1576,5 +1608,423 @@ struct PendingEmphasisTests {
         #expect(!traits(source, caret: source.count, at: after).bold)
         let inside = (source as NSString).range(of: "bold").location
         #expect(traits(source, caret: source.count, at: inside).bold)
+    }
+}
+
+@Suite("Command line wrapper")
+struct CommandLineWrapperTests {
+
+    /// `Scripts/install.sh` writes a `heft` shell wrapper that forwards a
+    /// known verb and treats anything else as a path to open. That list is a
+    /// second copy of the dispatch, and adding `export` to `Main.swift`
+    /// without adding it there turned `heft export …` into
+    /// `heft open export …` — "no such file or folder: export", from a binary
+    /// that handled the verb perfectly well when called directly.
+    ///
+    /// So the two are compared. The list is deliberately explicit rather than
+    /// inferred, because `heft find …` must not become `open find …`; what it
+    /// must not be is *stale*.
+    @Test("Every dispatched verb is forwarded by the wrapper")
+    func wrapperKnowsEveryVerb() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // HeftTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // package root
+
+        func source(_ path: String) throws -> String {
+            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        }
+
+        func matches(_ pattern: String, in text: String) -> [String] {
+            let regex = try? NSRegularExpression(pattern: pattern)
+            let full = NSRange(text.startIndex..., in: text)
+            return (regex?.matches(in: text, range: full) ?? []).compactMap {
+                Range($0.range(at: 1), in: text).map { range in String(text[range]) }
+            }
+        }
+
+        let main = try source("Sources/Heft/Main.swift")
+        let agent = try source("Sources/Heft/AgentCLI.swift")
+        let script = try source("Scripts/install.sh")
+
+        var verbs = Set(matches(#"arguments\.first == "([a-z-]+)""#, in: main))
+        // AgentCLI's own switch, which handles the proposal verbs.
+        verbs.formUnion(matches(#"case "([a-z-]+)": \w+\(root:"#, in: agent))
+        #expect(verbs.count >= 10, "found only \(verbs.sorted()), the scrape is wrong")
+        #expect(verbs.contains("export"))
+        #expect(verbs.contains("stats"))
+
+        let forwarded = Set(
+            matches(#"\n    (open\|[a-z|-]+)\)"#, in: script)
+                .first?.components(separatedBy: "|") ?? []
+        )
+        #expect(!forwarded.isEmpty, "could not find the wrapper's verb list")
+
+        let missing = verbs.subtracting(forwarded).sorted()
+        #expect(
+            missing.isEmpty,
+            "Scripts/install.sh does not forward: \(missing.joined(separator: ", "))"
+        )
+    }
+}
+
+@Suite("Quoted block conformance")
+struct QuotedBlockConformanceTests {
+
+    /// Is a list inside a quote actually Markdown, or an invention?
+    ///
+    /// Settled against cmark-gfm, which Heft already bundles through
+    /// swift-markdown and which is the same parser GitHub renders with. If it
+    /// reports a list nested in a block quote, then `> - item` is a list by
+    /// the CommonMark spec and the live surface drawing it as one is
+    /// conformance, not an extension.
+    @Test("cmark-gfm parses a quoted list as a list")
+    func gfmAgrees() throws {
+        let (_, blocks) = MarkdownModel.parse("> - one\n> - two\n")
+        guard case .quote(_, _, let inner) = try #require(blocks.first) else {
+            Issue.record("`> - one` did not parse as a block quote")
+            return
+        }
+        guard case .list(let ordered, _, let items) = try #require(inner.first) else {
+            Issue.record("the quote's content was not a list: \(inner)")
+            return
+        }
+        #expect(!ordered)
+        #expect(items.count == 2)
+    }
+
+    @Test("cmark-gfm parses a quoted heading as a heading")
+    func gfmAgreesOnHeadings() throws {
+        let (_, blocks) = MarkdownModel.parse("> ## A heading\n")
+        guard case .quote(_, _, let inner) = try #require(blocks.first) else {
+            Issue.record("`> ## A heading` did not parse as a block quote")
+            return
+        }
+        guard case .heading(let level, _, _) = try #require(inner.first) else {
+            Issue.record("the quote's content was not a heading: \(inner)")
+            return
+        }
+        #expect(level == 2)
+    }
+
+    /// The live surface and the block parser must agree about the same text.
+    /// Before this, `> - item` was a list to `MarkdownModel` (so the
+    /// presentation view drew a bullet) and quoted prose to `LiveDecorator`
+    /// (so the editor did not) — the same note, two answers.
+    @Test("The live surface agrees with the block parser")
+    func surfaceAgreesWithParser() {
+        let source = "> - one\n> - two\n"
+        let quoted = LiveDecorator.decorations(in: source).compactMap { decoration -> QuotedBlock? in
+            guard case .quoteLine(let quote) = decoration.style else { return nil }
+            return quote.nested
+        }
+        #expect(quoted.count == 2, "the live surface found \(quoted.count) quoted lists")
+    }
+}
+
+@Suite("Menu anchors")
+struct MenuAnchorTests {
+
+    /// A `CommandGroup(after: X)` whose anchor `X` is also *replaced*
+    /// elsewhere in the same `Commands` body hangs from nothing: the item
+    /// lands in no menu, and a menu item that is not in a menu has no working
+    /// key equivalent. Export as PDF was attached `after: .saveItem` while
+    /// `.saveItem` was replaced twenty lines further down, which presented as
+    /// "⇧⌘E does nothing" and looked for all the world like a reserved system
+    /// shortcut.
+    ///
+    /// Read from the source because the failure is a placement one: it
+    /// compiles, it runs, and the only symptom is a menu item that is not
+    /// there.
+    @Test("No command group anchors on a placement that is replaced")
+    func noAnchorOnAReplacedGroup() throws {
+        let file = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/Heft/HeftApp.swift")
+        let source = try String(contentsOf: file, encoding: .utf8)
+
+        func placements(_ verb: String) -> Set<String> {
+            let pattern = #"CommandGroup\(\#(verb): \.([A-Za-z]+)\)"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+            let full = NSRange(source.startIndex..., in: source)
+            return Set(regex.matches(in: source, range: full).compactMap {
+                Range($0.range(at: 1), in: source).map { String(source[$0]) }
+            })
+        }
+
+        let replaced = placements("replacing")
+        let anchored = placements("after").union(placements("before"))
+        #expect(!replaced.isEmpty, "the scrape found no replaced groups")
+        #expect(!anchored.isEmpty, "the scrape found no anchored groups")
+
+        let broken = anchored.intersection(replaced).sorted()
+        #expect(
+            broken.isEmpty,
+            "anchored on a replaced group: \(broken.joined(separator: ", "))"
+        )
+    }
+}
+
+@Suite("PDF export options")
+@MainActor
+struct PDFExportOptionsTests {
+
+    private func export(
+        _ text: String, _ options: PDFExportOptions, title: String? = nil
+    ) throws -> PDFDocument {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-opts-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("out.pdf")
+        #expect(PDFExport.write(
+            text: text, context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            to: url, title: title, options: options
+        ))
+        let document = try #require(PDFDocument(url: url))
+        try? FileManager.default.removeItem(at: directory)
+        return document
+    }
+
+    private static let note = (1...90)
+        .map { "## Section \($0)\n\nA paragraph of body text that is long enough to wrap." }
+        .joined(separator: "\n\n")
+
+    /// The whole point of the feature. The editor's type is sized to be read
+    /// on a display at arm's length; printed at that size the same note ran to
+    /// four pages where Obsidian took three.
+    @Test("Text size changes how much fits on a page")
+    func sizeChangesDensity() throws {
+        let small = try export(Self.note, PDFExportOptions(bodyPointSize: 9)).pageCount
+        let medium = try export(Self.note, PDFExportOptions(bodyPointSize: 12)).pageCount
+        let full = try export(Self.note, PDFExportOptions(bodyPointSize: 15)).pageCount
+        #expect(small < medium, "9pt took \(small) pages, 12pt took \(medium)")
+        #expect(medium < full, "12pt took \(medium) pages, 15pt took \(full)")
+    }
+
+    /// The editor draws body text at 15, which is chosen to be read on a
+    /// display; paper wants around 10-12.
+    @Test("The default is smaller than the editor's own size")
+    func defaultIsDownscaled() {
+        #expect(PDFExportOptions().bodyPointSize == 12)
+        #expect(PDFExportOptions().scale(forEditorBodySize: 15) == 0.8)
+        #expect(PDFExportOptions(bodyPointSize: 15).scale(forEditorBodySize: 15) == 1)
+    }
+
+    /// The printed size is asked for in absolute points, so it must not move
+    /// when the editor's own size does. That is the whole reason it is no
+    /// longer stored as a percentage of it.
+    @Test("The printed size does not follow the editor's size")
+    func sizeIsAbsolute() {
+        let options = PDFExportOptions(bodyPointSize: 12)
+        for editorSize in [12.0, 15.0, 20.0, 30.0] {
+            let printed = options.scale(forEditorBodySize: editorSize) * editorSize
+            #expect(abs(printed - 12) < 0.001, "editor at \(editorSize) printed \(printed)")
+        }
+        // And a nonsense editor size cannot produce a nonsense scale.
+        #expect(options.scale(forEditorBodySize: 0) == 1)
+    }
+
+    @Test("A size outside the range is clamped, not obeyed")
+    func sizeIsClamped() {
+        #expect(
+            PDFExportOptions(bodyPointSize: 1).bodyPointSize
+                == PDFExportOptions.bodySizeRange.lowerBound
+        )
+        #expect(
+            PDFExportOptions(bodyPointSize: 900).bodyPointSize
+                == PDFExportOptions.bodySizeRange.upperBound
+        )
+    }
+
+    /// Measured off the finished page, not inferred.
+    ///
+    /// A point is 1/72 inch and the print system works in them, so this is the
+    /// same on any display: what is asserted is that asking for N points puts
+    /// N points on the paper.
+    @Test("The text on the page really is the size that was asked for")
+    func printedSizeIsMeasured() throws {
+        func height(_ points: Double) throws -> CGFloat {
+            let document = try export(
+                "Hedgehog paragraph.", PDFExportOptions(bodyPointSize: points)
+            )
+            let selection = try #require(
+                document.findString("Hedgehog", withOptions: [.literal]).first
+            )
+            let page = try #require(selection.pages.first)
+            return selection.bounds(for: page).height
+        }
+
+        let small = try height(8)
+        let medium = try height(12)
+        let large = try height(16)
+
+        // Linear in the requested size.
+        #expect(abs(medium / small - 1.5) < 0.05, "8pt gave \(small), 12pt gave \(medium)")
+        #expect(abs(large / small - 2.0) < 0.05, "8pt gave \(small), 16pt gave \(large)")
+
+        // And the right magnitude: a line box is a little taller than the font
+        // it holds, never several times it.
+        for (points, measured) in [(8.0, small), (12.0, medium), (16.0, large)] {
+            let ratio = Double(measured) / points
+            #expect(ratio > 1 && ratio < 1.4, "\(points)pt measured \(measured), ratio \(ratio)")
+        }
+    }
+
+    @Test("Paper size and orientation reach the page")
+    func paperAndOrientation() throws {
+        let short = "One short line."
+        func size(_ options: PDFExportOptions) throws -> CGSize {
+            let page = try #require(try export(short, options).page(at: 0))
+            return page.bounds(for: .mediaBox).size
+        }
+
+        let a4 = try size(PDFExportOptions())
+        #expect(abs(a4.width - 595) <= 1 && abs(a4.height - 842) <= 1, "A4 was \(a4)")
+
+        let letter = try size(PDFExportOptions(paper: .letter))
+        #expect(abs(letter.width - 612) <= 1 && abs(letter.height - 792) <= 1, "Letter was \(letter)")
+
+        let landscape = try size(PDFExportOptions(isLandscape: true))
+        #expect(landscape.width > landscape.height, "landscape was \(landscape)")
+    }
+
+    /// The note's name is not in its body, so an exported note otherwise
+    /// arrives untitled.
+    @Test("The note's name is added only when asked for")
+    func titleIsOptional() throws {
+        let body = "Just the body, no heading.\n"
+        let without = try export(body, PDFExportOptions(), title: "Meeting Notes")
+        let with = try export(body, PDFExportOptions(includesTitle: true), title: "Meeting Notes")
+
+        func text(_ document: PDFDocument) -> String {
+            (0..<document.pageCount).compactMap { document.page(at: $0)?.string }.joined()
+        }
+        #expect(!text(without).contains("Meeting Notes"))
+        #expect(text(with).contains("Meeting Notes"))
+
+        // Nothing is invented when there is no name to add.
+        let unnamed = try export(body, PDFExportOptions(includesTitle: true), title: nil)
+        #expect(text(unnamed).contains("Just the body"))
+    }
+
+    /// Every page carries text.
+    ///
+    /// The view is built to be *exactly* page-width once scaled, so with
+    /// `horizontalPagination = .automatic` a rounding error of a fraction of a
+    /// point made it a hair too wide and AppKit split it into two
+    /// page-columns: the note came out as content, blank page, content, blank
+    /// page. It appeared only at the narrowest margin, where the arithmetic
+    /// lands exactly on the boundary, which is why every margin is checked.
+    @Test("No margin produces blank pages")
+    func noBlankPages() throws {
+        for margin in PDFExportOptions.Margin.allCases {
+            for size in [9.0, 12.0, 15.0] {
+                let document = try export(
+                    Self.note, PDFExportOptions(margin: margin, bodyPointSize: size)
+                )
+                for index in 0..<document.pageCount {
+                    let page = try #require(document.page(at: index))
+                    let ink = (page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    #expect(
+                        !ink.isEmpty,
+                        "page \(index + 1) of \(document.pageCount) is blank at \(margin.label) \(Int(size))pt"
+                    )
+                }
+            }
+        }
+    }
+
+    /// The trim must never eat a real page. A note ending in a table is the
+    /// case that would expose it: a table is *drawn* by a layout fragment, so
+    /// a text-based emptiness test would call its page blank and delete the
+    /// end of the document.
+    @Test("Trailing content is never trimmed away")
+    func keepsTrailingContent() throws {
+        let table = """
+
+
+            | Engine | Throughput |
+            | --- | --- |
+            | SGLang | 112 t/s |
+            | vLLM | 115 t/s |
+            """
+        let note = (1...70).map { "Paragraph \($0) of a note that keeps going." }
+            .joined(separator: "\n\n") + table
+
+        let document = try export(note, PDFExportOptions())
+        let text = (0..<document.pageCount)
+            .compactMap { document.page(at: $0)?.string }.joined()
+        #expect(text.contains("Paragraph 70 of"), "the last paragraph was trimmed away")
+        #expect(text.contains("115 t/s"), "the closing table was trimmed away")
+
+        // And the pages that remain all carry something.
+        for index in 0..<document.pageCount {
+            let page = try #require(document.page(at: index))
+            #expect(!(page.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    /// A wider margin leaves less room for text, so the same note needs more
+    /// pages. Asserted through the output rather than by reading the setting
+    /// back, which would prove only that a number was stored.
+    @Test("Margins reach the page")
+    func marginsApply() throws {
+        let narrow = try export(Self.note, PDFExportOptions(margin: .narrow)).pageCount
+        let wide = try export(Self.note, PDFExportOptions(margin: .wide)).pageCount
+        #expect(narrow < wide, "narrow took \(narrow) pages, wide took \(wide)")
+    }
+}
+
+@Suite("Export settings persistence")
+struct PDFExportSettingsTests {
+
+    /// The panel has to open showing what was last used, or every export is
+    /// five decisions again.
+    @Test("Options survive a round trip")
+    func roundTrip() {
+        let chosen = PDFExportOptions(
+            paper: .legal, isLandscape: true, margin: .wide,
+            bodyPointSize: 9.5, includesTitle: true
+        )
+        #expect(PDFExportOptions(decoding: chosen.encoded) == chosen)
+    }
+
+    /// A settings file from an older version, or a hand-edited one, must not
+    /// stop the export working.
+    @Test("Missing or corrupt settings fall back to the defaults")
+    func survivesBadData() {
+        #expect(PDFExportOptions(decoding: nil) == PDFExportOptions())
+        #expect(PDFExportOptions(decoding: Data("not json".utf8)) == PDFExportOptions())
+        #expect(PDFExportOptions(decoding: Data()) == PDFExportOptions())
+    }
+
+    /// Decoding re-runs the initialiser, so a stale file cannot put an
+    /// out-of-range scale into the print system.
+    @Test("A stored scale outside the range is clamped on the way back in")
+    func clampsOnDecode() throws {
+        var wild = PDFExportOptions()
+        // Encoded by hand, because the initialiser would have clamped it.
+        let json = Data(#"{"paper":"a4","isLandscape":false,"margin":"normal","bodyPointSize":9000,"includesTitle":false}"#.utf8)
+        wild = PDFExportOptions(decoding: json)
+        #expect(wild.bodyPointSize == PDFExportOptions.bodySizeRange.upperBound)
+    }
+
+    /// The store writes what it reads, against the real defaults, and puts
+    /// back whatever was there.
+    @Test("The store actually writes to defaults")
+    func writesToDefaults() {
+        let key = "dev.stenglein.Heft.export.pdf.roundTripProbe"
+        let defaults = UserDefaults.standard
+        let previous = defaults.data(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+
+        let chosen = PDFExportOptions(paper: .tabloid, margin: .narrow, bodyPointSize: 9)
+        defaults.set(chosen.encoded, forKey: key)
+        #expect(PDFExportOptions(decoding: defaults.data(forKey: key)) == chosen)
     }
 }

@@ -20,6 +20,9 @@ struct AppCommandShortcut {
     static let captureInbox = Self(
         key: "i", modifiers: [.command, .shift], display: "⇧⌘I"
     )
+    static let exportPDF = Self(
+        key: "e", modifiers: [.command, .shift], display: "⇧⌘E"
+    )
 }
 
 /// One command owns all of its palette metadata and behaviour. Adding a
@@ -82,6 +85,15 @@ struct AppCommand: Identifiable {
                 let next = model.proposalsForCurrentNote.first ?? model.proposals.first
                 if let next { model.openAndReview(next) }
             }
+        ),
+        Self(
+            id: "exportPDF",
+            title: "Export as PDF…",
+            symbol: "arrow.down.doc",
+            searchTerms: "pdf export print save share render",
+            shortcut: .exportPDF,
+            enabled: { $0.current != nil },
+            action: { $0.exportPDF() }
         ),
         Self(
             id: "startPresentation",

@@ -172,10 +172,27 @@ struct HeftCommands: Commands {
                     : "Set Up Agent Access…"
             ) { model?.setUpAgentAccess() }
                 .disabled(model?.vaultRoot == nil)
-            Divider()
+        }
+        // `.importExport`, not `.saveItem`.
+        //
+        // This is the anchor macOS reserves for exactly this item, and it is
+        // the one anchor here that nothing else touches. Attaching it `after:
+        // .saveItem` looked right and silently did not work: `HeftCommands`
+        // also *replaces* the `.saveItem` group further down, and replacing a
+        // group removes the anchor an `after:` on the same group hangs from.
+        // The item then lands nowhere, and a menu item that is not in a menu
+        // has no working key equivalent — which reads as "the shortcut is
+        // reserved by the system" and is nothing of the kind.
+        CommandGroup(after: .importExport) {
             Button("Export as PDF…") { model?.exportPDF() }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(model?.current == nil)
+                .keyboardShortcut(
+                    AppCommandShortcut.exportPDF.key,
+                    modifiers: AppCommandShortcut.exportPDF.modifiers
+                )
+                // On the model, not on the open note: `exportPDF` already says
+                // "No note to export", and a shortcut that reports why it did
+                // nothing beats one that silently does nothing.
+                .disabled(model == nil)
         }
         CommandGroup(after: .textEditing) {
             Menu("Format") {
