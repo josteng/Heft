@@ -1,18 +1,45 @@
 import AppKit
 import HeftCore
 
+/// One row of a completion menu.
+///
+/// Deliberately not "a note": the same panel now offers callout kinds, and
+/// carrying a `NoteRef` meant the panel could only ever answer one kind of
+/// question. Title, detail and symbol are what a row actually draws.
 struct WikiCompletionItem {
-    let ref: NoteRef
+    let title: String
+    let detail: String
+    let symbol: String
+    /// What accepting this row writes.
     let destination: String
 
-    var symbol: String {
-        switch ref.kind {
+    init(title: String, detail: String, symbol: String, destination: String) {
+        self.title = title
+        self.detail = detail
+        self.symbol = symbol
+        self.destination = destination
+    }
+
+    init(ref: NoteRef, destination: String) {
+        title = ref.name
+        detail = ref.folder
+        symbol = switch ref.kind {
         case .markdown: "doc.text"
         case .image: "photo"
         case .pdf: "doc.richtext"
         case .canvas: "square.on.square.dashed"
         default: "doc"
         }
+        self.destination = destination
+    }
+
+    init(callout: CalloutSuggestion) {
+        title = callout.kind.rawValue
+        // The spelling that was typed, when it was not the canonical name, so
+        // it is clear why `tldr` offered `abstract`.
+        detail = callout.matchedAlias ?? ""
+        symbol = callout.kind.symbol
+        destination = callout.insertion
     }
 }
 
@@ -129,13 +156,13 @@ final class WikiCompletionRow: NSView {
         icon.imageScaling = .scaleProportionallyDown
         addSubview(icon)
 
-        title.stringValue = item.ref.name
+        title.stringValue = item.title
         title.font = .systemFont(ofSize: 13, weight: .medium)
         title.textColor = selected ? .white : .labelColor
         title.lineBreakMode = .byTruncatingTail
         addSubview(title)
 
-        detail.stringValue = item.ref.folder
+        detail.stringValue = item.detail
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = selected ? NSColor.white.withAlphaComponent(0.72) : .tertiaryLabelColor
         detail.alignment = .right
@@ -144,9 +171,9 @@ final class WikiCompletionRow: NSView {
 
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel(item.ref.folder.isEmpty
-            ? item.ref.name
-            : "\(item.ref.name), \(item.ref.folder)")
+        setAccessibilityLabel(item.detail.isEmpty
+            ? item.title
+            : "\(item.title), \(item.detail)")
     }
 
     @available(*, unavailable)

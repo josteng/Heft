@@ -777,6 +777,18 @@ final class HeftTextKit2View: NSTextView {
     var onNeedsRestyle: (() -> Void)?
     private var lastWidth: CGFloat = 0
     private var completionPanel: WikiCompletionPanel?
+    /// What the open menu is completing. `[[` and `> [!` share the panel, and
+    /// accepting a row has to re-detect the same one it was built from.
+    private enum CompletionKind { case wiki, callout }
+    private var completionKind: CompletionKind = .wiki
+
+    /// What the completion menu is currently offering. The panel is a private
+    /// subview and the items behind it are private state, so this is how a
+    /// test asks whether typing `> [!` actually opened anything — the claim
+    /// being made is about the surface, not about the pure detector.
+    var visibleCompletions: [String] {
+        completionIsActive ? completionItems.map(\.title) : []
+    }
     private var completionItems: [WikiCompletionItem] = []
     private var completionSelection = 0
     private var completionIsActive = false
@@ -2118,27 +2130,56 @@ final class HeftTextKit2View: NSTextView {
     }
 
     func updateLinkCompletion(allowStart: Bool) {
-        guard let context = WikiCompletionContext.detect(
-            in: string, selection: selectedRange()
-        ) else {
+        // Two things can be under the caret, and only one at a time: `[[` is a
+        // link and `> [!` is a callout. They go through one panel because they
+        // are the same interaction, and the kind is remembered so accepting a
+        // row knows which context to re-detect.
+        let selection = selectedRange()
+        let query: String
+        if let wiki = WikiCompletionContext.detect(in: string, selection: selection) {
+            completionKind = .wiki
+            query = wiki.query
+        } else if let callout = CalloutCompletionContext.detect(in: string, selection: selection) {
+            completionKind = .callout
+            query = callout.query
+        } else {
             dismissLinkCompletion()
             return
         }
+
         if !completionIsActive {
-            guard allowStart, context.query.isEmpty else { return }
+            // Only ever opens on the empty query — the moment `[[` or `[!` is
+            // finished. Starting later would make the menu appear in the
+            // middle of a word someone is already typing.
+            guard allowStart, query.isEmpty else { return }
             completionIsActive = true
         }
-        if completionQuery != context.query {
-            completionQuery = context.query
+        if completionQuery != query {
+            completionQuery = query
             completionSelection = 0
         }
 
-        let refs = completionIndex.linkSuggestions(
-            matching: context.query, forEmbed: context.isEmbed
-        )
-        completionItems = refs.map {
-            WikiCompletionItem(ref: $0, destination: completionIndex.linkDestination(for: $0))
+        switch completionKind {
+        case .wiki:
+            guard let wiki = WikiCompletionContext.detect(in: string, selection: selection) else {
+                dismissLinkCompletion()
+                return
+            }
+            let refs = completionIndex.linkSuggestions(
+                matching: wiki.query, forEmbed: wiki.isEmbed
+            )
+            completionItems = refs.map {
+                WikiCompletionItem(ref: $0, destination: completionIndex.linkDestination(for: $0))
+            }
+        case .callout:
+            guard let callout = CalloutCompletionContext.detect(in: string, selection: selection)
+            else {
+                dismissLinkCompletion()
+                return
+            }
+            completionItems = callout.suggestions().map(WikiCompletionItem.init(callout:))
         }
+
         completionSelection = min(completionSelection, max(0, completionItems.count - 1))
         guard !completionItems.isEmpty, let anchor = completionAnchor() else {
             completionPanel?.dismiss()
@@ -2174,10 +2215,21 @@ final class HeftTextKit2View: NSTextView {
 
     @discardableResult
     private func acceptLinkCompletion(at index: Int) -> Bool {
-        guard completionIsActive, completionItems.indices.contains(index),
-              let context = WikiCompletionContext.detect(in: string, selection: selectedRange())
-        else { return false }
-        let edit = context.accepting(completionItems[index].destination)
+        guard completionIsActive, completionItems.indices.contains(index) else { return false }
+        let destination = completionItems[index].destination
+        let edit: MarkdownEditing.Edit
+        switch completionKind {
+        case .wiki:
+            guard let context = WikiCompletionContext.detect(
+                in: string, selection: selectedRange()
+            ) else { return false }
+            edit = context.accepting(destination)
+        case .callout:
+            guard let context = CalloutCompletionContext.detect(
+                in: string, selection: selectedRange()
+            ) else { return false }
+            edit = context.accepting(destination)
+        }
         completionIsActive = false
         completionPanel?.dismiss()
         guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return true }
@@ -2189,6 +2241,7 @@ final class HeftTextKit2View: NSTextView {
 
     private func dismissLinkCompletion() {
         completionIsActive = false
+        completionKind = .wiki
         completionItems = []
         completionSelection = 0
         completionQuery = ""

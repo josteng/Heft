@@ -37,7 +37,7 @@ public struct MDListItem: Sendable {
 public enum MDColumnAlignment: Sendable, Hashable { case leading, center, trailing }
 
 /// Obsidian callouts: `> [!note] Title`.
-public enum CalloutKind: String, Sendable {
+public enum CalloutKind: String, Sendable, CaseIterable {
     case note, abstract, info, todo, tip, success, question, warning
     case failure, danger, bug, example, quote
 
@@ -57,6 +57,23 @@ public enum CalloutKind: String, Sendable {
         case "example": .example
         case "quote", "cite": .quote
         default: nil
+        }
+    }
+
+    /// The other spellings Obsidian accepts for this kind. Offered by
+    /// completion so typing `tldr` or `caution` finds the callout it means,
+    /// rather than only the one canonical name.
+    public var aliases: [String] {
+        switch self {
+        case .abstract: ["summary", "tldr"]
+        case .tip: ["hint", "important"]
+        case .success: ["check", "done"]
+        case .question: ["help", "faq"]
+        case .warning: ["caution", "attention"]
+        case .failure: ["fail", "missing"]
+        case .danger: ["error"]
+        case .quote: ["cite"]
+        default: []
         }
     }
 

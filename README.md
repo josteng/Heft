@@ -106,6 +106,9 @@ when the caret is anywhere on its line, while inline spans (`**bold**`,
 - **Wikilinks** — `[[note]]`, `[[note|alias]]`, `[[note#heading]]`,
   `[[note#^block]]`, embeds `![[image.png|400]]`. Typing `[[` opens filename
   completion. Unresolved links render dimmed and create the note when clicked.
+- **Callout completion** — typing `> [!` lists the thirteen kinds with their
+  icons, and finds one by any of its Obsidian spellings (`tldr` offers
+  `abstract`). Accepting writes the canonical name and the closing `] `.
 - **Typing substitutions** — `->` becomes `→`, `--` an en dash, quotes curl, as
   you type; backspace immediately after puts back what you typed. Eight groups,
   each switchable, plus your own `trigger → replacement` table with date/time

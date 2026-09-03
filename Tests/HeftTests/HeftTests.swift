@@ -992,3 +992,148 @@ struct AttachmentFolderTests {
         )
     }
 }
+
+@Suite("Callout completion")
+struct CalloutCompletionTests {
+
+    private func detect(_ source: String) -> CalloutCompletionContext? {
+        // `|` marks the caret and is removed before detection.
+        let caret = (source as NSString).range(of: "|")
+        let text = source.replacingOccurrences(of: "|", with: "")
+        return CalloutCompletionContext.detect(
+            in: text, selection: NSRange(location: caret.location, length: 0)
+        )
+    }
+
+    @Test("A callout being typed is detected, and only there")
+    func detection() throws {
+        #expect(detect("> [!|")?.query == "")
+        #expect(detect("> [!war|")?.query == "war")
+        #expect(detect("> [!war|]")?.query == "war")
+        #expect(detect(">[!war|")?.query == "war", "the space after > is optional")
+        #expect(detect(">> [!war|")?.query == "war", "nested quotes still open callouts")
+        #expect(detect("  > [!war|")?.query == "war", "so does an indented quote")
+
+        // Not a quote at all.
+        #expect(detect("[!war|") == nil)
+        #expect(detect("some text [!war|") == nil)
+        // `[!kind]` is only read on the line that opens the quote; on a body
+        // line it is literal text, so completing there would be a trap.
+        #expect(detect("> first line\n> [!war|") == nil)
+        // The caret has to be in what is being typed.
+        #expect(detect("> [!warning] and a title|") == nil)
+        #expect(detect("|> [!warning]") == nil)
+        // Something has to follow the marker.
+        #expect(detect("> |") == nil)
+        #expect(detect("> [|") == nil)
+    }
+
+    @Test("The closing bracket is noticed")
+    func closingBracket() throws {
+        #expect(try #require(detect("> [!war|]")).hasClosingBracket)
+        #expect(try #require(detect("> [!war|")).hasClosingBracket == false)
+    }
+
+    @Test("Suggestions rank a prefix above a substring, and know the aliases")
+    func suggestions() throws {
+        let all = try #require(detect("> [!|")).suggestions()
+        #expect(all.count == CalloutKind.allCases.count, "an empty query offers every kind")
+        #expect(all.first?.kind == .note, "in Obsidian's own order")
+
+        let warn = try #require(detect("> [!warn|")).suggestions()
+        #expect(warn.first?.kind == .warning)
+
+        // An alias finds the kind it spells, and says which spelling matched
+        // so it is clear why `tldr` offered `abstract`.
+        let tldr = try #require(detect("> [!tldr|")).suggestions()
+        #expect(tldr.first?.kind == .abstract)
+        #expect(tldr.first?.matchedAlias == "tldr")
+
+        // The canonical name always outranks an alias of another kind.
+        let question = try #require(detect("> [!qu|")).suggestions()
+        #expect(question.first?.kind == .question)
+
+        #expect(try #require(detect("> [!zzz|")).suggestions().isEmpty)
+    }
+
+    /// Accepting writes the canonical name. The aliases exist so a row can be
+    /// found, not so one vault spells a callout four ways.
+    @Test("Accepting writes the canonical name and closes the bracket")
+    func accepting() throws {
+        let fresh = try #require(detect("> [!warn|"))
+        let edit = fresh.accepting(fresh.suggestions()[0].insertion)
+        var text = "> [!warn" as NSString
+        text = text.replacingCharacters(in: edit.range, with: edit.replacement) as NSString
+        #expect(text as String == "> [!warning] ")
+        #expect(edit.selection.location == text.length, "the caret lands where the title goes")
+
+        // Editing a callout that already has its bracket must not add another.
+        let existing = try #require(detect("> [!warn|] Title"))
+        let second = existing.accepting("warning")
+        var line = "> [!warn] Title" as NSString
+        line = line.replacingCharacters(in: second.range, with: second.replacement) as NSString
+        #expect(line as String == "> [!warning] Title")
+    }
+}
+
+@Suite("Completion surface")
+@MainActor
+struct CompletionSurfaceTests {
+
+    private func editor() -> (HeftTextKit2View, LiveTextEditor.Coordinator) {
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let editor = LiveTextEditor(
+            text: .constant(""), documentIdentity: "probe.md", generation: 0,
+            generationKeepsPosition: false, findSelection: nil, insertion: nil,
+            context: context, onAttachment: { _ in nil }, onFollowLink: { _ in },
+            onVimSearch: { _ in }
+        )
+        let coordinator = LiveTextEditor.Coordinator(editor)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isVerticallyResizable = true
+        view.frame = NSRect(x: 0, y: 0, width: 700, height: 900)
+        view.textContainer?.size = NSSize(width: 644, height: CGFloat.greatestFiniteMagnitude)
+        view.textLayoutManager?.delegate = coordinator
+        view.delegate = coordinator
+        return (view, coordinator)
+    }
+
+    /// The pure detector agreeing is not the same as the menu opening: the
+    /// two share one panel, and the kind has to be picked before the items
+    /// are built.
+    @Test("Typing a callout marker opens the menu")
+    func opensOnCalloutMarker() {
+        let (view, _) = editor()
+        view.string = "> [!"
+        view.setSelectedRange(NSRange(location: 4, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+
+        let offered = view.visibleCompletions
+        #expect(offered.contains("note"))
+        #expect(offered.contains("warning"))
+        #expect(offered.count == CalloutKind.allCases.count)
+
+        // Narrowing filters it down rather than starting again.
+        view.string = "> [!warn"
+        view.setSelectedRange(NSRange(location: 8, length: 0))
+        view.updateLinkCompletion(allowStart: false)
+        #expect(view.visibleCompletions.first == "warning")
+
+        // And leaving the construct closes it.
+        view.string = "plain text"
+        view.setSelectedRange(NSRange(location: 10, length: 0))
+        view.updateLinkCompletion(allowStart: false)
+        #expect(view.visibleCompletions.isEmpty)
+    }
+
+    /// The menu must not appear in the middle of a word already being typed,
+    /// which is what `allowStart` on a non-empty query would do.
+    @Test("The menu only opens on a fresh marker")
+    func opensOnlyOnAnEmptyQuery() {
+        let (view, _) = editor()
+        view.string = "> [!warn"
+        view.setSelectedRange(NSRange(location: 8, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        #expect(view.visibleCompletions.isEmpty)
+    }
+}

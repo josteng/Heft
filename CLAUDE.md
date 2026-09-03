@@ -296,6 +296,22 @@ tags or URLs — `SmartTypography.allowsSubstitution` is a cheap own scan rather
 than a `LiveDecorator` pass, because it runs on every keystroke and only has to
 answer for one position.
 
+### Completion
+
+`[[` and `> [!` are the same interaction and share one panel, so
+`WikiCompletionItem` carries a title, detail and symbol rather than a
+`NoteRef`, and the view remembers which `CompletionKind` is open: accepting a
+row has to re-detect the same context the rows were built from.
+
+`CalloutCompletionContext` is pure and shaped deliberately like
+`WikiCompletionContext`. Two rules are load-bearing. It only fires on the line
+that *opens* a quote block, because Obsidian reads `[!kind]` nowhere else and
+completing on a body line would write something that renders as literal text.
+And the caret has to be inside the name being typed, or every callout on the
+caret's line would reopen the menu. Aliases are offered so `tldr` finds
+`abstract`, but accepting always writes the canonical name: they exist so a
+row can be found, not so one vault spells a callout four ways.
+
 ### Agent proposals
 
 An agent does not edit the vault; it proposes, and the editor asks. `AgentCLI`
