@@ -19,7 +19,12 @@ Scripts/install.sh
 ```
 
 Requires macOS 26 and Xcode. That installs `Heft.app` into `/Applications` and
-a `heft` command into `~/.local/bin`.
+a `heft` command into `~/.local/bin`. There is no signed release yet, so on a
+Mac that did not build it Gatekeeper will refuse to open the app.
+
+**New here? [`Docs/GettingStarted.md`](Docs/GettingStarted.md)** — opening a
+vault, the five things worth trying first, daily notes and capture, and setting
+up agent review.
 
 ---
 
@@ -170,29 +175,38 @@ changed, rather than re-attributing the whole note twice per character.
 
 ## The `heft` command
 
+Every verb is declared in one place, so `heft help` is always the full list and
+`heft help --json` is the same thing for an agent. Grouped by who it is for:
+
 ```bash
+# Yours
 heft [path]                     # open a folder or note, like `code .`
-heft help [--json]              # every verb and flag; --json for agents
+heft help [--json]              # every verb and flag
+heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
 heft agent-setup <vault>        # teach an agent in that vault to propose
+heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
+    # --text-size 12  --paper a4|letter|legal|tabloid
+    # --landscape --margin narrow|normal|wide --title
+
+# An agent's, and all read-only
 heft find <vault> <query>       # full-text search
 heft read <vault> <note>        # a note's source
 heft files <vault>              # every note, vault-relative
     # --by-use   most-used first, the order Quick Open opens on
     # --by-agent what an agent has proposed changes to, kept separately
     # --scores   show each note's score   --limit N
-heft proposals <vault>          # what is waiting for review
-heft diff <vault> <id>          # what one of them would change
 heft outline <vault> <note>     # the note's headings, with line numbers
 heft links <vault> <note>       # links out, resolved and unresolved
 heft backlinks <vault> <note>   # what links here, with the referencing line
 heft tags <vault> [tag]         # tags with counts, or the notes carrying one
 heft config <vault>             # the vault's settings, as JSON
-heft stats <vault>              # read-only index report
-heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
-heft render <vault> <note>      # what the live surface would draw, headless
-heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
-    # --text-size 12  --paper a4|letter|legal|tabloid
-    # --landscape --margin narrow|normal|wide --title
+heft propose <vault> <note>     # propose a new body, from stdin
+heft proposals <vault>          # what is waiting for review
+heft diff <vault> <id>          # what one of them would change
+
+# Diagnostics — about Heft's rendering rather than about your notes
+heft stats <vault>              # index report: counts, timings, resolution
+heft render <vault> <note>      # what the live surface would draw, fragment by fragment
 ```
 
 `heft help --json` says which verbs are read-only and therefore safe against a
@@ -300,23 +314,32 @@ swift-markdown-engine for syntax-highlighting grammars.
 ## Development
 
 ```bash
-Scripts/run.sh [vault] [note]   # debug build, launched without installing
-Scripts/bundle.sh debug         # build the .app without launching
 swift test                      # the full suite
+Scripts/smoke.sh                # does the app actually start?
+Scripts/run.sh [vault] [note]   # debug build, launched without installing
+Scripts/run.sh --sandbox [vault]   # ...with its preferences isolated
+Scripts/bundle.sh debug         # build the .app without launching
 ```
 
 `Scripts/run.sh` is the one to use while iterating — it launches from `.build`
 and takes a vault path, so risky editor changes can be pointed at a disposable
 copy. The GUI autosaves; never aim it at a vault you care about while testing.
+`--sandbox` puts every preference in its own suite, so a test launch cannot
+rewrite the Spotlight capture destination or Open Recent.
 
-The suite is 115 tests across 27 suites: pure checks over parsing, formatting,
+`Scripts/smoke.sh` exists because `swift test` cannot launch an app bundle, so
+nothing in the suite notices an app that starts and immediately exits. One
+shipped that way. It launches with no arguments, the way the Dock does.
+
+The suite is 174 tests across 40 suites: pure checks over parsing, formatting,
 links, paths and settings; a live-surface check that runs edit scripts through
 both an incrementally styled buffer and a from-scratch one and compares every
 attribute on every character; a differential decoration check that drives the
 same edit scripts through the incremental and from-scratch parsers and fails if
 the fast path never ran; a typing-performance check that holds the per-keystroke
-budget; and a disposable-vault integration check that exercises autosave, save
-conflicts, recovery, renames and link repointing. Temporary vaults are
+budget; a disposable-vault integration check that exercises autosave, save conflicts,
+recovery, renames and link repointing; and checks that unsaved work survives a
+process that does not. Temporary vaults are
 UUID-named and removed afterwards, and the harness restores any user setting it
 touches.
 
@@ -332,6 +355,9 @@ runtime, and the checks skip when `nvim` is absent.
 
 ## Not built yet
 
+- **No signed release.** This is the one thing standing between Heft and
+  anyone else running it: unsigned and un-notarised, Gatekeeper blocks it on
+  any Mac that did not build it.
 - Graph view, plugins, themes.
 - Advanced Vim: Ex commands, system and clipboard registers, mappings, jump
   lists beyond the previous-position mark, full blockwise put.
