@@ -156,9 +156,15 @@ keystroke, which is the difference between missing and making a frame on a
 144Hz display.
 
 Two guards are what make it safe, and both are proven by mutation against the
-differential check: a paragraph containing anything multi-line (a fence, a
-pipe, `---`, `$$`, a comment) is never reused, and neither is one any
-line-spanning decoration reaches into. The rest of the guards are defence in
+differential check: a paragraph containing anything that can open a construct
+across blank lines (a fence, `---`, `$$`, a comment) is never reused, and
+neither is one that any cached decoration *crosses the boundary of*.
+
+That second guard was first written as a list of block styles and was wrong:
+it named the block constructs and missed `$…$`, which pairs across blank lines
+and so reaches into a paragraph holding no maths of its own — dropping the
+maths decoration entirely. It asks about ranges now, not kinds, so a
+construct added later cannot be forgotten from a list. The rest of the guards are defence in
 depth — `paragraph(containing:)` rejecting blank lines already subsumes them
 today, which the check confirms, but that is a property of `paragraph` rather
 than of them.
@@ -168,6 +174,32 @@ in phase order. That is safe because decorations only ever overlap within a
 paragraph, so their relative order — a heading applied before the bold inside
 it — is preserved, and `RestyleScope` matches by location rather than by
 position whenever the source changed.
+
+Dirty ranges used to take their neighbouring lines — always. A line's styling
+can depend on what is beside it (whether the next line continues the list,
+whether this is the last line of a quote), so removing that outright breaks
+list paragraph styles and widget layout, which the incremental check catches at
+once. But applying it to *every* edit meant a character typed on one list line
+restyled the line below it, rebuilding that line's bullet on every keystroke —
+visible as the dot flickering.
+
+So `normalize` now separates the two. An edit safely inside a line's text,
+past its leading markers and containing no newline, is **local**: it dirties
+its own line and no further. Anything that moves a line boundary, or touches
+the run of markers a line begins with — where typing `[` really can turn a
+bullet into a checkbox — is **structural** and still takes its neighbours.
+
+Four separate paths appended to the dirty set, and classifying only the first
+fixed almost nothing: a decoration that *overlaps* the edit reaches the set by
+two more routes, and a reveal change by a fourth. Typing inside `**bold**`
+went through the overlap paths, which is why the flicker survived the first
+attempt. A decoration confined to one line is local wherever it arrives from.
+
+Mutation-proven from both sides: making everything structural brings the
+flicker back, making everything local goes stale. The single-line test on
+decorations is the exception — the edit-level classification already routes
+the dangerous cases, so removing it alone breaks nothing today. It is kept
+because that is a property of the edit rules, not of it.
 
 `Tests/HeftTests/IncrementalDecorationCheck.swift` is the oracle, and it has to
 be: the incremental-styling check compares an incrementally styled buffer

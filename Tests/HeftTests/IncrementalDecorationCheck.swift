@@ -53,6 +53,31 @@ enum IncrementalDecorationCheck {
 
         Outro paragraph.
         """),
+        ("table wide", """
+        | name | value | note |
+        | --- | --- | --- |
+        | one | 1 | first |
+        | two | 2 | second |
+        | three | 3 | third |
+        """),
+        ("table beside prose", """
+        Some prose before it.
+
+        | a | b |
+        |---|---|
+        | 1 | 2 |
+
+        | c | d |
+        |---|---|
+        | 3 | 4 |
+
+        Prose after.
+        """),
+        ("table escaped pipe", """
+        | file | size |
+        | --- | --- |
+        | ![[chart.png\\|500]] | big |
+        """),
         ("frontmatter", """
         ---
         title: A note

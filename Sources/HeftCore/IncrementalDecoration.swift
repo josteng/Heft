@@ -40,19 +40,20 @@ extension LiveDecorator {
     /// Sequences that can begin or end something spanning more than one line.
     /// A paragraph containing any of them is not safely local: adding a
     /// backtick fence changes how the rest of the note parses.
-    static let multilineMarkers = ["```", "~~~", "---", "$$", "|", "<!--", "-->"]
+    static let multilineMarkers = ["```", "~~~", "---", "$$", "<!--", "-->"]
 
-    /// Whether a decoration can cover more than the line it starts on. These
-    /// are the ones whose extent depends on text far from the edit.
-    static func spansLines(_ style: MarkdownDecoration.Style) -> Bool {
-        switch style {
-        case .frontmatter, .codeBlock, .comment, .table, .blockMath, .agentGuideBoundary:
-            true
-        case .wikiLink(let link):
-            link.isEmbed
-        default:
-            false
-        }
+    /// Whether `decoration` describes text the paragraph does not contain.
+    ///
+    /// Range-based rather than a list of styles, because the list was wrong:
+    /// it named the block constructs and missed `$…$`, which can pair across
+    /// blank lines and so reach into a paragraph holding no maths of its own.
+    /// A decoration wholly inside the paragraph is rebuilt by reparsing it; one
+    /// that crosses the boundary is not, whatever kind it is.
+    static func escapes(_ decoration: MarkdownDecoration, paragraph: NSRange) -> Bool {
+        let range = decoration.range
+        guard range.length > 0 else { return false }
+        guard NSIntersectionRange(range, paragraph).length > 0 else { return false }
+        return !NSEqualRanges(NSIntersectionRange(range, paragraph), range)
     }
 
     /// Internal so tests can ask directly whether the fast path applied,
@@ -103,14 +104,11 @@ extension LiveDecorator {
             guard !newText.contains(marker), !oldText.contains(marker) else { return nil }
         }
 
-        // Nothing multi-line may reach into the paragraph: a fence opened above
-        // it makes its text code, and the fence's own decoration would have to
-        // grow rather than the paragraph's change. Proven load-bearing: without
-        // it the differential check disagrees on 70 edits.
-        for decoration in cache.decorations where spansLines(decoration.style) {
-            guard NSIntersectionRange(decoration.range, oldParagraph).length == 0 else {
-                return nil
-            }
+        // Nothing may reach into the paragraph from outside it: a fence opened
+        // above makes its text code, and a `$…$` can pair across a blank line.
+        // Proven load-bearing: without it the differential check disagrees.
+        for decoration in cache.decorations {
+            guard !escapes(decoration, paragraph: oldParagraph) else { return nil }
         }
 
         // Reparse the paragraph alone. It begins at a line start, so the

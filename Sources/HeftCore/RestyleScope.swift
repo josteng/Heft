@@ -129,6 +129,19 @@ public enum RestyleScope {
     /// The line-aligned ranges whose styling may have changed between the two
     /// snapshots. An empty result means the document is already correctly
     /// styled and the restyle can be skipped outright.
+    /// Whether `range` lies inside one line of `text`. A construct that begins
+    /// and ends on the same line cannot change what the lines around it are, so
+    /// rewriting it need not disturb them.
+    static func withinOneLine(_ range: NSRange, in text: NSString) -> Bool {
+        guard range.location <= text.length else { return false }
+        let clamped = NSRange(
+            location: range.location,
+            length: min(range.length, text.length - range.location)
+        )
+        let line = text.lineRange(for: clamped)
+        return clamped.location >= line.location && NSMaxRange(clamped) <= NSMaxRange(line)
+    }
+
     public static func dirtyRanges(from old: Snapshot, to new: Snapshot) -> [NSRange] {
         // Moving the caret cannot change what the constructs *are*, only which
         // of them show their markup. Worth its own path: it is the common case
@@ -137,23 +150,51 @@ public enum RestyleScope {
         if old.source.isEqual(to: new.source as String),
            old.decorations.count == new.decorations.count {
             var dirty: [NSRange] = []
+            var local: [NSRange] = []
             for (before, after) in zip(old.decorations, new.decorations) {
                 guard before == after else {
                     dirty.append(before.range)
                     dirty.append(after.range)
                     continue
                 }
+                // Markup collapsing or coming back changes how wide the line
+                // is, not what the lines around it are. Treating it as
+                // structural made moving the caret through a bold span restyle
+                // the line below, rebuilding that line's bullet each time.
                 if old.reveal.state(of: before) != new.reveal.state(of: after) {
-                    dirty.append(after.range)
+                    local.append(after.range)
                 }
             }
-            return normalize(dirty, in: new.source, decorations: new.decorations)
+            return normalize(
+                local: local, structural: dirty, in: new.source, decorations: new.decorations
+            )
         }
 
         let edit = SourceEdit.between(old.source, new.source)
+        // The edited span alone is local: typing into a paragraph changes that
+        // paragraph's text and nothing beside it. Everything appended to
+        // `dirty` below is a construct that actually changed.
+        var local: [NSRange] = []
         var dirty: [NSRange] = []
         if edit.changed.length > 0 || edit.previous.length > 0 {
-            dirty.append(edit.changed)
+            // An edit that moves a line boundary, or that touches the run of
+            // markers at the start of a line, can change what the lines around
+            // it are — a list continuing, a quote ending. Only an edit safely
+            // inside a line's text is local.
+            let changed = new.source.substring(with: edit.changed)
+            let removed = old.source.substring(with: edit.previous)
+            let line = new.source.lineRange(for: edit.changed)
+            let beforeEdit = new.source.substring(with: NSRange(
+                location: line.location, length: edit.changed.location - line.location
+            ))
+            let onlyMarkers = beforeEdit.trimmingCharacters(
+                in: CharacterSet(charactersIn: " \t-*+>#0123456789.[]x")
+            ).isEmpty
+            if changed.contains("\n") || removed.contains("\n") || onlyMarkers {
+                dirty.append(edit.changed)
+            } else {
+                local.append(edit.changed)
+            }
         }
 
         // Old decorations, moved into new coordinates, indexed by where they
@@ -178,10 +219,18 @@ public enum RestyleScope {
                     Entry(decoration: moved, revealed: revealed)
                 )
             } else {
+                // Overlaps the edit, so it cannot be carried across. Its
+                // ground is dirty either way; whether the lines *beside* it
+                // are depends on whether it spanned more than one line.
                 let start = edit.mapStart(range.location)
-                dirty.append(NSRange(
+                let moved = NSRange(
                     location: start, length: max(0, edit.mapEnd(NSMaxRange(range)) - start)
-                ))
+                )
+                if withinOneLine(range, in: old.source), withinOneLine(moved, in: new.source) {
+                    local.append(moved)
+                } else {
+                    dirty.append(moved)
+                }
             }
         }
 
@@ -191,7 +240,13 @@ public enum RestyleScope {
             guard NSMaxRange(range) <= edit.changed.location
                     || range.location >= NSMaxRange(edit.changed)
             else {
-                dirty.append(range)
+                // Overlaps the edit, so it is new ground. Structural only if it
+                // covers more than its own line.
+                if withinOneLine(range, in: new.source) {
+                    local.append(range)
+                } else {
+                    dirty.append(range)
+                }
                 continue
             }
             guard var entries = carried[range.location],
@@ -199,8 +254,14 @@ public enum RestyleScope {
                       !$0.used && $0.decoration == decoration
                   })
             else {
-                // Nothing like it was here before: newly styled ground.
-                dirty.append(range)
+                // Nothing like it was here before: newly styled ground. Only
+                // structural if it reaches across a line boundary — a bold
+                // span growing as it is typed does not.
+                if withinOneLine(range, in: new.source) {
+                    local.append(range)
+                } else {
+                    dirty.append(range)
+                }
                 continue
             }
             entries[index].used = true
@@ -208,7 +269,7 @@ public enum RestyleScope {
             // Same construct, but the caret moved into or out of it, so its
             // markup has to collapse or come back.
             if entries[index].revealed != new.reveal.state(of: decoration) {
-                dirty.append(range)
+                local.append(range)
             }
         }
 
@@ -216,11 +277,18 @@ public enum RestyleScope {
         // reset, or its markup stays collapsed after the construct is gone.
         for entries in carried.values {
             for entry in entries where !entry.used {
-                dirty.append(entry.decoration.range)
+                let range = entry.decoration.range
+                if withinOneLine(range, in: new.source) {
+                    local.append(range)
+                } else {
+                    dirty.append(range)
+                }
             }
         }
 
-        return normalize(dirty, in: new.source, decorations: new.decorations)
+        return normalize(
+            local: local, structural: dirty, in: new.source, decorations: new.decorations
+        )
     }
 
     /// Snaps ranges to whole lines, absorbs every decoration they touch, and
@@ -228,8 +296,25 @@ public enum RestyleScope {
     static func normalize(
         _ ranges: [NSRange], in text: NSString, decorations: [MarkdownDecoration]
     ) -> [NSRange] {
+        normalize(local: [], structural: ranges, in: text, decorations: decorations)
+    }
+
+    /// `local` is ground that changed without any construct changing with it —
+    /// a character typed into a paragraph. It dirties its own line and no more.
+    ///
+    /// `structural` is a construct that appeared, vanished, or changed reveal.
+    /// Those take their neighbours too, because a line's styling can depend on
+    /// what is beside it: whether the next line continues the list, whether
+    /// this is the last line of a quote. Expanding *every* range that way is
+    /// what made typing on one list line re-style the line below it, rebuilding
+    /// its bullet on every keystroke — visible as a flicker.
+    static func normalize(
+        local: [NSRange], structural: [NSRange],
+        in text: NSString, decorations: [MarkdownDecoration]
+    ) -> [NSRange] {
         let length = text.length
-        var current = ranges.compactMap { range -> NSRange? in
+        func clamp(_ ranges: [NSRange]) -> [NSRange] {
+            ranges.compactMap { range -> NSRange? in
             let clamped = NSIntersectionRange(
                 NSRange(location: max(0, range.location), length: max(0, range.length)),
                 NSRange(location: 0, length: length)
@@ -240,7 +325,10 @@ public enum RestyleScope {
             return clamped.length > 0
                 ? clamped
                 : NSRange(location: min(range.location, length), length: 0)
+            }
         }
+        var current = clamp(local).map { text.lineRange(for: $0) }
+            + clamp(structural).map { neighbouringLines(of: $0, in: text) }
         guard !current.isEmpty else { return [] }
 
         // Absorbing a decoration can extend a range onto new lines, which can
@@ -248,8 +336,7 @@ public enum RestyleScope {
         // deeply, so this settles in a couple of rounds; the bound is there so
         // a surprise cannot spin.
         for _ in 0..<8 {
-            let lined = current.map { neighbouringLines(of: $0, in: text) }
-            var merged = coalesce(lined)
+            var merged = coalesce(current)
             var grown = false
             for decoration in decorations {
                 let range = decoration.range
@@ -258,7 +345,8 @@ public enum RestyleScope {
                 else { continue }
                 guard !merged.contains(where: { NSIntersectionRange($0, range) == range })
                 else { continue }
-                merged.append(range)
+                // A construct being absorbed is structural by definition.
+                merged.append(neighbouringLines(of: range, in: text))
                 grown = true
             }
             current = grown ? coalesce(merged) : merged
