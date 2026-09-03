@@ -1,5 +1,4 @@
 import Foundation
-import HeftCore
 
 /// The headless surface an agent talks to.
 ///
@@ -12,12 +11,12 @@ import HeftCore
 /// indistinguishable from the user's own typing an hour later, and there is
 /// nothing left to review; `propose` writes to `.heft/proposals` instead and
 /// lets the editor ask.
-enum AgentCLI {
+public enum AgentCLI {
 
-    static let verbs: Set<String> = ["propose", "proposals", "diff", "drop", "read", "find"]
+    public static let verbs: Set<String> = ["propose", "proposals", "diff", "drop", "read", "find"]
 
     /// Returns true when it handled the arguments (and has exited).
-    static func run(_ arguments: [String]) -> Bool {
+    public static func run(_ arguments: [String]) -> Bool {
         guard let verb = arguments.first, verbs.contains(verb) else { return false }
         guard arguments.count > 1 else {
             fail("usage: heft \(verb) <vault> …")

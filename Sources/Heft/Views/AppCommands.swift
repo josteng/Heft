@@ -1,3 +1,4 @@
+import HeftCore
 import SwiftUI
 
 struct AppCommandShortcut {

@@ -1,5 +1,4 @@
 import Foundation
-import HeftCore
 
 /// A `Frecency` that persists itself.
 ///
@@ -7,23 +6,23 @@ import HeftCore
 /// change: the palette and the switcher read the ranking when they open, and a
 /// store that told SwiftUI it had changed on every note opened would re-render
 /// the window for a number nothing on screen is showing.
-final class FrecencyStore {
+public final class FrecencyStore {
     private let key: String
     private var frecency: Frecency
 
-    init(key: String) {
+    public init(key: String) {
         self.key = key
         frecency = Frecency(decoding: HeftDefaults.shared.data(forKey: key))
     }
 
-    func record(_ identifier: String) {
+    public func record(_ identifier: String) {
         frecency.record(identifier)
         HeftDefaults.shared.set(frecency.encoded, forKey: key)
     }
 
-    func score(_ identifier: String) -> Double { frecency.score(identifier) }
+    public func score(_ identifier: String) -> Double { frecency.score(identifier) }
 
-    func ranked<Key>(
+    public func ranked<Key>(
         _ keys: [Key],
         by identity: (Key) -> String,
         tiebreak: (Key, Key) -> Bool
@@ -33,10 +32,10 @@ final class FrecencyStore {
 
     /// What the command palette has been used for. App-wide: the commands are
     /// the app's, not a vault's.
-    static let commands = FrecencyStore(key: "dev.stenglein.Heft.frecency.commands")
+    public static let commands = FrecencyStore(key: "dev.stenglein.Heft.frecency.commands")
 
     /// Per vault, because "the note I keep opening" is a fact about a vault.
-    static func notes(forVaultAt path: String) -> FrecencyStore {
+    public static func notes(forVaultAt path: String) -> FrecencyStore {
         FrecencyStore(key: "dev.stenglein.Heft.frecency.notes.\(path)")
     }
 
@@ -51,7 +50,7 @@ final class FrecencyStore {
     /// proposal is accepted the record that an agent ever worked on that note
     /// is gone, and a session resuming tomorrow has no way to ask what it did
     /// yesterday.
-    static func agentNotes(forVaultAt path: String) -> FrecencyStore {
+    public static func agentNotes(forVaultAt path: String) -> FrecencyStore {
         FrecencyStore(key: "dev.stenglein.Heft.frecency.agent.\(path)")
     }
 }

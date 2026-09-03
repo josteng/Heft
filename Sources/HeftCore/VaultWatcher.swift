@@ -5,12 +5,12 @@ import Foundation
 /// FSEvents rather than a `DispatchSource` per file: the vault is hundreds of
 /// files across nested folders, and iCloud materialising a file counts as a
 /// change we want to hear about without holding a descriptor for each one.
-final class VaultWatcher {
+public final class VaultWatcher {
     private var stream: FSEventStreamRef?
     private let onChange: () -> Void
     private let queue = DispatchQueue(label: "dev.stenglein.Heft.watcher")
 
-    init?(root: URL, latency: TimeInterval = 0.6, onChange: @escaping () -> Void) {
+    public init?(root: URL, latency: TimeInterval = 0.6, onChange: @escaping () -> Void) {
         self.onChange = onChange
 
         var context = FSEventStreamContext(
@@ -55,7 +55,7 @@ final class VaultWatcher {
     /// to trigger a full rescan, which re-reads every note in the vault to
     /// rebuild the link and tag index — so the app burned CPU while sitting
     /// apparently idle.
-    static func isInteresting(_ path: String) -> Bool {
+    public static func isInteresting(_ path: String) -> Bool {
         let name = (path as NSString).lastPathComponent
         if name == ".DS_Store" { return false }
         // A placeholder appearing means the real file is on its way; the real
@@ -68,7 +68,7 @@ final class VaultWatcher {
         return true
     }
 
-    func stop() {
+    public func stop() {
         guard let stream else { return }
         FSEventStreamStop(stream)
         FSEventStreamInvalidate(stream)

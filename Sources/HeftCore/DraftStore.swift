@@ -1,5 +1,4 @@
 import Foundation
-import HeftCore
 
 /// Keeps unsaved work on disk whenever it cannot reach its note.
 ///
@@ -23,7 +22,7 @@ import HeftCore
 /// the same naming the close path already uses, so there is one thing to look
 /// for and it appears where notes appear rather than in a Library folder
 /// nobody visits.
-enum DraftStore {
+public enum DraftStore {
 
     private static var directory: URL? {
         guard let support = FileManager.default.urls(
@@ -49,7 +48,7 @@ enum DraftStore {
     }
 
     /// Records the buffer as a draft. Overwrites any previous one.
-    static func write(_ text: String, vault: URL, relativePath: String) {
+    public static func write(_ text: String, vault: URL, relativePath: String) {
         guard let directory, let url = url(vault: vault, relativePath: relativePath) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // The note's own path goes in a sidecar rather than the filename,
@@ -62,14 +61,14 @@ enum DraftStore {
     }
 
     /// Forgets the draft, because the buffer reached its note.
-    static func discard(vault: URL, relativePath: String) {
+    public static func discard(vault: URL, relativePath: String) {
         guard let url = url(vault: vault, relativePath: relativePath) else { return }
         try? FileManager.default.removeItem(at: url)
         try? FileManager.default.removeItem(at: url.appendingPathExtension("path"))
     }
 
     /// The draft for a note, if one outlived the process that wrote it.
-    static func draft(vault: URL, relativePath: String) -> String? {
+    public static func draft(vault: URL, relativePath: String) -> String? {
         guard let url = url(vault: vault, relativePath: relativePath) else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }
@@ -78,7 +77,7 @@ enum DraftStore {
     ///
     /// Deliberately not timestamped at recovery time: a note whose draft is
     /// promoted twice should give one file, not one per attempt.
-    static func recoveryName(for noteName: String) -> String {
+    public static func recoveryName(for noteName: String) -> String {
         "\(noteName) (Heft Recovery)"
     }
 }

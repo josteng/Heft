@@ -1620,12 +1620,30 @@ struct PendingEmphasisTests {
 @Suite("Command line spec")
 struct CommandLineSpecTests {
 
-    private func source(_ path: String) throws -> String {
+    /// Reads a source file by *name*, wherever under `Sources/` it lives.
+    ///
+    /// Deliberately not by path. What this check is about is the dispatch
+    /// table agreeing with `CommandLineSpec`, which is a fact about the code
+    /// rather than about which target holds it — and a hard-coded path turns
+    /// moving a file between targets into two failing tests that say nothing
+    /// about the invariant. It still fails loudly on a name that is missing
+    /// or ambiguous, because either means the scrape below is reading
+    /// something other than what it thinks.
+    private func source(named name: String) throws -> String {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        return try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+            .appendingPathComponent("Sources")
+        let found = FileManager.default
+            .enumerator(at: root, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }
+            .filter { $0.lastPathComponent == name } ?? []
+        guard found.count == 1 else {
+            Issue.record("expected exactly one \(name) under Sources/, found \(found.count)")
+            return ""
+        }
+        return try String(contentsOf: found[0], encoding: .utf8)
     }
 
     private func matches(_ pattern: String, in text: String) -> Set<String> {
@@ -1645,8 +1663,8 @@ struct CommandLineSpecTests {
     /// That is not hypothetical: it is what happened to `heft export`.
     @Test("Every dispatched verb is in the spec")
     func specCoversDispatch() throws {
-        let main = try source("Sources/Heft/Main.swift")
-        let agent = try source("Sources/Heft/AgentCLI.swift")
+        let main = try source(named: "Main.swift")
+        let agent = try source(named: "AgentCLI.swift")
 
         // `[a-z]` first, so the `--help` and `-h` aliases compared on the same
         // line are not mistaken for verbs of their own.
@@ -1671,8 +1689,8 @@ struct CommandLineSpecTests {
     /// after a verb the binary rejects.
     @Test("Every declared verb is dispatched")
     func dispatchCoversSpec() throws {
-        let main = try source("Sources/Heft/Main.swift")
-        let agent = try source("Sources/Heft/AgentCLI.swift")
+        let main = try source(named: "Main.swift")
+        let agent = try source(named: "AgentCLI.swift")
         let combined = main + agent
         for verb in CommandLineSpec.verbs {
             // `help` is dispatched through `wantsHelp` rather than by a
