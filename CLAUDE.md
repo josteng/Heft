@@ -480,11 +480,15 @@ depends on changes.
   empty trailing page removed. Emptiness is decided by **rasterising**: half of
   what this editor draws is painted by a layout fragment and is not in the text
   layer, so a page holding only a table reports no string.
-- **`swift run Heft` and the installed app do not share `UserDefaults`.** The
-  development binary has no bundle identifier, so `UserDefaults.standard`
-  resolves to a different domain and every stored setting reads back empty.
-  Anything on the CLI that reads app state — `files --by-use` does — has to be
-  tested through the *installed* `heft`, not `swift run`.
+- **The installed `heft` and the GUI share `UserDefaults`; `swift run Heft`
+  does not.** Both installed entry points are the same binary in the same
+  bundle, so both read and write the `dev.stenglein.Heft` domain — a ranking
+  the CLI records is the ranking the switcher opens on. The development build
+  has no bundle identifier and lands in a domain named after the executable
+  (`Heft`), which is *desirable*: a debug run must not clobber the installed
+  app's settings. It does mean anything on the CLI that reads app state —
+  `files --by-use` does — reads back empty under `swift run` and has to be
+  tested through the installed `heft`.
 - **`standardizedFileURL` rewrites `/private/tmp` to `/tmp`.** Both the vault
   session and the CLI standardize before building a per-vault defaults key, so
   they agree; anything computing such a key by hand must standardize too, or it
