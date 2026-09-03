@@ -6,7 +6,9 @@ pointing the vault folder at iCloud Drive; there is no custom sync engine. Opens
 existing Obsidian vault unmodified, including its `.obsidian/` config.
 
 ```bash
+Scripts/smoke.sh                                # does the app actually start?
 Scripts/run.sh [vault] [note]                   # Xcode build, then launch
+Scripts/run.sh --sandbox [vault]                # ...with isolated preferences
 Scripts/bundle.sh debug                         # Xcode build without launching
 Scripts/install.sh [--install-only]             # release install; launches by default
 swift test                                      # core, live-surface, and disposable-vault checks
@@ -574,6 +576,21 @@ depends on changes.
   surface (which is how the TextKit-1 downgrade, the clipped lines and the
   blank pages were all caught), and structural tests for menus, which no
   rendering technique reaches.
+- **`Scripts/smoke.sh` is the only thing that checks the app starts, and it
+  must launch with *no arguments*.** `swift test` cannot launch an app bundle,
+  so nothing in the suite notices an app that exits immediately — which is
+  what shipped when `heft help` was made to answer an empty command line, the
+  way the Dock, Finder and `open` all start a Mac app. The first version of
+  this script passed `--vault` and passed happily with the bug reintroduced:
+  arguments were not empty, so the broken branch was never reached. It seeds
+  the sandbox suite with a vault and then starts the app with nothing on the
+  command line at all.
+- **A Cocoa app killed with `SIGTERM` never flushes its preferences.** So a
+  test that reads what the app wrote has to quit it gracefully, or read
+  something the app has flushed itself. `VaultSession` synchronises after
+  recording the capture vault for the second reason: that value is read by a
+  *separate process* (the App Intent, the `heft` command), and left in
+  cfprefsd's cache it survives a clean quit but not a crash or a flat battery.
 - **`Scripts/run.sh --sandbox` is how to launch the GUI for testing.** It puts
   every preference in its own suite (`--fresh` wipes it first), so a test
   launch cannot rewrite `vaultPath`, Open Recent or the rankings. Everything

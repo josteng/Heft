@@ -177,6 +177,14 @@ final class VaultRegistry: ObservableObject {
         let session = VaultSession(root: root)
         sessions[root.path] = WeakSession(session)
         HeftDefaults.shared.set(root.path, forKey: CaptureVaultPreference.defaultsKey)
+        // Flushed rather than left to be written whenever the system decides.
+        //
+        // This is where Spotlight capture files things, and it is read by a
+        // *separate process* — the App Intent, or the `heft` command. Left in
+        // cfprefsd's cache it survives a normal quit and not a crash or a
+        // battery running out, and the capture then goes to whichever vault
+        // was open before that.
+        HeftDefaults.shared.synchronize()
         return session
     }
 
