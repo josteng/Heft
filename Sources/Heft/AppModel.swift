@@ -1238,7 +1238,9 @@ final class AppModel: ObservableObject {
 
     /// Types a blank table at the caret. How many newlines it needs in front
     /// of it depends on where the caret is, which only the editor knows.
-    func insertTable(rows: Int = 2, columns: Int = 2) {
+    /// `rows` counts body rows: a 2×2 table is a header and one row under it,
+    /// which is the smallest thing that still reads as a table.
+    func insertTable(rows: Int = 1, columns: Int = 2) {
         let table = TableEditing.blankTable(rows: rows, columns: columns, newlinesBefore: 0)
         pendingInsertion = EditorInsertion(
             text: table.text, caretOffset: table.caretOffset, startsBlock: true,

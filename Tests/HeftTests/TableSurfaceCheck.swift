@@ -442,6 +442,47 @@ enum TableSurfaceCheck {
         )
         expectTrue(view.activeTable == nil, "and there is no cell to draw a caret in")
 
+        // MARK: An empty table is still wide enough to aim at
+
+        // Column widths come from the rendered text, so a table whose cells
+        // are all blank measured nothing but the three spaces `blankTable`
+        // writes into each one. A fresh 2x2 grid came out barely wider than
+        // its own borders.
+        let blank = TableEditing.blankTable(rows: 1, columns: 2, newlinesBefore: 0).text
+        view.string = blank
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        coordinator.restyle(view)
+        if let empty = view.liveLayout.tables.first {
+            expect(empty.columnWidths.count, 2, "the blank table has two columns")
+            for (column, width) in empty.columnWidths.enumerated() {
+                expectTrue(
+                    width >= TableGrid.minimumColumnWidth,
+                    "blank column \(column) is at least the floor"
+                        + " (\(width) < \(TableGrid.minimumColumnWidth))"
+                )
+            }
+        } else {
+            r.failures.append("a blank table is not drawn as a grid")
+        }
+
+        // The floor must never be what makes a table overflow: with more
+        // columns than the width can give the floor to, it yields instead.
+        let wide = TableEditing.blankTable(rows: 1, columns: 12, newlinesBefore: 0).text
+        view.string = wide
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        coordinator.restyle(view)
+        if let many = view.liveLayout.tables.first {
+            expect(many.columnWidths.count, 12, "the wide table has twelve columns")
+            let containerWidth = view.textContainer?.size.width ?? 0
+            expectTrue(
+                many.size.width <= containerWidth + 1,
+                "twelve blank columns still fit the text column"
+                    + " (\(many.size.width) > \(containerWidth))"
+            )
+        } else {
+            r.failures.append("a wide blank table is not drawn as a grid")
+        }
+
         return r
     }
 }

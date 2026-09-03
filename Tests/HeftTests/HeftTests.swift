@@ -347,3 +347,100 @@ struct DirtySweep {
         }
     }
 }
+
+@Suite("Reported list case")
+struct ReportedListCase {
+    @Test("The reported document: long wrapping list lines")
+    func longLines() {
+        let document = """
+        - dfasdfasdfasdfasdfddddddddddddddddddddddddd
+        - aasasdasdfasdffffffffffffffffffffffasdfsaaadddddddddddddddddddddddddddddddddddddddd
+        - adfasdf
+
+        """
+        let source = document as NSString
+        let decorations = LiveDecorator.decorations(in: document)
+        var reaching: [Int] = []
+        for at in 1..<source.length {
+            let edited = source.replacingCharacters(
+                in: NSRange(location: at, length: 0), with: "x"
+            ) as NSString
+            let before = RestyleScope.Snapshot(
+                source: source, decorations: decorations,
+                reveal: Reveal(selection: NSRange(location: at, length: 0), in: source)
+            )
+            let after = RestyleScope.Snapshot(
+                source: edited, decorations: LiveDecorator.decorations(in: edited as String),
+                reveal: Reveal(selection: NSRange(location: at + 1, length: 0), in: edited)
+            )
+            let dirty = RestyleScope.dirtyRanges(from: before, to: after)
+            let line = edited.lineRange(for: NSRange(location: at, length: 0))
+            if dirty.contains(where: {
+                $0.location < line.location || NSMaxRange($0) > NSMaxRange(line)
+            }) { reaching.append(at) }
+        }
+        print("REPORTED reaches past its line at \(reaching) of 1..<\(source.length)")
+    }
+}
+
+
+@Suite("Widget keys during a held key")
+@MainActor
+struct WidgetKeysWhileRepeating {
+    /// The reported case: holding a key on one list line makes the marker on
+    /// the line below disappear.
+    ///
+    /// A held key defers its styling, so the widgets keep their pre-edit
+    /// offsets for the whole repeat. A fragment rebuilt in that window asks for
+    /// its widget at an offset that has moved and is handed nothing.
+    @Test("A held key keeps the marker on the line below")
+    func markerSurvivesARepeat() {
+        let document = "- adfajjjjjjjjjjjjjjjjj\n- \n"
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let editor = LiveTextEditor(
+            text: .constant(document), documentIdentity: "b.md", generation: 0,
+            generationKeepsPosition: false, findSelection: nil, insertion: nil,
+            context: context, onAttachment: { _ in nil }, onFollowLink: { _ in },
+            onVimSearch: { _ in }
+        )
+        let coordinator = LiveTextEditor.Coordinator(editor)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isVerticallyResizable = true
+        view.frame = NSRect(x: 0, y: 0, width: 700, height: 900)
+        view.textContainer?.size = NSSize(width: 644, height: 1_000_000)
+        view.textLayoutManager?.delegate = coordinator
+        view.textStorage?.delegate = coordinator
+        view.delegate = coordinator
+        view.string = document
+        coordinator.restyle(view)
+
+        /// What a fragment beginning at `start` would be handed right now.
+        func hasMarker(at start: Int) -> Bool {
+            if case .list = coordinator.layout.blocks[coordinator.layoutKey(for: start)] {
+                return true
+            }
+            return false
+        }
+        let secondLine = 24
+        #expect(hasMarker(at: 0) && hasMarker(at: secondLine), "both markers to begin with")
+
+        // Hold the key: each repeat edits the storage and defers its styling.
+        var caret = 22
+        for repeatIndex in 1...6 {
+            coordinator.pretendEditsAreArrivingInABurst()
+            view.setSelectedRange(NSRange(location: caret, length: 0))
+            view.insertText("j", replacementRange: view.selectedRange())
+            caret += 1
+            #expect(
+                hasMarker(at: secondLine + repeatIndex),
+                Comment(rawValue: "after repeat \(repeatIndex) the marker on the line "
+                    + "below is gone; it is keyed \(repeatIndex) characters back")
+            )
+        }
+
+        // When the key is released the restyle lands and the keys are real.
+        coordinator.restyle(view)
+        #expect(coordinator.pendingShift == nil, "the restyle closes the window")
+        #expect(hasMarker(at: secondLine + 6), "and the marker is still there")
+    }
+}

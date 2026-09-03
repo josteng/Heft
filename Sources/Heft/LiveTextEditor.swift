@@ -93,6 +93,8 @@ struct LiveTextEditor: NSViewRepresentable {
         // The delegate hands each paragraph its widgets; without it tables,
         // formulae, images and list glyphs have nothing to draw them.
         textView.textLayoutManager?.delegate = nsContext.coordinator
+        // Widget keys go stale the moment the text moves; see `layoutKey`.
+        textView.textStorage?.delegate = nsContext.coordinator
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
@@ -277,6 +279,12 @@ struct LiveTextEditor: NSViewRepresentable {
         var indexFingerprint = ""
         var lastFindGeneration = -1
         var lastInsertionGeneration = -1
+        /// How far the text has moved since the widgets were computed.
+        ///
+        /// Only ever non-nil in the window between a storage edit and the
+        /// restyle that follows it — which is empty while typing normally, and
+        /// is the whole of a held key, because those defer their styling.
+        var pendingShift: (fromOldOffset: Int, delta: Int)?
         private var reveal = Reveal.none
         private var revealedSpans = ""
         private var needsRevealRestyle = false
@@ -564,6 +572,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // The view resolves clicks and places the table caret against the
             // same measurement the fragments draw with, so it needs the layout
             // this pass produced, not the one before it.
+            pendingShift = nil
             (textView as? HeftTextKit2View)?.liveLayout = layout
             // Recorded after styling: the span list is only known once the
             // decorator has run over the current text.
@@ -673,6 +682,44 @@ struct LiveTextEditor: NSViewRepresentable {
     }
 }
 
+extension LiveTextEditor.Coordinator: NSTextStorageDelegate {
+    /// Records how far the text has moved, without moving the widgets.
+    ///
+    /// The restyle shifts them itself when it carries them over, so doing it
+    /// here as well would move them twice.
+    func textStorage(
+        _ textStorage: NSTextStorage,
+        didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        guard editedMask.contains(.editedCharacters), delta != 0 else { return }
+        // `editedRange` is in the new text; the old text ended the edit here.
+        let oldEnd = editedRange.location + max(0, editedRange.length - delta)
+        if let pending = pendingShift {
+            pendingShift = (min(pending.fromOldOffset, oldEnd), pending.delta + delta)
+        } else {
+            pendingShift = (oldEnd, delta)
+        }
+    }
+}
+
+extension LiveTextEditor.Coordinator {
+    /// Where to look a widget up, for a fragment starting at `start` in the
+    /// text as it is now.
+    ///
+    /// Widgets are keyed by absolute offset, so an edit above them leaves every
+    /// key below it short by the size of that edit until the restyle rebuilds
+    /// them. While a key is held there is no restyle until it stops, so a
+    /// fragment rebuilt during the repeat looks its widget up at an offset that
+    /// has moved, finds nothing, and draws the line without its bullet — the
+    /// marker on the line below the caret vanishing as the key repeats.
+    func layoutKey(for start: Int) -> Int {
+        guard let shift = pendingShift, shift.delta != 0 else { return start }
+        return start >= shift.fromOldOffset + shift.delta ? start - shift.delta : start
+    }
+}
+
 extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
     /// Hands every paragraph the widgets the last restyle computed for it.
     func textLayoutManager(
@@ -686,9 +733,10 @@ extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
         guard let content = textLayoutManager.textContentManager else { return fragment }
         let start = content.offset(from: content.documentRange.location, to: location)
         fragment.elementStart = start
-        fragment.widget = layout.blocks[start]
-        fragment.inlineMath = layout.inlineMath[start] ?? []
-        fragment.inlineTags = layout.inlineTags[start] ?? []
+        let key = layoutKey(for: start)
+        fragment.widget = layout.blocks[key]
+        fragment.inlineMath = layout.inlineMath[key] ?? []
+        fragment.inlineTags = layout.inlineTags[key] ?? []
         return fragment
     }
 }

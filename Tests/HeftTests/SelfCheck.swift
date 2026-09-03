@@ -1653,6 +1653,13 @@ public enum SelfCheck {
             blank.text.components(separatedBy: "\n").filter { !$0.isEmpty }.count == 4,
             "a 2-row table is a header, a delimiter and two body rows"
         )
+        // The default is the smallest thing that still reads as a table:
+        // a header and one row, drawn as a 2x2 grid.
+        let smallest = TableEditing.blankTable(rows: 1, columns: 2, newlinesBefore: 0)
+        expectTrue(
+            smallest.text.components(separatedBy: "\n").filter { !$0.isEmpty }.count == 3,
+            "the default table is a header, a delimiter and one row"
+        )
         expectTrue(
             String(Array(blank.text)[blank.caretOffset]) == " ",
             "the caret lands inside the first header cell"

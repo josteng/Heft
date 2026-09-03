@@ -194,6 +194,13 @@ struct TableGrid {
     var accent: NSColor = .controlAccentColor
 
     static let padding = CGSize(width: 11, height: 7)
+    /// The narrowest a column is drawn at, whatever its content measures.
+    ///
+    /// Widths come from the rendered text, so a table whose cells are still
+    /// empty measured only the three spaces `blankTable` writes into each one:
+    /// a fresh 2x2 grid came out barely wider than its own borders, with
+    /// nothing to aim a click at. Leaves room for roughly ten characters.
+    static let minimumColumnWidth: CGFloat = 96
     /// Thickness of the add-row strip under the table and the add-column strip
     /// beside it.
     ///
@@ -292,6 +299,14 @@ struct TableGrid {
                 )
                 natural[column] = max(natural[column], ceil(bounds.width) + 1 + padding.width * 2)
             }
+        }
+
+        // Capped at an equal share of the space available, so the floor itself
+        // can never be what pushes a table into scaling down: a six-column
+        // table stays as wide as it fits and no wider.
+        let minimum = min(minimumColumnWidth, maxWidth / CGFloat(columnCount))
+        for column in natural.indices {
+            natural[column] = max(natural[column], minimum)
         }
 
         let total = natural.reduce(0, +)
