@@ -45,8 +45,11 @@ enum MathRenderer {
     static func clear() { cache.removeAllObjects() }
 }
 
-private extension NSColor {
+extension NSColor {
     /// Compact identity for cache keys; exact fidelity is not needed.
+    ///
+    /// Shared with the symbol cache in `LiveWidgets`, which keys on the tint
+    /// for the same reason: two callout kinds differ only by colour.
     var hexish: String {
         guard let rgb = usingColorSpace(.sRGB) else { return description }
         return String(

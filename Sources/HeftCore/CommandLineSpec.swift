@@ -116,6 +116,21 @@ public enum CommandLineSpec {
         verbs.first { $0.name == name }
     }
 
+    /// Whether these arguments are asking for help.
+    ///
+    /// **Never for no arguments at all.** That is how the Dock, Finder and
+    /// `open` launch a Mac app, and treating it as a help request made the
+    /// app print usage to a stdout nobody was reading and exit — one bounce
+    /// in the Dock and no window. It shipped that way.
+    ///
+    /// A bare `heft` in a terminal does not reach this: the installed wrapper
+    /// sends anything that is not a verb through `open`, so it arrives as
+    /// `heft open` and starts the app, the way `code .` does.
+    public static func wantsHelp(_ arguments: [String]) -> Bool {
+        guard let first = arguments.first else { return false }
+        return first == "help" || first == "--help" || first == "-h"
+    }
+
     /// Newline-separated verb names. What `install.sh` bakes into the wrapper,
     /// so the wrapper cannot fall behind the binary.
     public static var verbNames: String {

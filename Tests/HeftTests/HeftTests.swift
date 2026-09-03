@@ -1675,6 +1675,13 @@ struct CommandLineSpecTests {
         let agent = try source("Sources/Heft/AgentCLI.swift")
         let combined = main + agent
         for verb in CommandLineSpec.verbs {
+            // `help` is dispatched through `wantsHelp` rather than by a
+            // literal comparison, precisely so that no-arguments cannot be
+            // mistaken for a help request.
+            if verb.name == "help" {
+                #expect(combined.contains("CommandLineSpec.wantsHelp"))
+                continue
+            }
             #expect(
                 combined.contains("\"\(verb.name)\""),
                 "`heft \(verb.name)` is promised by the spec but never dispatched"
@@ -1698,6 +1705,26 @@ struct CommandLineSpecTests {
                 "`\(name)` is not safe to paste into the wrapper's case statement"
             )
         }
+    }
+
+    /// No arguments must never mean "print help".
+    ///
+    /// That is how the Dock, Finder and `open` launch a Mac app. Treating it
+    /// as a help request made Heft print usage to a stdout nobody was reading
+    /// and exit — one bounce in the Dock and no window — and it shipped that
+    /// way until someone tried to open the app.
+    @Test("An empty command line starts the app, it does not ask for help")
+    func emptyArgumentsAreNotAHelpRequest() {
+        #expect(!CommandLineSpec.wantsHelp([]), "a bare app launch was taken as a help request")
+        #expect(!CommandLineSpec.wantsHelp([""]))
+        // A path is a path, even one that looks like a word.
+        #expect(!CommandLineSpec.wantsHelp(["/Users/someone/Vault"]))
+        #expect(!CommandLineSpec.wantsHelp(["helpful-notes.md"]))
+        // And the real requests still are ones.
+        #expect(CommandLineSpec.wantsHelp(["help"]))
+        #expect(CommandLineSpec.wantsHelp(["--help"]))
+        #expect(CommandLineSpec.wantsHelp(["-h"]))
+        #expect(CommandLineSpec.wantsHelp(["help", "--json"]))
     }
 
     @Test("Help is complete and parseable")
@@ -2516,5 +2543,98 @@ struct ExportedTextLayerTests {
         #expect(heading.location != NSNotFound)
         let font = storage.attribute(.font, at: heading.location, effectiveRange: nil) as? NSFont
         #expect((font?.pointSize ?? 0) > 20, "the heading lost its styling (got \(font?.pointSize ?? -1))")
+    }
+}
+
+@Suite("Callout icons")
+@MainActor
+struct CalloutIconTests {
+
+    /// `SymbolConfiguration(paletteColors:)` is the obvious way to tint an SF
+    /// Symbol and it silently **flattens** it: every `.fill` symbol becomes a
+    /// solid silhouette, so `pencil.circle.fill` is a plain disc and
+    /// `info.circle.fill` is the same plain disc. At 14pt it reads as "a
+    /// coloured blob" and went unnoticed until a PDF made it big enough to
+    /// look at.
+    ///
+    /// The test is that the glyph has a *hole* in it: a flattened symbol is
+    /// opaque throughout, a real one leaves its detail as negative space so
+    /// the callout's card shows through.
+    @Test("A callout icon keeps its detail, not just its outline")
+    func iconIsNotFlattened() throws {
+        let side: CGFloat = 48
+        let tint = NSColor.systemBlue
+        let image = try #require(
+            HeftLayoutFragment.tintedSymbol("pencil.circle.fill", side: side, tint: tint)
+        )
+        let data = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: data))
+
+        // The middle of the glyph, where a disc would be solid and a pencil
+        // is not.
+        let inset = rep.pixelsWide / 4
+        var opaque = 0
+        var clear = 0
+        for x in inset..<(rep.pixelsWide - inset) {
+            for y in inset..<(rep.pixelsHigh - inset) {
+                guard let pixel = rep.colorAt(x: x, y: y) else { continue }
+                if pixel.alphaComponent > 0.9 { opaque += 1 }
+                if pixel.alphaComponent < 0.1 { clear += 1 }
+            }
+        }
+        #expect(opaque > 20, "the icon barely drew at all (\(opaque) opaque)")
+        #expect(clear > 20, "the icon is a solid silhouette — its detail was flattened away")
+    }
+
+    /// And it is actually the colour that was asked for, not black. A template
+    /// image keeps its detail but ignores the fill colour, which is why the
+    /// mask is recoloured with `.sourceIn` rather than simply drawn.
+    ///
+    /// Compared between two tints rather than against a fixed value: a
+    /// catalog colour resolves against whatever appearance is current, and the
+    /// bitmap comes back in whichever colour space `lockFocus` chose, so an
+    /// exact match is not a stable thing to assert. That one tint is warmer
+    /// than the other is.
+    @Test("A callout icon is drawn in its own tint")
+    func iconIsTinted() throws {
+        func averageInk(_ tint: NSColor) throws -> (red: Double, blue: Double) {
+            let image = try #require(
+                HeftLayoutFragment.tintedSymbol("flame.fill", side: 48, tint: tint)
+            )
+            let data = try #require(image.tiffRepresentation)
+            let rep = try #require(NSBitmapImageRep(data: data))
+            var red = 0.0, blue = 0.0, count = 0.0
+            for x in 0..<rep.pixelsWide {
+                for y in 0..<rep.pixelsHigh {
+                    guard let pixel = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                          pixel.alphaComponent > 0.9 else { continue }
+                    red += pixel.redComponent
+                    blue += pixel.blueComponent
+                    count += 1
+                }
+            }
+            #expect(count > 50, "the icon barely drew (\(count) opaque pixels)")
+            return (red / max(count, 1), blue / max(count, 1))
+        }
+
+        let orange = try averageInk(.systemOrange)
+        let blue = try averageInk(.systemBlue)
+        #expect(orange.red > blue.red, "an orange icon is not warmer than a blue one")
+        #expect(blue.blue > orange.blue, "a blue icon is not cooler than an orange one")
+        // And neither is the black a template image draws when the fill colour
+        // is ignored.
+        #expect(orange.red > 0.3, "the icon came out near-black (red \(orange.red))")
+        #expect(blue.blue > 0.3, "the icon came out near-black (blue \(blue.blue))")
+    }
+
+    /// Two kinds must not share a cache entry just because they are the same
+    /// size: they differ only by colour.
+    @Test("The cache keys on the tint as well as the symbol")
+    func cacheDistinguishesTints() throws {
+        let warm = try #require(HeftLayoutFragment.tintedSymbol("flame.fill", side: 24, tint: .systemOrange))
+        let cool = try #require(HeftLayoutFragment.tintedSymbol("flame.fill", side: 24, tint: .systemBlue))
+        let warmData = try #require(warm.tiffRepresentation)
+        let coolData = try #require(cool.tiffRepresentation)
+        #expect(warmData != coolData, "the same glyph came back for two different tints")
     }
 }

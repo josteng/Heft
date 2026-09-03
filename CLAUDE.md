@@ -518,6 +518,16 @@ depends on changes.
   writes to a key nothing ever reads.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
+- **`SymbolConfiguration(paletteColors:)` flattens an SF Symbol.** It is the
+  obvious way to tint one and it throws the detail away: every `.fill` symbol
+  becomes a solid silhouette, so `pencil.circle.fill` and `info.circle.fill`
+  are both a plain disc. It is wrong on screen too — at 14pt it just reads as
+  a coloured blob, and it went unnoticed until an export made it large enough
+  to look at. A *template* image keeps the detail and ignores the fill colour,
+  so `tintedSymbol` combines the two: draw the mask, then recolour it with
+  `.sourceIn`, which repaints the opaque pixels and leaves the negative space
+  transparent so the callout's card shows through. Cached on symbol, size and
+  tint, since two kinds differ only by colour.
 - **Collapsed markup is invisible on the page and still text in a PDF.** So an
   export carried its own source, and a widget drawing over source that is
   still present put every table and formula in there twice. `PDFExport`

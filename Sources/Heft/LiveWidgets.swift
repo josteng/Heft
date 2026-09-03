@@ -1024,18 +1024,54 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         }
     }
 
+    private static let symbolCache = NSCache<NSString, NSImage>()
+
+    /// An SF Symbol drawn in `tint`, with its detail intact.
+    ///
+    /// Not `SymbolConfiguration(paletteColors:)`, which is the obvious way and
+    /// silently **flattens the symbol**: every `.fill` symbol comes out as a
+    /// solid silhouette, so `pencil.circle.fill` is a plain disc and
+    /// `info.circle.fill` a plain disc too. It is wrong on screen as well as
+    /// in a PDF; it simply reads as "a coloured blob" at 14pt and was noticed
+    /// only once an export made it big enough to look at.
+    ///
+    /// A template image keeps the knocked-out detail but ignores the fill
+    /// colour, so the two are combined: draw the mask, then recolour it with
+    /// `.sourceIn`, which repaints every opaque pixel and leaves the negative
+    /// space transparent — so the callout's own card shows through the pencil,
+    /// which is what Obsidian does.
+    static func tintedSymbol(_ name: String, side: CGFloat, tint: NSColor) -> NSImage? {
+        let key = "\(name)|\(side)|\(tint.hexish)" as NSString
+        if let hit = symbolCache.object(forKey: key) { return hit }
+
+        guard let glyph = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(pointSize: side * 0.86, weight: .semibold)
+            )
+        else { return nil }
+        glyph.isTemplate = true
+
+        let box = NSRect(x: 0, y: 0, width: side, height: side)
+        let tinted = NSImage(size: box.size)
+        tinted.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        glyph.draw(in: box, from: .zero, operation: .sourceOver, fraction: 1)
+        tint.set()
+        box.fill(using: .sourceIn)
+        tinted.unlockFocus()
+
+        symbolCache.setObject(tinted, forKey: key)
+        return tinted
+    }
+
     private func drawCalloutIcon(
         _ quote: QuoteLine, tint: NSColor, at origin: CGPoint,
         line: NSTextLineFragment, isRevealed: Bool, in context: CGContext
     ) {
         let side: CGFloat = 14
         let centreY = origin.y + line.typographicBounds.midY
-        guard let symbol = NSImage(
-            systemSymbolName: quote.callout?.symbol ?? "quote.bubble.fill",
-            accessibilityDescription: nil
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [tint]))
+        guard let symbol = Self.tintedSymbol(
+            quote.callout?.symbol ?? "quote.bubble.fill", side: side, tint: tint
         ) else { return }
 
         withAppKitContext(context) {

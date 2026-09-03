@@ -12,8 +12,7 @@ enum HeftMain {
         // Discovery first, so `heft` alone and `heft help` both answer.
         // Everything printed here comes from `CommandLineSpec`, which is also
         // what the shell wrapper is generated from.
-        if arguments.isEmpty || arguments.first == "help"
-            || arguments.first == "--help" || arguments.first == "-h" {
+        if CommandLineSpec.wantsHelp(arguments) {
             if arguments.contains("--json") {
                 print(CommandLineSpec.helpJSON())
             } else if arguments.contains("--verbs") {
