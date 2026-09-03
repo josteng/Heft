@@ -1391,3 +1391,31 @@ struct TaskStateTests {
         #expect(quoted("> - [/] a") == .list(kind: .task(.other("/")), depth: 0, marker: "- [/] "))
     }
 }
+
+@Suite("Presentation deck")
+struct PresentationDeckTests {
+
+    private func slideCount(_ source: String) -> Int {
+        PresentationDeck.slides(from: MarkdownModel.parse(source).blocks).count
+    }
+
+    @Test("A top-level rule starts the next slide")
+    func splitsOnRules() {
+        #expect(slideCount("One\n\n---\n\nTwo") == 2)
+        #expect(slideCount("One\n\n***\n\nTwo\n\n___\n\nThree") == 3)
+        #expect(slideCount("Just one slide") == 1)
+        // A note with nothing in it is still a deck of one, not of none.
+        #expect(slideCount("") == 1)
+    }
+
+    /// The three `---` that must not split a note, all of which appear in an
+    /// ordinary note and would otherwise fill a deck with blank slides.
+    @Test("Frontmatter, fences and table rows are not slide breaks")
+    func nonBreaks() {
+        #expect(slideCount("---\ntags: [a]\n---\n\nOnly slide") == 1)
+        #expect(slideCount("Text\n\n```\n---\n```\n\nMore") == 1)
+        #expect(slideCount("| a | b |\n| --- | --- |\n| 1 | 2 |") == 1)
+        // `---` under a paragraph is a setext heading, not a rule.
+        #expect(slideCount("A Heading\n---\n\nBody") == 1)
+    }
+}

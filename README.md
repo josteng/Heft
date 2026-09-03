@@ -194,6 +194,10 @@ Obsidian templates use moment.js tokens, which collide with ICU: moment `DD` is
 day-of-month where ICU `DD` is day-of-year. Heft implements the moment tokens
 directly rather than routing them through `DateFormatter`.
 
+`Docs/TemplatesAndSlides.md` covers daily-note templates, the full token
+table, the typing-substitution snippets, and how `---` splits a note into
+slides.
+
 Measured against a 379-note vault: scan 8 ms, full index 122 ms, 84.7% of
 wikilinks resolved (the rest are genuinely missing notes, which Obsidian also
 reports as unresolved).
