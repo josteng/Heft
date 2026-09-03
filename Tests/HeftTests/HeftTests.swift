@@ -718,13 +718,19 @@ struct PDFExportTests {
 
         // No caret, so no line reveals its own block markup. With a selection
         // at 0 the first line came out with a literal `#` in the PDF.
+        //
+        // The hash is not merely collapsed now, it is replaced outright by a
+        // zero-width space, so what is asserted is that nothing readable
+        // precedes the heading rather than that the `#` is small.
         let storage = try #require(view.textStorage)
-        let hash = (storage.string as NSString).range(of: "# Quarterly")
-        #expect(hash.location != NSNotFound)
-        let font = storage.attribute(.font, at: hash.location, effectiveRange: nil) as? NSFont
+        let title = (storage.string as NSString).range(of: "Quarterly Notes")
+        #expect(title.location != NSNotFound)
+        let before = (storage.string as NSString)
+            .substring(to: title.location)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(
-            (font?.pointSize ?? 99) < 1,
-            "the heading's hash is collapsed, not shown (got \(font?.pointSize ?? -1)pt)"
+            before.allSatisfy { $0 == "\u{200B}" },
+            "something readable precedes the heading: \(before.debugDescription)"
         )
     }
 
@@ -2365,5 +2371,150 @@ struct OffscreenRenderTests {
                 try? png.write(to: url)
             }
         }
+    }
+}
+
+@Suite("Exported text layer")
+@MainActor
+struct ExportedTextLayerTests {
+
+    private static let note = """
+    # Quarterly Notes
+
+    A paragraph with **bold**, *italic* and $E = mc^2$ maths.
+
+    | Engine | Throughput |
+    | --- | --- |
+    | SGLang | 112 t/s |
+
+    - a bullet
+    - [x] a finished task
+
+    > [!warning] Mind this
+    > A callout body.
+
+    $$
+    \\int_0^1 x^2 \\, dx = \\frac{1}{3}
+    $$
+    """
+
+    private func exportedText() throws -> String {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-layer-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("out.pdf")
+        #expect(PDFExport.write(
+            text: Self.note,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            to: url
+        ))
+        let document = try #require(PDFDocument(url: url))
+        return (0..<document.pageCount)
+            .compactMap { document.page(at: $0)?.string }.joined(separator: "\n")
+    }
+
+    /// The page looked right all along; the invisible text behind it did not.
+    /// Collapsing hides markup with a hairline clear font, which is still text
+    /// as far as PDF is concerned, so an export carried its own source —
+    /// copying a paragraph gave back `**bold**`.
+    @Test("The markup is not in the exported text")
+    func markupIsGone() throws {
+        let text = try exportedText()
+        #expect(!text.contains("# Quarterly"), "a heading's hashes reached the text layer")
+        #expect(!text.contains("**bold**"), "emphasis markers reached the text layer")
+        #expect(!text.contains("*italic*"))
+        #expect(!text.contains("[!warning]"))
+        #expect(!text.contains("- a bullet"), "a list marker reached the text layer")
+    }
+
+    /// A widget draws *over* source that is still present, so a table and a
+    /// formula each appeared twice — once drawn, once as `| --- | ---: |` and
+    /// its LaTeX. A screen reader read all of it, twice.
+    @Test("Drawn constructs are not also present as source")
+    func noDuplication() throws {
+        let text = try exportedText()
+        #expect(!text.contains("| --- |"), "the table's delimiter row reached the text layer")
+        #expect(!text.contains("\\int_0^1"), "the formula's LaTeX reached the text layer")
+        #expect(!text.contains("$$"))
+    }
+
+    /// And the prose is still there, still selectable. Stripping the markup
+    /// must not strip the note.
+    @Test("The prose survives")
+    func proseSurvives() throws {
+        let text = try exportedText()
+            .replacingOccurrences(of: "\u{200B}", with: "")
+        for expected in [
+            "Quarterly Notes", "bold", "italic", "a bullet",
+            "a finished task", "Mind this", "A callout body",
+            "SGLang", "112 t/s",
+        ] {
+            #expect(text.contains(expected), "`\(expected)` was lost from the text layer")
+        }
+    }
+
+    /// An inline formula occupies no width of its own: the gap it is drawn
+    /// into is bought with a `.kern` on the last character of its collapsed
+    /// `$…$`. Kerning is not applied to a zero-width space, so replacing that
+    /// character closed the gap and the typeset maths landed on top of the
+    /// words after it — visible on the page, and invisible to any test that
+    /// only reads the text.
+    @Test("The character carrying a formula's gap is kept")
+    func keepsTheKernedCharacter() throws {
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let view = PDFExport.renderView(
+            text: "A line with $E = mc^2$ maths in it.\n", context: context, width: 483
+        )
+        let storage = try #require(view.textStorage)
+
+        _ = storage
+
+        // Measured from the layout, not from the attribute. The kern survives
+        // on a zero-width space and is simply not applied to it, so a test
+        // that reads the attribute passes while the page is wrong.
+        func lineWidth(_ text: String) throws -> CGFloat {
+            let view = PDFExport.renderView(text: text, context: context, width: 483)
+            let manager = try #require(view.textLayoutManager)
+            var width: CGFloat = 0
+            manager.enumerateTextLayoutFragments(
+                from: manager.documentRange.location, options: [.ensuresLayout]
+            ) { fragment in
+                for line in fragment.textLineFragments {
+                    width = max(width, line.typographicBounds.width)
+                }
+                return false
+            }
+            return width
+        }
+
+        let withMaths = try lineWidth("A line with $E = mc^2$ maths in it.\n")
+        let without = try lineWidth("A line with  maths in it.\n")
+        #expect(
+            withMaths - without > 15,
+            "the formula has no room on the line: \(withMaths) vs \(without) without it"
+        )
+    }
+
+    /// The visible page must be untouched by any of this: flattening happens
+    /// after styling and replaces each character with one of the same count,
+    /// so nothing may reflow.
+    @Test("Flattening does not change the page")
+    func layoutIsUnchanged() throws {
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let view = PDFExport.renderView(text: Self.note, context: context, width: 483)
+        let storage = try #require(view.textStorage)
+
+        // Same length as the source, character for character.
+        #expect(storage.length == (Self.note as NSString).length)
+
+        // And the styling survived. A restyle triggered by the edits would
+        // re-decorate a buffer with no markdown left and give back plain body
+        // text — which is exactly what happened before both delegates were
+        // detached.
+        let heading = (storage.string as NSString).range(of: "Quarterly Notes")
+        #expect(heading.location != NSNotFound)
+        let font = storage.attribute(.font, at: heading.location, effectiveRange: nil) as? NSFont
+        #expect((font?.pointSize ?? 0) > 20, "the heading lost its styling (got \(font?.pointSize ?? -1))")
     }
 }

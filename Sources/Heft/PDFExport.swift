@@ -106,6 +106,84 @@ enum PDFExport {
         return true
     }
 
+    /// Replaces collapsed markup with zero-width spaces, in place.
+    ///
+    /// Newlines are kept as they are. A collapsed range routinely spans
+    /// several lines — `hideWhole` collapses a whole table, frontmatter block
+    /// or `$$…$$` in one go — and replacing its newlines would run those lines
+    /// together and destroy the layout the reservation was made for.
+    private static func flattenCollapsedText(in view: NSTextView) {
+        guard let storage = view.textStorage, storage.length > 0 else { return }
+
+        // The coordinator must not see these edits.
+        //
+        // Both delegates, and for different reasons. The text view's forwards
+        // `textDidChange` and a character edit therefore schedules a restyle,
+        // which then re-decorates a buffer with no markdown left in it and
+        // produces a page of plain body text — no headings, no bold, no
+        // widgets. The storage's would map the edit for incremental styling it
+        // will never do.
+        //
+        // The *layout manager's* delegate has to stay: it is what hands each
+        // fragment its widget, so detaching it is how every table, bullet and
+        // formula stops being drawn.
+        storage.delegate = nil
+        view.delegate = nil
+
+        var collapsed: [NSRange] = []
+        storage.enumerateAttribute(
+            .font, in: NSRange(location: 0, length: storage.length)
+        ) { value, range, _ in
+            // The hairline size `collapse` applies, and nothing else uses.
+            guard let font = value as? NSFont, font.pointSize < 1 else { return }
+            collapsed.append(range)
+        }
+        guard !collapsed.isEmpty else { return }
+
+        let text = storage.string as NSString
+        storage.beginEditing()
+        // Backwards, so an earlier replacement cannot move a later range.
+        for range in collapsed.reversed() {
+            let replacement = NSMutableAttributedString()
+            for offset in 0..<range.length {
+                let index = range.location + offset
+                let character = text.character(at: index)
+                // Newlines stay. A collapsed range routinely spans several
+                // lines — `hideWhole` takes a whole table, frontmatter block
+                // or `$$…$$` in one go — and replacing its newlines would run
+                // those lines together and destroy the layout the height
+                // reservation was made for.
+                let isNewline = character == 10 || character == 13
+                // A character carrying a kern is load-bearing and stays.
+                //
+                // An inline formula occupies no width of its own: the gap it
+                // is drawn into is bought with a `.kern` on the last character
+                // of its collapsed `$…$`. Kerning is not applied to a
+                // zero-width space, so replacing that one character closed the
+                // gap and the typeset maths landed on top of the words after
+                // it. One `$` left in the text layer per formula is a far
+                // smaller price than that.
+                let attributes = storage.attributes(at: index, effectiveRange: nil)
+                let kern = (attributes[.kern] as? NSNumber)?.doubleValue ?? 0
+                let keepsCharacter = isNewline || abs(kern) > 0.001
+                let scalar: String = keepsCharacter
+                    ? text.substring(with: NSRange(location: index, length: 1))
+                    : "\u{200B}"
+                // Each replacement character keeps the attributes of the one
+                // it stands in for, rather than inheriting the first
+                // character's. `replaceCharacters(in:with: String)` does the
+                // latter, and it loses anything set per character inside the
+                // run: an inline formula is positioned by a `.kern` on the
+                // *last* character of its collapsed `$…$`, so flattening with
+                // a plain string dropped the gap and the typeset maths landed
+                // on top of the words after it.
+                replacement.append(NSAttributedString(string: scalar, attributes: attributes))
+            }
+            storage.replaceCharacters(in: range, with: replacement)
+        }
+        storage.endEditing()
+    }
+
     /// Drops any wholly empty page off the end of a finished PDF.
     ///
     /// The print system decides pagination from the view's height, and with a
@@ -240,6 +318,27 @@ enum PDFExport {
         if let manager = view.textLayoutManager, let content = manager.textContentManager {
             manager.ensureLayout(for: content.documentRange)
         }
+        // Take the markup out of the *text layer*.
+        //
+        // Collapsing hides markup with a hairline clear font, which is
+        // invisible on the page and still text as far as PDF is concerned. So
+        // an exported note carried its own source: copying a paragraph gave
+        // back `**bold**`, and because a widget draws *over* source that is
+        // still there, every table and formula appeared twice — once as the
+        // drawn grid or glyphs, once as `| --- | ---: |` and its LaTeX. A
+        // screen reader read all of it, twice.
+        //
+        // Deleting the markup is not available. For a table, an image or a
+        // formula, `hideWhole` reserves the widget's height on the very lines
+        // it collapsed: those lines *are* the widget's canvas, and deleting
+        // them leaves it nowhere to draw. Every offset in `LiveLayout` is
+        // keyed on them too.
+        //
+        // So each collapsed character is replaced by a zero-width space
+        // instead. Same character count, so every offset, widget key and
+        // reserved height survives untouched; nothing readable left behind.
+        flattenCollapsedText(in: view)
+
         view.sizeToFit()
 
         // Trim the trailing gutter.

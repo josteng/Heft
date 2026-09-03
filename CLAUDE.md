@@ -518,6 +518,19 @@ depends on changes.
   writes to a key nothing ever reads.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
+- **Collapsed markup is invisible on the page and still text in a PDF.** So an
+  export carried its own source, and a widget drawing over source that is
+  still present put every table and formula in there twice. `PDFExport`
+  replaces each collapsed character with a zero-width space of the same count
+  — deleting is not available, because `hideWhole` reserves a widget's height
+  on the very lines it collapsed, so those lines are its canvas. Three things
+  make it safe and each broke the page first: detach the text view's delegate
+  (its `textDidChange` schedules a restyle that re-decorates markdown-free
+  text into plain prose) but *not* the layout manager's (that is what supplies
+  the widgets); copy attributes per character, since replacing with a plain
+  string applies the first character's to the whole run; and keep any
+  character carrying a `.kern`, because an inline formula's gap is a kern and
+  kerning is not applied to a zero-width space.
 - **Checking the GUI without a screen: what works and what does not.** Four
   routes were tried against a real settings pane.
   `ImageRenderer` works, needs no permission and no window, and is what the
