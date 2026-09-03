@@ -30,7 +30,11 @@ struct CaptureToInboxIntent: AppIntent {
         guard let vault = IntentVaultDestination.url else {
             throw InboxCaptureError.vaultUnavailable
         }
-        try InboxCapture(vaultRoot: vault).capture(note)
+        try await MainActor.run {
+            try IntentPresentation.preservingVisibility {
+                try InboxCapture(vaultRoot: vault).capture(note)
+            }
+        }
         return .result(dialog: "Added to Inbox in \(vault.lastPathComponent).")
     }
 }
@@ -57,7 +61,11 @@ struct AddToTodaysNoteIntent: AppIntent {
             throw DailyNoteCaptureError.vaultUnavailable
         }
         let settings = ObsidianSettings.load(vaultRoot: vault)
-        _ = try DailyNoteCapture(vaultRoot: vault, settings: settings).capture(note)
+        try await MainActor.run {
+            _ = try IntentPresentation.preservingVisibility {
+                try DailyNoteCapture(vaultRoot: vault, settings: settings).capture(note)
+            }
+        }
         return .result(dialog: "Added to today's note in \(vault.lastPathComponent).")
     }
 }

@@ -20,6 +20,13 @@ extension FocusedValues {
 /// before any scene exists, and `IntentNavigation` already knows how to hold a
 /// request until a workspace registers itself.
 final class HeftAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Has to start watching now rather than when a capture arrives: what
+        // it records is how the user left the app, which is already gone by
+        // the time an intent brings the app forward and asks.
+        MainActor.assumeIsolated { IntentPresentation.begin() }
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard let path = HeftURL.openedPath(in: url) else { continue }
