@@ -55,6 +55,13 @@ enum HeftMain {
             )
             return
         }
+        // `export <vault> <note> <out.pdf>` writes the rendered note to PDF
+        // without a window. The GUI's Export as PDF goes through exactly this,
+        // so what a script produces is what the menu item produces.
+        if arguments.first == "export", arguments.count > 3 {
+            runExport(vaultPath: arguments[1], note: arguments[2], output: arguments[3])
+            return
+        }
         if arguments.first == "files", arguments.count > 1 {
             let root = URL(fileURLWithPath: (arguments[1] as NSString).expandingTildeInPath)
             for item in VaultScanner.scan(root: root).flattened() where !item.isFolder {
@@ -133,6 +140,32 @@ enum HeftMain {
     /// Read-only report over a vault. Exists so indexing and link resolution
     /// can be checked against a real vault without launching the editor, which
     /// autosaves and would risk writing to notes that matter.
+    private static func runExport(vaultPath: String, note: String, output: String) {
+        let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
+        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        guard let ref = index.notes.first(where: {
+            $0.relativePath == note || $0.name == note
+        }) else {
+            FileHandle.standardError.write(Data("no such note: \(note)\n".utf8))
+            exit(1)
+        }
+        let source = (try? String(contentsOf: ref.url, encoding: .utf8)) ?? ""
+        let context = RenderContext(index: index, current: ref, vaultRoot: root)
+        let destination = URL(
+            fileURLWithPath: (output as NSString).expandingTildeInPath
+        ).standardizedFileURL
+
+        let wrote = MainActor.assumeIsolated {
+            PDFExport.write(text: source, context: context, to: destination)
+        }
+        guard wrote else {
+            FileHandle.standardError.write(Data("could not write \(destination.path)\n".utf8))
+            exit(1)
+        }
+        print("wrote \(destination.path)")
+        exit(0)
+    }
+
     private static func runRenderProbe(vaultPath: String, note: String, caret: Int?) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
         let index = VaultIndex.build(root: VaultScanner.scan(root: root))

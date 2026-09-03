@@ -1146,6 +1146,52 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    // MARK: - Export
+
+    /// Writes the open note to PDF, asking where to put it.
+    ///
+    /// Exports what the editor draws, not the markdown source: the rendered
+    /// note is the thing worth handing to someone who does not have Heft.
+    func exportPDF() {
+        guard let current else { status = "No note to export"; return }
+
+        let panel = NSSavePanel()
+        panel.title = "Export as PDF"
+        panel.nameFieldStringValue = (current.url.lastPathComponent as NSString)
+            .deletingPathExtension + ".pdf"
+        panel.allowedContentTypes = [.pdf]
+        panel.canCreateDirectories = true
+        // Beside the note is where an export is usually wanted, and is a
+        // better guess than wherever a save panel was last pointed.
+        panel.directoryURL = current.url.deletingLastPathComponent()
+
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+        // Pending edits first: exporting a note that is 700ms out of date
+        // would be a strange thing to discover later in a PDF.
+        flushPendingSave()
+
+        let appearance = AppearanceSettings.shared
+        let context = RenderContext(
+            index: index, current: current, vaultRoot: vaultRoot,
+            strictLineBreaks: settings.strictLineBreaks,
+            colorfulFormatting: appearance.colorfulFormattingEnabled,
+            accentColor: appearance.accentColor,
+            linkColor: appearance.linkColor,
+            tagColor: appearance.tagColor,
+            codeColor: appearance.codeColor,
+            boldColor: appearance.boldColor,
+            italicColor: appearance.italicColor,
+            headingColors: (1...6).map { appearance.headingColor($0) }
+        )
+
+        if PDFExport.write(text: text, context: context, to: destination) {
+            status = "Exported \(destination.lastPathComponent)"
+        } else {
+            status = "Could not export \(destination.lastPathComponent)"
+        }
+    }
+
     func copyToPasteboard(_ string: String, describedAs label: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)

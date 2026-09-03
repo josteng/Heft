@@ -14,6 +14,7 @@ swift run Heft stats <vault>                    # read-only index report; safe o
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
 swift run Heft proposals <vault>                # agent edits waiting for review
+swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headless
 ```
 
 ## Architecture

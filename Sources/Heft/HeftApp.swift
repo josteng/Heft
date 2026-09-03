@@ -172,6 +172,10 @@ struct HeftCommands: Commands {
                     : "Set Up Agent Access…"
             ) { model?.setUpAgentAccess() }
                 .disabled(model?.vaultRoot == nil)
+            Divider()
+            Button("Export as PDF…") { model?.exportPDF() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(model?.current == nil)
         }
         CommandGroup(after: .textEditing) {
             Menu("Format") {

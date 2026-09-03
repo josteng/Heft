@@ -395,6 +395,14 @@ struct LiveTextEditor: NSViewRepresentable {
             textView.showFindIndicator(for: match)
         }
 
+        /// Renders as though nothing were focused, for an export: no caret
+        /// means no line reveals its block markup, so a PDF gets the rendered
+        /// form of every construct rather than a stray `#` on whichever line
+        /// the selection happened to sit.
+        func renderWithoutCaret() {
+            revealsSelection = false
+        }
+
         func focusChanged(_ focused: Bool, in textView: NSTextView) {
             let shouldReveal = focused || parent.findSelection != nil
             guard shouldReveal != revealsSelection else { return }

@@ -126,6 +126,9 @@ changed, rather than re-attributing the whole note twice per character.
   from the vault's configured template.
 - **Backlinks** panel with the referencing line as context.
 - **Quick open** (⌘O), **content search** (⇧⌘F), **command palette** (⌘P).
+- **Export as PDF** (⇧⌘E) of the *rendered* note — tables, callouts, bullets,
+  checkboxes and typeset LaTeX, not the Markdown source. It prints the live
+  surface itself rather than a second renderer, so the page matches the editor.
 - **Multiple windows** over the same or different vaults, with an optional
   folder-focused view that scopes the tree, search and quick open without
   turning that folder into a second vault.
@@ -147,6 +150,7 @@ heft diff <vault> <id>          # what one of them would change
 heft stats <vault>              # read-only index report
 heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
 heft render <vault> <note>      # what the live surface would draw, headless
+heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
 ```
 
 `stats` and `render` are read-only and safe against a real vault.
@@ -194,6 +198,7 @@ reports as unresolved).
 | ⌘P | Command palette |
 | ⌘S | Save pending edits now |
 | ⇧⌘F | Search the vault |
+| ⇧⌘E | Export as PDF |
 | ⇧⌘I | Capture to Inbox |
 | ⇧⌘T | Today's daily note |
 | ⇧⌘S | Toggle sidebar |

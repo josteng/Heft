@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PDFKit
 import SwiftUI
 import Testing
 @testable import Heft
@@ -601,5 +602,155 @@ struct MathColourTests {
         dark.appearance = RenderContext.appearance(for: .dark)
         #expect(light.resolved(.textColor) != dark.resolved(.textColor))
         #expect(light.resolved(.labelColor) != dark.resolved(.labelColor))
+    }
+}
+
+@Suite("PDF export")
+@MainActor
+struct PDFExportTests {
+
+    static let note = """
+    # Quarterly Notes
+
+    A paragraph with **bold**, *italic*, `code` and some $E = mc^2$ maths.
+
+    ## A table
+
+    | Engine | Throughput | Notes |
+    | --- | ---: | :---: |
+    | SGLang FP8 | ~112 t/s | **fast** |
+    | vLLM FP8 | 115.1 t/s | `stable` |
+
+    ## A list
+
+    - first item
+    - second item
+      - nested item
+    - [ ] an unchecked task
+    - [x] a finished one
+
+    > [!note] A callout
+    > With a body worth keeping.
+
+    $$
+    \\int_0^1 x^2 \\, dx = \\frac{1}{3}
+    $$
+    """
+
+    @Test("A note becomes a readable PDF")
+    func exportsAPDF() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-pdf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("note.pdf")
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+
+        #expect(PDFExport.write(text: Self.note, context: context, to: destination))
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+
+        let document = try #require(PDFDocument(url: destination))
+        #expect(document.pageCount >= 1)
+
+        // The point of exporting through the live surface is that the PDF
+        // holds the *rendered* note. So the prose has to be in there, and the
+        // markup that produced it must not be.
+        let contents = (0..<document.pageCount)
+            .compactMap { document.page(at: $0)?.string }
+            .joined()
+        #expect(contents.contains("Quarterly Notes"))
+        #expect(contents.contains("second item"))
+        #expect(contents.contains("A callout"))
+        // Every cell of the table reached the page, which only happens if the
+        // grid widget drew. Reaching for the TextKit 1 layout manager anywhere
+        // in the export path drops the view back to TextKit 1, where
+        // NSTextLayoutFragment does not exist and every widget silently stops
+        // being drawn — the text still renders, so it reads as a styling bug.
+        #expect(contents.contains("SGLang FP8"))
+        #expect(contents.contains("Throughput"))
+
+        // The markup characters are still *in* the PDF's text, because the
+        // buffer equals the file and collapsing is a font change rather than a
+        // deletion. So the claim worth asserting is not that they are absent,
+        // it is that they are invisible.
+    }
+
+    /// The two ways the export used to come out wrong, asserted where they are
+    /// actually observable: on the view the PDF is printed from.
+    @Test("The exported page is laid out inside the paper, with markup hidden")
+    func renderViewGeometry() throws {
+        let printable: CGFloat = 483
+        let view = PDFExport.renderView(
+            text: Self.note,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            width: printable
+        )
+
+        // Nothing may be laid out past the page. The text view re-imposes its
+        // own 28pt gutter on every frame change, so sizing the container to
+        // the full printable width lays the text out 28pt too far right and
+        // clips the last word of every line.
+        let manager = try #require(view.textLayoutManager)
+        var widest: CGFloat = 0
+        manager.enumerateTextLayoutFragments(
+            from: manager.documentRange.location, options: [.ensuresLayout]
+        ) { fragment in
+            widest = max(widest, fragment.layoutFragmentFrame.maxX)
+            return true
+        }
+        #expect(widest > 0, "nothing was laid out")
+        #expect(
+            widest <= printable + 1,
+            "text runs \(widest - printable)pt past the right edge of the page"
+        )
+
+        // The fragment frames alone do not catch it: they are measured from
+        // the container, which can itself be wider than the space left for it.
+        // What clips a line is the container plus both gutters exceeding the
+        // page, since the text is *drawn* offset by the leading one.
+        let inset = view.textContainerInset.width
+        let container = try #require(view.textContainer).size.width
+        #expect(
+            container + inset * 2 <= view.frame.width + 1,
+            "the text area (\(container)) plus its two \(inset)pt gutters is wider than the page (\(view.frame.width))"
+        )
+
+        // No caret, so no line reveals its own block markup. With a selection
+        // at 0 the first line came out with a literal `#` in the PDF.
+        let storage = try #require(view.textStorage)
+        let hash = (storage.string as NSString).range(of: "# Quarterly")
+        #expect(hash.location != NSNotFound)
+        let font = storage.attribute(.font, at: hash.location, effectiveRange: nil) as? NSFont
+        #expect(
+            (font?.pointSize ?? 99) < 1,
+            "the heading's hash is collapsed, not shown (got \(font?.pointSize ?? -1)pt)"
+        )
+    }
+
+    /// A note longer than a page has to actually paginate. Getting this wrong
+    /// silently loses everything past the first page, which is the kind of
+    /// thing nobody notices until they have sent the file to someone.
+    @Test("A long note runs to more than one page")
+    func paginates() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-pdf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let long = (1...240).map { "Paragraph \($0) of a note that keeps going." }
+            .joined(separator: "\n\n")
+        let destination = directory.appendingPathComponent("long.pdf")
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+
+        #expect(PDFExport.write(text: long, context: context, to: destination))
+        let document = try #require(PDFDocument(url: destination))
+        #expect(document.pageCount > 1, "got \(document.pageCount) page(s)")
+
+        let contents = (0..<document.pageCount)
+            .compactMap { document.page(at: $0)?.string }
+            .joined()
+        #expect(contents.contains("Paragraph 1 of"))
+        #expect(contents.contains("Paragraph 240 of"), "the last paragraph reached the PDF")
     }
 }
