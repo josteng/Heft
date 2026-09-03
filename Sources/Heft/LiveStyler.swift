@@ -359,33 +359,40 @@ enum LiveStyler {
         case .image(let source, _):
             guard let url = context.resolveResource(source), let image = ImageCache.image(at: url)
             else { return }
+            let lead = blockLead(range, text: text, lineStart: lineStart, in: storage, layout: layout)
             hideWhole(
-                range, in: storage, text: text,
+                range, in: storage, text: text, indent: lead.indent,
                 reserving: HeftLayoutFragment.displaySize(for: image).height
             )
-            layout.blocks[lineStart] = .image(image)
+            layout.blocks[lineStart] = .image(image, lead: lead)
 
         case .wikiLink(let link):
-            guard link.isEmbed, ownsItsLine(range, text), let hit = context.resolve(link)
+            guard link.isEmbed,
+                  BlockLine.leadingMarkers(before: range, in: text) != nil,
+                  let hit = context.resolve(link)
             else { return }
+            let lead = blockLead(range, text: text, lineStart: lineStart, in: storage, layout: layout)
 
             // A markdown target is transcluded; anything else is a picture.
             if hit.isMarkdown {
                 guard let embed = EmbedRenderer.render(
-                    link: link, note: hit, maxWidth: contentWidth,
+                    link: link, note: hit, maxWidth: contentWidth - lead.indent,
                     context: context, fontSize: base.pointSize - 0.5
                 ) else { return }
-                hideWhole(range, in: storage, text: text, reserving: embed.size.height)
-                layout.blocks[lineStart] = .embed(embed)
+                hideWhole(
+                    range, in: storage, text: text, indent: lead.indent,
+                    reserving: embed.size.height
+                )
+                layout.blocks[lineStart] = .embed(embed, lead: lead)
                 return
             }
 
             guard let image = ImageCache.image(at: hit.url) else { return }
             hideWhole(
-                range, in: storage, text: text,
+                range, in: storage, text: text, indent: lead.indent,
                 reserving: HeftLayoutFragment.displaySize(for: image).height
             )
-            layout.blocks[lineStart] = .image(image)
+            layout.blocks[lineStart] = .image(image, lead: lead)
 
         case .thematicBreak:
             // The dashes collapse to nothing, so without a reserved height the
@@ -405,16 +412,45 @@ enum LiveStyler {
 
     /// True when only whitespace shares the range's line, so the construct can
     /// be given the whole line's height without painting over prose.
-    private static func ownsItsLine(_ range: NSRange, _ text: NSString) -> Bool {
-        let line = text.lineRange(for: range)
-        let before = text.substring(with: NSRange(
-            location: line.location, length: range.location - line.location
-        ))
-        let after = text.substring(with: NSRange(
-            location: NSMaxRange(range), length: NSMaxRange(line) - NSMaxRange(range)
-        ))
-        return before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && after.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    /// What the line a block widget is about to claim still owes the reader.
+    ///
+    /// A picture on a bullet, or inside a quote, is one line with two things
+    /// on it, and the editor draws one widget per line. The marker's own
+    /// widget was written in the first pass and is about to be overwritten
+    /// here, so what it would have drawn is lifted out of it and carried by
+    /// the picture instead.
+    ///
+    /// The indent is read from the paragraph style that widget's own styling
+    /// wrote, rather than recomputed from the marker's depth, so the two
+    /// cannot disagree. It must be read *before* `hideWhole`, which replaces
+    /// that paragraph style.
+    private static func blockLead(
+        _ range: NSRange, text: NSString, lineStart: Int,
+        in storage: StyleSink, layout: LiveLayout
+    ) -> BlockLead {
+        guard let markers = BlockLine.leadingMarkers(before: range, in: text), markers > 0
+        else { return BlockLead() }
+        let indent = (storage.attribute(.paragraphStyle, at: lineStart, effectiveRange: nil)
+            as? NSParagraphStyle)?.headIndent ?? 0
+
+        switch layout.blocks[lineStart] {
+        case .list(let glyph, let markerOffset, let fontSize):
+            return BlockLead(
+                indent: indent,
+                bullet: LeadingBullet(
+                    glyph: glyph, markerOffset: markerOffset, fontSize: fontSize
+                )
+            )
+        case .quote(let quote, _, let isRevealed, let bullet):
+            // The quote widget already carries any list written inside it, so
+            // `> - ![[shot.png]]` needs nothing further.
+            return BlockLead(
+                indent: indent, bullet: bullet,
+                quote: LeadingQuote(line: quote, isRevealed: isRevealed)
+            )
+        default:
+            return BlockLead()
+        }
     }
 
     /// Hides every line a multi-line construct occupies, then gives its *first*
@@ -425,7 +461,8 @@ enum LiveStyler {
     /// the layout manager has to honour, so the space is really there and the
     /// drawing cannot be clipped to a hairline.
     private static func hideWhole(
-        _ range: NSRange, in storage: StyleSink, text: NSString, reserving height: CGFloat
+        _ range: NSRange, in storage: StyleSink, text: NSString,
+        indent: CGFloat = 0, reserving height: CGFloat
     ) {
         collapse(range, in: storage)
         let lines = text.lineRange(for: range)
@@ -445,6 +482,10 @@ enum LiveStyler {
         block.paragraphSpacingBefore = 8
         block.paragraphSpacing = 8
         block.minimumLineHeight = height + HeftLayoutFragment.blockInset * 2
+        // A block on a list line keeps the list's indent, because the widget
+        // positions its bullet from where the line's text begins.
+        block.headIndent = indent
+        block.firstLineHeadIndent = indent
         // Deliberately no maximum: it would clamp the height back down.
         storage.addAttribute(.paragraphStyle, value: block, range: first)
     }
@@ -574,7 +615,7 @@ enum LiveStyler {
             // A list inside a quote is indented from the quote's own text
             // edge, not from the page: the bullet belongs inside the card.
             var indent = quoteEdge
-            var quotedBullet: QuotedBullet?
+            var quotedBullet: LeadingBullet?
             if case .list(let kind, let depth, let marker) = quote.nested {
                 // The full list indent, on top of the quote's own text edge:
                 // a quoted list steps in from quoted prose by exactly what an
@@ -588,7 +629,7 @@ enum LiveStyler {
                     case .task(let state): .checkbox(state, accent: context.accentColor)
                     case .ordered: .ordered(orderedLabel(marker))
                     }
-                    quotedBullet = QuotedBullet(
+                    quotedBullet = LeadingBullet(
                         glyph: glyph,
                         markerOffset: listGlyphOffset(marker: marker, kind: kind, font: base),
                         fontSize: base.pointSize

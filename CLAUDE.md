@@ -118,6 +118,57 @@ and the card not, stepping the whole card right on every list line.
 A callout's header line is excluded: `[!kind]` has already claimed what
 follows the marker there.
 
+### A picture pasted onto a bullet
+
+Pasting an image writes `![[shot.png]]` at the caret, so in a daily log made
+of bullets it always arrives as `- ![[shot.png]]`. The surface drew nothing
+for that. A block construct was only drawn when it was **alone on its line**,
+and the test for that asked whether everything before it was whitespace: a
+list marker is not whitespace, so every pasted picture stayed as its filename
+in blue. The markdown spelling `- ![](shot.png)` had the mirror-image bug,
+drawing the picture and silently deleting the bullet.
+
+`BlockLine.leadingMarkers` in HeftCore replaces that test and is pure. It
+returns the length of the markers the construct follows, `0` when the
+construct starts its own line, and nil when anything else shares the line. A
+marker is the line's *structure* rather than its content, so a picture behind
+one is no less a picture; but `- see ![[shot.png]]` is a sentence that happens
+to end in an embed, and drawing that as a block would hide the sentence behind
+the picture's reserved height. Which is why it returns a length rather than a
+bool, and why "the markers must reach the construct" is load-bearing: only
+that separates the two, and a mutation removing it passed until a case with
+words *between* the marker and the embed was added.
+
+Quote markers lead for the same reason and compose with a list's, so
+`> ![[shot.png]]` and `> - ![[shot.png]]` are both pictures inside a quote. A
+callout's header is the exception: `[!kind]` has already claimed what follows
+the marker there, which is the same line `QuotedBlock` refuses for the same
+reason.
+
+The editor draws **one widget per line**, keyed by line start, so the picture
+takes the slot the marker's own `.list` or `.quote` widget was written into one
+pass earlier. `BlockLead` is what that line still owed the reader — its indent,
+its list glyph, and its quote bar or callout card — and rides on `.image` and
+`.embed`, which paint the card first, then the glyph, then themselves. Each
+part goes through the same drawing the displaced widget would have used, so a
+quoted bullet holding a picture needs no third code path.
+
+Two geometry facts, both of which broke the page first:
+
+- `hideWhole` replaces the paragraph style, so it has to be given the list's
+  indent or the line loses it. The indent is *read back* from the style the
+  list wrote rather than recomputed from the marker's depth, so the two cannot
+  disagree, and it has to be read before `hideWhole` runs.
+- With that indent set, the layout fragment's **own origin already carries
+  it** (`frame.minX` is 31 for a top-level item, 53 for a nested one, while
+  the text's `typographicBounds.minX` stays 0). Offsetting the picture by the
+  indent as well put it twice as far in. `heft render` reports both numbers
+  for exactly this reason.
+
+And the carried bullet is drawn *left* of that origin, so `renderingSurfaceBounds`
+has to open the same 44pt gutter `.list` gets or the clip shaves it off
+entirely — which is what happened: the picture moved, the bullet vanished.
+
 ### Tables are edited in place
 
 A table is the one construct with a third reveal state. Everything else is
@@ -786,6 +837,15 @@ depends on changes.
   jump lists, and blockwise put are not implemented; `Docs/VimMode.md` tracks
   the full command surface and the handful of narrow places the prose objects
   differ from Vim.
+- A drawn block on the **last line of a file** reserves its height twice, so a
+  note ending in a picture or a formula gets a picture-sized gap under it.
+  TextKit lays an extra, empty line fragment after the document's final
+  newline *inside the same paragraph*, and it takes the paragraph's tall
+  `minimumLineHeight` with it. Paragraph attributes cannot separate the two:
+  giving that final newline its own style changes nothing, because the style
+  is read from the paragraph's first character. Anything with a line after it
+  is unaffected. In a PDF export the same fragment also draws its content at
+  the wrong horizontal offset.
 - Deferred: graph view, plugins.
 
 ## The icon

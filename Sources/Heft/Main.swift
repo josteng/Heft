@@ -451,7 +451,19 @@ enum HeftMain {
             return number
         }
 
-        func describeNested(_ nested: QuotedBlock?, bullet: QuotedBullet?) -> String {
+        /// What a picture or transclusion took over from a list marker, so the
+        /// headless report shows the bullet is still being drawn.
+        func describeCarried(_ lead: BlockLead) -> String {
+            var parts: [String] = []
+            if let quote = lead.quote {
+                parts.append("in quote depth \(quote.line.depth)")
+            }
+            if let bullet = lead.bullet { parts.append("on list \(bullet.glyph)") }
+            guard !parts.isEmpty else { return "" }
+            return " " + parts.joined(separator: " ") + " indent \(fmt(lead.indent))"
+        }
+
+        func describeNested(_ nested: QuotedBlock?, bullet: LeadingBullet?) -> String {
             switch nested {
             case .list(let kind, let depth, let marker):
                 " + list \(kind) depth \(depth) marker \"\(marker)\""
@@ -475,14 +487,17 @@ enum HeftMain {
             case .thematicBreak: "thematic break"
             case .agentGuide(let isEnd): "agent guide \(isEnd ? "end" : "start")"
             case .blockMath(let image): "block math \(size(image.size))"
-            case .image(let image): "image \(size(image.size))"
+            case .image(let image, let lead):
+                "image \(size(image.size))" + describeCarried(lead)
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
                     + describeActiveCell(of: grid)
             case .properties(let card):
                 "properties \(card.rows.count) rows \(size(card.size))"
-            case .embed(let embed):
-                "embed \"\(embed.title)\" \(size(embed.size))\(embed.isTruncated ? " truncated" : "")"
+            case .embed(let embed, let lead):
+                "embed \"\(embed.title)\" \(size(embed.size))"
+                    + (embed.isTruncated ? " truncated" : "")
+                    + describeCarried(lead)
             case .quote(let quote, let indent, _, let bullet):
                 "\(quote.rawCallout.map { "callout \($0)" } ?? "quote") depth \(quote.depth) \(quote.edge) indent \(fmt(indent))"
                     + describeNested(quote.nested, bullet: bullet)
@@ -531,7 +546,10 @@ enum HeftMain {
         manager.textContainer = container
         manager.ensureLayout(for: content.documentRange)
 
-        print("fragment geometry (frame height / text height / lead / trail):")
+        print(
+            "fragment geometry (frame height / text height / lead / trail"
+                + " / frame x / text x):"
+        )
         manager.enumerateTextLayoutFragments(from: nil, options: [.ensuresLayout]) { fragment in
             let offset = content.offset(
                 from: content.documentRange.location, to: fragment.rangeInElement.location
@@ -544,7 +562,16 @@ enum HeftMain {
             // how much below the last: this is where paragraph spacing lands.
             let lead = first.typographicBounds.minY
             let trail = frame.height - textHeight - lead
-            print("  line \(line(offset)): \(fmt(frame.height)) / \(fmt(textHeight)) / \(fmt(lead)) / \(fmt(trail))")
+            // Where a widget drawn beside the text has to start. `draw` is
+            // handed the fragment's own origin, and the paragraph's indent may
+            // already be in either of these two, so both are reported: a widget
+            // that adds an indent to an origin that already carries one lands
+            // twice as far in, which is invisible in the model and obvious here.
+            print(
+                "  line \(line(offset)): \(fmt(frame.height)) / \(fmt(textHeight))"
+                    + " / \(fmt(lead)) / \(fmt(trail))"
+                    + " / \(fmt(frame.minX)) / \(fmt(first.typographicBounds.minX))"
+            )
             return true
         }
     }

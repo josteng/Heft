@@ -24,29 +24,52 @@ enum BlockWidget {
     /// A labelled rule where the agent guide begins or ends.
     case agentGuide(isEnd: Bool)
     case blockMath(NSImage)
-    case image(NSImage)
+    /// A picture, and whatever the line it claimed still owes the reader.
+    case image(NSImage, lead: BlockLead = BlockLead())
     /// Drawn as a grid; the widget owns every line of the table.
     case table(TableGrid)
     /// One line's slice of a quote bar, or of a callout's tinted card.
     /// `isRevealed` means the line's real source is on screen, so nothing may
     /// be drawn where that source sits.
-    case quote(QuoteLine, indent: CGFloat, isRevealed: Bool, bullet: QuotedBullet? = nil)
+    case quote(QuoteLine, indent: CGFloat, isRevealed: Bool, bullet: LeadingBullet? = nil)
     /// Another note's content, transcluded by `![[Note]]`.
-    case embed(EmbeddedNote)
+    case embed(EmbeddedNote, lead: BlockLead = BlockLead())
     /// YAML frontmatter, drawn as a key/value table.
     case properties(PropertiesCard)
 }
 
-/// A bullet, numeral or checkbox belonging to a list written inside a quote.
+/// A bullet, numeral or checkbox belonging to a list whose line is drawn by
+/// some other widget: a quote bar, or a picture pasted onto the bullet.
 ///
-/// Carried by the quote widget rather than emitted as a `.list` of its own,
-/// because the editor draws one widget per line and the quote bar already
-/// owns that line's key. Same three numbers `.list` takes, so both go through
-/// exactly the same drawing code.
-struct QuotedBullet {
+/// Carried by that widget rather than emitted as a `.list` of its own, because
+/// the editor draws one widget per line and something else already owns that
+/// line's key. Same three numbers `.list` takes, so both go through exactly the
+/// same drawing code.
+struct LeadingBullet {
     let glyph: ListGlyph
     let markerOffset: CGFloat
     let fontSize: CGFloat
+}
+
+/// What a line already owed the reader before a picture or a transclusion
+/// claimed its one widget slot.
+///
+/// The editor draws one widget per line, keyed by line start, so a picture
+/// written onto a bullet inside a quote displaces both the bullet and the
+/// quote bar. Rather than let the last writer win, the picture carries them:
+/// `indent` is how far the paragraph is already inset (room the picture does
+/// not have), `bullet` is the list glyph, and `quote` is the bar or callout
+/// card to paint behind it all.
+struct BlockLead {
+    var indent: CGFloat = 0
+    var bullet: LeadingBullet?
+    var quote: LeadingQuote?
+}
+
+/// A quote bar or callout card whose line some other widget took over.
+struct LeadingQuote {
+    let line: QuoteLine
+    let isRevealed: Bool
 }
 
 /// A note's frontmatter, measured as a two-column table.
@@ -729,11 +752,28 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     private var contentSize: CGSize? {
         switch widget {
         case .blockMath(let image): image.size
-        case .image(let image): Self.displaySize(for: image)
+        case .image(let image, _): Self.displaySize(for: image)
         case .table(let grid): grid.contentSize
-        case .embed(let embed): embed.size
+        case .embed(let embed, _): embed.size
         case .properties(let card): card.size
         default: nil
+        }
+    }
+
+    /// What the line this widget claimed still owes the reader, if anything.
+    private var blockLead: BlockLead? {
+        switch widget {
+        case .image(_, let lead), .embed(_, let lead): lead
+        default: nil
+        }
+    }
+
+    /// How far a block widget is drawn in from the fragment's own origin.
+    /// Non-zero only for one sitting on a list or quote line.
+    private var blockIndent: CGFloat {
+        switch widget {
+        case .image(_, let lead), .embed(_, let lead): lead.indent
+        default: 0
         }
     }
 
@@ -746,7 +786,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             // so a bounds box the size of the formula clips its right half.
             bounds = bounds.union(CGRect(
                 x: 0, y: 0,
-                width: max(bounds.width, containerWidth, contentSize.width) + 2,
+                width: max(bounds.width, containerWidth - blockIndent, contentSize.width) + 2,
                 height: contentSize.height + Self.blockInset * 2
             ))
         }
@@ -768,6 +808,18 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             ))
         case .list:
             bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
+        // A picture or transclusion that took a list line's widget slot draws
+        // that list's bullet in the same gutter, and a clip starting at the
+        // fragment's own origin shaves it off completely. A quote's card is
+        // painted back to the container's own edge, which is further still.
+        case .image(_, let lead), .embed(_, let lead):
+            if lead.quote != nil {
+                bounds = bounds.union(CGRect(
+                    x: -lead.indent, y: -2, width: containerWidth, height: bounds.height + 4
+                ))
+            } else if lead.bullet != nil {
+                bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
+            }
         case .quote(_, let indent, _, _):
             // The card and the bars are painted in the gutter the paragraph's
             // head indent opened up, which is to the left of every glyph.
@@ -810,18 +862,30 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
                 quote, indent: indent, isRevealed: isRevealed, at: point, in: context
             )
         }
+        // The same card, for a line a picture or transclusion took over. It is
+        // painted from the fragment's own origin back by the indent, so the
+        // indent the block was laid out at is the one to pass.
+        if let lead = blockLead, let quote = lead.quote {
+            drawQuoteBackground(
+                quote.line, indent: lead.indent, isRevealed: quote.isRevealed,
+                at: point, in: context
+            )
+        }
         switch widget {
         case .blockMath(let image):
             // The source is fully collapsed, so there is no text to draw.
             drawCentred(image, size: image.size, at: point, in: context)
             return
-        case .image(let image):
-            drawLeading(image, size: Self.displaySize(for: image), at: point, in: context)
+        case .image(let image, let lead):
+            let size = Self.displaySize(for: image)
+            drawBesideBlock(lead.bullet, height: size.height, at: point, in: context)
+            drawLeading(image, size: size, at: point, in: context)
             return
         case .table(let grid):
             draw(grid, at: point, in: context)
             return
-        case .embed(let embed):
+        case .embed(let embed, let lead):
+            drawBesideBlock(lead.bullet, height: embed.size.height, at: point, in: context)
             draw(embed, at: point, in: context)
             return
         case .properties(let card):
@@ -1382,12 +1446,28 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
 
     // MARK: Line decoration
 
+    /// The bullet whose line a picture or transclusion has taken over.
+    ///
+    /// Aligned near the top of the block rather than centred on it: the line is
+    /// as tall as the picture, and a bullet floating halfway down a 400pt
+    /// photograph does not read as belonging to the item it starts.
+    private func drawBesideBlock(
+        _ bullet: LeadingBullet?, height: CGFloat, at point: CGPoint, in context: CGContext
+    ) {
+        guard let bullet else { return }
+        draw(
+            bullet.glyph, markerOffset: bullet.markerOffset, fontSize: bullet.fontSize,
+            at: point, in: context,
+            centredAt: point.y + Self.blockInset + bullet.fontSize * 0.62
+        )
+    }
+
     private func draw(
         _ glyph: ListGlyph, markerOffset: CGFloat, fontSize: CGFloat,
-        at point: CGPoint, in context: CGContext
+        at point: CGPoint, in context: CGContext, centredAt overrideY: CGFloat? = nil
     ) {
         guard let line = textLineFragments.first else { return }
-        let centreY = point.y + line.typographicBounds.midY
+        let centreY = overrideY ?? (point.y + line.typographicBounds.midY)
         // The fragment is already positioned at the paragraph's head indent, so
         // the text's leading edge is the origin and the gutter is behind it.
         // Deriving this from `indent` instead would double-count the indent.
