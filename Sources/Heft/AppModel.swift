@@ -940,112 +940,69 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private struct LinkRewrite {
-        let source: NoteRef
-        let original: String
-        let rewritten: String
-        let count: Int
-        let usesOpenBuffer: Bool
-    }
-
-    /// Builds file-level path changes for a note, attachment, or every file
-    /// below a folder. The index is still pre-move here, so link resolution can
-    /// identify intended targets without guessing from filenames.
+    /// Which files move, and what the notes pointing at them should say.
+    ///
+    /// The work itself is `VaultRename` in HeftCore, so the command line does
+    /// exactly what the sidebar does. What stays here is what only a window
+    /// knows: whether another window has the file open, and that the note being
+    /// edited must be read from its buffer rather than from disk.
     private func pathChanges(for item: VaultItem, movingTo newPath: String) -> [String: String] {
-        guard item.isFolder else { return [item.relativePath: newPath] }
-        return Dictionary(uniqueKeysWithValues: item.flattened().compactMap { descendant in
-            guard !descendant.isFolder else { return nil }
-            let suffix = descendant.relativePath.dropFirst(item.relativePath.count)
-            return (descendant.relativePath, newPath + suffix)
-        })
+        VaultRename.changes(for: item, movingTo: newPath)
     }
 
-    /// Reads and rewrites every source before the move, but performs no writes.
-    /// A source open in another window blocks the operation, because writing
-    /// underneath that window would defeat the editor lease.
-    private func prepareLinkRewrites(for changes: [String: String]) -> [LinkRewrite]? {
+    private func prepareLinkRewrites(for changes: [String: String]) -> [VaultRename.Rewrite]? {
         let sources = Set(changes.keys.flatMap {
             index.backlinks(to: $0).map(\.source.relativePath)
         })
-        var plans: [LinkRewrite] = []
-
         for path in sources.sorted() {
             guard let source = index.note(atRelativePath: path) else { continue }
             guard !registry.isClaimedByAnotherWindow(source.url, excluding: workspaceID) else {
                 status = "Close \(source.name) in the other window before moving linked files"
                 return nil
             }
-            let usesOpenBuffer = current?.relativePath == path
-            guard let original = usesOpenBuffer
-                ? text
-                : try? String(contentsOf: source.url, encoding: .utf8)
-            else {
-                status = "Could not read \(source.relativePath) before updating its links"
-                return nil
-            }
-
-            let result = WikiLinkParser.rewriteTargets(
-                in: original,
-                matches: { link in
-                    guard let old = index.resolve(link, from: source)?.relativePath else {
-                        return false
-                    }
-                    return changes[old] != nil
-                },
-                replacement: { link in
-                    guard let old = index.resolve(link, from: source)?.relativePath,
-                          let new = changes[old]
-                    else { return link.target }
-                    return WikiLinkParser.retargeted(link.target, to: new)
-                }
-            )
-            guard result.count > 0, result.text != original else { continue }
-            plans.append(LinkRewrite(
-                source: source,
-                original: original,
-                rewritten: result.text,
-                count: result.count,
-                usesOpenBuffer: usesOpenBuffer
-            ))
         }
-        return plans
+
+        do {
+            return try VaultRename.rewrites(for: changes, in: index) { source in
+                // The open note's unsaved text is the truth about it; the file
+                // is only where it was last written.
+                if current?.relativePath == source.relativePath { return text }
+                return try String(contentsOf: source.url, encoding: .utf8)
+            }
+        } catch VaultRename.Failure.unreadable(let path) {
+            status = "Could not read \(path) before updating its links"
+            return nil
+        } catch {
+            status = "Could not work out which links to update: \(error.localizedDescription)"
+            return nil
+        }
     }
 
-    /// Applies prepared rewrites after the move. Sources that moved with a
-    /// folder are addressed by their new path. A final content comparison
-    /// prevents a last-millisecond external edit from being overwritten.
+    /// Applies prepared rewrites after the move. The note this window has open
+    /// goes through the buffer and the ordinary autosave rather than being
+    /// written under the editor.
     private func applyLinkRewrites(
-        _ plans: [LinkRewrite], after changes: [String: String]
+        _ plans: [VaultRename.Rewrite], after changes: [String: String]
     ) -> (links: Int, notes: Int, failures: Int) {
         guard let vaultRoot else { return (0, 0, plans.count) }
-        var links = 0
-        var notes = 0
-        var failures = 0
-
+        var openBuffer: VaultRename.Rewrite?
+        var onDisk: [VaultRename.Rewrite] = []
         for plan in plans {
-            if plan.usesOpenBuffer {
-                text = plan.rewritten
-                documentGeneration += 1
-                links += plan.count
-                notes += 1
-                continue
-            }
-
-            let path = changes[plan.source.relativePath] ?? plan.source.relativePath
-            let url = vaultRoot.appendingPathComponent(path)
-            guard (try? String(contentsOf: url, encoding: .utf8)) == plan.original else {
-                failures += 1
-                continue
-            }
-            do {
-                try plan.rewritten.write(to: url, atomically: true, encoding: .utf8)
-                links += plan.count
-                notes += 1
-            } catch {
-                failures += 1
+            if current?.relativePath == plan.note.relativePath {
+                openBuffer = plan
+            } else {
+                onDisk.append(plan)
             }
         }
-        return (links, notes, failures)
+
+        var summary = VaultRename.apply(onDisk, after: changes, vaultRoot: vaultRoot)
+        if let openBuffer {
+            text = openBuffer.rewritten
+            documentGeneration += 1
+            summary.links += openBuffer.links
+            summary.notes += 1
+        }
+        return (summary.links, summary.notes, summary.skipped)
     }
 
     func duplicate(_ item: VaultItem) {

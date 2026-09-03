@@ -105,6 +105,10 @@ public enum CommandLineSpec {
         ], isReadOnly: false),
         Verb("daily", "<vault> [YYYY-MM-DD]", "Create a daily note from the template.",
              isReadOnly: false),
+        Verb("rename", "<vault> <path> <new>",
+             "Rename a note, attachment or folder, repointing the links into it.", flags: [
+            Flag("--dry-run", "Say what would change, and change nothing."),
+        ], isReadOnly: false),
         Verb("render", "<vault> <note> [caret]",
              "What the live surface would draw, fragment by fragment.",
              isDiagnostic: true),

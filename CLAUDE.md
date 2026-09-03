@@ -517,6 +517,19 @@ file and may hold their own instructions, which is the same rule proposals
 exist to enforce. Bump `AgentGuide.version` whenever the wording an agent
 depends on changes.
 
+### Renaming, in one place
+
+`VaultRename` in HeftCore does the work: which files move, which notes point at
+them, and what those notes should say afterwards. `AppModel` keeps only what a
+window knows — whether another window has the file open, and that the note
+being edited must be read from its buffer rather than from disk — and hands the
+rest over. `heft rename` calls the same thing with no window at all.
+
+A link written as a path is repointed; a bare `[[note.pdf]]` that still resolves
+is left exactly as it was written. A note that changed between the plan and the
+write is skipped rather than overwritten: half of somebody's edit plus half of
+this is worse than neither.
+
 ### What opens when Heft starts
 
 `StartupNote` in HeftCore, stored per vault. Per vault because "always open

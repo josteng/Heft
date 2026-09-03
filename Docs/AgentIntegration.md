@@ -36,6 +36,11 @@ heft diff <vault> <proposal-id>        # what one of them would change
 heft drop <vault> <proposal-id>        # withdraw one
 ```
 
+`heft rename <vault> <path> <new>` is the one structural edit here, and it is
+not a proposal: a rename moves a file and rewrites the links in every note that
+pointed at it, which is not the new body of one note. `--dry-run` says what it
+would do first, and is the right thing to show somebody before doing it.
+
 Also read-only, and better than `grep` at every one of these:
 `heft outline` for a note's headings, `heft links` and `heft backlinks` for the
 resolved link graph, `heft tags`, and `heft config` for the vault's settings as

@@ -143,7 +143,10 @@ changed, rather than re-attributing the whole note twice per character.
 - **File tree** with folders, images and PDFs, and inline creation. Renaming
   or moving a note *or a folder* repoints the path-qualified wikilinks that
   pointed into it, including from the notes that travelled with it, while bare
-  `[[Chapter]]` links that still resolve are left alone.
+  `[[Chapter]]` links that still resolve are left alone. The same work is
+  `heft rename`, so an agent can fix a misspelled folder without you clicking
+  through it — measured on a real vault: 45 files moved, one path-qualified
+  link repointed, and link resolution unchanged at 82.0%.
 - **Calendar** with a dot per existing daily note; clicking a day creates it
   from the vault's configured template.
 - **Backlinks** panel with the referencing line as context.
@@ -196,6 +199,8 @@ Every verb is declared in one place, so `heft help` is always the full list and
 heft [path]                     # open a folder or note, like `code .`
 heft help [--json]              # every verb and flag
 heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
+heft rename <vault> <path> <new> # rename a note, attachment or folder,
+                                 #   repointing the links into it (--dry-run)
 heft agent-setup <vault>        # teach an agent in that vault to propose
 heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
     # --text-size 12  --paper a4|letter|legal|tabloid
@@ -346,7 +351,7 @@ rewrite the Spotlight capture destination or Open Recent.
 nothing in the suite notices an app that starts and immediately exits. One
 shipped that way. It launches with no arguments, the way the Dock does.
 
-The suite is 242 tests across 55 suites: pure checks over parsing, formatting,
+The suite is 247 tests across 56 suites: pure checks over parsing, formatting,
 links, paths and settings; a live-surface check that runs edit scripts through
 both an incrementally styled buffer and a from-scratch one and compares every
 attribute on every character; a differential decoration check that drives the

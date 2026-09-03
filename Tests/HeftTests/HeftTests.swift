@@ -1747,7 +1747,7 @@ struct CommandLineSpecTests {
     /// the new query verbs are too. Anything that writes must not claim to be.
     @Test("Read-only verbs are the ones that only read")
     func readOnlyIsHonest() {
-        let writes = ["open", "propose", "drop", "daily", "export", "agent-setup"]
+        let writes = ["open", "propose", "drop", "daily", "export", "agent-setup", "rename"]
         for verb in CommandLineSpec.verbs {
             #expect(
                 verb.isReadOnly == !writes.contains(verb.name),

@@ -33,6 +33,18 @@ enum HeftMain {
             return
         }
 
+        // Renaming is the one structural edit worth doing from here. A typo in
+        // a folder's name is a bad thing to fix by hand — every link into it
+        // has to move with it — and it cannot be expressed as a proposal,
+        // which carries the new body of one note.
+        if arguments.first == "rename", arguments.count > 3 {
+            runRename(
+                vaultPath: arguments[1], target: arguments[2], newName: arguments[3],
+                dryRun: arguments.contains("--dry-run")
+            )
+            return
+        }
+
         if arguments.first == "stats", arguments.count > 1 {
             runStats(vaultPath: arguments[1])
             return
@@ -591,6 +603,81 @@ enum HeftMain {
 
     private static func size(_ s: CGSize) -> String { "\(fmt(s.width))x\(fmt(s.height))" }
     private static func fmt(_ value: CGFloat) -> String { String(format: "%.1f", value) }
+
+    /// `rename <vault> <path> <new>` — the sidebar's rename, without the
+    /// sidebar. `<new>` is a name to keep the item where it is, or a
+    /// vault-relative path to move it as well.
+    private static func runRename(
+        vaultPath: String, target: String, newName: String, dryRun: Bool
+    ) {
+        let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
+            .standardizedFileURL
+        let tree = VaultScanner.scan(root: root)
+        let index = VaultIndex.build(root: tree)
+
+        let wanted = target.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let item = tree.flattened().first(where: {
+            $0.relativePath == wanted || $0.name == wanted
+        }) else {
+            FileHandle.standardError.write(Data("no such note or folder: \(target)\n".utf8))
+            exit(1)
+        }
+
+        // A bare name keeps the item where it is; anything with a slash is a
+        // move as well as a rename.
+        let parent = (item.relativePath as NSString).deletingLastPathComponent
+        var destination = newName.contains("/")
+            ? newName.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            : (parent.isEmpty ? newName : parent + "/" + newName)
+        if item.isMarkdown, (destination as NSString).pathExtension.lowercased() != "md" {
+            destination += ".md"
+        }
+
+        let changes = VaultRename.changes(for: item, movingTo: destination)
+        do {
+            if dryRun {
+                let planned = try VaultRename.rewrites(for: changes, in: index) {
+                    try String(contentsOf: $0.url, encoding: .utf8)
+                }
+                print("would rename: \(item.relativePath) -> \(destination)")
+                if changes.count > 1 { print("files moved:  \(changes.count)") }
+                for rewrite in planned {
+                    print("  \(rewrite.note.relativePath): \(rewrite.links) link"
+                        + (rewrite.links == 1 ? "" : "s"))
+                }
+                print("would repoint \(planned.reduce(0) { $0 + $1.links }) link"
+                    + (planned.reduce(0) { $0 + $1.links } == 1 ? "" : "s")
+                    + " in \(planned.count) note" + (planned.count == 1 ? "" : "s"))
+                return
+            }
+
+            let summary = try VaultRename.perform(
+                item: item, to: destination, index: index, vaultRoot: root
+            )
+            print("renamed: \(item.relativePath) -> \(destination)")
+            if changes.count > 1 { print("files moved: \(changes.count)") }
+            print("repointed \(summary.links) link" + (summary.links == 1 ? "" : "s")
+                + " in \(summary.notes) note" + (summary.notes == 1 ? "" : "s"))
+            if summary.skipped > 0 {
+                print("\(summary.skipped) note" + (summary.skipped == 1 ? " was" : "s were")
+                    + " changed while this ran and were left alone")
+            }
+        } catch let failure as VaultRename.Failure {
+            let message: String = switch failure {
+            case .noSuchItem(let path): "no such note or folder: \(path)"
+            case .alreadyExists(let path): "already exists: \(path)"
+            case .emptyName: "the new name is empty"
+            case .unreadable(let path): "could not read \(path) before updating its links"
+            }
+            FileHandle.standardError.write(Data((message + "\n").utf8))
+            exit(1)
+        } catch {
+            FileHandle.standardError.write(
+                Data("rename failed: \(error.localizedDescription)\n".utf8)
+            )
+            exit(1)
+        }
+    }
 
     private static func runStats(vaultPath: String) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
