@@ -28,7 +28,8 @@ swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headle
 Three targets:
 
 - `HeftCore`: pure logic. Never imports AppKit or SwiftUI. Parsing, the link index,
-  the vault scanner, moment.js date formatting, live-mode decorations.
+  the vault scanner, moment.js date formatting, live-mode decorations, the file
+  watcher, the draft mirror, the frecency ranking, and the agent CLI.
 - `HeftVimCore`: Foundation-only modal editing grammar. It returns edits and
   selections but never owns an editor buffer or imports AppKit. Anything it
   cannot answer from the text alone — which lines are on screen for `H M L`,
@@ -44,6 +45,43 @@ shared `VaultSession`. Each window owns a separate `AppModel` for its open note,
 navigation, folder focus, and visible panels. A focused folder scopes browsing
 and search without turning that folder into another vault; multiple windows can
 therefore show different parts of one vault without duplicate watchers or indexes.
+
+### What a window knows, and what it only asks about
+
+`AppModel` is the largest thing in the app target and is a window's own state:
+the open note, the buffer, navigation, focus, save conflicts. It is *not* where
+the rules live, and the boundary is worth keeping because it has been crossed
+twice already and cost something both times.
+
+`VaultRename` in HeftCore decides which files move and what the notes pointing
+at them should say. `VaultOperations` decides everything around that: cleaning
+a typed name, putting back the `.md` a note is displayed without, finding a
+free `Untitled 3`, and whether a rename or a move can happen at all. Both were
+`guard` statements inside `AppModel` interleaved with writes to `status`, so
+the only way to reach one was through a running window — and the command line
+re-derived the `.md` rule by hand, in a slightly different form, which is
+exactly the drift `CommandLineSpec` exists to prevent elsewhere.
+
+So a refusal is a **value**, not a string assigned on the way out.
+`VaultOperations.Refusal` carries one wording that the sidebar shows, the CLI
+prints, and a test asks for without either. It conforms to `Error` only
+because `Result` asks that of a failure type; nothing throws one.
+
+`VaultHost` is the other half: everything an operation has to ask a person, or
+hand to the system, before it can happen. `AppModel` used to build an `NSAlert`
+or an `NSOpenPanel` in the middle of renaming and deleting, which made those
+paths unreachable in a test — `runModal` blocks and has no answer to give — so
+the checks around them were verified by reading. `AppKitHost` ships;
+`ScriptedHost` in the test target answers from a queue and records what it was
+asked, which is how the refusals are now driven end to end. `NSWorkspace` and
+`NSPasteboard` are behind it for a related reason: opening an attachment in a
+test does not block, it launches Preview.
+
+Reading back what the plan decided, rather than recomputing it, is the rule in
+both. `move` takes its destination URL from the plan's path, so where the file
+is written and where every link is repointed to cannot disagree — the same
+lesson as reading a list's indent back from the paragraph style rather than
+from the marker's depth.
 
 ### The editing surface
 
