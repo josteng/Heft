@@ -285,7 +285,8 @@ private struct TransclusionView: View {
                         codeColor: context.codeColor,
                         boldColor: context.boldColor,
                         italicColor: context.italicColor,
-                        headingColors: context.headingColors
+                        headingColors: context.headingColors,
+                        appearance: context.appearance
                     ),
                     embedDepth: embedDepth + 1
                 )

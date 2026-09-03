@@ -9,12 +9,14 @@ struct PresentationView: View {
     @State private var slideIndex = 0
     @FocusState private var hasKeyboardFocus: Bool
 
+    @Environment(\.colorScheme) private var colorScheme
+
     private var slides: [[MDBlock]] {
         PresentationDeck.slides(from: MarkdownModel.parse(model.text).blocks)
     }
 
     private var context: RenderContext {
-        RenderContext(
+        var context = RenderContext(
             index: model.index,
             current: model.current,
             vaultRoot: model.vaultRoot,
@@ -27,6 +29,8 @@ struct PresentationView: View {
             italicColor: appearance.italicColor,
             headingColors: (1...6).map { appearance.headingColor($0) }
         )
+        context.appearance = RenderContext.appearance(for: colorScheme)
+        return context
     }
 
     var body: some View {

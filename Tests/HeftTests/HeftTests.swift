@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Heft
 @testable import HeftCore
@@ -519,5 +521,85 @@ struct WeekLayoutTests {
         #expect(FirstWeekday.saturday.resolved() == 7)
         // System follows the locale rather than a fixed day.
         #expect(FirstWeekday.system.weekdayIndex == nil)
+    }
+}
+
+@Suite("Math colour")
+@MainActor
+struct MathColourTests {
+
+    /// The glyph colour is baked into the bitmap, so getting it wrong is
+    /// permanent for as long as that image is cached. This is the check the
+    /// `resolved(_:)` docstring asks for and that the inline path was
+    /// skipping: it passed the dynamic `.textColor` straight through, and a
+    /// formula on a light page came out in the dark-mode colour.
+    @Test("A formula is drawn in the appearance's own text colour")
+    func formulaFollowsAppearance() throws {
+        func luminance(of image: NSImage) throws -> Double {
+            let data = try #require(image.tiffRepresentation)
+            let rep = try #require(NSBitmapImageRep(data: data))
+            var total = 0.0
+            var counted = 0
+            for x in 0..<rep.pixelsWide {
+                for y in 0..<rep.pixelsHigh {
+                    guard let pixel = rep.colorAt(x: x, y: y) else { continue }
+                    // Only the ink. The background is transparent, and
+                    // averaging it in would drown the glyphs out.
+                    guard pixel.alphaComponent > 0.5 else { continue }
+                    let rgb = pixel.usingColorSpace(.sRGB) ?? pixel
+                    total += 0.2126 * rgb.redComponent
+                        + 0.7152 * rgb.greenComponent
+                        + 0.0722 * rgb.blueComponent
+                    counted += 1
+                }
+            }
+            #expect(counted > 0, "the formula rendered no ink at all")
+            return counted == 0 ? 0 : total / Double(counted)
+        }
+
+        func context(_ scheme: ColorScheme) -> RenderContext {
+            var context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+            context.appearance = RenderContext.appearance(for: scheme)
+            return context
+        }
+
+        // Through `InlineText.pieces`, not `MathRenderer` directly: the bug
+        // was never in the renderer, it was the call site handing it an
+        // unresolved dynamic colour. A test that resolves the colour itself
+        // would pass with the bug still in place.
+        func rendered(_ scheme: ColorScheme) throws -> NSImage {
+            let pieces = InlineText.pieces(
+                [.math("\\frac{a}{b} + \\sqrt{c}", display: true)],
+                context: context(scheme)
+            )
+            for piece in pieces {
+                if case .mathBlock(let image, _) = piece { return image }
+            }
+            Issue.record("no formula was rendered for \(scheme)")
+            throw CancellationError()
+        }
+
+        let light = try rendered(.light)
+        let dark = try rendered(.dark)
+
+        let lightInk = try luminance(of: light)
+        let darkInk = try luminance(of: dark)
+
+        // Dark ink on a light page, light ink on a dark one. Asserted as an
+        // ordering plus a floor rather than exact values, so the check does
+        // not break when a system colour is retuned.
+        #expect(lightInk < 0.5, "a formula on a light page is dark ink (got \(lightInk))")
+        #expect(darkInk > 0.5, "a formula on a dark page is light ink (got \(darkInk))")
+        #expect(lightInk < darkInk)
+    }
+
+    @Test("Resolving without an appearance is not silently the same colour")
+    func appearanceActuallyChangesResolution() {
+        var light = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        light.appearance = RenderContext.appearance(for: .light)
+        var dark = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        dark.appearance = RenderContext.appearance(for: .dark)
+        #expect(light.resolved(.textColor) != dark.resolved(.textColor))
+        #expect(light.resolved(.labelColor) != dark.resolved(.labelColor))
     }
 }

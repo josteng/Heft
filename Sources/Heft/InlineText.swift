@@ -38,6 +38,15 @@ struct RenderContext {
     /// `resolved(_:)` first.
     var appearance: NSAppearance?
 
+    /// The appearance a SwiftUI view is being drawn in.
+    ///
+    /// SwiftUI does not set `NSAppearance.current` while it evaluates a body,
+    /// so a context built there has to be told, or every colour baked into an
+    /// image by that view is resolved against whatever was last current.
+    static func appearance(for scheme: ColorScheme) -> NSAppearance? {
+        NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+    }
+
     func resolved(_ color: NSColor) -> NSColor {
         guard let appearance else { return color.usingColorSpace(.sRGB) ?? color }
         var out = color
@@ -199,7 +208,13 @@ enum InlineText {
                     let rendered = MathRenderer.image(
                         latex: latex,
                         fontSize: display ? mathPointSize + 3 : mathPointSize,
-                        color: .textColor,
+                        // Through `resolved`, like every other colour that
+                        // gets flattened into a bitmap. Passed raw, the
+                        // dynamic `.textColor` resolved against whatever
+                        // `NSAppearance.current` happened to be during the
+                        // restyle — which is nothing in particular — and baked
+                        // the dark-mode colour into formulae on a light page.
+                        color: context.resolved(.textColor),
                         display: display
                     )
                     guard let rendered else {

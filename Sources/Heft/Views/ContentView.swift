@@ -315,9 +315,10 @@ struct EditorPane: View {
     @State private var findDirection = 1
     @State private var findWholeWord = false
     @FocusState private var findFieldFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     private var context: RenderContext {
-        RenderContext(
+        var context = RenderContext(
             index: model.index, current: model.current, vaultRoot: model.vaultRoot,
             strictLineBreaks: model.settings.strictLineBreaks,
             colorfulFormatting: appearance.colorfulFormattingEnabled,
@@ -329,6 +330,8 @@ struct EditorPane: View {
             italicColor: appearance.italicColor,
             headingColors: (1...6).map { appearance.headingColor($0) }
         )
+        context.appearance = RenderContext.appearance(for: colorScheme)
+        return context
     }
 
     var body: some View {
