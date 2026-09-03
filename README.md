@@ -270,13 +270,20 @@ swift test                      # the full suite
 and takes a vault path, so risky editor changes can be pointed at a disposable
 copy. The GUI autosaves; never aim it at a vault you care about while testing.
 
-The suite is 39 tests across 6 suites: pure checks over parsing, formatting,
+The suite is 115 tests across 27 suites: pure checks over parsing, formatting,
 links, paths and settings; a live-surface check that runs edit scripts through
 both an incrementally styled buffer and a from-scratch one and compares every
-attribute on every character; a disposable-vault integration check that
-exercises autosave, save conflicts, recovery, renames and link repointing; and
-the table and proposal suites. Temporary vaults are UUID-named and removed
-afterwards, and the harness restores any user setting it touches.
+attribute on every character; a differential decoration check that drives the
+same edit scripts through the incremental and from-scratch parsers and fails if
+the fast path never ran; a typing-performance check that holds the per-keystroke
+budget; and a disposable-vault integration check that exercises autosave, save
+conflicts, recovery, renames and link repointing. Temporary vaults are
+UUID-named and removed afterwards, and the harness restores any user setting it
+touches.
+
+Rendering is checked by *rendering*: `heft export` writes a note to PDF
+headlessly, so a claim about how a table, callout or formula is drawn can be
+looked at rather than inferred from a probe.
 
 When Neovim is installed, the Vim suite additionally runs command sequences and
 a generated operator/motion/count matrix through `nvim --clean --headless` and
