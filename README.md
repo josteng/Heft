@@ -246,6 +246,11 @@ reports as unresolved).
 - Saves are atomic and compare the file against the exact source Heft loaded.
   If Obsidian, iCloud or another process changes the same note during editing,
   autosave pauses and asks which version to keep.
+- While autosave cannot write — an unresolved conflict, a full disk, a
+  permissions change — the buffer is mirrored to a draft on the same 700ms
+  debounce. If Heft never gets to finish, opening that note again brings the
+  draft back as a `(Heft Recovery)` note beside it. A crash or a flat battery
+  costs the same fraction of a second as it does at any other time.
 - An unresolved conflict blocks switching notes or vaults. If a window closes
   first, the local buffer is preserved as a timestamped `Heft Recovery` note.
 - Deletion asks, and moves to the macOS Trash.

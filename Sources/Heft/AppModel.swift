@@ -525,6 +525,10 @@ final class AppModel: ObservableObject {
             if recordingNavigation { recordNavigation(to: ref.relativePath) }
             recordRecent(ref.relativePath)
             current = ref
+            // Before the buffer is set, so a draft from a process that did not
+            // survive becomes a visible note rather than being overwritten by
+            // whatever is on disk now.
+            recoverDraftIfAny(for: ref)
             setText(contents)
             isDirty = false
             lastKnownDiskText = contents
@@ -1521,7 +1525,16 @@ final class AppModel: ObservableObject {
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(700))
             guard !Task.isCancelled else { return }
-            self?.save()
+            guard let self else { return }
+            // While a conflict is unresolved `save()` deliberately writes
+            // nothing, so the draft is the only thing keeping up with what is
+            // being typed. Refreshed on the same debounce as a save, so the
+            // exposure is the same 700ms either way.
+            if self.saveConflict != nil {
+                self.recordDraft()
+                return
+            }
+            self.save()
         }
     }
 
@@ -1560,6 +1573,11 @@ final class AppModel: ObservableObject {
                 mine: text,
                 disk: diskText
             )
+            // Autosave is now paused until the conflict is resolved, so
+            // nothing else will write this buffer anywhere. A draft is the
+            // difference between losing a minute of typing to a flat battery
+            // and losing everything since the conflict appeared.
+            recordDraft()
             status = diskExists
                 ? "Save paused: \(current.name) changed on disk"
                 : "Save paused: \(current.name) was removed from disk"
@@ -1610,6 +1628,7 @@ final class AppModel: ObservableObject {
             saveTask?.cancel()
             saveTask = nil
             setText(fresh)
+            discardDraft()
             isDirty = false
             lastKnownDiskText = fresh
             lastKnownModification = modificationDate(of: current.url)
@@ -1625,6 +1644,7 @@ final class AppModel: ObservableObject {
         guard let current else { return }
         do {
             try text.write(to: current.url, atomically: true, encoding: .utf8)
+            discardDraft()
             isDirty = false
             lastKnownDiskText = text
             lastKnownModification = modificationDate(of: current.url)
@@ -1632,8 +1652,53 @@ final class AppModel: ObservableObject {
             status = "Saved \(current.relativePath)"
             reindexIfMetadataChanged(for: current)
         } catch {
-            status = "Save failed: \(error.localizedDescription)"
+            // The buffer stays dirty so the next keystroke retries, but until
+            // then the only copy of the work is in memory. A draft puts it on
+            // disk, so a full volume or a permissions change cannot cost the
+            // note.
+            recordDraft()
+            status = "Save failed, kept a draft: \(error.localizedDescription)"
         }
+    }
+
+    /// Mirrors the buffer to a draft file, for the states where autosave
+    /// cannot write the note itself.
+    private func recordDraft() {
+        guard isDirty, let current, let vaultRoot else { return }
+        DraftStore.write(text, vault: vaultRoot, relativePath: current.relativePath)
+    }
+
+    private func discardDraft() {
+        guard let current, let vaultRoot else { return }
+        DraftStore.discard(vault: vaultRoot, relativePath: current.relativePath)
+    }
+
+    /// Promotes a draft left behind by a process that did not survive.
+    ///
+    /// Written into the vault beside the note rather than offered in a sheet:
+    /// it is an ordinary Markdown file, it appears where notes appear, and
+    /// nothing has to be decided before the reader can see both versions.
+    /// Skipped when the draft says the same thing as the note, which is the
+    /// common case after a clean quit.
+    private func recoverDraftIfAny(for note: NoteRef) {
+        guard let vaultRoot,
+              let draft = DraftStore.draft(vault: vaultRoot, relativePath: note.relativePath)
+        else { return }
+        defer { DraftStore.discard(vault: vaultRoot, relativePath: note.relativePath) }
+
+        let onDisk = try? String(contentsOf: note.url, encoding: .utf8)
+        guard draft != onDisk, !draft.isEmpty else { return }
+
+        let target = uniqueURL(
+            in: note.url.deletingLastPathComponent(),
+            base: DraftStore.recoveryName(for: note.name),
+            extension: "md"
+        )
+        guard (try? draft.write(to: target, atomically: true, encoding: .utf8)) != nil else {
+            return
+        }
+        status = "Recovered unsaved edits as \(target.lastPathComponent)"
+        reload()
     }
 
     private func modificationDate(of url: URL) -> Date? {

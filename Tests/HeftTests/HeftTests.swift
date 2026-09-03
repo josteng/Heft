@@ -2738,3 +2738,151 @@ struct PrintColoursTests {
         #expect(PDFExportOptions(decoding: PDFExportOptions().encoded).colours == .paper)
     }
 }
+
+@Suite("Unsaved work survives")
+@MainActor
+struct DraftRecoveryTests {
+
+    private func vault() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-draft-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "first version\n".write(
+            to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8
+        )
+        return root
+    }
+
+    private func model(_ root: URL) -> AppModel {
+        AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+    }
+
+    /// An unresolved conflict pauses autosave on purpose, so nothing writes
+    /// the buffer anywhere. Everything typed after the conflict appeared used
+    /// to exist only in memory, and a recovery copy was made when the window
+    /// *closed* — which covers quitting and not losing power.
+    @Test("A conflict leaves the buffer on disk as a draft")
+    func conflictWritesADraft() throws {
+        let root = try vault()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let model = model(root)
+        #expect(model.current?.relativePath == "Note.md")
+
+        model.text = "what I typed\n"
+        // Somebody else changed the note, so saving must not overwrite it.
+        try "changed elsewhere\n".write(
+            to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8
+        )
+        model.save()
+
+        #expect(model.saveConflict != nil, "no conflict was raised")
+        #expect(
+            DraftStore.draft(vault: root, relativePath: "Note.md") == "what I typed\n",
+            "the buffer was left only in memory"
+        )
+        // And the note itself is untouched, which was always true.
+        let onDisk = try String(contentsOf: root.appendingPathComponent("Note.md"), encoding: .utf8)
+        #expect(onDisk == "changed elsewhere\n")
+    }
+
+    /// Once the buffer reaches its note there is nothing left to recover, and
+    /// a stale draft would be promoted into the vault for no reason.
+    @Test("A successful save forgets the draft")
+    func savingForgetsTheDraft() throws {
+        let root = try vault()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        // The model is created *first*, and the draft written after: opening a
+        // note recovers any draft it finds, so seeding one beforehand is
+        // consumed by that path and never reaches the save. This is the draft
+        // a conflict would have left behind while the note was already open.
+        let model = model(root)
+        model.text = "edited\n"
+        DraftStore.write("edited\n", vault: root, relativePath: "Note.md")
+        #expect(DraftStore.draft(vault: root, relativePath: "Note.md") != nil)
+
+        model.save()
+        #expect(
+            DraftStore.draft(vault: root, relativePath: "Note.md") == nil,
+            "a stale draft outlived the save and would be promoted on the next open"
+        )
+        let onDisk = try String(contentsOf: root.appendingPathComponent("Note.md"), encoding: .utf8)
+        #expect(onDisk == "edited\n", "the save did not happen")
+    }
+
+    /// The half that makes drafts worth writing: a draft left by a process
+    /// that did not survive becomes an ordinary note in the vault, where it
+    /// will be seen, rather than a file in a Library folder nobody visits.
+    @Test("A draft that outlived its process is recovered on open")
+    func draftIsRecoveredOnOpen() throws {
+        let root = try vault()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        DraftStore.write("work that was never saved\n", vault: root, relativePath: "Note.md")
+
+        _ = model(root)
+
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        let recovered = names.filter { $0.contains("Heft Recovery") }
+        #expect(recovered.count == 1, "expected one recovery note, found \(names)")
+
+        let text = try String(
+            contentsOf: root.appendingPathComponent(recovered[0]), encoding: .utf8
+        )
+        #expect(text == "work that was never saved\n")
+        // Taken, not left to be offered again on the next open.
+        #expect(DraftStore.draft(vault: root, relativePath: "Note.md") == nil)
+        // And the note itself was not touched.
+        let onDisk = try String(contentsOf: root.appendingPathComponent("Note.md"), encoding: .utf8)
+        #expect(onDisk == "first version\n")
+    }
+
+    /// The common case after a clean quit: a draft that says exactly what the
+    /// note says is not work at risk, and promoting it would litter the vault.
+    @Test("A draft matching the note is discarded, not promoted")
+    func matchingDraftIsNotPromoted() throws {
+        let root = try vault()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        DraftStore.write("first version\n", vault: root, relativePath: "Note.md")
+
+        _ = model(root)
+
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        #expect(!names.contains { $0.contains("Heft Recovery") }, "found \(names)")
+        #expect(DraftStore.draft(vault: root, relativePath: "Note.md") == nil)
+    }
+
+    /// Two notes must not share a draft. The filename is a hash of the vault
+    /// and note path, so a collision would silently swap one note's unsaved
+    /// work for another's.
+    @Test("Each note has its own draft")
+    func draftsAreNotShared() throws {
+        let root = try vault()
+        defer {
+            for path in ["Note.md", "Other.md", "Folder/Note.md"] {
+                DraftStore.discard(vault: root, relativePath: path)
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
+        DraftStore.write("one\n", vault: root, relativePath: "Note.md")
+        DraftStore.write("two\n", vault: root, relativePath: "Other.md")
+        DraftStore.write("three\n", vault: root, relativePath: "Folder/Note.md")
+
+        #expect(DraftStore.draft(vault: root, relativePath: "Note.md") == "one\n")
+        #expect(DraftStore.draft(vault: root, relativePath: "Other.md") == "two\n")
+        #expect(DraftStore.draft(vault: root, relativePath: "Folder/Note.md") == "three\n")
+    }
+}

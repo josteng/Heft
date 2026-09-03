@@ -585,6 +585,19 @@ depends on changes.
   arguments were not empty, so the broken branch was never reached. It seeds
   the sandbox suite with a vault and then starts the app with nothing on the
   command line at all.
+- **Autosave has two states where it writes nothing, and both used to risk
+  everything.** An unresolved save conflict pauses it deliberately, so the
+  buffer accumulates edits with nothing writing them anywhere; and a failed
+  write (full volume, permissions, an iCloud file that will not materialise)
+  reports itself and leaves the buffer dirty to retry. In both, the only copy
+  of the work was in memory, and the recovery copy was written when the
+  *window closed* — which covers quitting and not losing power.
+  `DraftStore` mirrors the buffer to one stable file per note in Application
+  Support in both cases, refreshed on the same 700ms debounce as a save and
+  deleted the moment the buffer reaches its note. Opening a note promotes any
+  draft that outlived its process into the vault as an ordinary
+  "(Heft Recovery)" note, so it is seen where notes are seen; a draft that
+  matches the note is discarded instead of littering the vault.
 - **A Cocoa app killed with `SIGTERM` never flushes its preferences.** So a
   test that reads what the app wrote has to quit it gracefully, or read
   something the app has flushed itself. `VaultSession` synchronises after
