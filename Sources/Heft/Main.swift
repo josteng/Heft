@@ -624,13 +624,12 @@ enum HeftMain {
         }
 
         // A bare name keeps the item where it is; anything with a slash is a
-        // move as well as a rename.
-        let parent = (item.relativePath as NSString).deletingLastPathComponent
-        var destination = newName.contains("/")
-            ? newName.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            : (parent.isEmpty ? newName : parent + "/" + newName)
-        if item.isMarkdown, (destination as NSString).pathExtension.lowercased() != "md" {
-            destination += ".md"
+        // move as well as a rename. The rule, and the `.md` a note is
+        // displayed without, are `VaultOperations` in HeftCore — the same ones
+        // the sidebar renames by.
+        guard let destination = VaultOperations.destination(for: item, named: newName) else {
+            FileHandle.standardError.write(Data("the new name is empty\n".utf8))
+            exit(1)
         }
 
         let changes = VaultRename.changes(for: item, movingTo: destination)
@@ -643,11 +642,11 @@ enum HeftMain {
                 if changes.count > 1 { print("files moved:  \(changes.count)") }
                 for rewrite in planned {
                     print("  \(rewrite.note.relativePath): \(rewrite.links) link"
-                        + (rewrite.links == 1 ? "" : "s"))
+                        + VaultOperations.plural(rewrite.links))
                 }
-                print("would repoint \(planned.reduce(0) { $0 + $1.links }) link"
-                    + (planned.reduce(0) { $0 + $1.links } == 1 ? "" : "s")
-                    + " in \(planned.count) note" + (planned.count == 1 ? "" : "s"))
+                let links = planned.reduce(0) { $0 + $1.links }
+                print("would repoint \(links) link" + VaultOperations.plural(links)
+                    + " in \(planned.count) note" + VaultOperations.plural(planned.count))
                 return
             }
 
@@ -656,12 +655,10 @@ enum HeftMain {
             )
             print("renamed: \(item.relativePath) -> \(destination)")
             if changes.count > 1 { print("files moved: \(changes.count)") }
-            print("repointed \(summary.links) link" + (summary.links == 1 ? "" : "s")
-                + " in \(summary.notes) note" + (summary.notes == 1 ? "" : "s"))
-            if summary.skipped > 0 {
-                print("\(summary.skipped) note" + (summary.skipped == 1 ? " was" : "s were")
-                    + " changed while this ran and were left alone")
-            }
+            // One wording, shared with the sidebar's status line, so the two
+            // cannot drift apart again.
+            let repointed = VaultOperations.repointSummary(summary)
+            print(repointed.isEmpty ? "no links needed repointing" : repointed)
         } catch let failure as VaultRename.Failure {
             let message: String = switch failure {
             case .noSuchItem(let path): "no such note or folder: \(path)"

@@ -35,6 +35,12 @@ public enum VaultRename {
         /// Notes that changed on disk between the plan and the write, and were
         /// left as they are.
         public var skipped = 0
+
+        public init(links: Int = 0, notes: Int = 0, skipped: Int = 0) {
+            self.links = links
+            self.notes = notes
+            self.skipped = skipped
+        }
     }
 
     public enum Failure: Error, Equatable {

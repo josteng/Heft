@@ -839,22 +839,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// A name not already taken in `directory`, as `Untitled`, `Untitled 1`, …
+    /// A URL not already taken in `directory`, as `Untitled`, `Untitled 1`, …
     private func uniqueURL(in directory: URL, base: String, extension ext: String) -> URL {
-        let suffix = ext.isEmpty ? "" : ".\(ext)"
-        var candidate = directory.appendingPathComponent(base + suffix)
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = directory.appendingPathComponent("\(base) \(counter)\(suffix)")
-            counter += 1
+        let name = VaultOperations.uniqueName(base: base, extension: ext) { candidate in
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(candidate).path
+            )
         }
-        return candidate
+        return directory.appendingPathComponent(name)
     }
 
     // MARK: - File operations
 
     @discardableResult
     func rename(_ item: VaultItem, to proposedName: String? = nil) -> Bool {
+        guard let vaultRoot else { return false }
         guard !item.isFolder || !registry.isFocusedByAnotherWindow(item.url, excluding: workspaceID) else {
             status = "Another window is focused on \(item.name); show its entire vault before renaming"
             return false
@@ -865,9 +864,6 @@ final class AppModel: ObservableObject {
             status = "Close \(item.name) in the other window before renaming it"
             return false
         }
-        // Markdown items display without their extension, so it must not appear
-        // in the field and must be put back afterwards.
-        let hasHiddenExtension = item.isMarkdown
         let entered: String
         if let proposedName {
             entered = proposedName
@@ -879,20 +875,27 @@ final class AppModel: ObservableObject {
             entered = prompted
         }
 
-        let cleaned = sanitised(entered)
-        guard !cleaned.isEmpty else { return false }
-        guard cleaned != item.name else { return true }
-        let filename = hasHiddenExtension && !cleaned.lowercased().hasSuffix(".md")
-            ? cleaned + ".md"
-            : cleaned
-        let target = item.url.deletingLastPathComponent().appendingPathComponent(filename)
-
-        guard !FileManager.default.fileExists(atPath: target.path) else {
-            status = "\(filename) already exists"
+        // Whether the name is usable, and where it lands, is `VaultOperations`
+        // in HeftCore: the same rules the command line renames by. What is
+        // left here is what only a window knows.
+        let planned = VaultOperations.planRename(item, to: entered) { candidate in
+            FileManager.default.fileExists(
+                atPath: vaultRoot.appendingPathComponent(candidate).path
+            )
+        }
+        let renamedPath: String
+        switch planned {
+        case .success(let move):
+            // Renaming to the name it already has is not a failure; there is
+            // simply nothing to do.
+            guard move.from != move.to else { return true }
+            renamedPath = move.to
+        case .failure(let refusal):
+            status = refusal.message
             return false
         }
-
-        let renamedPath = relativePath(of: target)
+        let filename = (renamedPath as NSString).lastPathComponent
+        let target = vaultRoot.appendingPathComponent(renamedPath)
         let changes = pathChanges(for: item, movingTo: renamedPath)
         let currentOldPath = current?.relativePath
         if let currentOldPath, changes[currentOldPath] != nil,
@@ -907,31 +910,28 @@ final class AppModel: ObservableObject {
             if item.isFolder, let scopePath,
                scopePath == item.relativePath || scopePath.hasPrefix(item.relativePath + "/") {
                 self.scopePath = renamedPath + String(scopePath.dropFirst(item.relativePath.count))
-                if let vaultRoot {
-                    registry.updateFocus(root: vaultRoot, scopePath: self.scopePath, for: workspaceID)
-                }
+                registry.updateFocus(root: vaultRoot, scopePath: self.scopePath, for: workspaceID)
             }
             navigationHistory = navigationHistory.map { changes[$0] ?? $0 }
             for (oldPath, newPath) in changes {
                 session?.replaceRecentPath(oldPath, with: newPath)
             }
             if let currentOldPath, let currentNewPath = changes[currentOldPath],
-               let root = vaultRoot,
-               let ref = NoteRef(url: root.appendingPathComponent(currentNewPath), vaultRoot: root) {
-                registry.release(root.appendingPathComponent(currentOldPath), for: workspaceID)
+               let ref = NoteRef(
+                   url: vaultRoot.appendingPathComponent(currentNewPath), vaultRoot: vaultRoot
+               ) {
+                registry.release(
+                    vaultRoot.appendingPathComponent(currentOldPath), for: workspaceID
+                )
                 _ = registry.claim(ref.url, for: workspaceID)
                 current = ref
             }
 
             status = "Renamed to \(filename)"
-            let updated = applyLinkRewrites(rewrites, after: changes)
-            if updated.links > 0 {
-                status += ", repointed \(updated.links) link\(updated.links == 1 ? "" : "s")"
-                    + " in \(updated.notes) note\(updated.notes == 1 ? "" : "s")"
-            }
-            if updated.failures > 0 {
-                status += "; \(updated.failures) note\(updated.failures == 1 ? "" : "s") changed concurrently and was left untouched"
-            }
+            let repointed = VaultOperations.repointSummary(
+                applyLinkRewrites(rewrites, after: changes)
+            )
+            if !repointed.isEmpty { status += ", " + repointed }
             reload(immediately: true)
             return true
         } catch {
@@ -983,8 +983,8 @@ final class AppModel: ObservableObject {
     /// written under the editor.
     private func applyLinkRewrites(
         _ plans: [VaultRename.Rewrite], after changes: [String: String]
-    ) -> (links: Int, notes: Int, failures: Int) {
-        guard let vaultRoot else { return (0, 0, plans.count) }
+    ) -> VaultRename.Summary {
+        guard let vaultRoot else { return VaultRename.Summary(skipped: plans.count) }
         var openBuffer: VaultRename.Rewrite?
         var onDisk: [VaultRename.Rewrite] = []
         for plan in plans {
@@ -1002,7 +1002,7 @@ final class AppModel: ObservableObject {
             summary.links += openBuffer.links
             summary.notes += 1
         }
-        return (summary.links, summary.notes, summary.skipped)
+        return summary
     }
 
     func duplicate(_ item: VaultItem) {
@@ -1077,11 +1077,10 @@ final class AppModel: ObservableObject {
     func move(_ urls: [URL], into folder: URL) {
         guard let vaultRoot else { return }
         var moved = 0
-        var repointed = (links: 0, notes: 0, failures: 0)
+        var repointed = VaultRename.Summary()
 
         for url in urls {
             let name = url.lastPathComponent
-            let destination = folder.appendingPathComponent(name)
             let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
 
             guard !isFolder || !registry.isFocusedByAnotherWindow(url, excluding: workspaceID) else {
@@ -1100,30 +1099,50 @@ final class AppModel: ObservableObject {
             // things already in the vault are moved: pulling a file in from
             // elsewhere would take it out of wherever the user keeps it, which
             // is not what dragging something onto a note list should mean.
-            guard url.standardizedFileURL.path.hasPrefix(vaultRoot.standardizedFileURL.path + "/")
-            else {
-                status = "\(name) is outside the vault"
-                continue
-            }
-
-            // Already there.
-            guard url.deletingLastPathComponent().standardizedFileURL != folder.standardizedFileURL
-            else { continue }
-            // Into itself, or into its own descendant: the move would delete it.
-            guard !isFolder || !folder.path.hasPrefix(url.path + "/") else {
-                status = "Cannot move \(name) inside itself"
-                continue
-            }
-            guard !FileManager.default.fileExists(atPath: destination.path) else {
-                status = "\(name) already exists in \(describe(folder))"
+            guard VaultOperations.isInside(url, vaultRoot: vaultRoot) else {
+                status = VaultOperations.Refusal.outsideVault(name: name).message
                 continue
             }
 
             let oldPath = relativePath(of: url)
-            let newPath = relativePath(of: destination)
+            // Whether this move can happen at all is `VaultOperations`, which
+            // is where the order of these questions is written down and
+            // tested: a folder dropped onto itself has to be recognised as
+            // that before its destination is tested for existence, or the
+            // answer is "already exists", which is true and no use.
+            let planned = VaultOperations.planMove(
+                oldPath, into: relativePath(of: folder), isFolder: isFolder
+            ) { candidate in
+                FileManager.default.fileExists(
+                    atPath: vaultRoot.appendingPathComponent(candidate).path
+                )
+            }
+            let newPath: String
+            switch planned {
+            case .success(let move):
+                newPath = move.to
+            case .failure(.alreadyThere):
+                // Dropping something back where it already is is not a
+                // mistake worth reporting; it is how a drag is cancelled.
+                continue
+            case .failure(.alreadyExists(let existing)):
+                // Named here rather than in the refusal: a drop has a folder
+                // the reader can see and the command line does not.
+                status = "\(existing) already exists in \(describe(folder))"
+                continue
+            case .failure(let refusal):
+                status = refusal.message
+                continue
+            }
+
+            // Read back from the plan rather than recomputed from the folder
+            // and the name, so where the file is written and where every link
+            // is repointed to cannot disagree.
+            let destination = vaultRoot.appendingPathComponent(newPath)
+
             let indexedItem = tree?.flattened().first { $0.relativePath == oldPath }
             guard !isFolder || indexedItem != nil else {
-                status = "Wait for the vault to finish loading before moving \(name)"
+                status = VaultOperations.Refusal.stillLoading(name: name).message
                 continue
             }
             let movingItem = indexedItem ?? VaultItem(
@@ -1168,18 +1187,14 @@ final class AppModel: ObservableObject {
             let result = applyLinkRewrites(rewrites, after: changes)
             repointed.links += result.links
             repointed.notes += result.notes
-            repointed.failures += result.failures
+            repointed.skipped += result.skipped
             moved += 1
         }
 
         guard moved > 0 else { return }
-        status = "Moved \(moved) item\(moved == 1 ? "" : "s") to \(describe(folder))"
-        if repointed.links > 0 {
-            status += ", repointed \(repointed.links) link\(repointed.links == 1 ? "" : "s")"
-        }
-        if repointed.failures > 0 {
-            status += "; \(repointed.failures) concurrently changed note\(repointed.failures == 1 ? "" : "s") left untouched"
-        }
+        status = "Moved \(moved) item\(VaultOperations.plural(moved)) to \(describe(folder))"
+        let summary = VaultOperations.repointSummary(repointed)
+        if !summary.isEmpty { status += ", " + summary }
         expandedFolders.insert(relativePath(of: folder))
         reload()
     }
@@ -1200,9 +1215,7 @@ final class AppModel: ObservableObject {
         panel.message = "Choose a folder inside the vault to move \(item.name) into."
         guard panel.runModal() == .OK, let target = panel.url else { return }
 
-        let root = vaultRoot.standardizedFileURL.path
-        let chosen = target.standardizedFileURL.path
-        guard chosen == root || chosen.hasPrefix(root + "/") else {
+        guard VaultOperations.isInside(target, vaultRoot: vaultRoot) else {
             status = "That folder is outside the vault"
             return
         }
@@ -1290,19 +1303,11 @@ final class AppModel: ObservableObject {
     }
 
     /// Strips path separators so a typed name cannot move the file elsewhere.
-    private func sanitised(_ name: String) -> String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-    }
+    private func sanitised(_ name: String) -> String { VaultOperations.sanitise(name) }
 
     private func relativePath(of url: URL) -> String {
         guard let vaultRoot else { return url.lastPathComponent }
-        let root = vaultRoot.standardizedFileURL.resolvingSymlinksInPath().path
-        let candidate = url.standardizedFileURL.resolvingSymlinksInPath().path
-        if candidate == root { return "" }
-        guard candidate.hasPrefix(root + "/") else { return url.lastPathComponent }
-        return String(candidate.dropFirst(root.count + 1))
+        return VaultOperations.relativePath(of: url, in: vaultRoot)
     }
 
     private func createFile(at url: URL, contents: String) {
