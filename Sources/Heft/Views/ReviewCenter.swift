@@ -38,6 +38,7 @@ struct ReviewCenter: View {
                                 ForEach(group.proposals) { proposal in
                                     row(proposal, depth: 1)
                                 }
+                                groupActions(group)
                             }
                         }
                         ForEach(pending.edits) { row($0, depth: 0) }
@@ -112,6 +113,37 @@ struct ReviewCenter: View {
             Button("Accept All") { model.acceptGroup(group) }
             Button("Discard", role: .destructive) { model.discardGroup(group) }
         }
+    }
+
+    /// Accepting or discarding a whole group, under the group when it is open.
+    ///
+    /// These were reachable only by right-clicking the group's row, which is
+    /// not an affordance: nobody found them, and the first thing a person does
+    /// to a row with a chevron on it is click the row. That expands it, so this
+    /// is where the eye already is.
+    ///
+    /// Not on the row itself. The row *is* the disclosure control, and hanging
+    /// a destructive button off a control whose whole job is to toggle invites
+    /// exactly the misclick it would be there to save.
+    ///
+    /// Accept All matters more than it looks. Applying a group is deliberately
+    /// not atomic, so accepting members one at a time really can leave the
+    /// vault half-changed — five new notes linking to each other, three of them
+    /// created. This button is the answer to that, and it was invisible.
+    private func groupActions(_ group: ProposalGroup) -> some View {
+        HStack(spacing: 6) {
+            Button("Accept All") { model.acceptGroup(group) }
+                .buttonStyle(.borderedProminent)
+            Button("Discard", role: .destructive) { model.discardGroup(group) }
+            Spacer(minLength: 0)
+        }
+        .controlSize(.small)
+        .font(.system(size: 10.5))
+        // Lined up with the member rows above it, which sit at depth 1.
+        .padding(.leading, 20)
+        .padding(.trailing, 6)
+        .padding(.top, 3)
+        .padding(.bottom, 5)
     }
 
     private func row(_ proposal: Proposal, depth: Int) -> some View {
