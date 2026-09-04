@@ -164,6 +164,83 @@ struct ProposalTests {
         #expect(ProposalStore.all(in: root).map(\.summary) == ["second"])
     }
 
+    @Test("Five proposals from one run keep the order they were made in")
+    func oneRunKeepsItsOrder() throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Named so that alphabetical order is the reverse of the order they
+        // were proposed in: that is exactly what a whole-second timestamp
+        // produced, because five proposals from one agent run land inside one
+        // second and the id tiebreak then decided everything.
+        let start = Date(timeIntervalSince1970: 1_000)
+        let names = ["index", "short", "long", "callout", "links"]
+        for (step, name) in names.enumerated() {
+            try ProposalStore.write(
+                Proposal(
+                    notePath: "Test/\(name).md", base: nil, body: "x\n", agent: "t",
+                    summary: name, createdAt: start.addingTimeInterval(Double(step) * 0.004)
+                ),
+                in: root
+            )
+        }
+
+        #expect(ProposalStore.all(in: root).map(\.summary) == names)
+    }
+
+    @Test("Two proposals in the same instant still read back in a stable order")
+    func identicalInstantsDoNotReshuffle() throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let same = Date(timeIntervalSince1970: 1_000)
+        for name in ["b", "a"] {
+            try ProposalStore.write(
+                Proposal(
+                    notePath: "\(name).md", base: nil, body: "x\n", agent: "t",
+                    summary: name, createdAt: same
+                ),
+                in: root
+            )
+        }
+        // The id tiebreak is what keeps the list from reordering between two
+        // reads, and a finer clock does not remove the need for it.
+        let first = ProposalStore.all(in: root).map(\.summary)
+        #expect(first == ["a", "b"])
+        #expect(ProposalStore.all(in: root).map(\.summary) == first)
+    }
+
+    @Test("A proposal written before the clock got finer still decodes")
+    func wholeSecondTimestampsStillLoad() throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Exactly what `heft propose` wrote until now: ISO8601 with no
+        // fraction. A decoder that insisted on one would make every pending
+        // proposal in somebody's vault vanish from the list.
+        try FileManager.default.createDirectory(
+            at: ProposalStore.directory(in: root), withIntermediateDirectories: true
+        )
+        try """
+            {
+              "agent" : "claude-code",
+              "body" : "new\\n",
+              "createdAt" : "2026-09-04T11:13:00Z",
+              "id" : "written-by-heft-ten",
+              "notePath" : "A.md",
+              "summary" : "written before the change"
+            }
+            """.write(
+                to: ProposalStore.directory(in: root)
+                    .appendingPathComponent("written-by-heft-ten.json"),
+                atomically: true, encoding: .utf8
+            )
+
+        let all = ProposalStore.all(in: root)
+        #expect(all.map(\.id) == ["written-by-heft-ten"])
+        #expect(all.first?.kind == .create)
+    }
+
     @Test("A note edited after the agent read it is reported as stale")
     func staleness() {
         let proposal = Proposal(

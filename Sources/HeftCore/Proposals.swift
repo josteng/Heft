@@ -196,16 +196,54 @@ public enum ProposalStore {
         vaultRoot.appendingPathComponent(".heft/proposals", isDirectory: true)
     }
 
+    /// ISO8601 to the millisecond, and the reason the fraction is there.
+    ///
+    /// The plain `.iso8601` strategy writes whole seconds, and one agent run
+    /// proposing five notes lands them all inside one. Every proposal in the
+    /// run then had the same `createdAt`, the id tiebreak in `all` decided the
+    /// order, and a group came back alphabetically: Short, Callout, Long,
+    /// Index, Links, for a run proposed Index first. The order an agent worked
+    /// in is information, and it was being thrown away by rounding.
+    ///
+    /// The tiebreak stays. It is what stops the list reshuffling between two
+    /// reads, and two proposals can still share a millisecond.
+    static let timestamp: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     private static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(timestamp.string(from: date))
+        }
         return encoder
     }
 
+    /// Reads both spellings, because the vault already holds the old one.
+    ///
+    /// A proposal written before this change has no fraction, and a decoder
+    /// that insisted on one would make every pending proposal in the vault
+    /// undecodable — which is somebody's change silently vanishing from the
+    /// list. Same lesson as `Proposal.init(from:)` and `PDFExportOptions`: a
+    /// stored file is a format, and a format has to tolerate being older than
+    /// the code reading it.
     private static var decoder: JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let plain = ISO8601DateFormatter()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            guard let date = timestamp.date(from: text) ?? plain.date(from: text) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "not an ISO8601 date: \(text)"
+                ))
+            }
+            return date
+        }
         return decoder
     }
 

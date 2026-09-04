@@ -638,8 +638,34 @@ list. A file from before kinds carried a body, so it is an edit — or a create
 when it had no base, which is exactly what nil `base` used to mean. Same lesson
 as `PDFExportOptions` and `TypingSettings`.
 
+One note holds **one pending proposal**. `propose` refuses a second, naming
+the one in the way, because both are diffed against the note as it is now:
+accepting either leaves the other asking for a note it was never rebased onto,
+and its hunks read as an attempt to undo what was just accepted. There is no
+amend verb, deliberately. An id is a *name*, printed by `heft proposals` and
+shown in the sidebar, so a name that quietly comes to mean something else makes
+the review list lie about what it is asking. `--replacing <id>` is the drop and
+the propose in one command: it writes the new proposal before removing the old
+one, so a failed write leaves the old standing rather than neither, and it
+frees the replaced id first so re-proposing under the same summary keeps the
+name instead of returning `tighten-the-opening-2` beside a deleted
+`tighten-the-opening`.
+
+`createdAt` is stored to the millisecond, not the second. Five proposals from
+one agent run land inside one second, so every one of them tied and the id
+tiebreak decided the order: a group proposed Index-first came back
+alphabetically. The tiebreak stays, since it is what stops the list reshuffling
+between two reads. The decoder reads both spellings, or every proposal already
+waiting in somebody's vault would vanish from the list.
+
 `ReviewCenter` sits at the top of the sidebar and is the only place that can
-show a change with no note behind it. The **banner stays**, because seeing a
+show a change with no note behind it. Accepting or discarding a whole group is
+offered **under the group when it is open**, not on the group's own row: that
+row is the disclosure control, and hanging a destructive button off a control
+whose job is to toggle invites the misclick. It was reachable only from a
+context menu, which is not an affordance — nobody found it, and Accept All is
+the answer to the half-applied group that applying a group non-atomically
+otherwise leaves. The **banner stays**, because seeing a
 diff where you are reading it is the part that already worked. The rule that
 keeps them from fighting is *one banner per note, ever*: a change belonging to a
 group says so on its banner and points at the centre, and a delete or a move
