@@ -74,9 +74,6 @@ final class AppearanceSettings: ObservableObject {
     /// page. Defaults to following the vault, so an upgrade cannot change how
     /// anybody's notes look; the point of the setting is the folder of plain
     /// Markdown that has no `.obsidian` to ask.
-    @Published var lineBreaks: LineBreakStyle {
-        didSet { HeftDefaults.shared.set(lineBreaks.rawValue, forKey: Self.lineBreaksKey) }
-    }
 
     /// Whether a folder row draws a chevron.
     ///
@@ -104,7 +101,6 @@ final class AppearanceSettings: ObservableObject {
     var hasCustomHeadingColor: Bool { customHeadingColors.contains { $0 != nil } }
     func resetHeadingColors() { customHeadingColors = Array(repeating: nil, count: 6) }
 
-    private static let lineBreaksKey = "dev.stenglein.Heft.appearance.lineBreaks"
     private static let folderArrowsKey = "dev.stenglein.Heft.appearance.folderArrows"
     private static let accentKey = "dev.stenglein.Heft.appearance.accentColor"
     private static let linkKey = "dev.stenglein.Heft.appearance.linkColor"
@@ -128,8 +124,6 @@ final class AppearanceSettings: ObservableObject {
         colorfulFormattingEnabled = HeftDefaults.shared.object(forKey: Self.colorfulFormattingKey) == nil
             ? true
             : HeftDefaults.shared.bool(forKey: Self.colorfulFormattingKey)
-        lineBreaks = HeftDefaults.shared.string(forKey: Self.lineBreaksKey)
-            .flatMap(LineBreakStyle.init(rawValue:)) ?? .followTheVault
         showsFolderArrows = HeftDefaults.shared.bool(forKey: Self.folderArrowsKey)
     }
 
@@ -308,19 +302,6 @@ struct AppearanceSettingsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 6) {
-                Picker(selection: $appearance.lineBreaks) {
-                    ForEach(LineBreakStyle.allCases) { Text($0.title).tag($0) }
-                } label: {
-                    Text("Consecutive Lines").font(.headline)
-                }
-                .pickerStyle(.radioGroup)
-                Text(lineBreakExplanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             Toggle(isOn: $appearance.showsFolderArrows) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -336,21 +317,6 @@ struct AppearanceSettingsView: View {
         .frame(width: 630, alignment: .leading)
     }
 
-    /// Read in `body`, never copied in `onAppear`: the Settings window
-    /// measures each pane off screen, where `onAppear` never fires.
-    private var lineBreakExplanation: String {
-        switch appearance.lineBreaks {
-        case .followTheVault:
-            "Whatever this vault's own `strictLineBreaks` says, and a line each "
-                + "when it says nothing, which is Obsidian's default."
-        case .aLineEach:
-            "A single newline is a line break. What Obsidian does."
-        case .oneParagraph:
-            "A single newline is a space, so two lines are one paragraph. What "
-                + "CommonMark says. The editing surface still shows each line "
-                + "where it is in the file; this is how a note reads once rendered."
-        }
-    }
 
     /// `ColorPicker` can round-trip a dynamic system colour to a concrete
     /// one on its first layout pass and report that back through `set` as if

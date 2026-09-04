@@ -828,13 +828,24 @@ in `Journal/`. `always` and `never` are not, because someone who says "always"
 has answered that question themselves — and they outrank a restored window's own
 state, or a window that disagreed once would keep overruling the setting.
 
-`LineBreakStyle` in Appearance overrides `strictLineBreaks`, which was only ever
-the vault's own: a folder of Markdown with no `.obsidian` was stuck with
-whichever default Heft carried. It defaults to following the vault so an upgrade
-cannot change how anybody's notes read. **The live surface shows each line where
-it is in the file either way** — the buffer *is* the file, so two source lines
-cannot be joined into one rendered paragraph without rewriting it — so the
-setting reaches the rendered views rather than the editing one.
+Consecutive lines follow the **vault's** `strictLineBreaks`, which is
+Obsidian's own setting in `.obsidian/app.json`, and nothing overrides it.
+
+There was a `LineBreakStyle` setting in Appearance that did, and it was
+removed. The editor cannot honour such a setting at all: a newline breaks the
+line in TextKit whatever it is styled as, and the buffer *is* the file, so
+joining two source lines into one paragraph would mean rewriting the note. PDF
+export renders that same editing surface. So the only surface the setting could
+ever reach was Presentation, which is reachable only from the command palette
+— and a setting that changes one hidden view while reading as though it changes
+the app is worse than no setting. It was reported as broken twice, correctly
+both times: first because `PresentationView` never passed the field at all, and
+then because even working, it did nothing anywhere the reader was looking.
+
+`AppModel.renderContext` builds the context every rendered surface is drawn
+with, and is the only thing that does. There were three hand-written copies and
+`PresentationView`'s forgot `strictLineBreaks`; a defaulted field in a struct
+built in several places is a bug waiting for its third copy.
 
 Folder disclosure arrows are a toggle in Appearance, off by default: the folder
 icon already fills when the row is open, so the arrow was a second way of saying

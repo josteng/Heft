@@ -1429,6 +1429,36 @@ final class AppModel: ObservableObject {
     ///
     /// Exports what the editor draws, not the markdown source: the rendered
     /// note is the thing worth handing to someone who does not have Heft.
+    /// The context every rendered surface is drawn with.
+    ///
+    /// One place because there were three, and one of them forgot a field:
+    /// `PresentationView` built its own and never passed `strictLineBreaks`,
+    /// which has a default, so nothing complained.
+    ///
+    /// `strictLineBreaks` is the *vault's* answer and nothing else. There was
+    /// a setting overriding it, and it was removed: the editor cannot honour
+    /// it — a newline breaks the line in TextKit whatever it is styled as, and
+    /// the buffer is the file — so the only surface it could reach was
+    /// Presentation, and a setting that changes one hidden view while reading
+    /// as though it changes the app is worse than no setting.
+    ///
+    /// `ink` is for export, where the same colours are stepped down for paper.
+    func renderContext(ink: (NSColor) -> NSColor = { $0 }) -> RenderContext {
+        let appearance = AppearanceSettings.shared
+        return RenderContext(
+            index: index, current: current, vaultRoot: vaultRoot,
+            strictLineBreaks: settings.strictLineBreaks,
+            colorfulFormatting: appearance.colorfulFormattingEnabled,
+            accentColor: ink(appearance.accentColor),
+            linkColor: ink(appearance.linkColor),
+            tagColor: ink(appearance.tagColor),
+            codeColor: ink(appearance.codeColor),
+            boldColor: ink(appearance.boldColor),
+            italicColor: ink(appearance.italicColor),
+            headingColors: (1...6).map { ink(appearance.headingColor($0)) }
+        )
+    }
+
     func exportPDF() {
         guard let current else { status = "No note to export"; return }
 
@@ -1452,20 +1482,7 @@ final class AppModel: ObservableObject {
         func ink(_ colour: NSColor) -> NSColor {
             PrintColours.adjusted(colour, for: options.colours)
         }
-        let context = RenderContext(
-            index: index, current: current, vaultRoot: vaultRoot,
-            strictLineBreaks: AppearanceSettings.shared.lineBreaks.strictLineBreaks(
-                vaultSetting: settings.strictLineBreaks
-            ),
-            colorfulFormatting: appearance.colorfulFormattingEnabled,
-            accentColor: ink(appearance.accentColor),
-            linkColor: ink(appearance.linkColor),
-            tagColor: ink(appearance.tagColor),
-            codeColor: ink(appearance.codeColor),
-            boldColor: ink(appearance.boldColor),
-            italicColor: ink(appearance.italicColor),
-            headingColors: (1...6).map { ink(appearance.headingColor($0)) }
-        )
+        let context = renderContext(ink: ink)
 
         let title = (current.url.lastPathComponent as NSString).deletingPathExtension
         PDFExportSettings.shared.lastDirectory = destination.deletingLastPathComponent()

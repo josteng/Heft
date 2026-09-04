@@ -116,6 +116,66 @@ struct VaultHostTests {
         )
     }
 
+    // MARK: - The context rendered surfaces are drawn with
+
+    @Test("Every rendered surface is drawn with the vault's own line-break rule")
+    func renderContextCarriesTheVaultsLineBreaks() async throws {
+        // The bug this covers: `PresentationView` built its own context and
+        // never passed this field. It has a default, so nothing complained,
+        // and Presentation is the only surface that reads it, so nothing
+        // anywhere honoured the vault.
+        let strict = try vault([
+            "Note.md": "# Note\n",
+            ".obsidian/app.json": #"{"strictLineBreaks": true}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: strict) }
+        let strictModel = try await ready(model(strict, ScriptedHost()))
+        #expect(strictModel.settings.strictLineBreaks)
+        #expect(strictModel.renderContext().strictLineBreaks)
+        // Export goes through the same builder, colours aside.
+        #expect(strictModel.renderContext(ink: { _ in .black }).strictLineBreaks)
+
+        // A vault that says nothing gets Obsidian's default, a line each.
+        let plain = try vault()
+        defer { try? FileManager.default.removeItem(at: plain) }
+        let plainModel = try await ready(model(plain, ScriptedHost()))
+        #expect(!plainModel.renderContext().strictLineBreaks)
+    }
+
+    @Test("Three source lines render as one paragraph, or as three")
+    func lineBreakSettingChangesWhatIsDrawn() throws {
+        // The end of the chain, not the setting end: what Presentation
+        // actually draws for three lines with no blank line between them.
+        let note = "asfasdfasdf\nasfdasdfasdfasdf\nasdfasdfasdf\n"
+        let blocks = MarkdownModel.parse(note).blocks
+        let paragraph = try #require(blocks.compactMap { block -> [MDInline]? in
+            if case let .paragraph(inlines) = block { return inlines }
+            return nil
+        }.first)
+
+        func drawn(strict: Bool) -> String {
+            var context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+            context.strictLineBreaks = strict
+            return InlineText.pieces(paragraph, context: context)
+                .compactMap { piece -> String? in
+                    guard case let .text(runs) = piece else { return nil }
+                    return runs.map { run -> String in
+                        guard case let .styled(text) = run else { return "" }
+                        return String(text.characters)
+                    }.joined()
+                }
+                .joined()
+        }
+
+        // Obsidian's default, and what the editor always shows.
+        #expect(drawn(strict: false).contains("\n"))
+        #expect(drawn(strict: false).split(separator: "\n").count == 3)
+
+        // One paragraph: the newlines become spaces.
+        #expect(!drawn(strict: true).contains("\n"))
+        #expect(drawn(strict: true) == "asfasdfasdf asfdasdfasdfasdf asdfasdfasdf")
+    }
+
     // MARK: - Creating a note
 
     @Test("With a sidebar, ⌘N asks it to name the note in place rather than prompting")

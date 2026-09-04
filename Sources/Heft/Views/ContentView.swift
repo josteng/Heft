@@ -324,20 +324,7 @@ struct EditorPane: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var context: RenderContext {
-        var context = RenderContext(
-            index: model.index, current: model.current, vaultRoot: model.vaultRoot,
-            strictLineBreaks: appearance.lineBreaks.strictLineBreaks(
-                vaultSetting: model.settings.strictLineBreaks
-            ),
-            colorfulFormatting: appearance.colorfulFormattingEnabled,
-            accentColor: appearance.accentColor,
-            linkColor: appearance.linkColor,
-            tagColor: appearance.tagColor,
-            codeColor: appearance.codeColor,
-            boldColor: appearance.boldColor,
-            italicColor: appearance.italicColor,
-            headingColors: (1...6).map { appearance.headingColor($0) }
-        )
+        var context = model.renderContext()
         context.appearance = RenderContext.appearance(for: colorScheme)
         return context
     }
