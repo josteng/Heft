@@ -47,6 +47,7 @@ struct AppCommandShortcut {
     static let quickOpen = Self("quickOpen")
     static let commandPalette = Self("commandPalette")
     static let revealInSidebar = Self("revealInSidebar")
+    static let settings = Self("settings")
 }
 
 extension View {

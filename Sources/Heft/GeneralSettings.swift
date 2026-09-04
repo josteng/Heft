@@ -155,13 +155,12 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        // A grouped Form is a scroll view, and a settings pane the window
-        // sizes to fit has no business scrolling: if it does, the sizing has
-        // already failed and the scroll bar is hiding it. Turning it off makes
-        // that a visible mistake rather than a silent one.
-        .scrollDisabled(true)
-        // Measured at a fixed width, like the other panes, so the wrapping in
-        // the explanations is the same when the pane is measured and shown.
+        // Scrolling stays on. It was turned off to stop a scroll bar the
+        // hand measurement caused by under-reporting this pane's height;
+        // `preferredContentSize` reports the Form's full content height,
+        // so the window is tall enough and no bar appears — and on a short
+        // display, where the pane is capped, scrolling is what should
+        // happen rather than the bottom being unreachable.
         .frame(width: 560)
     }
 }

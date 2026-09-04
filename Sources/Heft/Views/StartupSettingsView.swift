@@ -127,8 +127,12 @@ struct StartupSettingsView: View {
         current.choice == .note ? "Note" : "Pattern"
     }
 
+    /// Not `Inbox.md`. That name means one thing in Heft — the note ⇧⌘I
+    /// appends to — and offering it as the example here made it look like the
+    /// canonical note for everything, which is the sort of overlap that reads
+    /// as two features pointing at the same place.
     private var placeholder: String {
-        current.choice == .note ? "Inbox.md" : "Journal/{{date:YYYY}}/{{date:YYYY-MM}}.md"
+        current.choice == .note ? "Projects/Overview.md" : "Journal/{{date:YYYY}}/{{date:YYYY-MM}}.md"
     }
 
     private var explanation: String {

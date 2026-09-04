@@ -98,6 +98,12 @@ public enum KeyboardShortcuts {
         .init(id: "findPrevious", title: "Find previous", key: "g", modifiers: [.command, .shift], group: .find),
         .init(id: "searchVault", title: "Search the vault", key: "f", modifiers: [.command, .shift], group: .find, isNotable: true),
 
+        // Declared here like everything else, even though macOS gives it for
+        // free: `heft keys` is what an agent answers "how do I change that"
+        // from, and a shortcut the app has and the table does not know about
+        // is exactly the drift this table exists to prevent.
+        .init(id: "settings", title: "Settings", key: ",", modifiers: [.command], group: .file),
+
         .init(id: "quickOpen", title: "Quick open", key: "o", modifiers: [.command], group: .navigate, isNotable: true),
         .init(id: "commandPalette", title: "Command palette", key: "p", modifiers: [.command], group: .navigate, isNotable: true),
         // ⇧⌘J is Xcode's Reveal in Project Navigator, which is this exactly.

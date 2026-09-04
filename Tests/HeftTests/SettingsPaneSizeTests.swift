@@ -4,12 +4,61 @@ import SwiftUI
 import Testing
 @testable import Heft
 
-/// The Settings window sizes itself to the pane showing, by measuring that pane
-/// off screen. Two things have gone wrong with that and both looked the same —
-/// a tab clipped halfway down a control.
+/// Each settings pane has to report the height it needs, because that is what
+/// `NSTabViewController` resizes the window to.
+///
+/// The failure this guards has happened three times and always looks the same:
+/// a pane clipped halfway down a control, or given a scroll bar. It used to be
+/// measured by hand off screen; now the number comes from
+/// `NSHostingController.preferredContentSize`, which is what AppKit actually
+/// sizes from — so these ask the same questions of the mechanism that ships.
 @Suite("Settings pane sizes")
 @MainActor
 struct SettingsPaneSizeTests {
+
+    /// What AppKit will size the window to. Built the way the window builds
+    /// them, cap included, or a test measures something that never ships.
+    static func height(of pane: SettingsPane, registry: VaultRegistry) -> CGFloat {
+        let host = NSHostingController(
+            rootView: AnyView(
+                pane.content
+                    .environmentObject(registry)
+                    .frame(width: SettingsPane.width)
+                    .frame(maxHeight: SettingsPane.maximumHeight)
+            )
+        )
+        host.sizingOptions = [.preferredContentSize]
+        host.view.layoutSubtreeIfNeeded()
+        return host.preferredContentSize.height
+    }
+
+    /// Nothing clamps `preferredContentSize`, so a tall pane simply makes a
+    /// tall window — one that cannot be resized and does not scroll, so its
+    /// bottom is unreachable. The cap has to leave room for the titlebar and
+    /// the tab bar on the screen it is actually on, which is the part a
+    /// constant chosen once would get wrong on somebody else's display.
+    @Test("The height cap leaves room for the window's own chrome")
+    func capLeavesRoomForChrome() {
+        let screen = NSScreen.main?.visibleFrame.height ?? 900
+        let chrome: CGFloat = 120
+        let tallest = SettingsPane.maximumHeight + chrome
+        #expect(
+            tallest <= screen,
+            "a capped pane still makes a \(tallest)pt window on a \(screen)pt screen"
+        )
+        // And not so tight that an ordinary pane is scrolled for no reason.
+        #expect(SettingsPane.maximumHeight >= 400)
+    }
+
+    @Test("Every pane fits the window it will be shown in")
+    func panesFitTheirWindow() throws {
+        try withVault { registry, _ in
+            for pane in SettingsPane.allCases {
+                let height = Self.height(of: pane, registry: registry)
+                #expect(height <= SettingsPane.maximumHeight + 1, "\(pane.title) wants \(height)")
+            }
+        }
+    }
 
     private func withVault(_ body: @MainActor (VaultRegistry, URL) throws -> Void) throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -41,7 +90,7 @@ struct SettingsPaneSizeTests {
                 StartupSettings.shared.set(
                     StartupNote(choice: choice, text: "Inbox.md"), for: vault
                 )
-                return SettingsWindow.idealHeight(of: .startup, registry: registry)
+                return Self.height(of: .startup, registry: registry)
             }
             let plain = height(.nothing)
             let named = height(.note)
@@ -64,9 +113,9 @@ struct SettingsPaneSizeTests {
     /// never on screen.
     @Test("A pane measures at its real size, not its empty one")
     func paneMeasuresItsRealContent() throws {
-        let empty = SettingsWindow.idealHeight(of: .startup, registry: VaultRegistry())
+        let empty = Self.height(of: .startup, registry: VaultRegistry())
         try withVault { registry, _ in
-            let real = SettingsWindow.idealHeight(of: .startup, registry: registry)
+            let real = Self.height(of: .startup, registry: registry)
             #expect(
                 real > empty,
                 "with a vault open the pane has content: \(real) against \(empty) without"
@@ -79,9 +128,9 @@ struct SettingsPaneSizeTests {
     @Test("Every tab measures to something")
     func everyTabMeasures() {
         let registry = VaultRegistry()
-        for tab in SettingsWindow.Tab.allCases {
+        for tab in SettingsPane.allCases {
             #expect(
-                SettingsWindow.idealHeight(of: tab, registry: registry) > 80,
+                Self.height(of: tab, registry: registry) > 80,
                 "\(tab.title) measured to nothing"
             )
         }
@@ -100,9 +149,9 @@ extension SettingsPaneSizeTests {
             defer { settings.newNoteLocation = restore }
 
             settings.newNoteLocation = .besideTheOpenNote
-            let plain = SettingsWindow.idealHeight(of: .general, registry: registry)
+            let plain = Self.height(of: .general, registry: registry)
             settings.newNoteLocation = .folder("Inbox")
-            let named = SettingsWindow.idealHeight(of: .general, registry: registry)
+            let named = Self.height(of: .general, registry: registry)
 
             #expect(plain > 0)
             #expect(named > plain, "a folder field should need room: \(named) vs \(plain)")
@@ -301,5 +350,38 @@ struct RevealTests {
 
         model.finishReveal()
         #expect(model.revealTarget == nil)
+    }
+}
+
+/// "Inbox" means one thing in Heft: the note ⇧⌘I appends to. Offering it as
+/// the example anywhere else makes two features look like they point at the
+/// same place, and a folder named after a note is a mess nobody asked for.
+@Suite("Inbox means one thing")
+@MainActor
+struct InboxNamingTests {
+
+    @Test("Nothing but capture suggests the name Inbox")
+    func onlyCaptureSuggestsInbox() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+
+        var offenders: [String] = []
+        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" } ?? []
+        for file in files where file.lastPathComponent != "InboxCapture.swift" {
+            let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                // Only what a person is shown: a literal offered in the UI.
+                guard line.contains("\"Inbox") else { continue }
+                // Comments explaining the rule are not suggestions.
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.hasPrefix("//"), !trimmed.hasPrefix("///") else { continue }
+                offenders.append("\(file.lastPathComponent): \(trimmed)")
+            }
+        }
+        #expect(offenders.isEmpty, "these offer Inbox as an example:\n\(offenders.joined(separator: "\n"))")
     }
 }

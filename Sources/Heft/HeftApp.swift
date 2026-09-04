@@ -63,7 +63,10 @@ struct HeftApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 720)
 
-        Settings { SettingsWindow().environmentObject(registry).appAccentTint() }
+        // No `Settings { }` scene: it sizes its window to the tallest tab and
+        // never shrinks back. `SettingsWindowController` is an ordinary Mac
+        // settings window, where resizing to the pane on show is the tab
+        // controller's own job.
     }
 }
 
@@ -116,6 +119,12 @@ struct HeftCommands: Commands {
     @ObservedObject private var appearance = AppearanceSettings.shared
 
     var body: some Commands {
+        // Ours rather than the one a `Settings` scene installs, since there is
+        // no such scene: the window is an ordinary AppKit settings window.
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { SettingsWindowController.shared.show(registry) }
+                .keyboardShortcut(.settings)
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Note…") { model?.createNote() }
                 .keyboardShortcut(.newNote)
