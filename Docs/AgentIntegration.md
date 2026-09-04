@@ -37,10 +37,15 @@ heft diff <vault> <proposal-id>        # what one of them would change
 heft drop <vault> <proposal-id>        # withdraw one
 ```
 
-An id may be given as any prefix long enough to name one proposal. An empty
-string is not: it is a prefix of every id, and `heft drop "$ID"` from a shell
-that expanded `$ID` to nothing used to delete whichever proposal happened to be
-first, and report success.
+An id is a name, taken from the `--summary`: `tighten-the-opening`, and
+`tighten-the-opening-2` for the next one like it. It was a bare UUID, which
+nobody can read, say out loud or type, and which a review listing would have
+shown as a column of hex. A proposal with no summary is named after its note.
+
+Any prefix long enough to name one proposal will do. An empty string is not: it
+is a prefix of every id, and `heft drop "$ID"` from a shell that expanded `$ID`
+to nothing used to delete whichever proposal happened to be first, and report
+success. A prefix matching two is refused rather than resolved to the first.
 
 `heft rename <vault> <path> <new>` is the one structural edit here, and it is
 not a proposal: a rename moves a file and rewrites the links in every note that

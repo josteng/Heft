@@ -113,7 +113,79 @@ public enum ProposalStore {
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? decoder.decode(Proposal.self, from: data)
             }
-            .sorted { $0.createdAt < $1.createdAt }
+            // By id where the timestamps tie, which they do: the dates are
+            // encoded to the second, and two proposals from one agent run land
+            // inside one. Without it the list reorders itself between reads.
+            .sorted { $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt < $1.createdAt }
+    }
+
+    /// A readable id for a proposal.
+    ///
+    /// It was a bare UUID, which nobody can read, say out loud or type: `heft
+    /// diff` and `heft drop` took a string that had to be copied, and a review
+    /// centre listing several would have shown a column of hex. The summary is
+    /// already one line on what the change is for, so it is the name.
+    ///
+    /// The note's name stands in when there is no summary, because the default
+    /// one is the same words every time and `proposed-edit-7` names nothing.
+    ///
+    /// Collisions get a number rather than a hash: two proposals to tighten the
+    /// same opening genuinely are `tighten-the-opening` and
+    /// `tighten-the-opening-2`, and a prefix long enough to tell them apart is
+    /// still short enough to type. Nothing here can produce `/`, `.` or an
+    /// empty string, which matters because the id is also the filename.
+    public static func identifier(
+        summary: String?, noteName: String, taken: Set<String>
+    ) -> String {
+        let described = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap {
+            $0.isEmpty || $0 == defaultSummary ? nil : $0
+        }
+        // Without the extension: `before-release-md` reads as a mistake.
+        let plain = (noteName as NSString).deletingPathExtension
+        var base = slug(described ?? (plain.isEmpty ? noteName : plain))
+        if base.isEmpty { base = "proposal" }
+        guard taken.contains(base) else { return base }
+        var index = 2
+        while taken.contains("\(base)-\(index)") { index += 1 }
+        return "\(base)-\(index)"
+    }
+
+    /// What `propose` calls a change nobody described.
+    public static let defaultSummary = "Proposed edit"
+
+    /// Long enough to be recognisable, short enough to type, and cut between
+    /// words: `tighten-the-opening-and-add-a-next-secti` reads as a mistake
+    /// where `tighten-the-opening-and-add-a-next` reads as a name.
+    static let slugLimit = 40
+
+    static func slug(_ text: String) -> String {
+        var out = ""
+        var word = ""
+        /// False once a word will not fit, which ends the name. Skipping that
+        /// word and taking the next one that happens to be short enough reads
+        /// as a typo rather than a truncation.
+        func flush() -> Bool {
+            guard !word.isEmpty else { return true }
+            let joined = out.isEmpty ? word : out + "-" + word
+            word = ""
+            if joined.count <= slugLimit {
+                out = joined
+                return true
+            }
+            // One word longer than the whole limit has no boundary to cut on,
+            // so it is cut anyway rather than leaving nothing.
+            if out.isEmpty { out = String(joined.prefix(slugLimit)) }
+            return false
+        }
+        for character in text.lowercased() {
+            if character.isLetter || character.isNumber {
+                word.append(character)
+            } else if !flush() {
+                return out
+            }
+        }
+        _ = flush()
+        return out
     }
 
     /// Which proposal an id names.

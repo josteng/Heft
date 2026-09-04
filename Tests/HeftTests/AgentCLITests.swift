@@ -475,4 +475,72 @@ struct AgentCLITests {
         #expect(output.text.contains("folder:"))
         #expect(!output.text.contains("link:"))
     }
+
+    // MARK: - Names rather than numbers
+
+    @Test("A proposal is named after what it is for")
+    func proposalsAreNamed() {
+        func name(_ summary: String?, note: String = "Before Release.md",
+                  taken: Set<String> = []) -> String {
+            ProposalStore.identifier(summary: summary, noteName: note, taken: taken)
+        }
+
+        #expect(name("Tighten the opening") == "tighten-the-opening")
+        // Punctuation and case are not part of a name.
+        #expect(name("Add a “Next” section!") == "add-a-next-section")
+
+        // No summary means the note, without its extension: the default
+        // summary is the same words every time, so `proposed-edit-7` would
+        // name nothing at all.
+        #expect(name(nil) == "before-release")
+        #expect(name(ProposalStore.defaultSummary) == "before-release")
+        #expect(name("   ") == "before-release")
+
+        // Nothing usable at all still has to produce a filename.
+        #expect(name("…!!!", note: "§.md") == "proposal")
+
+        // Cut between words, not mid-word.
+        let long = name("Tighten the opening and add a Next section about naming")
+        #expect(long.count <= ProposalStore.slugLimit)
+        #expect(long == "tighten-the-opening-and-add-a-next")
+
+        // Two proposals for the same thing are numbered, not hashed.
+        #expect(name("Tighten the opening", taken: ["tighten-the-opening"])
+            == "tighten-the-opening-2")
+        #expect(name("Tighten the opening",
+                     taken: ["tighten-the-opening", "tighten-the-opening-2"])
+            == "tighten-the-opening-3")
+    }
+
+    @Test("A name is safe to use as a filename")
+    func namesAreSafeFilenames() {
+        // The id is the filename under `.heft/proposals`, so anything that
+        // could climb out of it must be impossible to produce.
+        for summary in ["../../etc/passwd", "..", "/", "a/b/c", ".", ""] {
+            let id = ProposalStore.identifier(
+                summary: summary, noteName: "N.md", taken: []
+            )
+            #expect(!id.isEmpty)
+            #expect(!id.contains("/"))
+            #expect(!id.contains("."))
+        }
+    }
+
+    @Test("A named proposal round-trips through the store and its verbs")
+    func namedProposalRoundTrip() throws {
+        let root = try vault(["Note.md": "one\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let proposed = try run(
+            ["propose", root.path, "Note.md", "--summary", "Tighten the opening"],
+            stdin: "two\n"
+        )
+        #expect(proposed.text.contains("proposed tighten-the-opening"))
+        #expect(ProposalStore.all(in: root).first?.id == "tighten-the-opening")
+
+        // The point of a readable id is that a person can type a bit of it.
+        #expect(try run(["diff", root.path, "tighten"]).status == 0)
+        #expect(try run(["drop", root.path, "tighten"]).status == 0)
+        #expect(ProposalStore.all(in: root).isEmpty)
+    }
 }

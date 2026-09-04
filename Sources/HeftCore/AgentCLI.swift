@@ -132,12 +132,18 @@ public enum AgentCLI {
                 """)
         }
 
+        let summary = options["summary"]
         let proposal = Proposal(
+            id: ProposalStore.identifier(
+                summary: summary,
+                noteName: (relative as NSString).lastPathComponent,
+                taken: Set(ProposalStore.all(in: root).map(\.id))
+            ),
             notePath: relative,
             base: current,
             body: body,
             agent: options["agent"] ?? "claude-code",
-            summary: options["summary"] ?? "Proposed edit"
+            summary: summary ?? ProposalStore.defaultSummary
         )
         do {
             try ProposalStore.write(proposal, in: root)
