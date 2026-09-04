@@ -14,7 +14,7 @@ import Foundation
 public enum AgentCLI {
 
     public static let verbs: Set<String> = [
-        "propose", "proposals", "diff", "drop", "read", "find", "changes",
+        "propose", "proposals", "diff", "drop", "read", "find", "changes", "attachment",
     ]
 
     /// Returns true when it handled the arguments (and has exited).
@@ -35,6 +35,7 @@ public enum AgentCLI {
         case "read": read(root: root, arguments: rest)
         case "find": find(root: root, arguments: rest)
         case "changes": changes(root: root, arguments: rest)
+        case "attachment": attachment(root: root, arguments: rest)
         default: return false
         }
         return true
@@ -258,6 +259,80 @@ public enum AgentCLI {
             for line in hunk.added { print("+\(line)") }
             for line in hunk.trailing { print(" \(line)") }
         }
+        exit(0)
+    }
+
+    /// `heft attachment <vault> <note> [filename]` — where a file attached to
+    /// that note goes, and what to write in the note to point at it.
+    ///
+    /// `AttachmentRules` already decides this for a paste in the editor, and
+    /// nothing on the command line could reach it: an agent handed a file had
+    /// to guess. `heft config` reports the raw Obsidian setting, which is one
+    /// of five rules and frequently not the one that answers — a vault that
+    /// keeps figures in three differently-named folders is the case the rules
+    /// exist for.
+    ///
+    /// It answers and does not write. Copying the file is the caller's, and a
+    /// verb that moved files into a vault would be the one thing proposals
+    /// exist to prevent.
+    private static func attachment(root: URL, arguments: [String]) {
+        guard let name = arguments.first, !name.hasPrefix("--") else {
+            fail("usage: heft attachment <vault> <note> [filename] [--json]")
+        }
+        let options = Options(arguments.dropFirst())
+        let filename = arguments.dropFirst().first { !$0.hasPrefix("--") }
+
+        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let relative = resolveNote(named: name, in: root)
+        let noteURL = root.appendingPathComponent(relative)
+        let settings = ObsidianSettings.load(vaultRoot: root)
+        let resolver = AttachmentDestination(
+            rules: AttachmentPlan.stored(in: HeftDefaults.shared).rules,
+            vaultRoot: root,
+            settings: settings
+        )
+        let chosen = resolver.resolve(
+            noteURL: noteURL,
+            learned: index.attachmentDestination(
+                near: AttachmentDestination.folder(of: noteURL, in: root)
+            )
+        )
+        let directory = chosen.folder.isEmpty
+            ? root : root.appendingPathComponent(chosen.folder, isDirectory: true)
+        let target = filename.map { directory.appendingPathComponent($0) }
+        let link = target.map { resolver.link(to: $0, from: noteURL) }
+
+        if options.flag("json") {
+            var payload: [String: Any] = [
+                "note": relative,
+                "folder": chosen.folder,
+                "rule": chosen.rule.id,
+                "exists": !chosen.needsCreating,
+                "mayCreate": chosen.rule.mayCreate,
+                "path": directory.path,
+                "wikilinks": settings.useWikilinks,
+            ]
+            if let target { payload["file"] = target.path }
+            if let link { payload["link"] = link }
+            if let data = try? JSONSerialization.data(
+                withJSONObject: payload, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            ) {
+                print(String(decoding: data, as: UTF8.self))
+            }
+            exit(0)
+        }
+
+        print("note:    \(relative)")
+        print("folder:  \(chosen.folder.isEmpty ? "(vault root)" : chosen.folder)")
+        print("rule:    \(chosen.rule.id)")
+        print("path:    \(directory.path)")
+        if chosen.needsCreating {
+            print(chosen.rule.mayCreate
+                ? "note:    that folder does not exist yet and would be created"
+                : "note:    that folder does not exist, so the vault root would be used")
+        }
+        if let target { print("file:    \(target.path)") }
+        if let link { print("link:    \(link)") }
         exit(0)
     }
 

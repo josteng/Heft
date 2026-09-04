@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 8
+    public static let version = 9
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -254,7 +254,15 @@ public enum AgentGuide {
         heft outline . "Note"    # its headings, with line numbers
         heft tags .              # tags with counts; add a tag to list its notes
         heft config .            # daily-note folder, date format, attachments
+        heft attachment . "Note" shot.png   # where that file goes, and the link
         ```
+
+        `heft attachment` is the one to use before putting a file anywhere.
+        The attachment folder is a set of rules, not a setting: a vault often
+        keeps figures beside the notes in one folder and in a named folder
+        elsewhere, and `heft config` reports only the raw Obsidian value, which
+        is frequently not the rule that answers. It prints the folder, the rule
+        that chose it, and the exact link text to write.
 
         Read `heft config .` before writing anything that has to fit the
         vault's conventions: it gives the daily-note folder and filename

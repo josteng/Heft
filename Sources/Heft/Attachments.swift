@@ -10,6 +10,9 @@ enum Attachments {
     /// Everything the destination depends on, gathered at the call site so the
     /// rules can be resolved anywhere — including a settings pane showing what
     /// a paste *would* do, before one has happened.
+    ///
+    /// The resolving itself is `AttachmentDestination` in HeftCore, so the
+    /// command line answers the same question with the same rules.
     struct Destination {
         let rules: AttachmentRules
         let index: VaultIndex
@@ -18,29 +21,10 @@ enum Attachments {
         /// Where a file pasted into `noteURL` should go, and the rule that
         /// said so.
         func resolve(vaultRoot: URL, noteURL: URL?) -> AttachmentRules.Destination {
-            let folder = noteURL.map { url -> String in
-                let note = url.standardizedFileURL.path
-                let root = vaultRoot.standardizedFileURL.path
-                guard note.hasPrefix(root + "/") else { return "" }
-                let relative = String(note.dropFirst(root.count + 1))
-                let parts = relative.split(separator: "/")
-                return parts.count > 1 ? parts.dropLast().joined(separator: "/") : ""
-            } ?? ""
-
-            return rules.destination(in: AttachmentRules.Context(
-                noteFolder: folder,
-                obsidianSetting: settings.attachmentFolderPath,
-                learned: index.attachmentDestination(near: folder),
-                folderExists: { candidate in
-                    guard !candidate.isEmpty else { return true }
-                    var isFolder: ObjCBool = false
-                    let exists = FileManager.default.fileExists(
-                        atPath: vaultRoot.appendingPathComponent(candidate).path,
-                        isDirectory: &isFolder
-                    )
-                    return exists && isFolder.boolValue
-                }
-            ))
+            let folder = AttachmentDestination.folder(of: noteURL, in: vaultRoot)
+            return AttachmentDestination(
+                rules: rules, vaultRoot: vaultRoot, settings: settings
+            ).resolve(noteURL: noteURL, learned: index.attachmentDestination(near: folder))
         }
 
         /// The folder to write into, made first only if the rule that chose it
@@ -157,23 +141,8 @@ enum Attachments {
     private static func linkMarkdown(
         for target: URL, vaultRoot: URL, noteURL: URL?, settings: ObsidianSettings
     ) -> String {
-        guard settings.useWikilinks else {
-            let path = relativePath(from: noteURL?.deletingLastPathComponent() ?? vaultRoot, to: target)
-            let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
-            return "![](\(encoded))"
-        }
-        // Obsidian wikilinks address attachments by filename alone.
-        return "![[\(target.lastPathComponent)]]"
-    }
-
-    private static func relativePath(from base: URL, to target: URL) -> String {
-        let baseParts = base.standardizedFileURL.pathComponents
-        let targetParts = target.standardizedFileURL.pathComponents
-        var shared = 0
-        while shared < baseParts.count, shared < targetParts.count, baseParts[shared] == targetParts[shared] {
-            shared += 1
-        }
-        let up = Array(repeating: "..", count: baseParts.count - shared)
-        return (up + targetParts[shared...]).joined(separator: "/")
+        AttachmentDestination.link(
+            to: target, from: noteURL, vaultRoot: vaultRoot, settings: settings
+        )
     }
 }

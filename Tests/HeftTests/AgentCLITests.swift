@@ -423,4 +423,56 @@ struct AgentCLITests {
         #expect(AgentPermissions.isSatisfied(by: AgentPermissions.merged(into: nil)))
         #expect(!AgentPermissions.isSatisfied(by: "{}"))
     }
+
+    // MARK: - attachment
+
+    @Test("`heft attachment` answers with the rules the editor pastes with")
+    func attachmentDestination() throws {
+        // A vault that already keeps figures beside a note, plus an
+        // Attachments folder elsewhere: which one answers is exactly what an
+        // agent cannot work out from `heft config`.
+        let root = try vault([
+            "Projects/Thing.md": "See ![[chart.png]]\n",
+            "Projects/chart.png": "x",
+            "Attachments/other.png": "x",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["attachment", root.path, "Projects/Thing.md", "shot.png", "--json"])
+        #expect(output.status == 0)
+        let payload = try #require(
+            try JSONSerialization.jsonObject(with: output.standard) as? [String: Any]
+        )
+        #expect(payload["note"] as? String == "Projects/Thing.md")
+        // Learned from the vault: the note's own folder already holds one.
+        #expect(payload["folder"] as? String == "Projects")
+        #expect(payload["rule"] as? String == "learned")
+        #expect(payload["file"] as? String == root.appendingPathComponent(
+            "Projects/shot.png"
+        ).path)
+        #expect(payload["link"] as? String == "![[shot.png]]")
+    }
+
+    @Test("A vault that writes Markdown links gets a Markdown link back")
+    func attachmentLinkFollowsTheVault() throws {
+        let root = try vault([
+            "Projects/Thing.md": "body\n",
+            ".obsidian/app.json": #"{"useMarkdownLinks": true}"#,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["attachment", root.path, "Projects/Thing.md", "shot.png"])
+        #expect(output.text.contains("![](") , "got \(output.text)")
+        #expect(!output.text.contains("![[shot.png]]"))
+    }
+
+    @Test("Naming no file still says where one would go")
+    func attachmentWithoutAFilename() throws {
+        let root = try vault(["Thing.md": "body\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = try run(["attachment", root.path, "Thing.md"])
+        #expect(output.status == 0)
+        #expect(output.text.contains("folder:"))
+        #expect(!output.text.contains("link:"))
+    }
 }

@@ -47,6 +47,27 @@ public struct AttachmentPlan: Codable, Equatable, Sendable {
         self.entries = entries
     }
 
+    /// Where the reader's plan is kept, and how to read it back.
+    ///
+    /// Here rather than only in the settings object, so the command line can
+    /// answer with the same rules the editor pastes with: `heft attachment`
+    /// would otherwise be reporting a different vault's behaviour than the one
+    /// the reader sees. Under `swift run` that is the standard plan, because a
+    /// development build has its own defaults domain — the same caveat
+    /// `files --by-use` carries.
+    public static let defaultsKey = "dev.stenglein.Heft.attachmentPlan"
+
+    public static func stored(in defaults: UserDefaults) -> AttachmentPlan {
+        // An unreadable or absent setting means the standard plan, not an
+        // empty one: a plan with no rules would send every attachment to the
+        // vault root and look like a decision somebody made.
+        guard let data = defaults.data(forKey: defaultsKey),
+              let plan = try? JSONDecoder().decode(AttachmentPlan.self, from: data),
+              !plan.entries.isEmpty
+        else { return .standard }
+        return plan
+    }
+
     /// A stored plan is merged with the full set rather than trusted whole, so
     /// a rule added in a later version arrives switched off at the end instead
     /// of being missing from every plan written before it existed. Same lesson

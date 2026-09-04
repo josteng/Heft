@@ -278,6 +278,7 @@ heft links <vault> <note>       # links out, resolved and unresolved
 heft backlinks <vault> <note>   # what links here, with the referencing line
 heft tags <vault> [tag]         # tags with counts, or the notes carrying one
 heft config <vault>             # the vault's settings, as JSON
+heft attachment <vault> <note> [file]  # where an attachment goes, and the link
 heft changes <vault> <note>     # what moved since you last read it
 heft propose <vault> <note>     # propose a new body, from stdin
 heft proposals <vault>          # what is waiting for review

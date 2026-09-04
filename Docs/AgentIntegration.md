@@ -52,6 +52,16 @@ Also read-only, and better than `grep` at every one of these:
 resolved link graph, `heft tags`, and `heft config` for the vault's settings as
 JSON.
 
+`heft attachment <vault> <note> [filename]` answers the one question `config`
+cannot. Where an attachment goes is a list of rules tried in order — what
+`.obsidian/app.json` says, what the notes near this one already do, the nearest
+folder of a given name, beside the note, a fixed folder — because a real vault
+keeps files in several places under several names, and one configured folder
+name would be wrong in most of them. This resolves them the way a paste in the
+editor does and prints the folder, the rule that answered, and the link text to
+write. It does not copy anything: moving files into a vault is the caller's,
+and a verb that did it would be the thing proposals exist to prevent.
+
 `propose` takes the **whole new body of the note**, not a patch. An agent
 already has the finished text in hand, and a full body cannot fail to apply.
 Heft works out the hunks itself. Where restating a long note to change a

@@ -12,7 +12,7 @@ import SwiftUI
 final class AttachmentSettings: ObservableObject {
     static let shared = AttachmentSettings()
 
-    private static let key = "dev.stenglein.Heft.attachmentPlan"
+    private static let key = AttachmentPlan.defaultsKey
 
     @Published var plan: AttachmentPlan {
         didSet {
@@ -25,16 +25,7 @@ final class AttachmentSettings: ObservableObject {
     var rules: AttachmentRules { plan.rules }
 
     private init() {
-        // An unreadable or absent setting means the standard plan, not an empty
-        // one: a plan with no rules would send every attachment to the vault
-        // root and look like a deliberate choice.
-        if let data = HeftDefaults.shared.data(forKey: Self.key),
-           let stored = try? JSONDecoder().decode(AttachmentPlan.self, from: data),
-           !stored.entries.isEmpty {
-            plan = stored
-        } else {
-            plan = .standard
-        }
+        plan = AttachmentPlan.stored(in: HeftDefaults.shared)
     }
 
     func reset() { plan = .standard }

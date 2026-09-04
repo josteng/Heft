@@ -83,6 +83,9 @@ public enum CommandLineSpec {
         Verb("backlinks", "<vault> <note>", "Notes linking to this one, with context."),
         Verb("tags", "<vault> [tag]", "Tags with counts, or the notes carrying one."),
         Verb("config", "<vault>", "The vault's settings, as JSON."),
+        Verb("attachment", "<vault> <note> [filename]",
+             "Where a file attached to that note goes, and the link to write.",
+             flags: [Flag("--json", "The machine-readable form.")]),
         Verb("stats", "<vault>", "Index report: counts, timings, link resolution.",
              isDiagnostic: true),
 
