@@ -302,4 +302,125 @@ struct AgentCLITests {
         log.record("elsewhere\n", vault: other, relativePath: "A.md")
         #expect(log.last(vault: vaultURL, relativePath: "A.md")?.text == "second\n")
     }
+
+    // MARK: - agent-setup
+
+    @Test("Setup writes a guide for every agent, and leaves each file's own words alone")
+    func setUpWritesBothGuides() throws {
+        let root = try vault([
+            "Note.md": "body\n",
+            // Somebody's own instructions, in one file but not the other.
+            "AGENTS.md": "# My vault\n\nDrafts live in Inbox/.\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["agent-setup", root.path]).status == 0)
+
+        for name in ["CLAUDE.md", "AGENTS.md"] {
+            let text = try String(
+                contentsOf: root.appendingPathComponent(name), encoding: .utf8
+            )
+            #expect(text.contains(AgentGuide.markerStart), "\(name) carries the guide")
+            #expect(AgentGuide.versionStamp(in: text) == AgentGuide.version)
+        }
+        // The preamble that was already there survived; the file that had none
+        // got the generated one rather than the other file's.
+        let agents = try String(
+            contentsOf: root.appendingPathComponent("AGENTS.md"), encoding: .utf8
+        )
+        #expect(agents.contains("Drafts live in Inbox/."))
+        let claude = try String(
+            contentsOf: root.appendingPathComponent("CLAUDE.md"), encoding: .utf8
+        )
+        #expect(!claude.contains("Drafts live in Inbox/."))
+
+        // Running it again is idempotent: one section per file, still.
+        #expect(try run(["agent-setup", root.path]).status == 0)
+        #expect(try String(contentsOf: root.appendingPathComponent("AGENTS.md"), encoding: .utf8)
+            .components(separatedBy: AgentGuide.markerStart).count == 2)
+    }
+
+    @Test("The oldest guide in a vault is the one a vault is judged by")
+    func vaultStatusTakesTheOldest() throws {
+        let root = try vault(["Note.md": "body\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(AgentGuide.status(ofVaultAt: root) == .absent)
+
+        #expect(try run(["agent-setup", root.path]).status == 0)
+        #expect(AgentGuide.status(ofVaultAt: root) == .current)
+
+        // Whoever brought Codex is reading the stale one, so the vault is stale.
+        var agents = try String(
+            contentsOf: root.appendingPathComponent("AGENTS.md"), encoding: .utf8
+        )
+        agents = agents.replacingOccurrences(
+            of: "\(AgentGuide.versionMarker) \(AgentGuide.version) -->",
+            with: "\(AgentGuide.versionMarker) 2 -->"
+        )
+        try agents.write(
+            to: root.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8
+        )
+        #expect(AgentGuide.status(ofVaultAt: root) == .outdated(found: 2))
+    }
+
+    // MARK: - Permissions
+
+    @Test("Setup ships permission rules, and keeps whatever was already in them")
+    func setUpWritesPermissions() throws {
+        let root = try vault([
+            "Note.md": "body\n",
+            ".claude/settings.json": """
+                {"permissions": {"allow": ["Bash(git status)"]}, "model": "Opus"}
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["agent-setup", root.path]).status == 0)
+        let text = try String(
+            contentsOf: root.appendingPathComponent(AgentPermissions.path), encoding: .utf8
+        )
+        #expect(AgentPermissions.isSatisfied(by: text))
+
+        let parsed = try #require(AgentPermissions.parsed(text))
+        // Their own settings survive: the file is theirs.
+        #expect(parsed["model"] as? String == "Opus")
+        let permissions = try #require(parsed["permissions"] as? [String: Any])
+        #expect((permissions["allow"] as? [String])?.contains("Bash(git status)") == true)
+
+        // Idempotent: running it again adds nothing twice.
+        #expect(try run(["agent-setup", root.path]).status == 0)
+        let reread = try #require(AgentPermissions.parsed(
+            try String(contentsOf: root.appendingPathComponent(AgentPermissions.path),
+                       encoding: .utf8)
+        ))
+        let again = try #require(reread["permissions"] as? [String: Any])
+        #expect((again["deny"] as? [String])?.count == AgentPermissions.deny.count)
+    }
+
+    @Test("A settings file that is not JSON is left alone rather than overwritten")
+    func brokenPermissionsAreLeftAlone() throws {
+        let broken = "{ this was hand-edited and never closed"
+        let root = try vault(["Note.md": "body\n", ".claude/settings.json": broken])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["agent-setup", root.path]).status == 0)
+        #expect(try String(
+            contentsOf: root.appendingPathComponent(AgentPermissions.path), encoding: .utf8
+        ) == broken)
+    }
+
+    @Test("The rules deny writing a note and still allow a scratch file")
+    func permissionRulesAreScoped() {
+        // Denying the tools by name would also stop the agent writing the
+        // /tmp file `heft propose --from` reads, which is the workflow the
+        // guide teaches. So every deny rule carries a path.
+        for rule in AgentPermissions.deny {
+            #expect(rule.contains("("), "\(rule) must be scoped to a path")
+        }
+        #expect(AgentPermissions.allow.contains("Bash(heft:*)"))
+
+        // A fresh vault gets a file that satisfies its own check.
+        #expect(AgentPermissions.isSatisfied(by: AgentPermissions.merged(into: nil)))
+        #expect(!AgentPermissions.isSatisfied(by: "{}"))
+    }
 }

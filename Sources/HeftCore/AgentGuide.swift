@@ -16,6 +16,23 @@ public enum AgentGuide {
     public static let markerStart = "<!-- heft:agent-guide start -->"
     public static let markerEnd = "<!-- heft:agent-guide end -->"
 
+    /// The files an agent looks for at the root of a folder it is started in.
+    ///
+    /// `CLAUDE.md` is Claude Code's; `AGENTS.md` is the convention Codex and
+    /// most of the others read. Both get the same managed section, because the
+    /// section is generated: two copies of generated text cannot drift, and
+    /// the alternative — one file pointing at the other — relies on the agent
+    /// following a pointer out of the file it was told to read, which is the
+    /// step most likely not to happen.
+    ///
+    /// Each file keeps its own preamble, which is the user's, so someone who
+    /// writes vault conventions into one is not surprised to find them copied
+    /// into the other.
+    public enum File: String, CaseIterable, Sendable {
+        case claude = "CLAUDE.md"
+        case agents = "AGENTS.md"
+    }
+
     /// The guide's revision. Bump it whenever the wording an agent depends on
     /// changes: a new verb, a changed flag, a rule that now reads differently.
     ///
@@ -24,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 7
+    public static let version = 8
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -60,6 +77,86 @@ public enum AgentGuide {
             + "Run `heft agent-setup \"\(vaultPath)\"` to refresh it."
     }
 
+    /// What a whole vault carries, across every file an agent might read.
+    ///
+    /// The oldest guide present decides, because that is the one an agent
+    /// could be reading. A vault with a current `CLAUDE.md` and an `AGENTS.md`
+    /// from two versions ago is out of date for whoever brought Codex.
+    public static func status(ofVaultAt vaultRoot: URL) -> Status {
+        let found = File.allCases.map { file in
+            status(of: try? String(
+                contentsOf: vaultRoot.appendingPathComponent(file.rawValue), encoding: .utf8
+            ))
+        }
+        if found.allSatisfy({ $0 == .absent }) { return .absent }
+        let versions = found.compactMap { status -> Int? in
+            switch status {
+            case .absent: return nil
+            case .current: return version
+            case let .outdated(found): return found
+            }
+        }
+        guard let oldest = versions.min(), oldest < version else { return .current }
+        return .outdated(found: oldest)
+    }
+
+    /// One file written by `agent-setup`.
+    public struct Written: Sendable, Equatable {
+        public let url: URL
+        /// True when the file did not exist at all before.
+        public let created: Bool
+    }
+
+    /// Writes the guide into every file an agent might read.
+    ///
+    /// Both entry points used to do this by hand — `Main.swift` for
+    /// `agent-setup`, `AppModel` for the menu item and the banner — with the
+    /// merge, the back-up and the error wording written out twice. Adding a
+    /// second file would have made that four copies, which is the drift
+    /// `CommandLineSpec` exists to prevent elsewhere.
+    @discardableResult
+    public static func install(
+        in vaultRoot: URL, binaryPath: String, vaultName: String? = nil, now: Date = Date()
+    ) throws -> (written: [Written], backedUp: URL?) {
+        let section = section(binaryPath: binaryPath)
+        let name = vaultName ?? vaultRoot.lastPathComponent
+        var written: [Written] = []
+        var backedUp: URL?
+
+        for file in File.allCases {
+            let target = vaultRoot.appendingPathComponent(file.rawValue)
+            let existing = try? String(contentsOf: target, encoding: .utf8)
+            // One back-up is enough to report; the files hold the same section.
+            if backedUp == nil {
+                backedUp = try? backUpIfEdited(
+                    existing: existing, replacement: section, vaultRoot: vaultRoot, now: now
+                )
+            }
+            let merged = merged(
+                into: existing, section: section, preamble: preamble(vaultName: name)
+            )
+            try merged.write(to: target, atomically: true, encoding: .utf8)
+            written.append(Written(url: target, created: existing == nil))
+        }
+
+        // The permission rules that make the guide's main instruction
+        // enforced rather than asked for. A file that is not JSON is left
+        // alone: it is the user's, and neither refusing everything nor
+        // overwriting it is a good answer.
+        let settings = vaultRoot.appendingPathComponent(AgentPermissions.path)
+        let existing = try? String(contentsOf: settings, encoding: .utf8)
+        if !AgentPermissions.isUnreadable(existing), !AgentPermissions.isSatisfied(by: existing) {
+            try FileManager.default.createDirectory(
+                at: settings.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try AgentPermissions.merged(into: existing)
+                .write(to: settings, atomically: true, encoding: .utf8)
+            written.append(Written(url: settings, created: existing == nil))
+        }
+
+        return (written, backedUp)
+    }
+
     /// The guidance itself, pointing at whichever binary is installed.
     public static func section(binaryPath: String) -> String {
         """
@@ -82,6 +179,12 @@ public enum AgentGuide {
         Do not use Write or Edit on `.md` files in this vault. Propose the
         change instead; it is reviewed in the editor, hunk by hunk, and applied
         from there.
+
+        Claude Code is held to this by `.claude/settings.json`, which denies
+        those tools inside the vault and allows `heft` without asking. Writing
+        outside the vault — a scratch file in `/tmp` — is untouched, because
+        that is how the workflow below works. Other agents are on their honour:
+        the rule is the same either way.
 
         ```bash
         heft read . "Note Name" > /tmp/note.md   # read a note

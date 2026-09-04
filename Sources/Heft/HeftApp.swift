@@ -158,8 +158,9 @@ struct HeftCommands: Commands {
             Button("Go to Path…") { model?.promptToGoToPath() }
             // The proposal verbs are only reachable if something tells an
             // agent they exist, and a vault of markdown says nothing. This
-            // writes that into the vault's CLAUDE.md, where a session started
-            // in the folder will read it.
+            // writes that into the vault's CLAUDE.md and AGENTS.md, where a
+            // session started in the folder will read it, whichever agent it
+            // is.
             Button(
                 model?.hasAgentGuide == true
                     ? "Update Agent Access…"

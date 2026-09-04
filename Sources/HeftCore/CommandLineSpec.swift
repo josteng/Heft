@@ -116,7 +116,7 @@ public enum CommandLineSpec {
         Verb("render", "<vault> <note> [caret]",
              "What the live surface would draw, fragment by fragment.",
              isDiagnostic: true),
-        Verb("agent-setup", "<vault>", "Teach an agent in that vault to propose.",
+        Verb("agent-setup", "<vault>", "Write CLAUDE.md and AGENTS.md so an agent there proposes.",
              isReadOnly: false),
     ]
 

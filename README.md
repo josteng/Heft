@@ -221,21 +221,33 @@ and **Review**. Each hunk gets its own Accept and Reject. Accepting one applies
 it and rewrites the proposal to hold only what is still undecided, so a
 half-reviewed proposal is a smaller proposal, never a lost one.
 
-Three details that make it trustworthy rather than a demo:
+Four details that make it trustworthy rather than a demo:
 
 - The diff is computed against the note **as it is now**, not against what the
   agent read. If it moved on since, the banner says so instead of silently
   rebasing.
+- A whole-body proposal for a note that changed since the agent read it is
+  **refused**, because it would replace text the agent never saw. `heft
+  changes <vault> <note>` shows what moved, and it reads the note again.
 - Accepted changes go through the editor's buffer, so they join the normal
   autosave and undo path rather than racing it.
 - No daemon and no port. The verbs live on the same binary as the app.
 
 **Teaching an agent to use it** is one command: `heft agent-setup <vault>`, or
-File ▸ Set Up Agent Access. It writes the vault's `CLAUDE.md`, which is where a
-session started in that folder looks. It is written between markers, so running
-it again after an upgrade refreshes Heft's section and leaves anything else in
-the file alone. [`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the
-detail.
+File ▸ Set Up Agent Access. It writes the vault's `CLAUDE.md` and `AGENTS.md`,
+which is where a session started in that folder looks, whichever agent you
+brought. Both are written between markers, so running it again after an upgrade
+refreshes Heft's section and leaves anything else in each file alone.
+
+It also writes `.claude/settings.json`, which turns the main instruction from a
+request into a rule: Edit, Write and NotebookEdit are denied **inside the
+vault**, and `heft` is allowed without a prompt. Writing outside the vault is
+untouched, since `heft propose --from /tmp/new.md` depends on it. Your own
+settings in that file are merged with, never replaced. Codex and the rest have
+no per-project equivalent, so for them the rule lives in `AGENTS.md` and is
+followed rather than enforced.
+
+[`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the detail.
 
 ## The `heft` command
 
@@ -249,7 +261,7 @@ heft help [--json]              # every verb and flag
 heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
 heft rename <vault> <path> <new> # rename a note, attachment or folder,
                                  #   repointing the links into it (--dry-run)
-heft agent-setup <vault>        # teach an agent in that vault to propose
+heft agent-setup <vault>        # write CLAUDE.md, AGENTS.md and the permission rules
 heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
     # --text-size 12  --paper a4|letter|legal|tabloid
     # --landscape --margin narrow|normal|wide --title
@@ -266,6 +278,7 @@ heft links <vault> <note>       # links out, resolved and unresolved
 heft backlinks <vault> <note>   # what links here, with the referencing line
 heft tags <vault> [tag]         # tags with counts, or the notes carrying one
 heft config <vault>             # the vault's settings, as JSON
+heft changes <vault> <note>     # what moved since you last read it
 heft propose <vault> <note>     # propose a new body, from stdin
 heft proposals <vault>          # what is waiting for review
 heft diff <vault> <id>          # what one of them would change

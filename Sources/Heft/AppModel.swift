@@ -1752,20 +1752,14 @@ final class AppModel: ObservableObject {
     /// True when the vault has no agent guidance yet, so the menu can say
     /// whether this would create the file or refresh it.
     var hasAgentGuide: Bool {
-        guard let vaultRoot else { return false }
-        let text = try? String(
-            contentsOf: vaultRoot.appendingPathComponent("CLAUDE.md"), encoding: .utf8
-        )
-        return text?.contains(AgentGuide.markerStart) == true
+        agentGuideStatus != .absent
     }
 
-    /// What the open vault's `CLAUDE.md` carries, so the banner can offer a
+    /// What the open vault's agent guides carry, so the banner can offer a
     /// refresh rather than only a first-time setup.
     var agentGuideStatus: AgentGuide.Status {
         guard let vaultRoot else { return .absent }
-        return AgentGuide.status(of: try? String(
-            contentsOf: vaultRoot.appendingPathComponent("CLAUDE.md"), encoding: .utf8
-        ))
+        return AgentGuide.status(ofVaultAt: vaultRoot)
     }
 
     private static let agentOfferDismissedKey = "dev.stenglein.Heft.agentOfferDismissed"
@@ -1806,38 +1800,29 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Writes the vault's `CLAUDE.md` so an agent started in that folder knows
+    /// Writes the vault's agent guides so an agent started in that folder knows
     /// to propose changes rather than write notes.
     ///
-    /// Offered rather than done silently on open: this writes a file into
+    /// Offered rather than done silently on open: this writes files into
     /// somebody's vault, and a vault is not ours to add things to unasked.
     func setUpAgentAccess() {
         guard let vaultRoot else { promptForVault(); return }
-        let target = vaultRoot.appendingPathComponent("CLAUDE.md")
-        let existing = try? String(contentsOf: target, encoding: .utf8)
-
         let binary = Bundle.main.executablePath ?? "heft"
-        let section = AgentGuide.section(binaryPath: binary)
-        let saved = try? AgentGuide.backUpIfEdited(
-            existing: existing, replacement: section, vaultRoot: vaultRoot
-        )
-        let merged = AgentGuide.merged(
-            into: existing,
-            section: section,
-            preamble: AgentGuide.preamble(vaultName: vaultName)
-        )
         do {
-            try merged.write(to: target, atomically: true, encoding: .utf8)
-            if let saved = saved ?? nil {
-                status = "Updated CLAUDE.md; your edits inside it were saved to "
+            let outcome = try AgentGuide.install(
+                in: vaultRoot, binaryPath: binary, vaultName: vaultName
+            )
+            let names = outcome.written.map(\.url.lastPathComponent).joined(separator: " and ")
+            if let saved = outcome.backedUp {
+                status = "Updated \(names); your edits inside the guide were saved to "
                     + saved.lastPathComponent
             } else {
-                status = existing == nil
-                    ? "Wrote CLAUDE.md: agents in this vault will propose changes"
-                    : "Updated CLAUDE.md for agents"
+                status = outcome.written.allSatisfy(\.created)
+                    ? "Wrote \(names): agents in this vault will propose changes"
+                    : "Updated \(names) for agents"
             }
         } catch {
-            status = "Could not write CLAUDE.md: \(error.localizedDescription)"
+            status = "Could not write the agent guides: \(error.localizedDescription)"
         }
     }
 

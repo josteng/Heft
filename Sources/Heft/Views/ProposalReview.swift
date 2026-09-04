@@ -35,8 +35,8 @@ struct AgentSetupBanner: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                 Text(isRefresh
-                     ? "Rewrites Heft's section of CLAUDE.md and leaves the rest of the file alone."
-                     : "Writes CLAUDE.md, so Claude Code proposes edits here for review instead of editing notes directly.")
+                     ? "Rewrites Heft's section of CLAUDE.md and AGENTS.md and leaves the rest of each file alone."
+                     : "Writes CLAUDE.md and AGENTS.md, so whichever agent you bring proposes edits here for review instead of editing notes directly.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

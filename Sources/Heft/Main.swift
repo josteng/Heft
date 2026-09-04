@@ -178,26 +178,19 @@ enum HeftMain {
             // The path an agent should call is this binary, wherever it is
             // installed, rather than a guess at /Applications.
             let binary = Bundle.main.executablePath ?? CommandLine.arguments[0]
-            let target = root.appendingPathComponent("CLAUDE.md")
-            let existing = try? String(contentsOf: target, encoding: .utf8)
-            let section = AgentGuide.section(binaryPath: binary)
-            if let saved = try? AgentGuide.backUpIfEdited(
-                existing: existing, replacement: section, vaultRoot: root
-            ) {
-                print("saved your edits inside the guide to \(saved.path)")
-            }
-            let merged = AgentGuide.merged(
-                into: existing,
-                section: section,
-                preamble: AgentGuide.preamble(vaultName: root.lastPathComponent)
-            )
             do {
-                try merged.write(to: target, atomically: true, encoding: .utf8)
-                print("\(existing == nil ? "wrote" : "updated") \(target.path)")
+                let outcome = try AgentGuide.install(in: root, binaryPath: binary)
+                if let saved = outcome.backedUp {
+                    print("saved your edits inside the guide to \(saved.path)")
+                }
+                for file in outcome.written {
+                    print("\(file.created ? "wrote" : "updated") \(file.url.path)")
+                }
                 exit(0)
             } catch {
                 FileHandle.standardError.write(
-                    Data("could not write \(target.path): \(error.localizedDescription)\n".utf8)
+                    Data(("could not write into \(root.path): "
+                        + error.localizedDescription + "\n").utf8)
                 )
                 exit(1)
             }

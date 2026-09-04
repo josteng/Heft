@@ -31,10 +31,16 @@ heft propose <vault> <note.md> \       # the new body arrives on stdin
 heft propose <vault> <note.md> --from /tmp/new-body.md
 heft propose <vault> <note.md> --replace   # anchored old/new pairs instead
 
+heft changes <vault> <note>            # what moved since you last read it
 heft proposals <vault>                 # what is waiting for review
 heft diff <vault> <proposal-id>        # what one of them would change
 heft drop <vault> <proposal-id>        # withdraw one
 ```
+
+An id may be given as any prefix long enough to name one proposal. An empty
+string is not: it is a prefix of every id, and `heft drop "$ID"` from a shell
+that expanded `$ID` to nothing used to delete whichever proposal happened to be
+first, and report success.
 
 `heft rename <vault> <path> <new>` is the one structural edit here, and it is
 not a proposal: a rename moves a file and rewrites the links in every note that
@@ -52,6 +58,23 @@ Heft works out the hunks itself. Where restating a long note to change a
 paragraph is silly, `--replace` takes anchored `old`/`new` pairs and refuses an
 anchor that matches more than once, so a bad anchor fails at the command rather
 than at review time.
+
+### Read it before you replace it
+
+Replacing a note wholesale is only safe if the agent saw the note it is
+replacing. `heft read` records what it handed over, and a whole-body `propose`
+against a note that has changed since is **refused**: without that, a line
+typed between the read and the proposal came back as an ordinary removal among
+the agent's own hunks, with nothing to say the agent had never seen it.
+
+`heft changes <vault> <note>` is the way out — it diffs the recorded read
+against the file as it is now — and then the note is read again. `--replace` is
+exempt, because its anchors are resolved against the current note and fail if
+the text they named has moved, which is the stricter check.
+
+The record is one snapshot per note, in Application Support rather than in the
+vault: it is one machine's scratch state, and writing a file into an iCloud
+vault on every read would sync for nobody's benefit. `HEFT_READ_LOG` moves it.
 
 ## What happens in the editor
 
@@ -75,9 +98,41 @@ Two details that matter in practice:
 - An accepted change to the note you have open goes through the buffer, so it
   joins the normal autosave and undo path instead of racing it.
 
-## Teaching Claude Code to use it
+## Teaching an agent to use it
 
-Put this in the `CLAUDE.md` at the root of your vault:
+`heft agent-setup <vault>` writes all of it, and File ▸ Set Up Agent Access is
+the same thing from the app. Three files:
+
+- `CLAUDE.md` and `AGENTS.md`, each carrying the same generated section between
+  `<!-- heft:agent-guide -->` markers. Two files because Claude Code reads one
+  and Codex and most of the rest read the other; the same section in both
+  because it is generated, and generated text cannot drift. Everything outside
+  the markers is yours, including each file's own preamble, which is why they
+  are not copies of one another.
+- `.claude/settings.json`, which is what turns "do not write notes directly"
+  from a request into a rule. `Edit(**)`, `Write(**)` and `NotebookEdit(**)`
+  are denied, and `Bash(heft:*)` is allowed without a prompt.
+
+  The deny rules carry a path rather than being bare tool names on purpose:
+  the workflow below writes a scratch file in `/tmp` and reads it back with
+  `--from`, so denying the tools outright would make the setup that enforces
+  the contract the setup that prevents following it. Your own entries in that
+  file are merged with, never replaced, and a file that is not valid JSON is
+  left alone rather than overwritten.
+
+Codex has no per-project deny list of this kind, so for it the rule lives in
+`AGENTS.md` and is followed rather than enforced. Running it read-only outside
+a scratch directory achieves the same thing, if you want the belt as well.
+
+The guide is stamped with a version, because it is copied *into* your vault and
+frozen there. Every agent verb checks the stamp and says on stderr when the
+vault is behind; the editor offers the same as a banner. Nothing rewrites these
+files on its own.
+
+### The guide, by hand
+
+If you would rather not run `agent-setup`, this is the shape of what it writes.
+Put it in the `CLAUDE.md` at the root of your vault:
 
 ````markdown
 # Vault
@@ -97,6 +152,9 @@ heft propose . "Path/To/Note.md" \
     --from /tmp/new.md \
     --summary "one line on what this changes"
 ```
+
+If `propose` says the note has changed since you read it, run
+`heft changes . "Path/To/Note.md"`, then read it again and rebuild on top.
 
 `heft find . <query>` searches the vault, `heft files .` lists every note.
 `heft proposals .` and `heft diff . <id>` show what is already waiting.
