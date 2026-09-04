@@ -98,6 +98,35 @@ else
     echo "Installed $CLI_DIR/heft (not on PATH; add it to use \`heft\`)"
 fi
 
+# Every Heft.app on this machine claims the same bundle identifier, and there
+# are usually several: build products under .build, and one per git worktree.
+# LaunchServices registers each of them, so one identifier names a handful of
+# bundles carrying whatever icon was current when each was built — and the App
+# Shortcut rows in Spotlight ("Add to Today's Note", "Capture to Inbox") are
+# drawn from that registration rather than from the app you just installed. So
+# the icon there stayed months out of date while the Dock and Finder were
+# correct, which is exactly the trap Resources/Heft.icon/README.md records for
+# the icon-preview stubs: IconServices caches per bundle identifier.
+#
+# So forget every other copy and re-register this one. Rebuilding a worktree
+# puts its copy back, which is why this runs on every install rather than once.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+if [[ -x "$LSREGISTER" ]]; then
+    forgotten=0
+    while read -r other; do
+        [[ -z "$other" || "$other" == "$TARGET" ]] && continue
+        "$LSREGISTER" -u "$other" >/dev/null 2>&1 && forgotten=$((forgotten + 1))
+    done < <("$LSREGISTER" -dump 2>/dev/null \
+        | sed -n 's|^[[:space:]]*path:[[:space:]]*\(.*Heft\.app\) (0x.*|\1|p' \
+        | sort -u)
+    "$LSREGISTER" -f "$TARGET" >/dev/null 2>&1
+    # The mtime is what the icon caches key their staleness on.
+    touch "$TARGET"
+    if [[ "$forgotten" -gt 0 ]]; then
+        echo "Unregistered $forgotten other Heft.app $( [[ $forgotten -eq 1 ]] && echo copy || echo copies )"
+    fi
+fi
+
 if [[ "$LAUNCH" -eq 1 ]]; then
     open "$TARGET"
 fi

@@ -924,6 +924,19 @@ put two elements under one identifier in the same scroll namespace.
   session and the CLI standardize before building a per-vault defaults key, so
   they agree; anything computing such a key by hand must standardize too, or it
   writes to a key nothing ever reads.
+- **Every Heft.app on the machine claims one bundle identifier, and there are
+  always several.** Build products under `.build`, and one per git worktree:
+  eleven were registered at once here. LaunchServices registers each, so one
+  identifier names a handful of bundles carrying whatever icon was current when
+  each was built, and the App Shortcut rows in Spotlight are drawn from that
+  registration rather than from the installed app. The result is the Dock and
+  Finder showing the new icon while "Add to Today's Note" shows one from
+  months ago — which reads as a broken build and is a stale registration. Two
+  of the eleven carried a visibly different `Heft.icns` from the installed one.
+  `Scripts/install.sh` now unregisters every other copy and re-registers the
+  installed one, on every install, because rebuilding a worktree puts its copy
+  back. Same root cause as the icon-preview trap in
+  `Resources/Heft.icon/README.md`: IconServices caches per bundle identifier.
 - **Never point the GUI at the real vault while testing.** It autosaves. Use a copied
   sandbox vault, or the read-only `stats` and `render` commands.
 - **A persisted settings struct needs a hand-written `init(from:)`.** The
