@@ -13,7 +13,9 @@ import Foundation
 /// lets the editor ask.
 public enum AgentCLI {
 
-    public static let verbs: Set<String> = ["propose", "proposals", "diff", "drop", "read", "find"]
+    public static let verbs: Set<String> = [
+        "propose", "proposals", "diff", "drop", "read", "find", "changes",
+    ]
 
     /// Returns true when it handled the arguments (and has exited).
     public static func run(_ arguments: [String]) -> Bool {
@@ -32,6 +34,7 @@ public enum AgentCLI {
         case "drop": drop(root: root, arguments: rest)
         case "read": read(root: root, arguments: rest)
         case "find": find(root: root, arguments: rest)
+        case "changes": changes(root: root, arguments: rest)
         default: return false
         }
         return true
@@ -114,6 +117,23 @@ public enum AgentCLI {
             exit(0)
         }
 
+        // A full-body proposal replaces the note, so it is only safe if the
+        // agent saw the note it is replacing. `--replace` is exempt: its
+        // anchors resolve against the note as it is now and fail if the text
+        // it named has moved, which is a stricter check than this one.
+        if !options.flag("replace"),
+           case let .stale(readAt) = ReadLog.shared.freshness(
+               vault: root, relativePath: relative, current: current
+           ) {
+            let formatter = ISO8601DateFormatter()
+            fail("""
+                \(relative) has changed since you read it at \(formatter.string(from: readAt)).
+                Proposing the whole body now would revert whatever was typed in between.
+                Run `heft changes "\(root.path)" "\(relative)"` to see what moved, \
+                then read it again.
+                """)
+        }
+
         let proposal = Proposal(
             notePath: relative,
             base: current,
@@ -167,10 +187,7 @@ public enum AgentCLI {
     /// Unified-diff-ish output, so the agent can check that what it proposed is
     /// what it meant before telling the user to go and look.
     private static func showDiff(root: URL, arguments: [String]) {
-        guard let id = arguments.first else { fail("usage: heft diff <vault> <proposal-id>") }
-        guard let proposal = ProposalStore.all(in: root).first(where: { $0.id.hasPrefix(id) }) else {
-            fail("no such proposal: \(id)")
-        }
+        let proposal = resolve(arguments.first, in: root, verb: "diff")
         let current = (try? String(
             contentsOf: root.appendingPathComponent(proposal.notePath), encoding: .utf8
         )) ?? ""
@@ -188,10 +205,7 @@ public enum AgentCLI {
     }
 
     private static func drop(root: URL, arguments: [String]) {
-        guard let id = arguments.first else { fail("usage: heft drop <vault> <proposal-id>") }
-        guard let proposal = ProposalStore.all(in: root).first(where: { $0.id.hasPrefix(id) }) else {
-            fail("no such proposal: \(id)")
-        }
+        let proposal = resolve(arguments.first, in: root, verb: "drop")
         ProposalStore.remove(proposal.id, in: root)
         print("dropped \(proposal.id)")
         exit(0)
@@ -201,14 +215,52 @@ public enum AgentCLI {
     /// an agent can work from what the vault calls things.
     private static func read(root: URL, arguments: [String]) {
         guard let name = arguments.first else { fail("usage: heft read <vault> <note>") }
-        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
-        let wanted = normalized(name)
-        guard let note = index.notes.first(where: {
-            $0.relativePath == wanted || $0.name == name || $0.name == note(name)
-        }) else {
-            fail("no such note: \(name)")
+        let relative = resolveNote(named: name, in: root)
+        let noteURL = root.appendingPathComponent(relative)
+        guard let text = try? String(contentsOf: noteURL, encoding: .utf8) else {
+            fail("could not read \(relative)")
         }
-        print((try? String(contentsOf: note.url, encoding: .utf8)) ?? "")
+        // Recorded before it is written, so what `propose` later holds the
+        // agent to is exactly the bytes the agent was given.
+        ReadLog.shared.record(text, vault: root, relativePath: relative)
+
+        // Written rather than printed. A note already ending in a newline came
+        // back with two, so every read/propose round trip grew it by a blank
+        // line — and an agent has no way to tell which newline was the file's.
+        FileHandle.standardOutput.write(Data(text.utf8))
+        exit(0)
+    }
+
+    /// `heft changes <vault> <note>` — what moved since this agent last read it.
+    ///
+    /// Nothing could answer this before. `heft diff` takes a proposal id, and
+    /// re-reading gives the current text without saying which part of it is
+    /// new, so an agent that had been told its proposal was stale had no way
+    /// to find out what it had missed short of holding the old text itself.
+    private static func changes(root: URL, arguments: [String]) {
+        guard let name = arguments.first else { fail("usage: heft changes <vault> <note>") }
+        let relative = resolveNote(named: name, in: root)
+        guard let entry = ReadLog.shared.last(vault: root, relativePath: relative) else {
+            fail("nothing recorded for \(relative): run `heft read` first")
+        }
+        let current = (try? String(
+            contentsOf: root.appendingPathComponent(relative), encoding: .utf8
+        )) ?? ""
+        let diff = NoteDiff.between(original: entry.text, proposed: current)
+        guard !diff.isEmpty else {
+            print("no change since you read \(relative)")
+            exit(0)
+        }
+        let formatter = ISO8601DateFormatter()
+        print("--- \(relative)  (as you read it, \(formatter.string(from: entry.readAt)))")
+        print("+++ \(relative)  (now)")
+        for hunk in diff.hunks {
+            print("@@ line \(hunk.originalRange.lowerBound + 1) @@")
+            for line in hunk.leading { print(" \(line)") }
+            for line in hunk.removed { print("-\(line)") }
+            for line in hunk.added { print("+\(line)") }
+            for line in hunk.trailing { print(" \(line)") }
+        }
         exit(0)
     }
 
@@ -229,6 +281,37 @@ public enum AgentCLI {
     }
 
     // MARK: - Helpers
+
+    /// The one proposal an id names, or an exit. `ProposalStore.match` decides;
+    /// this only turns each answer into a message and a status.
+    private static func resolve(_ id: String?, in root: URL, verb: String) -> Proposal {
+        let proposals = ProposalStore.all(in: root)
+        switch ProposalStore.match(id, among: proposals) {
+        case let .one(found):
+            return proposals.first { $0.id == found }!
+        case .missing:
+            fail("usage: heft \(verb) <vault> <proposal-id>")
+        case let .unknown(given):
+            fail("no such proposal: \(given)")
+        case let .ambiguous(candidates):
+            fail("that names \(candidates.count) proposals: "
+                + candidates.joined(separator: ", "))
+        }
+    }
+
+    /// The vault-relative path a name refers to, resolved the way a wikilink
+    /// resolves: a path, or a bare note name. `read` and `changes` both go
+    /// through it so that a name means the same thing to each.
+    private static func resolveNote(named name: String, in root: URL) -> String {
+        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let wanted = normalized(name)
+        guard let found = index.notes.first(where: {
+            $0.relativePath == wanted || $0.name == name || $0.name == note(name)
+        }) else {
+            fail("no such note: \(name)")
+        }
+        return found.relativePath
+    }
 
     /// Vault-relative, always with the extension a note actually has on disk.
     private static func normalized(_ path: String) -> String {

@@ -116,6 +116,31 @@ public enum ProposalStore {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// Which proposal an id names.
+    ///
+    /// Prefix matching is the point — nobody types a whole id — but an empty
+    /// string is a prefix of everything, so `heft drop <vault> ""` used to
+    /// delete whichever proposal happened to be first, and report success. A
+    /// shell that expanded a variable to nothing was enough to lose one.
+    ///
+    /// An ambiguous prefix is refused rather than resolved to the first match,
+    /// for the same reason: the caller meant one of them and there is no way
+    /// to know which.
+    public enum Match: Equatable, Sendable {
+        case one(String)
+        /// No id was given at all.
+        case missing
+        case unknown(String)
+        case ambiguous([String])
+    }
+
+    public static func match(_ id: String?, among proposals: [Proposal]) -> Match {
+        guard let id, !id.isEmpty else { return .missing }
+        let hits = proposals.filter { $0.id.hasPrefix(id) }.map(\.id)
+        guard let first = hits.first else { return .unknown(id) }
+        return hits.count == 1 ? .one(first) : .ambiguous(hits)
+    }
+
     public static func forNote(_ relativePath: String, in vaultRoot: URL) -> [Proposal] {
         all(in: vaultRoot).filter { $0.notePath == relativePath }
     }

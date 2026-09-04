@@ -93,6 +93,8 @@ public enum CommandLineSpec {
             Flag("--from", value: "file", "Read the body from a file instead of stdin."),
             Flag("--replace", "Take anchored old/new pairs as JSON instead of a whole body."),
         ], isReadOnly: false),
+        Verb("changes", "<vault> <note>",
+             "What moved in a note since you last `read` it."),
         Verb("proposals", "<vault>", "What is waiting for review."),
         Verb("diff", "<vault> <id>", "What one proposal would change."),
         Verb("drop", "<vault> <id>", "Discard a proposal.", isReadOnly: false),

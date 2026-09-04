@@ -24,7 +24,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 6
+    public static let version = 7
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -94,6 +94,17 @@ public enum AgentGuide {
         `propose` takes the whole new body of the note, not a patch. Heft works
         out the hunks itself, against the note as it is *now*.
 
+        Read before you propose. Heft remembers what `heft read` handed you and
+        refuses a full-body proposal for a note that has changed since — you
+        would be replacing text you never saw:
+
+        ```bash
+        heft changes . "Path/To/Note.md"   # what moved since you read it
+        ```
+
+        Then read it again and rebuild your version on top. `--replace` below
+        is exempt, because its anchors are checked against the current note.
+
         ## Changing part of a long note
 
         Restating a long note just to change a paragraph is mostly
@@ -120,6 +131,7 @@ public enum AgentGuide {
         heft files . --by-use    # ordered by what this person actually opens
         heft proposals .         # what is already waiting for review
         heft diff . <id>         # what one of them would change
+        heft changes . "Note"    # what moved since you last read it
         ```
 
         `heft help` is the whole surface, so nothing here needs to list it
