@@ -730,6 +730,21 @@ enum LiveStyler {
                     .quote(quote, indent: indent, isRevealed: revealed, bullet: quotedBullet)
             }
 
+        // The rest of a hard-wrapped item. Same indent, no marker to reveal
+        // and no glyph to draw: the bullet belongs to the line above, and the
+        // editor draws one widget per line.
+        case .listContinuation(let depth):
+            let indent = listIndent(depth: depth)
+            let carried = NSMutableParagraphStyle()
+            carried.lineSpacing = Theme.lineSpacing
+            carried.paragraphSpacing = 2
+            carried.minimumLineHeight = ceil(base.ascender - base.descender + base.leading)
+            carried.headIndent = indent
+            carried.firstLineHeadIndent = indent
+            storage.addAttribute(
+                .paragraphStyle, value: carried, range: text.lineRange(for: range)
+            )
+
         case .listMarker(let kind, let depth):
             let indent = listIndent(depth: depth)
             let marker = text.substring(with: range)

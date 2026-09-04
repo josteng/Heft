@@ -17,6 +17,19 @@ public struct MarkdownDecoration: Sendable, Equatable {
         /// bar or callout card the editor draws behind it.
         case quoteLine(QuoteLine)
         case listMarker(kind: ListMarkerKind, depth: Int)
+        /// A line that continues the list item above it, rather than starting
+        /// one of its own: the second half of a hard-wrapped bullet.
+        ///
+        /// A paragraph style applies to a paragraph, and a hard line break
+        /// starts a new one as far as TextKit is concerned, so the indent the
+        /// marker line was given stopped at its own newline and the rest of
+        /// the item fell back to the left margin. A long bullet in a narrow
+        /// window therefore rendered ragged: one line indented, the next not.
+        ///
+        /// It carries no `syntax` — there is no markup on such a line to hide —
+        /// and no glyph, since the editor draws one widget per line and the
+        /// bullet belongs to the first.
+        case listContinuation(depth: Int)
         /// A whole GFM table, header and delimiter row included. Carried as one
         /// decoration because the editor draws the grid itself rather than
         /// styling the pipe characters in place.
@@ -371,7 +384,11 @@ public struct Reveal: Equatable, Sendable {
         case .wikiLink(let link):
             link.isEmbed
         case .listMarker, .bold, .italic, .strikethrough, .highlight, .inlineCode,
-             .link, .tag, .inlineMath, .footnoteReference:
+             .link, .tag, .inlineMath, .footnoteReference,
+             // Nothing to reveal: it has no markup of its own. Answering
+             // `true` would flip its reveal state as the caret crossed it,
+             // which `RestyleScope` would have to restyle the line for.
+             .listContinuation:
             false
         // Not really a reveal: this is the one style that is *applied* on the
         // caret's line rather than undone there. Riding the line rule is what
@@ -857,6 +874,76 @@ public enum LiveDecorator {
             result.append(MarkdownDecoration(range: match, style: .thematicBreak))
         }
 
+        result.append(contentsOf: listContinuations(text, protected: protected, blocks: result))
+
+        return result
+    }
+
+    /// The lines that carry on a list item without starting one.
+    ///
+    /// Run last, so it can see every other block construct found on this pass
+    /// and decline the lines they own: `- item` followed by `# Heading` is a
+    /// heading, not the rest of the bullet. Fences, tables and frontmatter are
+    /// already in `protected` by the time `blockDecorations` runs, so those
+    /// need no special case; `$$` is found *after* this and so does.
+    ///
+    /// A blank line ends the run. CommonMark would let an indented paragraph
+    /// after one still belong to the item, but that needs the item's content
+    /// column rather than "is there a list above", and the ragged rendering
+    /// this exists to fix is the hard-wrapped case.
+    private static func listContinuations(
+        _ text: NSString, protected: ProtectedRanges, blocks: [MarkdownDecoration]
+    ) -> [MarkdownDecoration] {
+        var markerDepths: [Int: Int] = [:]
+        var claimed: Set<Int> = []
+        for block in blocks {
+            let line = text.lineRange(for: NSRange(location: block.range.location, length: 0))
+            if case let .listMarker(_, depth) = block.style {
+                markerDepths[line.location] = depth
+            } else {
+                // Every other block style owns its line outright.
+                var scan = block.range.location
+                let end = max(NSMaxRange(block.range), block.range.location + 1)
+                while scan < end, scan <= text.length {
+                    let covered = text.lineRange(for: NSRange(location: scan, length: 0))
+                    claimed.insert(covered.location)
+                    guard NSMaxRange(covered) > scan else { break }
+                    scan = NSMaxRange(covered)
+                }
+            }
+        }
+
+        var result: [MarkdownDecoration] = []
+        var depth: Int?
+        var location = 0
+        while location < text.length {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            defer {
+                location = NSMaxRange(line) > location ? NSMaxRange(line) : text.length
+            }
+
+            if let found = markerDepths[line.location] {
+                depth = found
+                continue
+            }
+            guard let active = depth else { continue }
+
+            var body = line
+            while body.length > 0, isNewline(text.character(at: NSMaxRange(body) - 1)) {
+                body.length -= 1
+            }
+            let source = text.substring(with: body)
+            let stripped = source.trimmingCharacters(in: .whitespaces)
+            guard !stripped.isEmpty,
+                  !claimed.contains(line.location),
+                  !protected.intersects(body),
+                  !stripped.hasPrefix("$$")
+            else {
+                depth = nil
+                continue
+            }
+            result.append(MarkdownDecoration(range: body, style: .listContinuation(depth: active)))
+        }
         return result
     }
 

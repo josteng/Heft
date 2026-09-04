@@ -125,3 +125,74 @@ struct TrailingLineFragmentTests {
         #expect(fragments.last?.emptyTrailingHeight ?? 0 > 0)
     }
 }
+
+/// A list item wrapped by a hard line break is still one item, and every line
+/// of it has to start where the first one does.
+@Suite("Wrapped list items")
+@MainActor
+struct ListContinuationTests {
+
+    /// The head indent the styler gives the line beginning at `offset`.
+    private func indent(_ source: String, lineStartingAt offset: Int) -> CGFloat {
+        let storage = NSTextStorage(string: source)
+        _ = LiveStyler.apply(
+            to: storage, reveal: .none,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 600
+        )
+        let style = storage.attribute(.paragraphStyle, at: offset, effectiveRange: nil)
+            as? NSParagraphStyle
+        return style?.headIndent ?? 0
+    }
+
+    private func offset(of line: String, in source: String) -> Int {
+        (source as NSString).range(of: line).location
+    }
+
+    @Test("The second half of a hard-wrapped bullet keeps the bullet's indent")
+    func continuationKeepsTheIndent() {
+        // A paragraph style applies to a paragraph, and the hard break starts
+        // a new one, so the continuation used to fall back to the left margin:
+        // a long bullet in a narrow window rendered ragged.
+        let source = "- an item with a hard break  \n  and the rest of it\n\nplain\n"
+        let item = indent(source, lineStartingAt: 0)
+        #expect(item > 0)
+        #expect(indent(source, lineStartingAt: offset(of: "  and the rest", in: source)) == item)
+        // A paragraph after the blank line is not part of the item.
+        #expect(indent(source, lineStartingAt: offset(of: "plain", in: source)) == 0)
+    }
+
+    @Test("A nested item's continuation carries the nested indent, not its parent's")
+    func nestedContinuation() {
+        let source = "- outer\n  - inner item  \n    carried on\n"
+        let outer = indent(source, lineStartingAt: 0)
+        let inner = indent(source, lineStartingAt: offset(of: "  - inner", in: source))
+        #expect(inner > outer)
+        #expect(indent(source, lineStartingAt: offset(of: "    carried on", in: source)) == inner)
+    }
+
+    @Test("A block that follows a list item is that block, not the rest of the bullet")
+    func blocksAreNotSwallowed() {
+        // Each of these used to be the case for reading the run as "anything
+        // non-blank after a list line". A heading, a quote, a fence, a
+        // thematic break and display maths all own their line outright.
+        for follower in ["# A heading", "> a quote", "```\nfenced\n```", "---", "$$x = 1$$"] {
+            let source = "- item\n\(follower)\nlast\n"
+            let item = indent(source, lineStartingAt: 0)
+            let after = indent(source, lineStartingAt: offset(of: follower, in: source))
+            #expect(after != item, "\(follower) should not take the list's indent")
+        }
+    }
+
+    @Test("A lazy continuation with no indentation of its own still lines up")
+    func lazyContinuation() {
+        // CommonMark and Obsidian both read this as part of the item, and the
+        // ragged rendering is at its worst here: nothing in the source hints
+        // that the line belongs to the bullet.
+        let source = "- an item\ncarried on with no indent\n"
+        #expect(
+            indent(source, lineStartingAt: offset(of: "carried on", in: source))
+                == indent(source, lineStartingAt: 0)
+        )
+    }
+}
