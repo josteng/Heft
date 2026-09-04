@@ -300,9 +300,27 @@ public enum ProposalStore {
         }
         // Without the extension: `before-release-md` reads as a mistake.
         let plain = (noteName as NSString).deletingPathExtension
-        var base = slug(described ?? (plain.isEmpty ? noteName : plain))
+        let text = described ?? (plain.isEmpty ? noteName : plain)
+        var base = slug(text)
         if base.isEmpty { base = "proposal" }
         guard taken.contains(base) else { return base }
+
+        // A collision is the moment the name most needs to say which of the
+        // two it is, and truncation had thrown exactly that away: five
+        // summaries written in one batch share a long opening and differ at
+        // the end, so `add-a-sample-note-for-checking` and its `-2` carried
+        // none of what distinguished them.
+        //
+        // So give back the words the cut took, one at a time, and stop at the
+        // first name that is free. Short ids stay short, and a name only grows
+        // where growing is what makes it a name.
+        let words = slug(text, limit: .max).split(separator: "-").map(String.init)
+        for count in words.indices {
+            let candidate = words.prefix(count + 1).joined(separator: "-")
+            if candidate.count > base.count, !taken.contains(candidate) { return candidate }
+        }
+
+        // Two genuinely identical summaries have nothing left to tell apart.
         var index = 2
         while taken.contains("\(base)-\(index)") { index += 1 }
         return "\(base)-\(index)"
@@ -316,7 +334,7 @@ public enum ProposalStore {
     /// where `tighten-the-opening-and-add-a-next` reads as a name.
     static let slugLimit = 40
 
-    static func slug(_ text: String) -> String {
+    static func slug(_ text: String, limit: Int = slugLimit) -> String {
         var out = ""
         var word = ""
         /// False once a word will not fit, which ends the name. Skipping that
@@ -326,13 +344,13 @@ public enum ProposalStore {
             guard !word.isEmpty else { return true }
             let joined = out.isEmpty ? word : out + "-" + word
             word = ""
-            if joined.count <= slugLimit {
+            if joined.count <= limit {
                 out = joined
                 return true
             }
             // One word longer than the whole limit has no boundary to cut on,
             // so it is cut anyway rather than leaving nothing.
-            if out.isEmpty { out = String(joined.prefix(slugLimit)) }
+            if out.isEmpty { out = String(joined.prefix(limit)) }
             return false
         }
         for character in text.lowercased() {

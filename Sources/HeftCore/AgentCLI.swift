@@ -114,7 +114,20 @@ public enum AgentCLI {
             do {
                 edits = try JSONDecoder().decode([AnchoredEdit].self, from: Data(body.utf8))
             } catch {
-                fail("--replace expects JSON: [{\"old\": \"…\", \"new\": \"…\"}]")
+                // Naming the parse failure, not only the shape it wanted.
+                // "expects JSON" reads as "you sent the wrong fields" when
+                // what actually happened is that the payload was not JSON at
+                // all, and the usual cause is a shell: zsh's `echo` expands a
+                // \n inside single quotes into a real newline, and JSON has no
+                // literal newlines inside strings. So the guide's own one-liner
+                // breaks the moment an anchor spans two lines.
+                fail("""
+                    --replace could not parse stdin as JSON: \(error.localizedDescription)
+                    It expects [{"old": "…", "new": "…"}].
+                    If an anchor spans lines, `echo` is the usual culprit: it turns \\n \
+                    inside the string into a real newline, which JSON does not allow. \
+                    Write the JSON to a file and pipe it in, or use a quoted heredoc.
+                    """)
             }
             guard !edits.isEmpty else { fail("--replace was given no edits") }
             do {

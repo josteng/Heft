@@ -387,6 +387,24 @@ struct AgentCLITests {
         #expect(AgentGuide.status(ofVaultAt: root) == .outdated(found: 2))
     }
 
+    @Test("Malformed --replace input says it could not be parsed, and why")
+    func replaceReportsAParseFailure() throws {
+        let root = try vault(["Note.md": "one\ntwo\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Exactly what zsh's `echo` produces from a two-line anchor: a real
+        // newline inside a JSON string, which JSON does not allow.
+        let broken = "[{\"old\": \"one\ntwo\", \"new\": \"x\"}]"
+        let output = try run(["propose", root.path, "Note.md", "--replace"], stdin: broken)
+
+        #expect(output.status != 0)
+        // The old wording named only the shape it wanted, which reads as
+        // "you sent the wrong fields" when the payload was not JSON at all.
+        #expect(output.error.contains("could not parse"))
+        #expect(output.error.contains("echo"))
+        #expect(ProposalStore.all(in: root).isEmpty)
+    }
+
     // MARK: - One proposal per note
 
     @Test("A second proposal on the same note is refused, and says how to replace it")
@@ -668,6 +686,38 @@ struct AgentCLITests {
         #expect(name("Tighten the opening",
                      taken: ["tighten-the-opening", "tighten-the-opening-2"])
             == "tighten-the-opening-3")
+    }
+
+    @Test("A collision gives back the words the cut took, rather than a number")
+    func collidingNamesGrowBackTheirTail() {
+        func name(_ summary: String, taken: Set<String> = []) -> String {
+            ProposalStore.identifier(summary: summary, noteName: "N.md", taken: taken)
+        }
+
+        // Five summaries written in one batch: a long shared opening, and the
+        // part that says which is which past the 40-character cut.
+        let first = name("Add a sample note for checking the callouts")
+        #expect(first == "add-a-sample-note-for-checking-the")
+
+        let second = name("Add a sample note for checking the tables", taken: [first])
+        // Not `add-a-sample-note-for-checking-the-2`, which says nothing about
+        // which of the two it is.
+        #expect(second == "add-a-sample-note-for-checking-the-tables")
+        #expect(!second.hasSuffix("-2"))
+
+        // It grows by as little as it has to. A third that differs one word
+        // earlier stops one word earlier.
+        #expect(name("Add a sample note for checking tables", taken: [first, second])
+            == "add-a-sample-note-for-checking-tables")
+
+        // An uncollided name is untouched: growing is for collisions only.
+        #expect(name("Add a sample note for checking the callouts")
+            == "add-a-sample-note-for-checking-the")
+
+        // Two identical summaries have nothing left to tell apart, so the
+        // number is still the answer there.
+        #expect(name("Tighten the opening", taken: ["tighten-the-opening"])
+            == "tighten-the-opening-2")
     }
 
     @Test("A name is safe to use as a filename")

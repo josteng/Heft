@@ -575,7 +575,12 @@ Three decisions carry it:
 
 An id is a **name**, not a UUID: `ProposalStore.identifier` slugs the summary,
 or the note when there is no summary, because the default summary is the same
-words every time. It is also the filename, so the slug can produce neither a
+words every time. A collision **grows the name back** rather than numbering it:
+the slug is cut at 40 characters between words, and five summaries written in
+one batch share a long opening and differ past the cut, so `-2` carried none of
+what told them apart. Colliding ids give back the words the cut took, one at a
+time, and stop at the first free name; only two genuinely identical summaries
+fall through to a number. It is also the filename, so the slug can produce neither a
 slash, a dot nor an empty string. `ProposalStore.match` resolves it, and
 answers `.missing` for an empty one — `heft drop "$ID"` from a shell that
 expanded `$ID` to nothing used to delete whichever proposal was first, and

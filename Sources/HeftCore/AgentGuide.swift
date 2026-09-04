@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 12
+    public static let version = 13
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -215,10 +215,18 @@ public enum AgentGuide {
         transcription. `--replace` takes anchored edits on stdin instead:
 
         ```bash
-        echo '[{"old": "the exact text to replace", "new": "its replacement"}]' \\
-            | heft propose . "Path/To/Note.md" --replace \\
-                --summary "one line on what this changes"
+        cat > /tmp/edits.json <<'JSON'
+        [{"old": "the exact text to replace", "new": "its replacement"}]
+        JSON
+        heft propose . "Path/To/Note.md" --replace \\
+            --summary "one line on what this changes" < /tmp/edits.json
         ```
+
+        Write the JSON to a file rather than `echo`-ing it. An anchor is
+        usually more than one line, and zsh's `echo` turns a `\\n` inside the
+        string into a real newline even in single quotes, which JSON does not
+        allow inside a string. The quoted heredoc above passes the text
+        through untouched.
 
         Each `old` must appear **exactly once** in the note; Heft refuses an
         anchor that matches twice rather than guessing which you meant. Edits
