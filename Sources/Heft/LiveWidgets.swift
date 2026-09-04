@@ -132,6 +132,11 @@ enum ListGlyph {
     /// `AppearanceSettings` here instead would sidestep the restyle-on-change
     /// path and leave open windows showing the old colour.
     case checkbox(TaskState, accent: NSColor)
+
+    /// How wide the drawn box is. Named because the hit target is measured
+    /// from it: a click area and a drawn control that disagree are a control
+    /// that misses.
+    static let checkboxSide: CGFloat = 13
 }
 
 /// Widget placement for one restyle pass, keyed by the document offset of the
@@ -1665,7 +1670,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             }
 
         case .checkbox(let state, let accent):
-            let side: CGFloat = 13
+            let side = ListGlyph.checkboxSide
             let box = CGRect(
                 x: markerCentre - side / 2, y: centreY - side / 2,
                 width: side, height: side

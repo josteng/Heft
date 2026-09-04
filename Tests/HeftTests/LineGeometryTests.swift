@@ -196,3 +196,253 @@ struct ListContinuationTests {
         )
     }
 }
+
+/// Where the pointer says "this is a button" rather than "this is text".
+///
+/// The first attempt at this shipped and did nothing, and the reason is worth
+/// keeping: `addCursorRect` looks like the answer and loses to `NSTextView`'s
+/// own `documentCursor`, and the `cursorUpdate` override that does win was
+/// never called, because a plain `NSTextView` installs no tracking areas at
+/// all. Both halves were dead code and no test noticed, because the geometry
+/// was right the whole time.
+@Suite("Pointer over a checkbox")
+@MainActor
+struct PointerCursorTests {
+
+    private func editor(_ source: String) -> HeftTextKit2View {
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isVerticallyResizable = true
+        view.frame = NSRect(x: 0, y: 0, width: 700, height: 900)
+        view.textContainerInset = NSSize(width: 28, height: 28)
+        view.textContainer?.size = NSSize(width: 644, height: CGFloat.greatestFiniteMagnitude)
+        view.string = source
+        _ = LiveStyler.apply(
+            to: view.textStorage!, reveal: .none,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 644
+        )
+        view.textLayoutManager?.ensureLayout(for: view.textLayoutManager!.documentRange)
+        return view
+    }
+
+    @Test("A task line has a clickable region, and it is only the gutter")
+    func checkboxHasItsOwnRegion() {
+        let view = editor("- [ ] a task with words after it\n")
+        let rects = view.pointerRects()
+        #expect(!rects.isEmpty, "the drawn checkbox had no region at all")
+
+        // The box sits in the gutter, left of where the text begins. Well into
+        // the words is ordinary text and must keep the I-beam, or the whole
+        // line would read as a button.
+        let box = rects[0]
+        #expect(box.midX < view.textContainerInset.width + LiveStyler.listIndent(depth: 0))
+        #expect(!rects.contains { $0.contains(CGPoint(x: 300, y: box.midY)) })
+    }
+
+    /// The check that was never made, and the one that found the bug: the
+    /// hover region is built from `rect(forSelection:)` while the click is
+    /// hit-tested with `characterIndexForInsertion`, and nothing tied the two
+    /// together. A region on the wrong line is invisible to every other test —
+    /// the geometry looks perfectly reasonable in isolation.
+    @Test("Every task gets a region, and each is over its own line")
+    func regionsLineUpWithTheirLines() {
+        let source = "# Title\n\nsome prose\n\n- [ ] first task\n- [ ] second task\n"
+        let view = editor(source)
+        let text = source as NSString
+        let rects = view.pointerRects()
+
+        #expect(rects.count == 2, "two tasks, two regions; got \(rects.count)")
+        for rect in rects {
+            let index = view.characterIndexForInsertion(
+                at: CGPoint(x: rect.midX, y: rect.midY)
+            )
+            let line = text.lineRange(for: NSRange(location: min(index, text.length - 1), length: 0))
+            #expect(
+                text.substring(with: line).hasPrefix("- [ ]"),
+                "a region sits over \(text.substring(with: line).debugDescription)"
+            )
+        }
+    }
+
+    /// The target is the drawn box with a little slack, and no more.
+    ///
+    /// It was the whole layout fragment, which is a line spacing taller than
+    /// the text and reads as a region reaching well below the box. Worse, a
+    /// target taller than it is wide catches clicks meant for the line below,
+    /// and the click and the cursor share these rects.
+    @Test("A target is the size of the box, not the size of the line")
+    func targetIsTheBoxNotTheLine() {
+        let view = editor("- [ ] one\n- [ ] two\n- [ ] three\n")
+        let rects = view.checkboxTargets().map(\.rect)
+        #expect(rects.count == 3)
+
+        let side = ListGlyph.checkboxSide
+        for rect in rects {
+            #expect(rect.height == rect.width, "the drawn box is square, so this is too")
+            #expect(rect.height > side)
+            #expect(rect.height < side + 8, "reaching past the box catches the line below")
+        }
+
+        let sorted = rects.sorted { $0.minY < $1.minY }
+        for (above, below) in zip(sorted, sorted.dropFirst()) {
+            #expect(above.maxY < below.minY, "targets run into one another")
+        }
+    }
+
+    /// The target has to be centred on the box, and the box is centred on the
+    /// *text*, not on the layout fragment. Those differ by 1pt on an ordinary
+    /// line and by 8pt on the last line of a note, where the fragment also
+    /// covers TextKit's empty trailing one — so centring on the fragment puts
+    /// the last target almost entirely below its box.
+    ///
+    /// Evenly spaced lines must give evenly spaced targets; anything measured
+    /// from the fragment breaks that on the last line alone.
+    @Test("Targets are spaced like the lines they sit on")
+    func targetsFollowTheLinePitch() {
+        let view = editor("- [ ] one\n- [ ] two\n- [ ] three\n- [ ] four\n")
+        let centres = view.checkboxTargets().map(\.rect.midY).sorted()
+        #expect(centres.count == 4)
+        let pitches = zip(centres, centres.dropFirst()).map { $1 - $0 }
+        for pitch in pitches {
+            #expect(abs(pitch - pitches[0]) < 0.5,
+                    "uneven spacing \(pitches): a target is not on its box")
+        }
+    }
+
+    /// TextKit lays an empty line fragment after a document's final newline
+    /// and puts it inside the last paragraph's layout fragment, so measuring
+    /// that frame made the last checkbox in a note claim a region an extra
+    /// line deep. `LiveWidgets` already corrects for this when painting.
+    @Test("The last checkbox in a note is no taller than the others")
+    func lastLineIsNotTaller() {
+        let view = editor("- [ ] one\n- [ ] two\n")
+        let heights = Set(view.checkboxTargets().map(\.rect.height))
+        #expect(heights.count == 1, "got \(heights)")
+    }
+
+    /// A boundary is a place a pointer is often parked, and a hand holding a
+    /// mouse still moves by a pixel or two: without hysteresis that alternated
+    /// between the two cursor shapes.
+    @Test("Leaving a target takes more than entering it")
+    func targetHasHysteresis() {
+        let view = editor("- [ ] a task with words after it\n")
+        let rects = view.pointerRects()
+        let box = try! #require(rects.first)
+
+        // Arriving: only the real target counts, so the hand does not appear
+        // early over the words beside the box.
+        let justOutside = CGPoint(x: box.maxX + 2, y: box.midY)
+        #expect(view.pointerTarget(at: justOutside, among: rects) == nil)
+
+        // Inside, then jittering back to that same point: it holds.
+        #expect(view.pointerTarget(at: CGPoint(x: box.midX, y: box.midY), among: rects) != nil)
+        #expect(view.pointerTarget(at: justOutside, among: rects) != nil)
+
+        // Far enough out and it lets go, and stays gone.
+        let wellOutside = CGPoint(x: box.maxX + 20, y: box.midY)
+        #expect(view.pointerTarget(at: wellOutside, among: rects) == nil)
+        #expect(view.pointerTarget(at: justOutside, among: rects) == nil)
+    }
+
+    /// Asked on every pointer move, so it must not be doing layout queries.
+    /// Measured before caching: 2.6ms a call on a 21KB note, which at the rate
+    /// a pointer moves is about a third of the main thread.
+    @Test("Asking where the pointer is costs nothing once the layout has settled")
+    func pointerRectsAreCached() {
+        var lines: [String] = []
+        for i in 0..<300 {
+            lines.append(i % 3 == 0 ? "- [ ] task \(i) with a reasonable amount of text"
+                                    : "Ordinary prose on line \(i) to fill the note out.")
+        }
+        let view = editor(lines.joined(separator: "\n") + "\n")
+        #expect(!view.pointerRects().isEmpty)
+
+        let start = Date()
+        for _ in 0..<500 { _ = view.pointerRects() }
+        let each = Date().timeIntervalSince(start) / 500 * 1000
+        #expect(each < 0.05, "\(each) ms per call is a layout query on every mouse move")
+    }
+
+    /// And the cache has to let go when the layout moves under it, or the
+    /// regions are left where the text used to be.
+    @Test("Editing the note rebuilds the regions")
+    func invalidationRebuildsTheRegions() {
+        let view = editor("- [ ] one\n- [ ] two\n")
+        let before = view.pointerRects()
+        #expect(before.count == 2)
+
+        view.string = "- [ ] one\n"
+        _ = LiveStyler.apply(
+            to: view.textStorage!, reveal: .none,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 644
+        )
+        view.textLayoutManager?.ensureLayout(for: view.textLayoutManager!.documentRange)
+        #expect(view.pointerRects() == before, "stale until something says otherwise")
+
+        view.invalidatePointerRects()
+        #expect(view.pointerRects().count == 1)
+    }
+
+    /// The bug this closes: the click found its line with
+    /// `characterIndexForInsertion`, which clamps, so every point in the empty
+    /// space below a note landed on the last line and toggled its box.
+    @Test("Clicking below the note toggles nothing")
+    func clicksBelowTheNoteMissEverything() {
+        let view = editor("- [ ] one\n- [ ] two\n")
+        let targets = view.checkboxTargets()
+        #expect(targets.count == 2)
+        let lowest = targets.map(\.rect.maxY).max()!
+
+        // Well below the last line, in the gutter where the boxes are.
+        let x = targets[0].rect.midX
+        for y in [lowest + 20, lowest + 200, lowest + 2000] {
+            #expect(!targets.contains { $0.rect.contains(CGPoint(x: x, y: y)) },
+                    "a click at y=\(y) reached a checkbox")
+        }
+    }
+
+    /// The invariant the shared value buys: the hand appears exactly where a
+    /// click works. They used to be two separate pieces of arithmetic.
+    @Test("Where the hand shows is where a click toggles")
+    func cursorAndClickAgree() {
+        let view = editor("# Title\n\n- [ ] one\nprose\n- [ ] two\n")
+        let targets = view.checkboxTargets()
+        let rects = view.pointerRects()
+        #expect(targets.count == 2)
+        for target in targets {
+            #expect(rects.contains(target.rect))
+        }
+    }
+
+    /// And the characters it rewrites are the box, not whatever happens to be
+    /// three characters from the end of some other marker.
+    @Test("A target names its own checkbox")
+    func targetNamesItsBox() {
+        let source = "- [ ] one\n  - [x] nested\n1. [ ] numbered\n"
+        let view = editor(source)
+        let text = source as NSString
+        let boxes = view.checkboxTargets().map { text.substring(with: $0.box) }
+        #expect(boxes == ["[ ]", "[x]", "[ ]"])
+    }
+
+    /// With nothing on screen there is nothing to scope to, so the whole
+    /// document is the answer. Scoping by rectangle instead was wrong twice:
+    /// `visibleRect` is *infinite* for a view with no window rather than
+    /// empty, and `characterIndexForInsertion` answers with the end of the
+    /// document for its top-left corner.
+    @Test("A view nobody has put in a window still finds its checkboxes")
+    func noViewportMeansTheWholeDocument() {
+        let view = editor("- [ ] one\n- [ ] two\n- [ ] three\n")
+        #expect(view.window == nil)
+        #expect(view.pointerRects().count == 3)
+    }
+
+    @Test("A plain bullet is not a checkbox, and neither is prose")
+    func onlyTasksGetARegion() {
+        #expect(editor("- an ordinary bullet\n").pointerRects().isEmpty)
+        #expect(editor("just a paragraph\n").pointerRects().isEmpty)
+        // Every checkbox state Obsidian carries through, not only `[ ]`.
+        #expect(!editor("- [x] done\n").pointerRects().isEmpty)
+    }
+}

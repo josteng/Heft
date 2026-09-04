@@ -604,6 +604,9 @@ struct LiveTextEditor: NSViewRepresentable {
 
             settleLayout(textView)
             keepCaretVisible(selection, in: textView)
+            // The checkboxes have just moved, so the regions the pointer is
+            // resolved against have to be rebuilt.
+            (textView as? HeftTextKit2View)?.invalidatePointerRects()
             // Revealing or collapsing markup reflows the line, so overlays
             // calculated from TextKit geometry must be moved after layout has
             // settled. In particular, collapsed wikilink suffixes can report
@@ -1643,45 +1646,277 @@ final class HeftTextKit2View: NSTextView {
         return super.validateMenuItem(item)
     }
 
-    override func resetCursorRects() {
-        super.resetCursorRects()
+    /// Every region where the pointer is over something clickable rather than
+    /// over text: a table's `+` strips, and the drawn checkbox of a task line.
+    ///
+    /// Only what is on screen. The rects are asked for on every mouse move, and
+    /// walking a whole note's lines to answer where the pointer is would make a
+    /// long note cost more to move the mouse across than a short one.
+    /// Cached, because this is asked on every pointer move and a layout query
+    /// per visible checkbox is not free: measured at 2.6ms a call on a 21KB
+    /// note, which at the rate a pointer moves is about a third of the main
+    /// thread spent deciding what shape the cursor is.
+    ///
+    /// It depends on the text, the layout and which lines are on screen, and
+    /// all three arrive through `invalidatePointerRects` — a restyle for the
+    /// first two, a scroll for the last.
+    private var cachedPointerRects: [CGRect]?
 
-        // The `+` strips are buttons, so they say so under the pointer.
+    func pointerRects() -> [CGRect] {
+        if let cachedPointerRects { return cachedPointerRects }
+        let computed = computePointerRects()
+        cachedPointerRects = computed
+        return computed
+    }
+
+    /// A drawn checkbox: where it is, and which characters it writes.
+    ///
+    /// One value for both jobs on purpose. The cursor and the click used to
+    /// find their target by different means — the cursor from a rectangle, the
+    /// click by asking `characterIndexForInsertion` which line a point was on
+    /// — and that answer **clamps**, so a click anywhere in the empty space
+    /// below the note landed on the last line and toggled its box. There was
+    /// no vertical bound on the click at all.
+    ///
+    /// Sharing the value makes "the hand appears exactly where clicking works"
+    /// true by construction rather than by two pieces of arithmetic agreeing.
+    struct CheckboxTarget: Equatable {
+        let rect: CGRect
+        /// The `[ ]` or `[x]` characters this toggles.
+        let box: NSRange
+    }
+
+    private func computeCheckboxTargets() -> [CheckboxTarget] {
+        var found: [CheckboxTarget] = []
+        let text = string as NSString
+        let visible = visibleLineRange()
+        var location = visible.location
+        let limit = NSMaxRange(visible)
+        while location < limit {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            let source = text.substring(with: line)
+            defer {
+                location = NSMaxRange(line) > location ? NSMaxRange(line) : limit
+            }
+            guard let marker = Self.listMarker(of: source),
+                  let boxMatch = source.range(
+                      of: #"^[ \t]*([-*+]|\d+[.)])[ \t]+\[([ xX])\]"#,
+                      options: .regularExpression
+                  ),
+                  let centreY = checkboxCentre(atLineStart: line.location)
+            else { continue }
+
+            let leading = marker.prefix { $0 == " " || $0 == "\t" }
+            let horizontal = taskHitRange(for: marker, depth: Self.listDepth(of: leading))
+            // The box, a little wider on every side. Square, because the drawn
+            // box is: a target that reaches further down than it does across
+            // is one that catches clicks meant for the line below.
+            let boxStart = line.location
+                + source.distance(from: source.startIndex, to: boxMatch.upperBound) - 3
+            let reach = Self.checkboxReach
+            found.append(CheckboxTarget(
+                rect: CGRect(
+                    x: horizontal.lowerBound,
+                    y: centreY - reach,
+                    width: horizontal.upperBound - horizontal.lowerBound,
+                    height: reach * 2
+                ),
+                box: NSRange(location: boxStart, length: 3)
+            ))
+        }
+        return found
+    }
+
+    /// Where a click would toggle something, worked out afresh.
+    ///
+    /// Not from the cache the cursor uses: a click decides which characters to
+    /// *rewrite*, and the cache is allowed to lag a keystroke behind, since a
+    /// restyle is deferred while typing. A cursor a frame stale is nothing; a
+    /// box range three characters out rewrites the wrong text.
+    func checkboxTargets() -> [CheckboxTarget] {
+        computeCheckboxTargets()
+    }
+
+    private func computePointerRects() -> [CGRect] {
+        var rects: [CGRect] = []
         for grid in liveLayout.tables {
             guard let origin = tableOrigin(of: grid) else { continue }
             for strip in [grid.addRowRect, grid.addColumnRect] {
-                addCursorRect(strip.offsetBy(dx: origin.x, dy: origin.y), cursor: .pointingHand)
+                rects.append(strip.offsetBy(dx: origin.x, dy: origin.y))
             }
         }
+        return rects + computeCheckboxTargets().map(\.rect)
+    }
 
+    /// Where the drawn checkbox's middle sits, in the view's coordinates.
+    ///
+    /// From the first *text line* fragment, which is what `LiveWidgets` centres
+    /// the box on, rather than from the layout fragment's frame. The frame was
+    /// the obvious answer and made the target far too tall: it is a whole line
+    /// spacing more than the text, and on the last line of a note it also
+    /// covers the empty fragment TextKit lays after the final newline — so the
+    /// last checkbox in a note claimed a region an extra line deep.
+    private func checkboxCentre(atLineStart location: Int) -> CGFloat? {
+        guard let manager = textLayoutManager,
+              let content = manager.textContentManager,
+              let start = content.location(content.documentRange.location, offsetBy: location),
+              let fragment = manager.textLayoutFragment(for: start),
+              let line = fragment.textLineFragments.first
+        else { return nil }
+        return fragment.layoutFragmentFrame.minY
+            + line.typographicBounds.midY
+            + textContainerInset.height
+    }
+
+    /// The lines on screen, grown to whole lines at both ends.
+    ///
+    /// From TextKit 2's viewport, which is the layout system's own answer to
+    /// "what is laid out on screen", rather than worked out from a rectangle.
+    /// Two attempts at the latter were wrong in different ways, and both were
+    /// silent: `visibleRect` is **infinite** for a view that is not in a
+    /// window — not empty, which would have been the safe way to be wrong —
+    /// and `characterIndexForInsertion(at:)` answers 55 for the top-left
+    /// corner of a 56-character document, so even a sane rectangle gave a
+    /// range naming one arbitrary line. Every checkbox outside it had no
+    /// region, which is invisible to a test that only ever looks at one.
+    ///
+    /// No viewport means nothing is on screen to scope to — a view with no
+    /// window, which is every test — so the whole document is the honest
+    /// answer there.
+    private func visibleLineRange() -> NSRange {
         let text = string as NSString
-        var location = 0
-        while location < text.length {
-            let line = text.lineRange(for: NSRange(location: location, length: 0))
-            let source = text.substring(with: line)
-            if let marker = Self.listMarker(of: source),
-               marker.range(of: #"\[[ xX]\]"#, options: .regularExpression) != nil {
-                let leading = marker.prefix { $0 == " " || $0 == "\t" }
-                let depth = Self.listDepth(of: leading)
-                let markerLength = marker.utf16.count
-                if let lineRect = rect(forSelection: NSRange(
-                    location: line.location,
-                    length: min(max(1, markerLength), line.length)
-                )) {
-                    let horizontal = taskHitRange(for: marker, depth: depth)
-                    addCursorRect(CGRect(
-                        x: horizontal.lowerBound,
-                        y: lineRect.minY,
-                        width: horizontal.upperBound - horizontal.lowerBound,
-                        height: max(lineRect.height, Theme.liveFont.boundingRectForFont.height)
-                    ), cursor: .pointingHand)
-                }
-            }
+        guard text.length > 0 else { return NSRange(location: 0, length: 0) }
+        let whole = NSRange(location: 0, length: text.length)
 
-            let next = NSMaxRange(line)
-            guard next > location else { break }
-            location = next
+        guard let manager = textLayoutManager,
+              let content = manager.textContentManager,
+              let viewport = manager.textViewportLayoutController.viewportRange
+        else { return whole }
+
+        let start = content.offset(from: content.documentRange.location, to: viewport.location)
+        let end = content.offset(from: content.documentRange.location, to: viewport.endLocation)
+        guard start >= 0, end >= start, end <= text.length else { return whole }
+
+        let first = text.lineRange(for: NSRange(location: min(start, text.length), length: 0))
+        let last = text.lineRange(for: NSRange(location: min(end, text.length), length: 0))
+        return NSRange(location: first.location, length: NSMaxRange(last) - first.location)
+    }
+
+    /// The pointing hand over a drawn checkbox.
+    ///
+    /// `NSTextView` decides the cursor itself as the pointer moves, and it
+    /// wins: cursor rectangles do not override it, and neither does setting
+    /// `NSCursor` from anywhere it runs after. So the only place to answer is
+    /// after its own `mouseMoved`, which is what this is.
+    ///
+    /// **Stateless, and that is the whole design.** An earlier version
+    /// remembered whether the pointer was over a box and only acted on a
+    /// change, writing `NSScrollView.documentCursor`. Mouse-moved events stop
+    /// arriving during a click's tracking loop, so the remembered state was
+    /// stranded and the hand stayed up over the entire note. Here every move
+    /// is answered from scratch, and `super` has already reset the cursor —
+    /// to the I-beam, or to the hand over a link — before this looks. Nothing
+    /// persists, so nothing can be left behind.
+    ///
+    /// It deliberately does **not** force the I-beam when the pointer is
+    /// elsewhere: that is `super`'s answer to give, and overriding it would
+    /// take the hand off links.
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let point = convert(event.locationInWindow, from: nil)
+        let rects = pointerRects()
+        let over = pointerTarget(at: point, among: rects) != nil
+        if over { NSCursor.pointingHand.set() }
+        Self.traceCursor(point: point, rects: rects, over: over)
+    }
+
+    /// How far outside a target the pointer must go before it counts as having
+    /// left it. Small: enough to absorb the jitter of a hand holding a mouse
+    /// still on a boundary, not enough to reach the words beside the box.
+    private static let pointerSlop: CGFloat = 4
+
+    /// The target the pointer is on, if any.
+    ///
+    /// Hysteresis, because a boundary is a place a pointer is often parked:
+    /// dragging into a corner and stopping there left the cursor alternating
+    /// between the two shapes as the hand moved by a pixel. Entering takes the
+    /// real target, leaving takes the target grown by `pointerSlop`, so the
+    /// two edges are in different places and a pointer between them keeps
+    /// whatever it had.
+    ///
+    /// The held rect is only ever a shortcut to an answer this could work out
+    /// anyway, and every move re-tests it against the current point. That is
+    /// the difference from the version that stuck: nothing here depends on
+    /// being told when to stop.
+    private var heldPointerRect: CGRect?
+
+    func pointerTarget(at point: CGPoint, among rects: [CGRect]) -> CGRect? {
+        if let held = heldPointerRect, rects.contains(held),
+           held.insetBy(dx: -Self.pointerSlop, dy: -Self.pointerSlop).contains(point) {
+            return held
         }
+        let found = rects.first { $0.contains(point) }
+        heldPointerRect = found
+        return found
+    }
+
+    /// `HEFT_CURSOR_DEBUG=1` writes one line per pointer move to stderr.
+    ///
+    /// Checking this from outside the app is the hard part, and it has cost
+    /// several wrong fixes: the cursor cannot be photographed without
+    /// Accessibility, because warping the pointer generates no event and the
+    /// shape is never re-resolved. This turns a person moving the mouse into
+    /// something readable. Off unless asked for, and throttled, since it fires
+    /// at the rate the pointer moves.
+    private static let cursorTracing =
+        ProcessInfo.processInfo.environment["HEFT_CURSOR_DEBUG"] == "1"
+    private static var lastTrace = Date.distantPast
+
+    private static func traceCursor(point: CGPoint, rects: [CGRect], over: Bool) {
+        guard cursorTracing, Date().timeIntervalSince(lastTrace) > 0.15 else { return }
+        lastTrace = Date()
+        let boxes = rects.prefix(4)
+            .map { "(\(Int($0.minX))…\(Int($0.maxX)), \(Int($0.minY))…\(Int($0.maxY)))" }
+            .joined(separator: " ")
+        FileHandle.standardError.write(Data((
+            "cursor: at (\(Int(point.x)), \(Int(point.y))) "
+            + "rects=\(rects.count) \(boxes) over=\(over)\n"
+        ).utf8))
+    }
+
+    /// Rebuilt when the view is scrolled, since the regions are scoped to the
+    /// lines on screen and scrolling changes which those are.
+    private var scrollObserver: NSObjectProtocol?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let scrollObserver {
+            NotificationCenter.default.removeObserver(scrollObserver)
+            self.scrollObserver = nil
+        }
+        guard let clip = enclosingScrollView?.contentView else { return }
+        clip.postsBoundsChangedNotifications = true
+        scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.invalidatePointerRects() }
+        }
+    }
+
+    deinit {
+        if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
+    }
+
+    /// The regions move whenever the text does or the view scrolls, and left
+    /// where the text used to be they put the hand over prose.
+    ///
+    /// Cheap and lazy: nothing is recomputed until the pointer next moves, so
+    /// scrolling with a stationary pointer costs two assignments. It used to
+    /// invalidate AppKit's cursor rectangles as well, which asked for a
+    /// rebuild on every scroll notification for a mechanism that never won.
+    func invalidatePointerRects() {
+        cachedPointerRects = nil
+        heldPointerRect = nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1821,31 +2056,17 @@ final class HeftTextKit2View: NSTextView {
     private func toggleTask(at point: CGPoint) -> Bool {
         let text = string as NSString
         guard text.length > 0 else { return false }
-        // Checkboxes sit in the gutter, which moves right with nesting depth.
-        // This only rules out clicks far into the text; the exact gutter test
-        // for the clicked line happens below.
-        guard point.x < textContainerInset.width + LiveStyler.listIndent(depth: 6) else { return false }
-        let index = min(characterIndexForInsertion(at: point), text.length - 1)
-        let line = text.lineRange(for: NSRange(location: index, length: 0))
-        let source = text.substring(with: line)
+        // Exact containment, with none of the hysteresis the cursor uses: that
+        // exists so a shape does not flicker while a pointer is parked on an
+        // edge, and a click is a single deliberate act with nothing to settle.
+        guard let target = checkboxTargets().first(where: { $0.rect.contains(point) }),
+              NSMaxRange(target.box) <= text.length
+        else { return false }
 
-        guard let marker = source.range(
-            of: #"^[ \t]*([-*+]|\d+[.)])[ \t]+\[([ xX])\]"#, options: .regularExpression
-        ) else { return false }
-
-        guard let fullMarker = Self.listMarker(of: source) else { return false }
-        let leading = fullMarker.prefix { $0 == " " || $0 == "\t" }
-        let depth = Self.listDepth(of: leading)
-        guard taskHitRange(for: fullMarker, depth: depth).contains(point.x) else { return false }
-
-        // The box is the last three characters of the matched marker.
-        let boxStart = line.location + source.distance(from: source.startIndex, to: marker.upperBound) - 3
-        let box = NSRange(location: boxStart, length: 3)
-        let checked = text.substring(with: box).lowercased() == "[x]"
+        let checked = text.substring(with: target.box).lowercased() == "[x]"
         let replacement = checked ? "[ ]" : "[x]"
-
-        guard shouldChangeText(in: box, replacementString: replacement) else { return false }
-        textStorage?.replaceCharacters(in: box, with: replacement)
+        guard shouldChangeText(in: target.box, replacementString: replacement) else { return false }
+        textStorage?.replaceCharacters(in: target.box, with: replacement)
         didChangeText()
         return true
     }
@@ -1855,9 +2076,18 @@ final class HeftTextKit2View: NSTextView {
             + leading.filter { $0 == " " }.count / 2
     }
 
+    /// How far the target reaches from the middle of the drawn box, on every
+    /// side. Measured from the box rather than being a number of its own, so
+    /// the hit area and the drawing cannot drift apart.
+    static let checkboxReach = ListGlyph.checkboxSide / 2 + 3
+
     /// Horizontal click/hover target around the exact checkbox position used
-    /// by the layout fragment. The padding makes the 13pt box forgiving while
-    /// keeping the surrounding text under the normal I-beam cursor.
+    /// by the layout fragment.
+    ///
+    /// Derived from the drawn box rather than being a number of its own, so
+    /// the two cannot drift: the box is `ListGlyph.checkboxSide` across, and
+    /// this adds a little on each side to make it forgiving without reaching
+    /// the words beside it.
     private func taskHitRange(for marker: String, depth: Int) -> ClosedRange<CGFloat> {
         let leading = marker.prefix { $0 == " " || $0 == "\t" }
         let visible = String(marker.dropFirst(leading.utf16.count))
@@ -1866,7 +2096,7 @@ final class HeftTextKit2View: NSTextView {
             + LiveStyler.listGlyphOffset(
                 marker: visible, kind: .task(.unchecked), font: Theme.liveFont
             )
-        return (centre - 10)...(centre + 10)
+        return (centre - Self.checkboxReach)...(centre + Self.checkboxReach)
     }
 
     override func paste(_ sender: Any?) {

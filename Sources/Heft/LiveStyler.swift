@@ -791,6 +791,7 @@ enum LiveStyler {
                 collapse(NSRange(location: range.location, length: leadingLength), in: storage)
             }
 
+
             // No glyph while the source is showing: the drawn bullet and the
             // literal `-` would both be visible, which is what the collapsed
             // rendering exists to avoid.

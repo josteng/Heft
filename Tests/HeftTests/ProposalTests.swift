@@ -425,9 +425,9 @@ struct ProposalTests {
         // Wait for the exact precondition rather than for a note count: the
         // repointing comes from the link index, and the open note is rewritten
         // from its buffer, so both have to have arrived.
-        #expect(await waitUntil {
+        #expect(await waitUntil({
             !model.index.backlinks(to: "Old/Target.md").isEmpty && !model.text.isEmpty
-        })
+        }, within: 20))
         model.refreshProposals()
 
         // Structural changes are not the banner's business: a banner over the
@@ -444,13 +444,14 @@ struct ProposalTests {
         ))
         // The open note is repointed through its buffer, so the new text
         // reaches disk by the ordinary autosave rather than under the editor.
+        // Flushed rather than waited for: the debounce is 700ms and a loaded
+        // test run can miss any deadline chosen for it, which is a flaky test
+        // rather than a slow one.
         #expect(model.text.contains("New/Target"), "got \(model.text)")
-        let repointed = await waitUntil {
-            ((try? String(
-                contentsOf: root.appendingPathComponent("Pointer.md"), encoding: .utf8
-            )) ?? "").contains("New/Target")
-        }
-        #expect(repointed)
+        #expect(model.flushPendingSave())
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Pointer.md"), encoding: .utf8
+        ).contains("New/Target"))
         #expect(model.proposals.isEmpty)
     }
 
@@ -494,7 +495,12 @@ struct ProposalTests {
             descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "A.md")
         )
         defer { model.closeWorkspace() }
-        #expect(await waitUntil { model.index.notes.count == 2 && !model.text.isEmpty })
+        // Generous, because it waits on a real vault scan and a real note
+        // load: any deadline tight enough to be quick is a flaky test under a
+        // loaded parallel run, and the thing being measured is not the timing.
+        #expect(await waitUntil(
+            { model.index.notes.count == 2 && !model.text.isEmpty }, within: 20
+        ))
         model.refreshProposals()
 
         let waiting = try #require(model.pendingProposals.groups.first)
@@ -505,14 +511,16 @@ struct ProposalTests {
         #expect(model.group(of: here)?.summary == "Rename the concept")
 
         model.acceptGroup(waiting)
+        // A.md is the open note, so its accepted text sits in the buffer until
+        // the autosave debounce. Flushed rather than waited for: any deadline
+        // chosen for a 700ms debounce is a flaky test under a loaded run.
+        #expect(model.flushPendingSave())
 
         // The move runs last, or the edit to B would have been written to a
         // path that no longer exists.
-        let settled = await waitUntil {
-            (try? String(contentsOf: root.appendingPathComponent("Renamed.md"), encoding: .utf8))
-                == "two\n"
-        }
-        #expect(settled, "B was reworded and then moved")
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Renamed.md"), encoding: .utf8
+        ) == "two\n", "B was reworded and then moved")
         #expect(try String(contentsOf: root.appendingPathComponent("A.md"), encoding: .utf8)
             == "two\n")
         #expect(model.proposals.isEmpty)
