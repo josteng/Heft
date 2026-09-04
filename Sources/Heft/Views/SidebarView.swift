@@ -57,6 +57,10 @@ private enum TagListRow: Identifiable {
 private struct SidebarInlineEdit: Equatable {
     let path: String
     var name: String
+    /// True for a note the sidebar has just written so it could be named.
+    /// Backing out of *that* takes the file with it; backing out of a rename
+    /// leaves the note exactly as it was.
+    var isNew = false
 }
 
 struct SidebarView: View {
@@ -133,6 +137,15 @@ struct SidebarView: View {
                tree?.flattened().contains(where: { $0.relativePath == inlineEdit.path }) != true {
                 self.inlineEdit = nil
             }
+        }
+        // ⌘N, which has no field of its own to draw. Answered here rather
+        // than in the tree because the tree may not be on screen: switching
+        // back from Tags has to happen first, and `beginCreatingNote` does it.
+        .onChange(of: model.inlineNoteRequest) { _, request in
+            guard let request else { return }
+            model.inlineNoteRequest = nil
+            guard let target = request.folder ?? noteCreationTarget else { return }
+            beginCreatingNote(in: target)
         }
     }
 
@@ -323,7 +336,7 @@ struct SidebarView: View {
         mode = .files
         filter = ""
         guard let created = model.createUntitledNote(in: folder) else { return }
-        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name)
+        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name, isNew: true)
     }
 
     private func beginCreatingFolder(in folder: URL) {
@@ -542,12 +555,20 @@ struct SidebarView: View {
     }
 
     private func cancelRename() {
+        if let edit = inlineEdit, edit.isNew { model.discardUnnamedNote(at: edit.path) }
         inlineEdit = nil
     }
 
     private func commitRename(_ item: VaultItem) {
         guard let edit = inlineEdit, edit.path == item.relativePath else { return }
-        if edit.name == item.name || !model.rename(item, to: edit.name) {
+        guard edit.name != item.name else {
+            inlineEdit = nil
+            // A new note that kept the name it was offered still has a name,
+            // and nothing has opened it yet.
+            if edit.isNew { model.open(item: item) }
+            return
+        }
+        if !model.rename(item, to: edit.name, thenOpen: edit.isNew) {
             inlineEdit = nil
         }
     }
@@ -703,20 +724,26 @@ private struct TreeRow: View {
     }
 
     private func cancelRename() {
-        guard inlineEdit?.path == item.relativePath else { return }
+        guard let edit = inlineEdit, edit.path == item.relativePath else { return }
+        if edit.isNew { model.discardUnnamedNote(at: edit.path) }
         inlineEdit = nil
     }
 
     private func commitRename() {
         guard let edit = inlineEdit, edit.path == item.relativePath else { return }
-        if edit.name == item.name || !model.rename(item, to: edit.name) {
+        guard edit.name != item.name else {
+            inlineEdit = nil
+            if edit.isNew { model.open(item: item) }
+            return
+        }
+        if !model.rename(item, to: edit.name, thenOpen: edit.isNew) {
             inlineEdit = nil
         }
     }
 
     private func beginCreatingNote(in folder: URL) {
         guard let created = model.createUntitledNote(in: folder) else { return }
-        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name)
+        inlineEdit = SidebarInlineEdit(path: created.path, name: created.name, isNew: true)
     }
 
     private func beginCreatingFolder(in folder: URL) {

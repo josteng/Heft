@@ -97,10 +97,167 @@ struct VaultHostTests {
         return model
     }
 
+    /// The rescan after a note is created runs detached, so a file on disk is
+    /// not yet a row in the tree.
+    private func item(
+        _ model: AppModel, awaiting path: String
+    ) async throws -> VaultItem {
+        for _ in 0..<600 where model.tree?.flattened().contains(
+            where: { $0.relativePath == path }
+        ) != true {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return try item(model, path)
+    }
+
     private func item(_ model: AppModel, _ path: String) throws -> VaultItem {
         try #require(
             model.tree?.flattened().first { $0.relativePath == path }, "no \(path) in the tree"
         )
+    }
+
+    // MARK: - Creating a note
+
+    @Test("With a sidebar, ⌘N asks it to name the note in place rather than prompting")
+    func newNoteNamesInTheSidebar() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host))
+        model.columnVisibility = .all
+
+        model.createNote()
+
+        // No modal. The sidebar draws a field in the row instead, which is
+        // what the + button already did.
+        #expect(host.asked.isEmpty, "asked: \(host.asked)")
+        #expect(model.inlineNoteRequest != nil)
+    }
+
+    @Test("With the sidebar hidden there is nowhere to type, so it still prompts")
+    func newNotePromptsWithoutASidebar() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.names = ["Kickoff"]
+        let model = try await ready(model(root, host))
+        model.columnVisibility = .detailOnly
+
+        model.createNote()
+
+        #expect(host.asked == ["name: New Note"])
+        #expect(model.inlineNoteRequest == nil)
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Kickoff.md").path
+        ))
+    }
+
+    @Test("Two presses are two requests, not one the view already answered")
+    func repeatedRequestsAreDistinct() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+        model.columnVisibility = .all
+
+        model.createNote()
+        let first = try #require(model.inlineNoteRequest)
+        model.inlineNoteRequest = nil        // what the sidebar does on seeing it
+        model.createNote()
+
+        #expect(model.inlineNoteRequest != first)
+    }
+
+    @Test("A note created only to be named is removed when the naming is abandoned")
+    func abandonedUntitledNoteIsRemoved() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        let created = try #require(model.createUntitledNote(in: root))
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent(created.path).path
+        ))
+
+        model.discardUnnamedNote(at: created.path)
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent(created.path).path
+        ))
+    }
+
+    @Test("A note being named is scrolled to, and not opened until it has a name")
+    func namingHappensWhereItCanBeSeen() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+        model.open(item: try item(model, "Note.md"))
+
+        let created = try #require(model.createUntitledNote(in: root))
+
+        // The sidebar is usually showing somewhere else, so a field appearing
+        // off screen reads as nothing having happened.
+        #expect(model.revealTarget == created.path)
+        // Not opened: a caret in the editor beside the caret in the row is
+        // two insertion points, one of which is the wrong place to type.
+        #expect(model.current?.relativePath == "Note.md")
+    }
+
+    @Test("Naming a new note opens the note that was named")
+    func namingOpensTheResult() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        let created = try #require(model.createUntitledNote(in: root))
+        let untitled = try await item(model, awaiting: created.path)
+        #expect(model.rename(untitled, to: "Kickoff", thenOpen: true))
+
+        // Opened at the path the plan produced, not one rebuilt from the name.
+        #expect(model.current?.relativePath == "Kickoff.md")
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Kickoff.md").path
+        ))
+    }
+
+    @Test("Keeping the offered name still opens the note")
+    func keepingTheOfferedNameOpensIt() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        let created = try #require(model.createUntitledNote(in: root))
+        let untitled = try await item(model, awaiting: created.path)
+        // What Return on an unchanged name does: a rename to the same name,
+        // which is not a failure and has nothing to move.
+        #expect(model.rename(untitled, to: untitled.name, thenOpen: true))
+        #expect(model.current?.relativePath == created.path)
+    }
+
+    @Test("Anything but an empty, still-unnamed note is left alone")
+    func onlyTheUnnamedNoteIsDiscarded() async throws {
+        let root = try vault([
+            "Untitled.md": "typed something\n", "Note.md": "# Note\n", "Scratch.md": "",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        // Named by the reader: not this function's business, whatever else
+        // is true of it.
+        model.discardUnnamedNote(at: "Note.md")
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+
+        // The one that matters. An empty note the reader named looks exactly
+        // like an abandoned one to every check except the name, and deleting
+        // somebody's empty note is the worst thing this could do.
+        model.discardUnnamedNote(at: "Scratch.md")
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Scratch.md").path
+        ))
+
+        // Still called Untitled, but it has something in it.
+        model.discardUnnamedNote(at: "Untitled.md")
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Untitled.md").path
+        ))
     }
 
     // MARK: - Accepting a group of deletes
@@ -416,6 +573,9 @@ struct VaultHostTests {
         let host = ScriptedHost()
         host.names = ["Fresh"]
         let model = try await ready(model(root, host))
+        // The prompt is what a window with no sidebar uses; with one, the
+        // name is typed into the row instead.
+        model.columnVisibility = .detailOnly
 
         model.createNote()
         #expect(host.asked == ["name: New Note"])
@@ -431,6 +591,7 @@ struct VaultHostTests {
         let host = ScriptedHost()
         host.names = ["Q3/Q4 plan"]
         let model = try await ready(model(root, host))
+        model.columnVisibility = .detailOnly
 
         model.createNote()
         #expect(FileManager.default.fileExists(

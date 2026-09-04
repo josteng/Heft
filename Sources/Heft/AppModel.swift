@@ -172,6 +172,20 @@ final class AppModel: ObservableObject {
     /// with no visible file tree. Lives here rather than as view state so the
     /// View menu can toggle it too.
     @Published var columnVisibility: NavigationSplitViewVisibility = .all
+
+    /// A note ⌘N wants created and named in the sidebar.
+    ///
+    /// A request the view answers, for the same reason `revealTarget` is one:
+    /// only the sidebar can draw a text field in a row. `sequence` is what
+    /// makes two ⌘N presses in the same folder two separate requests, since a
+    /// value equal to the last one would not be seen as a change.
+    struct InlineNoteRequest: Equatable {
+        let folder: URL?
+        let sequence: Int
+    }
+
+    @Published var inlineNoteRequest: InlineNoteRequest?
+    private var inlineNoteSequence = 0
     @Published var isInspectorVisible = false
     /// Three narrow pickers rather than one that does everything. A combined
     /// palette was tried and removed: mixing content hits into a note switcher
@@ -820,6 +834,21 @@ final class AppModel: ObservableObject {
     /// with no obvious way to name it leaves the note unlinkable.
     func createNote(in folder: URL? = nil) {
         guard let vaultRoot else { promptForVault(); return }
+
+        // Naming happens in the sidebar when there is one, which is where the
+        // note is about to appear. ⌘N and the sidebar's own button were two
+        // different interactions for one act: a modal asking for a name, and
+        // a row you type into. The row is the better of the two — it shows
+        // where the note lands and needs no dialog — but it can only be drawn
+        // by the sidebar, so this is a request the view answers, like
+        // `revealTarget`. With the sidebar hidden there is nowhere to type,
+        // and the prompt below is still the answer.
+        if columnVisibility != .detailOnly {
+            inlineNoteRequest = InlineNoteRequest(folder: folder, sequence: inlineNoteSequence)
+            inlineNoteSequence += 1
+            return
+        }
+
         let directory = folder ?? newNoteDirectory
         // Pre-filled and selected, so Return alone still gives the old
         // behaviour and typing replaces it.
@@ -903,16 +932,58 @@ final class AppModel: ObservableObject {
             )
             try "".write(to: target, atomically: true, encoding: .utf8)
             guard let ref = NoteRef(url: target, vaultRoot: vaultRoot) else { return nil }
-            open(ref)
             let parentPath = relativePath(of: directory)
             if !parentPath.isEmpty { expandedFolders.insert(parentPath) }
             reload(immediately: true)
+            // Scrolled to, or the field being typed into is off screen and
+            // the note appears to have been created nowhere. The sidebar may
+            // be showing another folder entirely, and after ⌘N it usually is.
+            revealTarget = ref.relativePath
+            // Deliberately *not* opened. It has no name yet, and opening it
+            // put a caret in the editor while the caret that matters is in
+            // the sidebar row: two insertion points, one of which is the
+            // wrong place to type. It opens when it is named.
             status = "Created \(ref.relativePath)"
             return (ref.relativePath, ref.name)
         } catch {
             status = "Could not create note: \(error.localizedDescription)"
             return nil
         }
+    }
+
+    /// Removes a note that was created only so it could be named, when the
+    /// naming was abandoned.
+    ///
+    /// The sidebar writes `Untitled.md` first and puts a field in its row, so
+    /// backing out of that field used to leave the file behind. They
+    /// accumulate quietly: a vault of a few months held six, in four folders,
+    /// none of them ever opened again.
+    ///
+    /// Every guard here is about being certain this is that file and nothing
+    /// else. Still called Untitled, still empty on disk, and if it is the open
+    /// note, nothing typed into it since — a buffer that has text has not been
+    /// abandoned, whatever the file still says. Removed outright rather than
+    /// trashed: it is an empty file that existed for as long as it took to
+    /// press Escape, and the Trash is for things that were something.
+    func discardUnnamedNote(at relativePath: String) {
+        guard let vaultRoot else { return }
+        let url = vaultRoot.appendingPathComponent(relativePath)
+        let stem = (url.lastPathComponent as NSString).deletingPathExtension
+        guard stem == "Untitled" || stem.hasPrefix("Untitled ") else { return }
+        guard (try? String(contentsOf: url, encoding: .utf8))?.isEmpty == true else { return }
+
+        if current?.relativePath == relativePath {
+            guard text.isEmpty, !isDirty else { return }
+            saveTask?.cancel()
+            saveTask = nil
+            registry.release(url, for: workspaceID)
+            current = nil
+            setText("")
+            isDirty = false
+        }
+        guard (try? FileManager.default.removeItem(at: url)) != nil else { return }
+        reload(immediately: true)
+        status = "Discarded the unnamed note"
     }
 
     func createUntitledFolder(in parent: URL) -> (path: String, name: String)? {
@@ -947,7 +1018,13 @@ final class AppModel: ObservableObject {
     // MARK: - File operations
 
     @discardableResult
-    func rename(_ item: VaultItem, to proposedName: String? = nil) -> Bool {
+    /// `thenOpen` is for a note that has just been named for the first time.
+    /// Nothing has opened it yet, and the path it ends up at is read back from
+    /// the plan rather than rebuilt from the name, so where the file went and
+    /// what gets opened cannot disagree.
+    func rename(
+        _ item: VaultItem, to proposedName: String? = nil, thenOpen: Bool = false
+    ) -> Bool {
         guard let vaultRoot else { return false }
         guard !item.isFolder || !registry.isFocusedByAnotherWindow(item.url, excluding: workspaceID) else {
             status = "Another window is focused on \(item.name); show its entire vault before renaming"
@@ -983,13 +1060,22 @@ final class AppModel: ObservableObject {
         case .success(let move):
             // Renaming to the name it already has is not a failure; there is
             // simply nothing to do.
-            guard move.from != move.to else { return true }
+            guard move.from != move.to else {
+                if thenOpen { open(item: item) }
+                return true
+            }
             renamedPath = move.to
         case .failure(let refusal):
             status = refusal.message
             return false
         }
-        return performMove(item, to: renamedPath)
+        guard performMove(item, to: renamedPath) else { return false }
+        if thenOpen, let ref = NoteRef(
+            url: vaultRoot.appendingPathComponent(renamedPath), vaultRoot: vaultRoot
+        ) {
+            open(ref)
+        }
+        return true
     }
 
     /// Moves a file to a vault-relative path, repointing every link into it.

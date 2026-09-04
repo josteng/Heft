@@ -783,6 +783,32 @@ Kept apart from Startup, which answers one question **per vault** because
 "always open `Thesis/Overview`" names a note and a note only exists in one
 vault; and apart from Appearance, which is about the page.
 
+A new note is **named in the sidebar**, in the row it is about to occupy.
+⌘N and the sidebar's own button used to be two interactions for one act: a
+modal asking for a name, and a row you type into. Only the sidebar can draw
+that row, so ⌘N posts a request the view answers, the way `revealTarget`
+works, and falls back to the prompt when the sidebar is hidden and there is
+nowhere to type.
+
+The row is **scrolled to**, through the same `revealTarget` request Reveal in
+Sidebar uses. After ⌘N the sidebar is usually showing another folder entirely,
+so a field appearing off screen reads as the note having been created nowhere.
+
+The note is **not opened until it is named**. Opening it put a caret in the
+editor while the caret that matters is in the sidebar row: two insertion
+points, one of them the wrong place to type, which is also why the field went
+unnoticed. Naming it opens it, at the path read back from the rename plan
+rather than one rebuilt from the typed name, so where the file went and what
+gets opened cannot disagree. Keeping the offered name is still naming it.
+
+Naming in place writes the file **first**, so backing out of the field used to
+leave an `Untitled.md` behind; a vault of a few months held six, in four
+folders, none ever opened again. `discardUnnamedNote` takes it back, and every
+guard on it is about being certain it is that file: still called `Untitled`,
+still empty on disk, and, if it is the open note, nothing typed into it since.
+The name check is the one that matters, because an empty note the reader named
+looks like an abandoned one to every other test.
+
 `NewNoteLocation` is pure and takes every fallback as an argument, so the rule
 can be shown in a pane and asked for in a test without a window. A folder
 chosen in the sidebar still wins over the setting: that is somebody pointing at
