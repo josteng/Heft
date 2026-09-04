@@ -465,8 +465,7 @@ struct AppearanceSettingsView: View {
             Toggle(isOn: $appearance.showsFolderArrows) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Folder Arrows in the Sidebar").font(.headline)
-                    Text("A folder's icon already fills when it is open, so the arrow "
-                        + "is a second way of saying the same thing.")
+                    Text("Adds a chevron beside each folder in the file tree.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

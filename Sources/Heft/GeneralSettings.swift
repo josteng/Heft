@@ -66,7 +66,10 @@ struct GeneralSettingsView: View {
         }
     }
 
-    @State private var typedFolder = "Inbox"
+    /// Empty, not a guess. It was "Inbox", which is a *note* in at least one
+    /// real vault — so the suggestion would have made a folder beside a file
+    /// of the same name, which is the one thing a default here must not do.
+    @State private var typedFolder = ""
 
     private var choice: Binding<Choice> {
         Binding(
@@ -111,17 +114,22 @@ struct GeneralSettingsView: View {
                     ForEach(Choice.allCases) { Text($0.title).tag($0) }
                 }
                 if choice.wrappedValue == .folder {
-                    // A real label on the row, with the example in `prompt`:
-                    // passing the example as the title puts it in the margin
-                    // beside an empty box, reading as a caption on the row
-                    // above.
-                    TextField("Folder", text: folder, prompt: Text("Inbox"))
+                    // Bordered and with its label hidden, the way the Startup
+                    // pane's path field is: a plain `TextField` in a grouped
+                    // Form draws as right-aligned text with no edge to it, so
+                    // it reads as a value someone else set rather than as
+                    // something to type in.
+                    LabeledContent("Folder") {
+                        TextField("", text: folder, prompt: Text("Projects/Notes"))
+                            .textFieldStyle(.roundedBorder)
+                            .labelsHidden()
+                    }
                     Text("Made when the first note goes in it, if it is not there yet.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("The name is asked for either way; this is only where it lands.")
+                Text("Where ⌘N puts a note. Picking a folder in the sidebar first still wins.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -134,14 +142,26 @@ struct GeneralSettingsView: View {
                     ForEach(CalendarVisibility.allCases) { Text($0.title).tag($0) }
                 }
             } footer: {
+                // What the setting decides is how a window *opens*. Saying so
+                // matters because ⇧⌘D still works either way, and a setting
+                // that looked absolute would read as broken the first time it
+                // was overridden by hand.
                 Text(settings.calendarVisibility == .whenDailyNotesAreInScope
-                    ? "A window focused on a folder that holds no daily notes opens without it, "
-                        + "and each window remembers what you last left it showing."
-                    : "In every window, whatever it was last left showing.")
+                    ? "How a window opens: without the calendar when it is showing a folder "
+                        + "that holds no daily notes. ⇧⌘D shows and hides it at any time."
+                    : "How every window opens. ⇧⌘D shows and hides it at any time.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        // A grouped Form is a scroll view, and a settings pane the window
+        // sizes to fit has no business scrolling: if it does, the sizing has
+        // already failed and the scroll bar is hiding it. Turning it off makes
+        // that a visible mistake rather than a silent one.
+        .scrollDisabled(true)
+        // Measured at a fixed width, like the other panes, so the wrapping in
+        // the explanations is the same when the pane is measured and shown.
+        .frame(width: 560)
     }
 }

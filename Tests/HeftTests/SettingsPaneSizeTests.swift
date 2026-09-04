@@ -110,6 +110,33 @@ extension SettingsPaneSizeTests {
     }
 }
 
+extension SettingsPaneSizeTests {
+
+    /// Choosing "Never" did nothing until the next launch: the setting was
+    /// read once when a window was built, and no open window was listening.
+    @Test("Changing when the calendar shows reaches the open window")
+    func calendarSettingReachesOpenWindows() throws {
+        try withVault { registry, root in
+            let model = AppModel(
+                registry: registry, descriptor: WorkspaceDescriptor(vaultPath: root.path)
+            )
+            defer {
+                model.closeWorkspace()
+                GeneralSettings.shared.calendarVisibility = .whenDailyNotesAreInScope
+            }
+
+            GeneralSettings.shared.calendarVisibility = .always
+            #expect(model.isCalendarVisible)
+
+            GeneralSettings.shared.calendarVisibility = .never
+            #expect(!model.isCalendarVisible, "a window built before the change never heard it")
+
+            GeneralSettings.shared.calendarVisibility = .always
+            #expect(model.isCalendarVisible)
+        }
+    }
+}
+
 /// The two General settings, as rules rather than as a pane.
 @Suite("General settings")
 struct GeneralPreferenceTests {
@@ -150,6 +177,22 @@ struct GeneralPreferenceTests {
         #expect(NewNoteLocation.normalised("  ") == "")
         #expect(NewNoteLocation.folder("../../etc/passwd")
             .directory(openNoteFolder: nil, focus: nil) == "etc/passwd")
+    }
+
+    /// The suggestion used to be "Inbox", which is a *note* in a real vault.
+    /// Accepting it would have made a folder beside a file of the same name.
+    @Test("The folder field suggests nothing")
+    @MainActor
+    func folderFieldHasNoDefault() {
+        let settings = GeneralSettings.shared
+        let restore = settings.newNoteLocation
+        defer { settings.newNoteLocation = restore }
+
+        settings.newNoteLocation = .folder("")
+        // An unfinished setting is not a request to write to the vault root;
+        // the window's own answer stands until a folder is actually typed.
+        #expect(NewNoteLocation.folder("").directory(openNoteFolder: "Work", focus: "Work")
+            == "Work")
     }
 
     @Test("A stored location survives a round trip, and an unknown one is the default")

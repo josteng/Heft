@@ -62,6 +62,14 @@ final class AppModel: ObservableObject {
     let workspaceID: UUID
     private let registry: VaultRegistry
     private var session: VaultSession?
+    /// Keeps this window's calendar in step with the General setting.
+    ///
+    /// Reading it once in `init` was not enough: choosing "Never" changed
+    /// nothing until the next launch, because no open window was listening.
+    /// `dropFirst` skips the value the subscription delivers on subscribing,
+    /// which would otherwise overwrite what a restored window was showing
+    /// before anybody had chosen anything.
+    private var calendarSettingSubscription: AnyCancellable?
     private var sessionChangeSubscription: AnyCancellable?
     private var diskChangeSubscription: AnyCancellable?
 
@@ -304,6 +312,17 @@ final class AppModel: ObservableObject {
             dailyNotesAreInScope: dailyNotesAreInScope,
             remembered: descriptor?.calendarVisible
         )
+        calendarSettingSubscription = GeneralSettings.shared.$calendarVisibility
+            .dropFirst()
+            .sink { [weak self] choice in
+                guard let self else { return }
+                // No `remembered:` on a change. Someone has just answered the
+                // question, and honouring what the window happened to be
+                // showing would be honouring the older answer.
+                isCalendarVisible = choice.isVisible(
+                    dailyNotesAreInScope: dailyNotesAreInScope, remembered: nil
+                )
+            }
 
         // Three sources, in order of how deliberate they are.
         //
