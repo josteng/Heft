@@ -677,6 +677,20 @@ group says so on its banner and points at the centre, and a delete or a move
 never appears in a banner at all — a bar over the page offering to delete the
 page is the wrong place to decide that.
 
+A destructive change is confirmed **once**, at the moment it is committed to,
+and never twice for the same commitment. Reviewing a delete in its own sheet
+*is* that moment: the sheet names the file and says where it goes, so its
+button reads "Move to Trash" rather than "Apply" and no alert follows it. A
+group's deletes are confirmed once, before anything is applied, naming every
+file. The per-file alert is right when a person points at a note and asks
+for it to go; accepting a group is a different gesture, answered as a list, and
+four identical alerts in a row is how a confirmation stops being read. It still
+asks, because Accept All is one click on a row and that alert is the only place
+those files are named as a consequence rather than as a proposal, and
+cancelling cancels the whole group rather than leaving its edits in and its
+deletes out. Deleting a note from the sidebar asks, since nothing else named
+it.
+
 Accepting a group applies its **edits before its moves**, or an edit would be
 written to a path the move had already taken away. It is deliberately **not
 atomic**: a half-applied rename across twelve notes is bad, but refusing to

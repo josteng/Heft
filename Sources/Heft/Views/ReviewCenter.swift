@@ -244,7 +244,7 @@ struct StructuralReviewView: View {
                     proposal.headline,
                     systemImage: proposal.kind == .delete ? "trash" : "arrow.right.doc.on.clipboard",
                     description: Text(proposal.kind == .delete
-                        ? "The file goes to the Trash, and Heft asks again before it does."
+                        ? "The file is moved to the Trash."
                         : "Every link pointing at it is repointed to the new path.")
                 )
                 .frame(maxHeight: .infinity)
@@ -261,9 +261,20 @@ struct StructuralReviewView: View {
                 Button("Later") { dismiss() }
                     .buttonStyle(.bordered)
                     .keyboardShortcut(.cancelAction)
-                Button(proposal.kind == .create ? "Create" : "Apply") {
+                // The button says the act, and is the *only* time it is
+                // asked. This sheet has already named the file and described
+                // what happens to it, so the alert that used to follow was a
+                // second question about a decision just made deliberately —
+                // the same thing that made a group of deletes ask four times.
+                //
+                // Which is why the label cannot stay "Apply": with no alert
+                // behind it, this press is the whole commitment, and "Move to
+                // Trash" is what it commits to. It also has to read clearly
+                // against "Discard Proposal" beside it, which throws the
+                // request away rather than carrying it out.
+                Button(applyLabel) {
                     if proposal.kind == .create { model.acceptAll(proposal) }
-                    else { model.applyStructural(proposal) }
+                    else { model.applyStructural(proposal, confirmed: true) }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -273,6 +284,15 @@ struct StructuralReviewView: View {
         .frame(width: 660, height: 480)
         .onChange(of: model.reviewing) { _, reviewing in
             if reviewing == nil { dismiss() }
+        }
+    }
+
+    private var applyLabel: String {
+        switch proposal.kind {
+        case .create: "Create"
+        case .delete: "Move to Trash"
+        case .move: "Move"
+        case .edit: "Apply"
         }
     }
 }

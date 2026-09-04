@@ -1136,7 +1136,10 @@ final class AppModel: ObservableObject {
 
     /// Moves to the Trash rather than unlinking, so a mis-click stays
     /// recoverable, and confirms first because this is the user's real vault.
-    func delete(_ item: VaultItem) {
+    /// `confirmed` is for a caller that has already asked, once, about several
+    /// files at a time. Accepting a group of deletes put the same question up
+    /// per note, which is the shape that teaches people to click through it.
+    func delete(_ item: VaultItem, confirmed: Bool = false) {
         guard !item.isFolder || !registry.isFocusedByAnotherWindow(item.url, excluding: workspaceID) else {
             status = "Another window is focused on \(item.name); show its entire vault before deleting"
             return
@@ -1151,7 +1154,7 @@ final class AppModel: ObservableObject {
         let detail = item.isFolder
             ? "The folder and its \(count) file\(count == 1 ? "" : "s") will be moved to the Trash."
             : "It will be moved to the Trash."
-        guard host.confirm(
+        guard confirmed || host.confirm(
             title: "Delete \(item.name)?", message: detail, confirm: "Delete", destructive: true
         ) else { return }
 
@@ -2278,7 +2281,7 @@ final class AppModel: ObservableObject {
     /// A create is already an edit with no note behind it — the same write
     /// path, which makes the folders it needs — so only delete and move are
     /// here. Both are answered whole: there are no hunks in "remove this file".
-    func applyStructural(_ proposal: Proposal) {
+    func applyStructural(_ proposal: Proposal, confirmed: Bool = false) {
         guard let vaultRoot else { return }
         // The window's tree first, and a fresh scan when it has nothing to
         // say: a vault whose scan has not finished yet would otherwise look
@@ -2300,7 +2303,7 @@ final class AppModel: ObservableObject {
         case .delete:
             // Through the same `delete` a person uses, so it asks the same
             // question and goes to the Trash rather than being unlinked.
-            delete(item)
+            delete(item, confirmed: confirmed)
             // Only settled if it actually went: `delete` refuses when another
             // window holds the file, and a proposal dropped after a refusal
             // would look like it had been applied.
@@ -2340,13 +2343,53 @@ final class AppModel: ObservableObject {
     /// is worse still, and the existing rule already covers it: what is left
     /// unanswered stays in the list as a smaller change.
     func acceptGroup(_ group: ProposalGroup) {
+        // Asked once, before anything is applied. Cancelling here cancels the
+        // whole group rather than leaving its edits in and its deletes out,
+        // which is what a question asked halfway through would do.
+        guard confirmDeletes(in: group) else { return }
         for proposal in group.proposals where !proposal.isStructural {
             acceptAll(proposal)
         }
         for proposal in group.proposals where proposal.isStructural {
-            applyStructural(proposal)
+            applyStructural(proposal, confirmed: true)
         }
         status = "Applied \(group.summary)"
+    }
+
+    /// One question for every file a group would delete.
+    ///
+    /// The per-file alert is right when a person picks a note and asks for it
+    /// to go: it names the one thing they pointed at. Accepting a group is a
+    /// different gesture — the list was on screen and answered as a list — so
+    /// repeating the question per note asks something already answered, and
+    /// four identical alerts in a row is how a confirmation stops being read.
+    ///
+    /// It still asks, rather than trusting the review: this is the only place
+    /// the files are named as a consequence rather than as a proposal, and it
+    /// is the last point at which the whole thing can be called off.
+    private func confirmDeletes(in group: ProposalGroup) -> Bool {
+        let names = group.proposals
+            .filter { $0.kind == .delete }
+            .map { ($0.notePath as NSString).lastPathComponent }
+        guard !names.isEmpty else { return true }
+        guard names.count > 1 else {
+            return host.confirm(
+                title: "Delete \(names[0])?",
+                message: "It will be moved to the Trash.",
+                confirm: "Delete", destructive: true
+            )
+        }
+        // Listed, not just counted: "Delete 4 files?" is not something anyone
+        // can answer. Long lists are cut, since an alert that scrolls is worse
+        // than one that says how much it is not showing.
+        let listed = names.count <= 8
+            ? names.joined(separator: "\n")
+            : names.prefix(7).joined(separator: "\n") + "\nand \(names.count - 7) more"
+        return host.confirm(
+            title: "Delete \(names.count) files?",
+            message: "They will be moved to the Trash.\n\n\(listed)",
+            confirm: "Delete", destructive: true
+        )
     }
 
     func discardGroup(_ group: ProposalGroup) {

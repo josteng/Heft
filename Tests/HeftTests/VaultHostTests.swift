@@ -103,6 +103,131 @@ struct VaultHostTests {
         )
     }
 
+    // MARK: - Accepting a group of deletes
+
+    @Test("A group of deletes asks once, naming every file, and takes them all")
+    func groupDeletesAskOnce() async throws {
+        let root = try vault([
+            "Keep.md": "kept\n", "Untitled 1.md": "", "Untitled 2.md": "", "Untitled 3.md": "",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let group = Proposal.Group(summary: "Clear the untitled notes")
+        for index in 1...3 {
+            try ProposalStore.write(
+                Proposal(
+                    id: "drop-untitled-\(index)", notePath: "Untitled \(index).md",
+                    base: nil, body: "", agent: "t",
+                    summary: "Delete Untitled \(index)", kind: .delete, group: group
+                ),
+                in: root
+            )
+        }
+
+        let host = ScriptedHost()
+        host.confirmations = [true]
+        let model = try await ready(model(root, host))
+        model.refreshProposals()
+        let waiting = try #require(model.pendingProposals.groups.first)
+        #expect(waiting.proposals.count == 3)
+
+        model.acceptGroup(waiting)
+
+        // One question, not three. Three identical alerts in a row is how a
+        // confirmation stops being read.
+        #expect(host.asked == ["confirm: Delete 3 files?"])
+        for index in 1...3 {
+            #expect(!FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("Untitled \(index).md").path
+            ))
+        }
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Keep.md").path
+        ))
+        #expect(ProposalStore.all(in: root).isEmpty)
+    }
+
+    @Test("Cancelling that one question leaves the whole group alone")
+    func cancellingAGroupDeleteChangesNothing() async throws {
+        let root = try vault(["A.md": "one\n", "Gone.md": "x\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let group = Proposal.Group(summary: "Tidy up")
+        try ProposalStore.write(
+            Proposal(
+                id: "drop-gone", notePath: "Gone.md", base: nil, body: "", agent: "t",
+                summary: "Delete Gone", kind: .delete, group: group
+            ),
+            in: root
+        )
+        try ProposalStore.write(
+            Proposal(
+                id: "edit-a", notePath: "A.md", base: "one\n", body: "two\n", agent: "t",
+                summary: "Reword A", group: group
+            ),
+            in: root
+        )
+
+        let host = ScriptedHost()
+        host.confirmations = [false]
+        let model = try await ready(model(root, host))
+        model.refreshProposals()
+        model.acceptGroup(try #require(model.pendingProposals.groups.first))
+
+        // Asked before anything was applied, so cancelling cancels the group
+        // rather than leaving its edits in and its deletes out.
+        #expect(host.asked == ["confirm: Delete Gone.md?"])
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Gone.md").path))
+        #expect(try String(contentsOf: root.appendingPathComponent("A.md"), encoding: .utf8)
+            == "one\n")
+        #expect(ProposalStore.all(in: root).count == 2)
+    }
+
+    @Test("Applying a delete from its review sheet does not ask a second time")
+    func reviewedDeleteDoesNotAskAgain() async throws {
+        let root = try vault(["Keep.md": "kept\n", "Gone.md": "x\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try ProposalStore.write(
+            Proposal(
+                id: "drop-gone", notePath: "Gone.md", base: nil, body: "", agent: "t",
+                summary: "Delete Gone", kind: .delete
+            ),
+            in: root
+        )
+
+        let host = ScriptedHost()
+        // Deliberately empty: `ScriptedHost` answers no when it runs out, so
+        // an alert appearing here would refuse the delete and the file would
+        // survive. The test cannot pass by accident.
+        host.confirmations = []
+        let model = try await ready(model(root, host))
+        model.refreshProposals()
+        let waiting = try #require(model.pendingProposals.structural.first)
+
+        // What the sheet's button does. The sheet named the file and said
+        // where it goes, so this press is the whole commitment.
+        model.applyStructural(waiting, confirmed: true)
+
+        #expect(host.asked.isEmpty, "asked: \(host.asked)")
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Gone.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Keep.md").path))
+        #expect(ProposalStore.all(in: root).isEmpty)
+    }
+
+    @Test("Deleting one file from the sidebar still asks about that file")
+    func singleDeleteStillAsks() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.confirmations = [true]
+        let model = try await ready(model(root, host))
+
+        model.delete(try item(model, "Note.md"))
+        #expect(host.asked == ["confirm: Delete Note?"])
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+    }
+
     // MARK: - Renaming
 
     @Test("A rename moves the file and repoints what pointed at it")
