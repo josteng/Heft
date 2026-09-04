@@ -320,7 +320,9 @@ struct EditorPane: View {
     private var context: RenderContext {
         var context = RenderContext(
             index: model.index, current: model.current, vaultRoot: model.vaultRoot,
-            strictLineBreaks: model.settings.strictLineBreaks,
+            strictLineBreaks: appearance.lineBreaks.strictLineBreaks(
+                vaultSetting: model.settings.strictLineBreaks
+            ),
             colorfulFormatting: appearance.colorfulFormattingEnabled,
             accentColor: appearance.accentColor,
             linkColor: appearance.linkColor,

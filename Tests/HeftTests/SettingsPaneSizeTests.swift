@@ -184,3 +184,36 @@ struct GeneralPreferenceTests {
             .isVisible(dailyNotesAreInScope: true, remembered: true))
     }
 }
+
+/// The two Appearance settings that are not colours.
+@Suite("Appearance settings")
+@MainActor
+struct AppearanceBehaviourTests {
+
+    @Test("How consecutive lines are read, and who decides")
+    func lineBreaks() {
+        // Following the vault is the default, so an upgrade cannot change how
+        // anybody's notes read: it has to pass both vault answers through.
+        #expect(LineBreakStyle.followTheVault.strictLineBreaks(vaultSetting: true))
+        #expect(!LineBreakStyle.followTheVault.strictLineBreaks(vaultSetting: false))
+
+        // The other two are the point of the setting: a plain folder of
+        // Markdown has no `.obsidian` to ask, and was stuck with the default.
+        #expect(!LineBreakStyle.aLineEach.strictLineBreaks(vaultSetting: true))
+        #expect(LineBreakStyle.oneParagraph.strictLineBreaks(vaultSetting: false))
+    }
+
+    @Test("A setting written by a later version is the default, not a crash")
+    func unknownStyleIsTheDefault() {
+        #expect(LineBreakStyle(rawValue: "somethingNew") == nil)
+    }
+
+    @Test("Folder arrows are off unless asked for")
+    func folderArrowsDefaultOff() {
+        let key = "dev.stenglein.Heft.appearance.folderArrows"
+        // An absent setting is false, which is what makes "off by default"
+        // the same statement as "nobody has said anything".
+        #expect(HeftDefaults.shared.object(forKey: key) == nil
+            || HeftDefaults.shared.bool(forKey: key) == AppearanceSettings.shared.showsFolderArrows)
+    }
+}

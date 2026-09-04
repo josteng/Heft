@@ -1290,7 +1290,9 @@ final class AppModel: ObservableObject {
         }
         let context = RenderContext(
             index: index, current: current, vaultRoot: vaultRoot,
-            strictLineBreaks: settings.strictLineBreaks,
+            strictLineBreaks: AppearanceSettings.shared.lineBreaks.strictLineBreaks(
+                vaultSetting: settings.strictLineBreaks
+            ),
             colorfulFormatting: appearance.colorfulFormattingEnabled,
             accentColor: ink(appearance.accentColor),
             linkColor: ink(appearance.linkColor),
