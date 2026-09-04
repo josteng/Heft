@@ -229,12 +229,28 @@ struct SidebarView: View {
         // it afterwards, and an `onChange` on a view that appears later never
         // sees the value it appeared *because of*. A task runs on appear too.
         //
-        // The wait is for the lazy stack to build the rows the newly opened
-        // folders revealed. Asking to scroll to a row that does not exist yet
-        // scrolls nowhere at all.
+        // Asking to scroll to a row that does not exist yet scrolls nowhere at
+        // all, and there are two separate reasons it might not exist.
+        //
+        // A note that was *just created* is on disk before it is in the tree:
+        // `reload` starts a rescan and returns, so the row arrives whenever
+        // the scan finishes. A fixed delay is a guess about that, and the
+        // guess was wrong — a new note never scrolled into view. So wait for
+        // the row itself, bounded, and give up quietly rather than hanging on
+        // a path that will never appear.
+        //
+        // Then the shorter wait, which is the original one: the lazy stack
+        // still has to build the rows inside the folders just expanded.
         .task(id: model.revealTarget) {
             guard let target = model.revealTarget else { return }
             selectedFolderPath = nil
+            for _ in 0..<60 {
+                if model.tree?.flattened().contains(where: { $0.relativePath == target }) == true {
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(25))
+                guard !Task.isCancelled else { return }
+            }
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.2)) {

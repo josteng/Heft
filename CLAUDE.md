@@ -793,6 +793,11 @@ nowhere to type.
 The row is **scrolled to**, through the same `revealTarget` request Reveal in
 Sidebar uses. After ⌘N the sidebar is usually showing another folder entirely,
 so a field appearing off screen reads as the note having been created nowhere.
+The scroll waits for the *row*, not for a fixed delay: `reload` starts a rescan
+and returns, so a note is on disk well before it is in the tree, and the
+existing 60ms wait was only ever sized for the lazy stack building rows inside
+folders that had just been expanded. Scrolling to an anchor that does not exist
+yet scrolls nowhere and reports nothing, which is exactly how it failed.
 
 The note is **not opened until it is named**. Opening it put a caret in the
 editor while the caret that matters is in the sidebar row: two insertion
