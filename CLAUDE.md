@@ -1196,6 +1196,20 @@ put two elements under one identifier in the same scroll namespace.
 - **Protection in `LiveDecorator` rejects any candidate that *intersects* a protected
   range.** So block constructs must be collected before inline spans are protected,
   or `# The $h(t)$ model` loses its heading entirely instead of nesting.
+- **A toolbar item costs title bar whether or not it draws anything.** The
+  scope picker was contributed from the sidebar and kept across a collapse as
+  a zero-width, zero-opacity, clipped item, on the theory that AppKit
+  sometimes forgot to restore an item that came and went. With the sidebar
+  hidden that pushed the sidebar toggle **80pt** from the traffic lights,
+  where Notes and the rest put it around 36, and nothing on screen said why:
+  the item is invisible, so all that shows is a toggle sitting too far right.
+  Framing the content to zero does not help, and neither does emptying it —
+  measured, and the obvious guess was wrong twice. `NSHostingController`
+  reports zero for both, because the cost is the item's *slot* rather than its
+  view, which no hosting measurement can see. The only fix is not to
+  contribute the item, and the way to find that is to remove things from the
+  real window and watch where the toggle lands (`screencapture -l<window>`,
+  then read off the traffic lights as a scale: they are 14pt each).
 - **Calendar visibility belongs in the View menu, not the window toolbar.** The
   `Show Calendar` command also has the `⇧⌘D` shortcut. Leave the system-provided
   `NavigationSplitView` sidebar toggle untouched.

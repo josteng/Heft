@@ -172,24 +172,24 @@ struct ContentView: View {
         }
     }
 
+    /// The scope picker, centred over the sidebar column.
+    ///
+    /// Contributed only while that column exists. An item's *slot* costs title
+    /// bar whatever is inside it: an empty one, or one framed to zero width,
+    /// still pushed the sidebar toggle 80pt from the traffic lights where
+    /// every other Mac app puts it around 36. Measured by removing this and
+    /// watching the toggle move 44pt left.
+    ///
+    /// It was kept across the collapse because fully removing it once made
+    /// AppKit forget to restore it when a very narrow sidebar was reopened.
+    /// That was with the item framed to zero rather than absent, which is a
+    /// different thing to ask of a toolbar; if it comes back, the fix is a
+    /// stable `id`, not an invisible item holding the door.
     @ToolbarContentBuilder
     private var sidebarToolbar: some ToolbarContent {
         if model.columnVisibility != .detailOnly {
             ToolbarSpacer(.flexible, placement: .status)
-        }
-        ToolbarItem(placement: .status) {
-            // Keep the toolbar item's identity stable across a collapse. Fully
-            // removing it made AppKit occasionally forget to restore it when
-            // a very narrow sidebar was reopened. A zero-width item also stays
-            // out of the overflow menu during the closing animation.
-            WorkspaceScopePicker()
-                .frame(width: model.columnVisibility == .detailOnly ? 0 : nil)
-                .opacity(model.columnVisibility == .detailOnly ? 0 : 1)
-                .clipped()
-                .allowsHitTesting(model.columnVisibility != .detailOnly)
-                .accessibilityHidden(model.columnVisibility == .detailOnly)
-        }
-        if model.columnVisibility != .detailOnly {
+            ToolbarItem(placement: .status) { WorkspaceScopePicker() }
             ToolbarSpacer(.flexible, placement: .status)
         }
     }
@@ -269,7 +269,8 @@ private struct WindowToolbarConfiguration: NSViewRepresentable {
 
 /// The window's browsing boundary belongs in the title bar: it describes the
 /// whole workspace, while the sidebar below is free to describe its contents.
-private struct WorkspaceScopePicker: View {
+/// Internal, not private, so a test can measure what it costs the title bar.
+struct WorkspaceScopePicker: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
