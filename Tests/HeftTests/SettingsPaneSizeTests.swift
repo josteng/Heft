@@ -217,3 +217,46 @@ struct AppearanceBehaviourTests {
             || HeftDefaults.shared.bool(forKey: key) == AppearanceSettings.shared.showsFolderArrows)
     }
 }
+
+/// Reveal is mostly a model change — which folders are open, and a request the
+/// sidebar answers — so most of it can be asked for without a window.
+@Suite("Reveal in the sidebar")
+@MainActor
+struct RevealTests {
+
+    @Test("Revealing a note opens every folder above it and asks the sidebar to scroll")
+    func revealOpensAncestors() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("reveal-\(UUID().uuidString)")
+        let deep = root.appendingPathComponent("Work/Projects/Heft")
+        try FileManager.default.createDirectory(at: deep, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "note".write(
+            to: deep.appendingPathComponent("Notes.md"), atomically: true, encoding: .utf8
+        )
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(
+                vaultPath: root.path, notePath: "Work/Projects/Heft/Notes.md"
+            )
+        )
+        defer { model.closeWorkspace() }
+        #expect(model.current?.relativePath == "Work/Projects/Heft/Notes.md")
+
+        model.expandedFolders = []
+        model.columnVisibility = .detailOnly
+        model.revealCurrentInSidebar()
+
+        // Every ancestor, not just the innermost: a note four deep was
+        // otherwise revealed behind three closed folders.
+        #expect(model.expandedFolders == ["Work", "Work/Projects", "Work/Projects/Heft"])
+        // The note itself is not a folder to open; it is what gets scrolled to.
+        #expect(model.revealTarget == "Work/Projects/Heft/Notes.md")
+        // And a hidden sidebar comes back, or the reveal happens off screen.
+        #expect(model.columnVisibility != .detailOnly)
+
+        model.finishReveal()
+        #expect(model.revealTarget == nil)
+    }
+}

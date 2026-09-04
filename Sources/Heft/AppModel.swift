@@ -150,6 +150,15 @@ final class AppModel: ObservableObject {
 
     // MARK: UI state
     @Published var isCalendarVisible = true
+
+    /// A note the sidebar has been asked to show, set by Reveal in Sidebar and
+    /// cleared by the sidebar once it has scrolled there.
+    ///
+    /// A request rather than a call, because the scrolling belongs to the view:
+    /// only the sidebar holds the `ScrollViewReader`, and only it knows which
+    /// of its three lists is showing. Everything a *model* can do about it —
+    /// opening the folders above the note, showing the column — happens here.
+    @Published var revealTarget: String?
     /// Driven explicitly rather than left to the system. Without this, a
     /// collapsed sidebar is restored on the next launch and the app reopens
     /// with no visible file tree. Lives here rather than as view state so the
@@ -752,6 +761,35 @@ final class AppModel: ObservableObject {
         guard let decoded = value.removingPercentEncoding else { return true }
         follow(WikiLinkParser.links(in: "[[\(decoded)]]").first ?? WikiLink(target: decoded))
         return true
+    }
+
+    /// Shows the open note in the file tree: opens every folder above it,
+    /// brings the sidebar back if it is hidden, and asks the sidebar to scroll.
+    ///
+    /// Quick Open and a wikilink both open a note without touching the tree, so
+    /// after either the sidebar is showing somewhere else entirely — and in a
+    /// vault of any size, finding out where a note actually lives meant
+    /// guessing at folders.
+    func revealCurrentInSidebar() {
+        guard let current else {
+            status = "No note to show"
+            return
+        }
+        if columnVisibility == .detailOnly { columnVisibility = .automatic }
+        // Every ancestor, so a note four deep is not revealed behind three
+        // closed folders. The note's own path is not a folder and is what the
+        // sidebar scrolls to.
+        let parts = current.relativePath.split(separator: "/").dropLast()
+        var path = ""
+        for part in parts {
+            path = path.isEmpty ? String(part) : path + "/" + part
+            expandedFolders.insert(path)
+        }
+        revealTarget = current.relativePath
+    }
+
+    func finishReveal() {
+        revealTarget = nil
     }
 
     // MARK: - Creating notes

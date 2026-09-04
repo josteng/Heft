@@ -232,6 +232,12 @@ struct HeftCommands: Commands {
             .keyboardShortcut(.toggleSidebar)
             Toggle("Show Calendar", isOn: binding(\.isCalendarVisible))
                 .keyboardShortcut(.toggleCalendar)
+            // Quick Open and a wikilink both open a note without touching the
+            // tree, so after either the sidebar is showing somewhere else and
+            // where the note actually lives is a guess.
+            Button("Reveal in Sidebar") { model?.revealCurrentInSidebar() }
+                .keyboardShortcut(.revealInSidebar)
+                .disabled(model?.current == nil)
             Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
             Toggle("Show Backlinks", isOn: binding(\.isInspectorVisible))
                 .keyboardShortcut(.toggleBacklinks)

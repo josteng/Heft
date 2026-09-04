@@ -46,6 +46,7 @@ struct AppCommandShortcut {
     static let searchVault = Self("searchVault")
     static let quickOpen = Self("quickOpen")
     static let commandPalette = Self("commandPalette")
+    static let revealInSidebar = Self("revealInSidebar")
 }
 
 extension View {
@@ -96,6 +97,15 @@ struct AppCommand: Identifiable {
             shortcut: .captureInbox,
             enabled: { $0.vaultRoot != nil },
             action: { $0.presentInboxCapture() }
+        ),
+        Self(
+            id: "revealInSidebar",
+            title: "Reveal in Sidebar",
+            symbol: "sidebar.leading",
+            searchTerms: "show find locate file tree folder where sidebar navigator",
+            shortcut: .revealInSidebar,
+            enabled: { $0.current != nil },
+            action: { $0.revealCurrentInSidebar() }
         ),
         Self(
             id: "reviewProposals",

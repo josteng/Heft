@@ -104,6 +104,16 @@ struct SidebarView: View {
         .onChange(of: model.scopePath) {
             selectedFolderPath = nil
         }
+        // Reveal has to happen here as well as in the tree, because the tree
+        // may not be what is showing: the sidebar could be on Tags, or filtered
+        // down to a search. Putting the list back is the part a view outside
+        // the tree has to do, and it is what makes the tree exist for the
+        // scroll below to reach.
+        .onChange(of: model.revealTarget) { _, target in
+            guard target != nil else { return }
+            mode = .files
+            filter = ""
+        }
         .onChange(of: model.tree) { _, tree in
             if let selectedFolderPath,
                tree?.flattened().contains(where: {
@@ -169,6 +179,7 @@ struct SidebarView: View {
     }
 
     private var treeList: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if let tree = model.scopedTree {
@@ -195,6 +206,24 @@ struct SidebarView: View {
         // useful, regardless of window height.
         .contentShape(.rect)
         .contextMenu { rootContextActions }
+        // `task(id:)` rather than `onChange`, because the tree may not have
+        // existed when the request was made: switching back from Tags builds
+        // it afterwards, and an `onChange` on a view that appears later never
+        // sees the value it appeared *because of*. A task runs on appear too.
+        //
+        // The wait is for the lazy stack to build the rows the newly opened
+        // folders revealed. Asking to scroll to a row that does not exist yet
+        // scrolls nowhere at all.
+        .task(id: model.revealTarget) {
+            guard let target = model.revealTarget else { return }
+            selectedFolderPath = nil
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(SidebarAnchor(path: target), anchor: .center)
+            }
+            model.finishReveal()
+        }
         // Anything in the list that is not a row is the vault root, which is
         // how something gets moved back out of a folder. Attached to the
         // scroll view rather than to its contents so it covers the whole
@@ -225,6 +254,7 @@ struct SidebarView: View {
                     .padding(.vertical, 2)
                     .allowsHitTesting(false)
             }
+        }
         }
     }
 
@@ -518,6 +548,16 @@ struct SidebarView: View {
     }
 }
 
+/// A row's scroll anchor.
+///
+/// Its own type rather than the row's path as a `String`: the tree's rows come
+/// from `ForEach` over `VaultItem`, whose `id` *is* that path, so an explicit
+/// `.id(path)` would put two elements under one identifier in the same scroll
+/// namespace and leave which one is scrolled to up to SwiftUI.
+struct SidebarAnchor: Hashable {
+    let path: String
+}
+
 private struct TreeRow: View {
     @EnvironmentObject private var model: AppModel
     let item: VaultItem
@@ -560,6 +600,7 @@ private struct TreeRow: View {
                 if isExpanded { model.expandedFolders.remove(item.relativePath) }
                 else { model.expandedFolders.insert(item.relativePath) }
             }
+            .id(SidebarAnchor(path: item.relativePath))
             .contextMenu {
                 FolderMenu(
                     item: item,
@@ -617,6 +658,7 @@ private struct TreeRow: View {
                 selectedFolderPath = nil
                 model.open(item: item)
             }
+            .id(SidebarAnchor(path: item.relativePath))
             .contextMenu {
                 FileMenu(
                     item: item,

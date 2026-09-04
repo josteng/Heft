@@ -100,6 +100,8 @@ public enum KeyboardShortcuts {
 
         .init(id: "quickOpen", title: "Quick open", key: "o", modifiers: [.command], group: .navigate, isNotable: true),
         .init(id: "commandPalette", title: "Command palette", key: "p", modifiers: [.command], group: .navigate, isNotable: true),
+        // ⇧⌘J is Xcode's Reveal in Project Navigator, which is this exactly.
+        .init(id: "revealInSidebar", title: "Show this note in the file tree", key: "j", modifiers: [.command, .shift], group: .navigate, isNotable: true),
 
         .init(id: "toggleSidebar", title: "Toggle sidebar", key: "s", modifiers: [.command, .shift], group: .view, isNotable: true),
         .init(id: "toggleCalendar", title: "Toggle calendar", key: "d", modifiers: [.command, .shift], group: .view, isNotable: true),

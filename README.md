@@ -366,6 +366,7 @@ ask it how to do something in the app.
 | ⇧⌘F | Search the vault |
 | ⌘O | Quick open |
 | ⌘P | Command palette |
+| ⇧⌘J | Show this note in the file tree |
 | ⇧⌘S | Toggle sidebar |
 | ⇧⌘D | Toggle calendar |
 | ⌥⌘B | Toggle backlinks |
