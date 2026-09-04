@@ -110,7 +110,7 @@ struct ReviewCenter: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .contextMenu {
-            Button("Accept All") { model.acceptGroup(group) }
+            Button("Accept All \(group.proposals.count) Changes") { model.acceptGroup(group) }
             Button("Discard", role: .destructive) { model.discardGroup(group) }
         }
     }
@@ -132,9 +132,17 @@ struct ReviewCenter: View {
     /// created. This button is the answer to that, and it was invisible.
     private func groupActions(_ group: ProposalGroup) -> some View {
         HStack(spacing: 6) {
-            Button("Accept All") { model.acceptGroup(group) }
-                .buttonStyle(.borderedProminent)
+            // Named with its count, because "Accept All" already means
+            // something else one sheet away: every *hunk* of the one proposal
+            // in front of you. Two scopes under one label is a thing you only
+            // learn by pressing the wrong one.
+            Button("Accept All \(group.proposals.count) Changes") {
+                model.acceptGroup(group)
+            }
+            .buttonStyle(.borderedProminent)
+            .lineLimit(1)
             Button("Discard", role: .destructive) { model.discardGroup(group) }
+                .buttonStyle(.bordered)
             Spacer(minLength: 0)
         }
         .controlSize(.small)
@@ -243,15 +251,21 @@ struct StructuralReviewView: View {
             }
 
             Divider()
+            // Every button says its style. Left to `.automatic`, the
+            // destructive role picked a different shape from the two beside
+            // it, so one footer held two corner radii.
             HStack {
                 Button("Discard Proposal", role: .destructive) { model.discard(proposal) }
+                    .buttonStyle(.bordered)
                 Spacer()
                 Button("Later") { dismiss() }
+                    .buttonStyle(.bordered)
                     .keyboardShortcut(.cancelAction)
                 Button(proposal.kind == .create ? "Create" : "Apply") {
                     if proposal.kind == .create { model.acceptAll(proposal) }
                     else { model.applyStructural(proposal) }
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             }
             .padding(12)

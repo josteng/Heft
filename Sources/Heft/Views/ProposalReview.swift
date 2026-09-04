@@ -197,13 +197,19 @@ struct ProposalReviewView: View {
         .padding(16)
     }
 
+    /// Every button says its style. Left to `.automatic`, the destructive role
+    /// picked a different shape from the two beside it, so one footer held two
+    /// corner radii.
     private var footer: some View {
         HStack {
             Button("Discard Proposal", role: .destructive) { model.discard(proposal) }
+                .buttonStyle(.bordered)
             Spacer()
             Button("Later") { dismiss() }
+                .buttonStyle(.bordered)
                 .keyboardShortcut(.cancelAction)
             Button("Accept All") { model.acceptAll(proposal) }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(diff.isEmpty)
         }
@@ -225,10 +231,11 @@ struct HunkCard: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Reject") { decide(false) }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                 Button("Accept") { decide(true) }
-                    .controlSize(.small)
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

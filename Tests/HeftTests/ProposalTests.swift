@@ -194,11 +194,14 @@ struct ProposalTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let same = Date(timeIntervalSince1970: 1_000)
+        // Ids given rather than defaulted: the tiebreak is *on* the id, and a
+        // defaulted UUID would decide the order at random, which is a test
+        // that passes or fails by luck rather than by the rule it names.
         for name in ["b", "a"] {
             try ProposalStore.write(
                 Proposal(
-                    notePath: "\(name).md", base: nil, body: "x\n", agent: "t",
-                    summary: name, createdAt: same
+                    id: name, notePath: "\(name).md", base: nil, body: "x\n",
+                    agent: "t", summary: name, createdAt: same
                 ),
                 in: root
             )
