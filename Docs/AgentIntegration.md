@@ -164,12 +164,20 @@ the same thing from the app. Three files:
   the markers is yours, including each file's own preamble, which is why they
   are not copies of one another.
 - `.claude/settings.json`, which is what turns "do not write notes directly"
-  from a request into a rule. `Edit(**)`, `Write(**)` and `NotebookEdit(**)`
-  are denied, and `Bash(heft:*)` is allowed without a prompt.
+  from a request into a rule. `Edit(**)` is denied, and `Bash(heft:*)` is
+  allowed without a prompt.
 
-  The deny rules carry a path rather than being bare tool names on purpose:
+  One rule, and it has to be spelled `Edit`: Claude Code matches a path-scoped
+  rule against the file a tool would touch, and only `Edit(path)` takes part in
+  that check, so it covers Write and NotebookEdit too. `Write(**)` and
+  `NotebookEdit(**)` are rejected as rules that match nothing, and a settings
+  file carrying one is set aside entirely, leaving the vault with no rule at
+  all. Heft wrote those two until version 10 of the guide and now removes them
+  when it finds them.
+
+  The deny rule carries a path rather than being a bare tool name on purpose:
   the workflow below writes a scratch file in `/tmp` and reads it back with
-  `--from`, so denying the tools outright would make the setup that enforces
+  `--from`, so denying the tool outright would make the setup that enforces
   the contract the setup that prevents following it. Your own entries in that
   file are merged with, never replaced, and a file that is not valid JSON is
   left alone rather than overwritten.

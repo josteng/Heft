@@ -446,6 +446,48 @@ struct AgentCLITests {
         // A fresh vault gets a file that satisfies its own check.
         #expect(AgentPermissions.isSatisfied(by: AgentPermissions.merged(into: nil)))
         #expect(!AgentPermissions.isSatisfied(by: "{}"))
+
+        // One rule, spelled the one way the check reads. A deny rule Claude
+        // Code cannot match is worse than none: it warns and then sets the
+        // whole file aside.
+        #expect(AgentPermissions.deny == ["Edit(**)"])
+        #expect(!AgentPermissions.deny.contains(where: AgentPermissions.superseded.contains))
+    }
+
+    @Test("Setup takes out the rules an earlier Heft wrote that Claude Code rejects")
+    func supersededPermissionsAreRemoved() throws {
+        // What `heft agent-setup` wrote up to guide version 10, plus a rule of
+        // the user's that has to survive.
+        let root = try vault([
+            "Note.md": "body\n",
+            ".claude/settings.json": """
+                {"permissions": {"allow": ["Bash(heft:*)"], "deny": \
+                ["Edit(**)", "Write(**)", "NotebookEdit(**)", "Bash(rm:*)"]}}
+                """,
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let before = try String(
+            contentsOf: root.appendingPathComponent(AgentPermissions.path), encoding: .utf8
+        )
+        // Every rule Heft wants is already there, and the file is still not
+        // satisfied: this is what makes setup rewrite it rather than skip it.
+        #expect(!AgentPermissions.isSatisfied(by: before))
+
+        #expect(try run(["agent-setup", root.path]).status == 0)
+        let text = try String(
+            contentsOf: root.appendingPathComponent(AgentPermissions.path), encoding: .utf8
+        )
+        #expect(AgentPermissions.isSatisfied(by: text))
+
+        let permissions = try #require(
+            AgentPermissions.parsed(text)?["permissions"] as? [String: Any]
+        )
+        let denied = try #require(permissions["deny"] as? [String])
+        #expect(denied.contains("Edit(**)"))
+        for rule in AgentPermissions.superseded { #expect(!denied.contains(rule)) }
+        // Removing ours must not take theirs with it.
+        #expect(denied.contains("Bash(rm:*)"))
     }
 
     // MARK: - attachment

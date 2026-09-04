@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 10
+    public static let version = 11
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -181,7 +181,8 @@ public enum AgentGuide {
         from there.
 
         Claude Code is held to this by `.claude/settings.json`, which denies
-        those tools inside the vault and allows `heft` without asking. Writing
+        editing any file inside the vault and allows `heft` without asking.
+        Writing
         outside the vault — a scratch file in `/tmp` — is untouched, because
         that is how the workflow below works. Other agents are on their honour:
         the rule is the same either way.
