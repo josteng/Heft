@@ -293,7 +293,9 @@ public enum AgentCLI {
     }
 
     private static func drop(root: URL, arguments: [String]) {
-        let proposal = resolve(arguments.first, in: root, verb: "drop")
+        // The whole id, not a prefix: this is the one verb that cannot be
+        // undone, and `heft proposals` prints the id ready to copy.
+        let proposal = resolve(arguments.first, in: root, verb: "drop", exactly: true)
         ProposalStore.remove(proposal.id, in: root)
         print("dropped \(proposal.id)")
         exit(0)
@@ -446,15 +448,23 @@ public enum AgentCLI {
 
     /// The one proposal an id names, or an exit. `ProposalStore.match` decides;
     /// this only turns each answer into a message and a status.
-    private static func resolve(_ id: String?, in root: URL, verb: String) -> Proposal {
+    private static func resolve(
+        _ id: String?, in root: URL, verb: String, exactly: Bool = false
+    ) -> Proposal {
         let proposals = ProposalStore.all(in: root)
-        switch ProposalStore.match(id, among: proposals) {
+        switch ProposalStore.match(id, among: proposals, exactly: exactly) {
         case let .one(found):
             return proposals.first { $0.id == found }!
         case .missing:
             fail("usage: heft \(verb) <vault> <proposal-id>")
         case let .unknown(given):
-            fail("no such proposal: \(given)")
+            // A prefix that would have matched is worth saying, or "no such
+            // proposal: tighten" is baffling next to a list showing
+            // `tighten-the-opening`.
+            let near = proposals.filter { $0.id.hasPrefix(given) }.map(\.id)
+            guard !near.isEmpty else { fail("no such proposal: \(given)") }
+            fail("no proposal is called \(given). \(verb) needs the whole id: "
+                + near.joined(separator: ", "))
         case let .ambiguous(candidates):
             fail("that names \(candidates.count) proposals: "
                 + candidates.joined(separator: ", "))

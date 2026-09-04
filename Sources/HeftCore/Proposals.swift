@@ -326,9 +326,26 @@ public enum ProposalStore {
         case ambiguous([String])
     }
 
-    public static func match(_ id: String?, among proposals: [Proposal]) -> Match {
+    /// - Parameter exactly: require the whole id rather than a prefix.
+    ///
+    ///   True for anything destructive. A prefix names a *different* set of
+    ///   proposals at different times: `tighten-the-o` uniquely names one
+    ///   today, and next week — that one gone, "tighten the outline" arrived —
+    ///   the same command deletes something else without ever being
+    ///   ambiguous. The ambiguity check only sees collisions that exist at the
+    ///   moment it runs.
+    ///
+    ///   Prefixes existed because nobody can type a UUID. Now that an id is
+    ///   the words of its summary, and `heft proposals` prints it ready to
+    ///   copy, that reason is gone for the one verb that cannot be undone.
+    ///   `diff` keeps them, because reading the wrong proposal costs nothing.
+    public static func match(
+        _ id: String?, among proposals: [Proposal], exactly: Bool = false
+    ) -> Match {
         guard let id, !id.isEmpty else { return .missing }
-        let hits = proposals.filter { $0.id.hasPrefix(id) }.map(\.id)
+        let hits = proposals
+            .filter { exactly ? $0.id == id : $0.id.hasPrefix(id) }
+            .map(\.id)
         guard let first = hits.first else { return .unknown(id) }
         return hits.count == 1 ? .one(first) : .ambiguous(hits)
     }

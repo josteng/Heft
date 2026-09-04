@@ -135,16 +135,36 @@ struct AgentCLITests {
         #expect(ProposalStore.all(in: root).count == 1)
     }
 
-    @Test("A real id still drops by prefix")
-    func prefixStillWorks() throws {
+    /// Dropping takes the **whole** id, and reading takes a prefix.
+    ///
+    /// A prefix names a different set of proposals at different times, and the
+    /// ambiguity check only sees collisions that exist while it runs: a
+    /// prefix that is unique today deletes something else next week, without
+    /// ever being reported as ambiguous. That is a fine trade for `diff`,
+    /// where the cost of the wrong one is reading it, and not for `drop`.
+    @Test("Dropping needs the whole id; diffing does not")
+    func dropIsExactAndDiffIsNot() throws {
         let root = try vault(["Note.md": "body\n"])
         defer { try? FileManager.default.removeItem(at: root) }
-        let proposal = Proposal(
-            notePath: "Note.md", base: "body\n", body: "new\n", agent: "t", summary: "s"
+        try ProposalStore.write(
+            Proposal(
+                id: "tighten-the-opening", notePath: "Note.md",
+                base: "body\n", body: "new\n", agent: "t", summary: "Tighten the opening"
+            ),
+            in: root
         )
-        try ProposalStore.write(proposal, in: root)
 
-        #expect(try run(["drop", root.path, String(proposal.id.prefix(6))]).status == 0)
+        // Reading by prefix, as before.
+        #expect(try run(["diff", root.path, "tighten"]).status == 0)
+
+        // Dropping by prefix, no longer. And it says what the whole id is,
+        // rather than "no such proposal" beside a list that plainly shows one.
+        let refused = try run(["drop", root.path, "tighten"])
+        #expect(refused.status != 0)
+        #expect(refused.error.contains("tighten-the-opening"))
+        #expect(ProposalStore.all(in: root).count == 1)
+
+        #expect(try run(["drop", root.path, "tighten-the-opening"]).status == 0)
         #expect(ProposalStore.all(in: root).isEmpty)
     }
 
@@ -164,6 +184,10 @@ struct AgentCLITests {
         #expect(ProposalStore.match(nil, among: all) == .missing)
         #expect(ProposalStore.match("zz", among: all) == .unknown("zz"))
         #expect(ProposalStore.match("abc", among: all) == .ambiguous(["abcdef", "abc123"]))
+        // Exactly: a prefix names nothing, however unambiguous it looks.
+        #expect(ProposalStore.match("abcd", among: all, exactly: true) == .unknown("abcd"))
+        #expect(ProposalStore.match("abcdef", among: all, exactly: true) == .one("abcdef"))
+        #expect(ProposalStore.match("", among: all, exactly: true) == .missing)
         // Nothing to match against is "no such proposal", not "give me one".
         #expect(ProposalStore.match("abc", among: []) == .unknown("abc"))
     }
@@ -538,9 +562,10 @@ struct AgentCLITests {
         #expect(proposed.text.contains("proposed tighten-the-opening"))
         #expect(ProposalStore.all(in: root).first?.id == "tighten-the-opening")
 
-        // The point of a readable id is that a person can type a bit of it.
+        // The point of a readable id is that a person can type it, and read
+        // it back from `heft proposals` to hand to another verb.
         #expect(try run(["diff", root.path, "tighten"]).status == 0)
-        #expect(try run(["drop", root.path, "tighten"]).status == 0)
+        #expect(try run(["drop", root.path, "tighten-the-opening"]).status == 0)
         #expect(ProposalStore.all(in: root).isEmpty)
     }
 

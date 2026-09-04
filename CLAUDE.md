@@ -576,10 +576,17 @@ Three decisions carry it:
 An id is a **name**, not a UUID: `ProposalStore.identifier` slugs the summary,
 or the note when there is no summary, because the default summary is the same
 words every time. It is also the filename, so the slug can produce neither a
-slash, a dot nor an empty string. `ProposalStore.match` resolves a prefix and
+slash, a dot nor an empty string. `ProposalStore.match` resolves it, and
 answers `.missing` for an empty one — `heft drop "$ID"` from a shell that
 expanded `$ID` to nothing used to delete whichever proposal was first, and
 report success.
+
+`drop` passes `exactly:`, and `diff` does not. A prefix names a *different* set
+of proposals at different times: one that is unique today deletes something else
+next week, and the ambiguity check only ever sees collisions that exist while it
+runs. That is a fine trade where the cost of the wrong one is reading it, and
+not for the verb that cannot be undone — and the reason prefixes existed at all,
+that nobody can type a UUID, went away when ids became words.
 
 `Docs/AgentIntegration.md` has the verbs and the `CLAUDE.md` snippet that makes
 Claude Code reach for `propose` instead of `Write`.

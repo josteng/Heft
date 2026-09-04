@@ -46,10 +46,15 @@ An id is a name, taken from the `--summary`: `tighten-the-opening`, and
 nobody can read, say out loud or type, and which a review listing would have
 shown as a column of hex. A proposal with no summary is named after its note.
 
-Any prefix long enough to name one proposal will do. An empty string is not: it
-is a prefix of every id, and `heft drop "$ID"` from a shell that expanded `$ID`
-to nothing used to delete whichever proposal happened to be first, and report
-success. A prefix matching two is refused rather than resolved to the first.
+`heft diff` takes any prefix long enough to name one proposal. **`heft drop`
+takes the whole id**, because it cannot be undone: a prefix names a different
+set of proposals at different times, so one that is unique today deletes
+something else next week without ever being reported as ambiguous. Reading the
+wrong proposal costs nothing; dropping it costs the work.
+
+An empty string is refused outright — it is a prefix of every id, and
+`heft drop "$ID"` from a shell that expanded `$ID` to nothing used to delete
+whichever proposal happened to be first, and report success.
 
 `heft rename <vault> <path> <new>` applies immediately and is the exception:
 `--dry-run` says what it would do first, and is the right thing to show
