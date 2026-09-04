@@ -176,6 +176,43 @@ struct VaultHostTests {
         #expect(drawn(strict: true) == "asfasdfasdf asfdasdfasdfasdf asdfasdfasdf")
     }
 
+    // MARK: - Opening a note leaves the tree alone
+
+    @Test("Opening a note does not unfold the sidebar around it")
+    func openingDoesNotExpandFolders() async throws {
+        let root = try vault([
+            "Daily Notes/2026-09-04.md": "# Today\n",
+            "Note.md": "# Note\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost(), open: "Note.md"))
+        #expect(model.expandedFolders.isEmpty)
+
+        // What clicking a date in the calendar does.
+        model.open(item: try await item(model, awaiting: "Daily Notes/2026-09-04.md"))
+        #expect(model.current?.relativePath == "Daily Notes/2026-09-04.md")
+
+        // The folder stays folded. It used to unfold on every open, which is
+        // a year of dailies appearing under a date click, and only half a
+        // reveal: nothing scrolled, so the note was in there somewhere.
+        #expect(model.expandedFolders.isEmpty, "got \(model.expandedFolders)")
+        #expect(model.revealTarget == nil)
+    }
+
+    @Test("Reveal in Sidebar is the one that unfolds, and scrolls too")
+    func revealUnfoldsAndScrolls() async throws {
+        let root = try vault(["Projects/Deep/Thing.md": "# Thing\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost(), open: "Projects/Deep/Thing.md"))
+
+        model.revealCurrentInSidebar()
+        // Every ancestor, or a note three deep is revealed behind two closed
+        // folders.
+        #expect(model.expandedFolders.contains("Projects"))
+        #expect(model.expandedFolders.contains("Projects/Deep"))
+        #expect(model.revealTarget == "Projects/Deep/Thing.md")
+    }
+
     // MARK: - Creating a note
 
     @Test("With a sidebar, ⌘N asks it to name the note in place rather than prompting")

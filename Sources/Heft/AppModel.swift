@@ -612,6 +612,18 @@ final class AppModel: ObservableObject {
         session?.recordRecent(relativePath)
     }
 
+    /// Opening a note does **not** rearrange the sidebar.
+    ///
+    /// It used to expand every folder above the note on every open, which
+    /// meant clicking a date in the calendar unfolded `Daily Notes` and left
+    /// it unfolded, over and over, for a note you were not browsing to. And it
+    /// was only half a reveal: expanding is not `revealTarget`, so nothing
+    /// scrolled and the note you had just opened was somewhere in a folder
+    /// that had just grown by a year of dailies.
+    ///
+    /// `revealCurrentInSidebar` is the deliberate version and does both
+    /// halves. A setting to turn the old behaviour off would have been a
+    /// setting for a half-finished one.
     private func open(_ ref: NoteRef, recordingNavigation: Bool) {
         guard ref.isMarkdown else {
             host.openExternally(ref.url)
@@ -652,7 +664,6 @@ final class AppModel: ObservableObject {
             saveConflict = nil
             lastKnownModification = modificationDate(of: ref.url)
             status = ref.relativePath
-            revealInTree(ref.relativePath)
             if let previous, previous.url.standardizedFileURL != ref.url.standardizedFileURL {
                 registry.release(previous.url, for: workspaceID)
             }
@@ -2223,16 +2234,6 @@ final class AppModel: ObservableObject {
 
     /// Expands every ancestor folder so a note opened from search or the
     /// calendar becomes visible in the sidebar.
-    private func revealInTree(_ relativePath: String) {
-        var parts = relativePath.split(separator: "/").map(String.init)
-        parts.removeLast()
-        var prefix = ""
-        for part in parts {
-            prefix = prefix.isEmpty ? part : "\(prefix)/\(part)"
-            expandedFolders.insert(prefix)
-        }
-    }
-
     func toggleSidebar() {
         withAnimation(.snappy(duration: 0.2)) {
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
