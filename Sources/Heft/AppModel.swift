@@ -2125,11 +2125,13 @@ final class AppModel: ObservableObject {
     func refreshProposals() {
         guard let vaultRoot else {
             proposals = []
+            pendingProposals = ProposalStore.Pending()
             return
         }
         let found = ProposalStore.all(in: vaultRoot)
         guard found != proposals else { return }
         proposals = found
+        pendingProposals = ProposalStore.sort(found)
         if let reviewing, !found.contains(where: { $0.id == reviewing.id }) {
             self.reviewing = nil
         }
@@ -2145,9 +2147,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Everything waiting, sorted the way the review centre lists it.
-    var pendingProposals: ProposalStore.Pending {
-        ProposalStore.sort(proposals)
-    }
+    ///
+    /// Stored rather than computed. The review centre reads it from its body,
+    /// which SwiftUI re-runs whenever `AppModel` publishes — every keystroke —
+    /// and sorting a list that changes only when a proposal arrives is work
+    /// done thousands of times for one answer.
+    @Published private(set) var pendingProposals = ProposalStore.Pending()
 
     /// The group the open note's proposal belongs to, if it belongs to one.
     ///

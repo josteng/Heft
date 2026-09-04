@@ -177,12 +177,34 @@ extension EnvironmentValues {
     }
 }
 
+/// Whether the file tree draws a chevron beside a folder.
+///
+/// Through the environment rather than read from the shared settings in each
+/// row. A sidebar row is one of hundreds, `AppModel` publishes on every
+/// keystroke, and an `@ObservedObject` in a row would open a Combine
+/// subscription per row per keystroke to answer a question the whole tree
+/// shares. Reading the environment costs nothing and the modifier below
+/// observes once, at the scene root.
+private struct FolderArrowsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var showsFolderArrows: Bool {
+        get { self[FolderArrowsKey.self] }
+        set { self[FolderArrowsKey.self] = newValue }
+    }
+}
+
 private struct AppAccent: ViewModifier {
     @ObservedObject private var appearance = AppearanceSettings.shared
 
     func body(content: Content) -> some View {
         let accent = Color(nsColor: appearance.accentColor)
-        return content.tint(accent).environment(\.appAccent, accent)
+        return content
+            .tint(accent)
+            .environment(\.appAccent, accent)
+            .environment(\.showsFolderArrows, appearance.showsFolderArrows)
     }
 }
 

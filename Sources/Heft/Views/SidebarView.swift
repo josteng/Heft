@@ -911,10 +911,11 @@ private struct FolderMenu: View {
 
 private struct NoteRow: View {
     @Environment(\.appAccent) private var accent
-    // Observed rather than read from the singleton: a SwiftUI view that only
-    // reads `.shared` keeps whatever it drew first, so turning the arrows on
-    // would take a relaunch to show.
-    @ObservedObject private var appearance = AppearanceSettings.shared
+    // From the environment, not from an `@ObservedObject` here: this view is
+    // one row of hundreds and `AppModel` publishes on every keystroke, so
+    // observing per row opened a subscription per row per keystroke to answer
+    // a question the whole tree shares. `appAccentTint` observes once.
+    @Environment(\.showsFolderArrows) private var showsFolderArrows
 
     let name: String
     let detail: String?
@@ -1000,7 +1001,7 @@ private struct NoteRow: View {
             // tree had no single left edge to read down. Against the right
             // edge every chevron lines up in its own column instead, and the
             // icons of everything at one depth finally agree.
-            if let disclosure, appearance.showsFolderArrows {
+            if let disclosure, showsFolderArrows {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)

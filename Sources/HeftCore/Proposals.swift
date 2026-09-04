@@ -365,6 +365,8 @@ public enum ProposalStore {
         public var edits: [Proposal] = []
         public var structural: [Proposal] = []
 
+        public init() {}
+
         public var isEmpty: Bool {
             groups.isEmpty && edits.isEmpty && structural.isEmpty
         }
