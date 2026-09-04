@@ -543,4 +543,149 @@ struct AgentCLITests {
         #expect(try run(["drop", root.path, "tighten"]).status == 0)
         #expect(ProposalStore.all(in: root).isEmpty)
     }
+
+    // MARK: - Kinds and groups
+
+    @Test("A proposal from before kinds existed still loads")
+    func oldProposalsStillDecode() throws {
+        let root = try vault(["Note.md": "one\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: ProposalStore.directory(in: root), withIntermediateDirectories: true
+        )
+        // Exactly the shape Heft wrote before `kind`, `destination` and
+        // `group`: the synthesised Codable would have rejected all of these,
+        // and the failure mode is a proposal silently vanishing from the list.
+        try #"""
+            {
+              "agent" : "claude-code",
+              "base" : "one\n",
+              "body" : "two\n",
+              "createdAt" : "2026-01-01T00:00:00Z",
+              "id" : "old-one",
+              "notePath" : "Note.md",
+              "summary" : "An older proposal"
+            }
+            """#.write(
+                to: ProposalStore.directory(in: root).appendingPathComponent("old-one.json"),
+                atomically: true, encoding: .utf8
+            )
+
+        let loaded = try #require(ProposalStore.all(in: root).first)
+        #expect(loaded.id == "old-one")
+        #expect(loaded.kind == .edit, "it carried a base, so it was an edit")
+        #expect(loaded.group == nil)
+        #expect(loaded.destination == nil)
+    }
+
+    @Test("A proposal for a note that did not exist reads as a create")
+    func oldNewNoteProposalIsACreate() throws {
+        let root = try vault(["Other.md": "x\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: ProposalStore.directory(in: root), withIntermediateDirectories: true
+        )
+        try #"""
+            {
+              "agent" : "claude-code",
+              "body" : "hello\n",
+              "createdAt" : "2026-01-01T00:00:00Z",
+              "id" : "old-new",
+              "notePath" : "Fresh.md",
+              "summary" : "A note that was not there"
+            }
+            """#.write(
+                to: ProposalStore.directory(in: root).appendingPathComponent("old-new.json"),
+                atomically: true, encoding: .utf8
+            )
+        // Nil `base` is exactly what "the note does not exist yet" used to mean.
+        #expect(ProposalStore.all(in: root).first?.kind == .create)
+    }
+
+    @Test("Deleting and moving are proposable, and read no body")
+    func structuralProposals() throws {
+        let root = try vault(["Old/C.md": "x\n", "Keep.md": "y\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["propose", root.path, "Old/C.md", "--move", "New/C.md"]).status == 0)
+        #expect(try run(["propose", root.path, "Keep.md", "--delete"]).status == 0)
+
+        let all = ProposalStore.all(in: root)
+        let move = try #require(all.first { $0.kind == .move })
+        #expect(move.destination == "New/C.md")
+        #expect(move.isStructural)
+        #expect(move.headline == "Move Old/C.md to New/C.md")
+        let remove = try #require(all.first { $0.kind == .delete })
+        #expect(remove.isStructural)
+        #expect(remove.body.isEmpty)
+
+        // Nothing happened to the vault: it is a proposal.
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Old/C.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Keep.md").path))
+    }
+
+    @Test("A structural proposal is refused when it cannot be carried out")
+    func structuralProposalsAreChecked() throws {
+        let root = try vault(["A.md": "x\n", "B.md": "y\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Better to fail at the command than at review time, which is the same
+        // rule --replace follows for its anchors.
+        #expect(try run(["propose", root.path, "Nope.md", "--delete"]).status != 0)
+        #expect(try run(["propose", root.path, "A.md", "--move", "B.md"]).status != 0)
+        #expect(ProposalStore.all(in: root).isEmpty)
+    }
+
+    @Test("Repeating the same words joins one change")
+    func groupsJoinByTheirWords() throws {
+        let root = try vault(["A.md": "one\n", "B.md": "one\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for note in ["A.md", "B.md"] {
+            #expect(try run(
+                ["propose", root.path, note, "--group", "Rename the concept"],
+                stdin: "two\n"
+            ).status == 0)
+        }
+        let pending = ProposalStore.pending(in: root)
+        #expect(pending.groups.count == 1)
+        #expect(pending.groups.first?.summary == "Rename the concept")
+        #expect(pending.groups.first?.proposals.count == 2)
+        #expect(pending.edits.isEmpty)
+    }
+
+    @Test("What a review list shows: groups, edits, and structural changes")
+    func sortingPending() {
+        func edit(_ id: String, group: String? = nil) -> Proposal {
+            Proposal(
+                id: id, notePath: "\(id).md", base: "a", body: "b",
+                agent: "t", summary: id,
+                group: group.map { Proposal.Group(summary: $0) }
+            )
+        }
+        func removal(_ id: String, group: String? = nil) -> Proposal {
+            Proposal(
+                id: id, notePath: "\(id).md", base: nil, body: "",
+                agent: "t", summary: id, kind: .delete,
+                group: group.map { Proposal.Group(summary: $0) }
+            )
+        }
+
+        let sorted = ProposalStore.sort([
+            edit("one", group: "rename it"),
+            edit("two", group: "rename it"),
+            removal("three", group: "rename it"),
+            edit("four"),
+            removal("five"),
+            // A group of one is not a group: an agent that names a change
+            // while touching a single note has described that proposal, and a
+            // heading with one row under it is a fold with nothing in it.
+            edit("six", group: "a lone change"),
+        ])
+
+        #expect(sorted.groups.count == 1)
+        #expect(sorted.groups.first?.proposals.map(\.id) == ["one", "two", "three"])
+        #expect(sorted.edits.map(\.id) == ["four", "six"])
+        #expect(sorted.structural.map(\.id) == ["five"])
+        #expect(sorted.count == 6)
+    }
 }

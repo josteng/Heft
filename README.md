@@ -221,6 +221,20 @@ and **Review**. Each hunk gets its own Accept and Reject. Accepting one applies
 it and rewrites the proposal to hold only what is still undecided, so a
 half-reviewed proposal is a smaller proposal, never a lost one.
 
+Not every change is one note's text, so the sidebar keeps a **review centre**
+listing everything waiting. A new note has no note to draw a banner above; a
+delete or a move is a fact about the tree rather than about a page; and a change
+across twelve notes is one change, not twelve, once the agent names it:
+
+```bash
+heft propose . "Old/Note.md" --move "New/Note.md" --summary "..."
+heft propose . "Stale.md" --delete --summary "..."
+heft propose . "A.md" --from /tmp/a.md --group "rename the concept" --summary "..."
+```
+
+A note whose change belongs to a group says so on its banner and points at the
+centre. One banner per note, ever.
+
 Four details that make it trustworthy rather than a demo:
 
 - The diff is computed against the note **as it is now**, not against what the

@@ -31,6 +31,10 @@ heft propose <vault> <note.md> \       # the new body arrives on stdin
 heft propose <vault> <note.md> --from /tmp/new-body.md
 heft propose <vault> <note.md> --replace   # anchored old/new pairs instead
 
+heft propose <vault> <path> --delete    # propose removing it; reads no body
+heft propose <vault> <path> --move <to> # propose moving it, repointing links
+heft propose <vault> <note> --group "…" # join several into one change
+
 heft changes <vault> <note>            # what moved since you last read it
 heft proposals <vault>                 # what is waiting for review
 heft diff <vault> <proposal-id>        # what one of them would change
@@ -47,10 +51,31 @@ is a prefix of every id, and `heft drop "$ID"` from a shell that expanded `$ID`
 to nothing used to delete whichever proposal happened to be first, and report
 success. A prefix matching two is refused rather than resolved to the first.
 
-`heft rename <vault> <path> <new>` is the one structural edit here, and it is
-not a proposal: a rename moves a file and rewrites the links in every note that
-pointed at it, which is not the new body of one note. `--dry-run` says what it
-would do first, and is the right thing to show somebody before doing it.
+`heft rename <vault> <path> <new>` applies immediately and is the exception:
+`--dry-run` says what it would do first, and is the right thing to show
+somebody before doing it. `propose --move` is the same change asked for rather
+than made, and is what to reach for when nobody is watching the terminal.
+
+### Kinds, and changes that span notes
+
+A proposal used to be one note's new body, and two things ran that out. A
+proposal for a note that **does not exist** had no note to draw a banner above,
+so it could not be reached from the app at all. And a change across twelve
+notes was twelve unrelated proposals: accepting seven left the vault
+half-changed with nothing recording that they belonged together.
+
+So a proposal carries a **kind** — edit, create, delete, move — and an optional
+**group**. A group's id is the slug of its summary, which is why an agent joins
+one by repeating the same words rather than by passing an id around. A group of
+one is not a group.
+
+Deleting and moving read no body: there is nothing to accept part of, so they
+are answered whole. Accepting a group applies its edits first and its moves and
+deletes afterwards, because a move renames the file the edits were written
+against. It is deliberately **not atomic**: refusing to apply eleven changes
+because the twelfth is stale is worse than applying eleven, and what is left
+unanswered stays in the list as a smaller change — the same rule a
+part-reviewed proposal already followed.
 
 Also read-only, and better than `grep` at every one of these:
 `heft outline` for a note's headings, `heft links` and `heft backlinks` for the
@@ -97,8 +122,17 @@ A proposal is a JSON file under `<vault>/.heft/proposals/`. The vault watcher
 already sees that folder, so the app notices within its usual coalescing
 latency — no polling, no extra watcher.
 
-- A banner appears above the note the proposal is about: the summary, the agent,
-  `+n −m in k places`, and Review / Discard.
+- **The review centre** sits at the top of the sidebar and lists everything
+  waiting: groups, single edits, and structural changes. It is the only place
+  that can show a change with no note behind it.
+- A banner still appears above the note a proposal is about: the summary, the
+  agent, `+n −m in k places`, and Review / Discard. Seeing a diff where you are
+  reading it is the part that already worked, and centralising it would have
+  been a downgrade.
+- **One banner per note, ever.** A change that belongs to a group says so on
+  that banner and points at the centre, rather than a second banner stacking on
+  the first. A delete or a move never appears in a banner at all: a bar over the
+  page offering to delete the page is the wrong place to decide that.
 - **Review** opens the hunks, each with its own Accept and Reject.
 - Accepting one hunk applies it and rewrites the proposal to hold only what is
   still undecided. Rejecting one removes it from the proposal for good. So a

@@ -316,6 +316,208 @@ struct ProposalTests {
         model.closeWorkspace()
     }
 
+    // MARK: - The review centre
+
+    @Test("A proposal for a note that does not exist can be reviewed and creates it")
+    @MainActor
+    func createProposalThroughTheEditor() async throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "anchor".write(
+            to: root.appendingPathComponent("Anchor.md"), atomically: true, encoding: .utf8
+        )
+        try ProposalStore.write(
+            Proposal(
+                notePath: "Heft/Before Release.md", base: nil, body: "# TODO\n\n- one\n",
+                agent: "claude-code", summary: "Add the release list", kind: .create
+            ),
+            in: root
+        )
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Anchor.md")
+        )
+        defer { model.closeWorkspace() }
+        model.refreshProposals()
+
+        // The bug this closes: it is not the open note's, so the banner never
+        // showed it and there was no other way in.
+        #expect(model.proposalsForCurrentNote.isEmpty)
+        let waiting = try #require(model.pendingProposals.edits.first)
+        #expect(waiting.kind == .create)
+
+        model.review(waiting)
+        #expect(model.reviewing?.id == waiting.id, "it is reviewed where it stands")
+        model.acceptAll(waiting)
+
+        let created = await waitUntil {
+            (try? String(
+                contentsOf: root.appendingPathComponent("Heft/Before Release.md"), encoding: .utf8
+            )) == "# TODO\n\n- one\n"
+        }
+        #expect(created, "the folder it needed was made and the note written")
+        #expect(model.proposals.isEmpty)
+    }
+
+    @Test("A banner over a note never offers to delete or move it")
+    @MainActor
+    func structuralProposalsStayOutOfTheBanner() throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "body\n".write(
+            to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8
+        )
+        try ProposalStore.write(
+            Proposal(
+                notePath: "Note.md", base: nil, body: "",
+                agent: "t", summary: "Drop it", kind: .delete
+            ),
+            in: root
+        )
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+        defer { model.closeWorkspace() }
+        model.refreshProposals()
+
+        // It names the note being read, so it would land in the banner — a bar
+        // over the page offering to delete the page. It belongs in the centre.
+        #expect(model.proposalsForCurrentNote.isEmpty)
+        #expect(model.pendingProposals.structural.count == 1)
+    }
+
+    @Test("A move proposal repoints the links into the file it moves")
+    @MainActor
+    func moveProposalRepointsLinks() async throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Old"), withIntermediateDirectories: true
+        )
+        try "target".write(
+            to: root.appendingPathComponent("Old/Target.md"), atomically: true, encoding: .utf8
+        )
+        try "See [[Old/Target]]\n".write(
+            to: root.appendingPathComponent("Pointer.md"), atomically: true, encoding: .utf8
+        )
+        try ProposalStore.write(
+            Proposal(
+                notePath: "Old/Target.md", base: nil, body: "",
+                agent: "claude-code", summary: "Move it into New",
+                kind: .move, destination: "New/Target.md"
+            ),
+            in: root
+        )
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Pointer.md")
+        )
+        defer { model.closeWorkspace() }
+        // The links come from the index, so the scan has to have finished:
+        // moving with an empty index moves the file and repoints nothing.
+        // And the open note is rewritten from its *buffer*, so that has to
+        // have arrived too, or the rewrite is skipped as a note that changed
+        // between the plan and the write.
+        // Wait for the exact precondition rather than for a note count: the
+        // repointing comes from the link index, and the open note is rewritten
+        // from its buffer, so both have to have arrived.
+        #expect(await waitUntil {
+            !model.index.backlinks(to: "Old/Target.md").isEmpty && !model.text.isEmpty
+        })
+        model.refreshProposals()
+
+        // Structural changes are not the banner's business: a banner over the
+        // note offering to delete or move it is the wrong place to decide.
+        #expect(model.proposalsForCurrentNote.isEmpty)
+        let move = try #require(model.pendingProposals.structural.first)
+        model.applyStructural(move)
+
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("New/Target.md").path
+        ), "the folder it named was made")
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Old/Target.md").path
+        ))
+        // The open note is repointed through its buffer, so the new text
+        // reaches disk by the ordinary autosave rather than under the editor.
+        #expect(model.text.contains("New/Target"), "got \(model.text)")
+        let repointed = await waitUntil {
+            ((try? String(
+                contentsOf: root.appendingPathComponent("Pointer.md"), encoding: .utf8
+            )) ?? "").contains("New/Target")
+        }
+        #expect(repointed)
+        #expect(model.proposals.isEmpty)
+    }
+
+    @Test("A group is one change, and its edits land before its moves")
+    @MainActor
+    func groupAppliesInAWorkableOrder() async throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "one\n".write(
+            to: root.appendingPathComponent("A.md"), atomically: true, encoding: .utf8
+        )
+        try "one\n".write(
+            to: root.appendingPathComponent("B.md"), atomically: true, encoding: .utf8
+        )
+        let group = Proposal.Group(summary: "Rename the concept")
+        try ProposalStore.write(
+            Proposal(
+                id: "move-b", notePath: "B.md", base: nil, body: "",
+                agent: "t", summary: "Move B", kind: .move,
+                destination: "Renamed.md", group: group
+            ),
+            in: root
+        )
+        try ProposalStore.write(
+            Proposal(
+                id: "edit-b", notePath: "B.md", base: "one\n", body: "two\n",
+                agent: "t", summary: "Reword B", group: group
+            ),
+            in: root
+        )
+        try ProposalStore.write(
+            Proposal(
+                id: "edit-a", notePath: "A.md", base: "one\n", body: "two\n",
+                agent: "t", summary: "Reword A", group: group
+            ),
+            in: root
+        )
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "A.md")
+        )
+        defer { model.closeWorkspace() }
+        #expect(await waitUntil { model.index.notes.count == 2 && !model.text.isEmpty })
+        model.refreshProposals()
+
+        let waiting = try #require(model.pendingProposals.groups.first)
+        #expect(waiting.proposals.count == 3)
+        // The banner over A says its change is part of something larger,
+        // rather than a second banner appearing above it.
+        let here = try #require(model.proposalsForCurrentNote.first)
+        #expect(model.group(of: here)?.summary == "Rename the concept")
+
+        model.acceptGroup(waiting)
+
+        // The move runs last, or the edit to B would have been written to a
+        // path that no longer exists.
+        let settled = await waitUntil {
+            (try? String(contentsOf: root.appendingPathComponent("Renamed.md"), encoding: .utf8))
+                == "two\n"
+        }
+        #expect(settled, "B was reworded and then moved")
+        #expect(try String(contentsOf: root.appendingPathComponent("A.md"), encoding: .utf8)
+            == "two\n")
+        #expect(model.proposals.isEmpty)
+    }
+
     @MainActor
     private func waitUntil(
         _ condition: () -> Bool, within seconds: Double = 5

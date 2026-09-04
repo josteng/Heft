@@ -93,6 +93,13 @@ struct ProposalBanner: View {
                     Text("+\(diff.addedLines)").foregroundStyle(.green)
                     Text("−\(diff.removedLines)").foregroundStyle(.red)
                     Text("in \(diff.hunks.count) place\(diff.hunks.count == 1 ? "" : "s")")
+                    // One banner per note, ever. A change that is part of
+                    // something larger says so here rather than putting a
+                    // second banner above this one.
+                    if let group = model.group(of: proposal) {
+                        Text("· part of “\(group.summary)”, \(group.proposals.count) changes")
+                            .lineLimit(1)
+                    }
                     if proposal.isStale(against: model.currentText(for: proposal)) {
                         Label("note changed since", systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
@@ -169,6 +176,12 @@ struct ProposalReviewView: View {
                 Text("\(proposal.agent) · \(proposal.notePath)")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                if let group = model.group(of: proposal) {
+                    Text("Part of “\(group.summary)”, \(group.proposals.count) changes. "
+                        + "The rest are in the sidebar.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
                 if proposal.isStale(against: current) {
                     Label(
                         "The note has changed since \(proposal.agent) read it. "

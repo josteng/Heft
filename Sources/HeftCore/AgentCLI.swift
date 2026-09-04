@@ -63,10 +63,21 @@ public enum AgentCLI {
     /// express the change as a patch that might not apply.
     private static func propose(root: URL, arguments: [String]) {
         guard let notePath = arguments.first, !notePath.hasPrefix("--") else {
-            fail("usage: heft propose <vault> <note.md> [--summary s] [--agent a] [--from file]")
+            fail("usage: heft propose <vault> <note.md> [--summary s] [--agent a] [--from file]"
+                + "\n       heft propose <vault> <path> --delete [--summary s]"
+                + "\n       heft propose <vault> <path> --move <new path> [--summary s]")
         }
         let options = Options(arguments.dropFirst())
         let relative = normalized(notePath)
+
+        // Deleting and moving are facts about the tree rather than about a
+        // note's text, so neither reads a body and neither has hunks to
+        // answer. They are here rather than under verbs of their own because
+        // `propose` is the one word for "ask, do not do", and an agent that
+        // has learnt it should not have to learn two more.
+        if options.flag("delete") || options["move"] != nil {
+            proposeStructural(root: root, path: notePath, options: options)
+        }
 
         var body: String
         if let from = options["from"] {
@@ -143,7 +154,9 @@ public enum AgentCLI {
             base: current,
             body: body,
             agent: options["agent"] ?? "claude-code",
-            summary: summary ?? ProposalStore.defaultSummary
+            summary: summary ?? ProposalStore.defaultSummary,
+            kind: current == nil ? .create : .edit,
+            group: options["group"].map { Proposal.Group(summary: $0) }
         )
         do {
             try ProposalStore.write(proposal, in: root)
@@ -170,22 +183,93 @@ public enum AgentCLI {
         exit(0)
     }
 
+    /// A delete or a move. Neither reads stdin: there is no new body to give.
+    private static func proposeStructural(root: URL, path: String, options: Options) {
+        let existing = VaultScanner.scan(root: root).flattened()
+        // Anything in the vault, not only notes: an attachment is as much a
+        // thing to move as a note is, and `rename` already treats them alike.
+        guard let item = existing.first(where: {
+            $0.relativePath == path || $0.relativePath == normalized(path)
+        }) else {
+            fail("no such file in the vault: \(path)")
+        }
+
+        let isMove = options["move"] != nil
+        var destination: String?
+        if let requested = options["move"] {
+            let cleaned = NewNoteLocation.normalised(requested)
+            guard !cleaned.isEmpty else { fail("--move needs a destination path") }
+            guard !existing.contains(where: { $0.relativePath == cleaned }) else {
+                fail("\(cleaned) already exists")
+            }
+            destination = cleaned
+        }
+
+        let summary = options["summary"]
+        let described = summary ?? (isMove
+            ? "Move \(item.relativePath) to \(destination ?? "")"
+            : "Delete \(item.relativePath)")
+        let proposal = Proposal(
+            id: ProposalStore.identifier(
+                summary: described,
+                noteName: (item.relativePath as NSString).lastPathComponent,
+                taken: Set(ProposalStore.all(in: root).map(\.id))
+            ),
+            notePath: item.relativePath,
+            base: nil,
+            body: "",
+            agent: options["agent"] ?? "claude-code",
+            summary: described,
+            kind: isMove ? .move : .delete,
+            destination: destination,
+            group: options["group"].map { Proposal.Group(summary: $0) }
+        )
+        do {
+            try ProposalStore.write(proposal, in: root)
+        } catch {
+            fail("could not write the proposal: \(error.localizedDescription)")
+        }
+        MainActor.assumeIsolated {
+            FrecencyStore.agentNotes(forVaultAt: root.standardizedFileURL.path)
+                .record(item.relativePath)
+        }
+        print("proposed \(proposal.id)")
+        print("change:  \(proposal.headline)")
+        if let group = proposal.group { print("group:   \(group.summary)") }
+        print("Waiting for review in Heft.")
+        exit(0)
+    }
+
     private static func list(root: URL) {
-        let proposals = ProposalStore.all(in: root)
-        guard !proposals.isEmpty else {
+        let pending = ProposalStore.pending(in: root)
+        guard !pending.isEmpty else {
             print("no proposals pending")
             exit(0)
         }
-        for proposal in proposals {
-            let current = (try? String(
-                contentsOf: root.appendingPathComponent(proposal.notePath), encoding: .utf8
-            )) ?? ""
-            let diff = proposal.diff(against: current)
-            let stale = proposal.isStale(against: current) ? "  [note changed since]" : ""
-            print("\(proposal.id)  \(proposal.notePath)  +\(diff.addedLines) -\(diff.removedLines)  \(proposal.agent)\(stale)")
-            print("    \(proposal.summary)")
+        for group in pending.groups {
+            print("group \(group.id)  \(group.summary)  (\(group.proposals.count) changes)")
+            for proposal in group.proposals { describe(proposal, in: root, indent: "  ") }
         }
+        for proposal in pending.edits { describe(proposal, in: root, indent: "") }
+        for proposal in pending.structural { describe(proposal, in: root, indent: "") }
         exit(0)
+    }
+
+    private static func describe(_ proposal: Proposal, in root: URL, indent: String) {
+        guard !proposal.isStructural else {
+            print("\(indent)\(proposal.id)  \(proposal.headline)  \(proposal.agent)")
+            print("\(indent)    \(proposal.summary)")
+            return
+        }
+        let current = (try? String(
+            contentsOf: root.appendingPathComponent(proposal.notePath), encoding: .utf8
+        )) ?? ""
+        let diff = proposal.diff(against: current)
+        let stale = proposal.isStale(against: current) ? "  [note changed since]" : ""
+        let new = proposal.kind == .create ? " (new)" : ""
+        print("\(indent)\(proposal.id)  \(proposal.notePath)\(new)  "
+            + "+\(diff.addedLines) -\(diff.removedLines)  \(proposal.agent)\(stale)")
+        print("\(indent)    \(proposal.summary)")
     }
 
     /// Unified-diff-ish output, so the agent can check that what it proposed is

@@ -84,6 +84,11 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             header
 
+            // Above the lists rather than in them: it is not a fourth way of
+            // browsing the vault, it is something waiting for an answer, and
+            // it has to be visible whichever list is showing.
+            ReviewCenter()
+
             switch mode {
             case .tags: tagList
             case .recent: recentList

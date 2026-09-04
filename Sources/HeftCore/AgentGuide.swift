@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 9
+    public static let version = 10
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -224,6 +224,34 @@ public enum AgentGuide {
         apply in order, each to the result of the last. Heft resolves them
         against the current note and stores an ordinary full-body proposal, so
         a bad anchor fails here and now rather than at review time.
+
+        ## Removing, moving, and changes that span notes
+
+        Deleting and moving are proposed too, and read no body:
+
+        ```bash
+        heft propose . "Old/Note.md" --move "New/Note.md" \\
+            --summary "one line on why"
+        heft propose . "Stale.md" --delete --summary "one line on why"
+        ```
+
+        A move repoints every link into the file when it is accepted. Neither
+        happens until it is.
+
+        When one change touches several notes, say so with `--group`, using the
+        **same words each time**:
+
+        ```bash
+        heft propose . "A.md" --from /tmp/a.md \\
+            --group "rename the concept across the vault" --summary "..."
+        heft propose . "B.md" --from /tmp/b.md \\
+            --group "rename the concept across the vault" --summary "..."
+        ```
+
+        They are then reviewed as one change rather than as unrelated ones, and
+        accepting some no longer leaves the vault half-changed with nothing
+        recording that they belonged together. Group edits and moves freely;
+        Heft applies the text before the tree.
 
         ## Finding things
 

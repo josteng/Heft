@@ -8,6 +8,54 @@ import Foundation
 /// untouched and carries enough context to be judged: what the agent saw when
 /// it started (`base`), what it wants instead (`body`), and why.
 public struct Proposal: Codable, Sendable, Equatable, Identifiable {
+
+    /// What kind of change this is.
+    ///
+    /// It used to be implied: a proposal carried a body, so it was an edit,
+    /// and a nil `base` meant the note did not exist yet. That left two holes.
+    /// A proposal for a note that does not exist has no note to draw a banner
+    /// above, so it could not be reviewed at all — found by proposing this
+    /// vault's own TODO note and then having to write it by hand. And deleting
+    /// or moving a file was not proposable in any form, which is why
+    /// `heft rename` applies immediately with no review.
+    ///
+    /// Creating, deleting and moving are facts about the *tree* rather than
+    /// about one note's text, and a banner anchored to a note is the wrong
+    /// place to decide them. Naming the kind is what lets the review centre
+    /// list them somewhere that is not a note.
+    public enum Kind: String, Codable, Sendable, CaseIterable {
+        case edit
+        case create
+        case delete
+        case move
+    }
+
+    /// The change several proposals belong to.
+    ///
+    /// "Rename this concept across twelve notes" was twelve unrelated
+    /// proposals: accepting seven left the vault half-changed, and nothing
+    /// recorded that they belonged together.
+    ///
+    /// Carried on each proposal rather than kept in a file of its own, so
+    /// there is one format to read and nothing to keep in step. The id is the
+    /// slug of the summary, which is what lets an agent join a group by
+    /// repeating the same words rather than by passing an id around.
+    public struct Group: Codable, Sendable, Equatable, Hashable {
+        public let id: String
+        public let summary: String
+
+        public init(id: String, summary: String) {
+            self.id = id
+            self.summary = summary
+        }
+
+        public init(summary: String) {
+            self.summary = summary
+            self.id = ProposalStore.slug(summary).isEmpty
+                ? "group" : ProposalStore.slug(summary)
+        }
+    }
+
     public let id: String
     /// Vault-relative path, e.g. `Projects/Heft.md`. May name a note that does
     /// not exist yet: that is a proposal to create one.
@@ -15,13 +63,18 @@ public struct Proposal: Codable, Sendable, Equatable, Identifiable {
     /// The note's full text as the agent read it. Nil when the agent proposed
     /// a new note, or worked without reading first.
     public let base: String?
-    /// The full text the agent proposes the note should have.
+    /// The full text the agent proposes the note should have. Empty for a
+    /// delete or a move, which say nothing about a note's contents.
     public let body: String
     /// Who is asking. Free-form, shown as-is.
     public let agent: String
     /// One line on what this change is for.
     public let summary: String
     public let createdAt: Date
+    public let kind: Kind
+    /// Where a `.move` puts the file, vault-relative. Nil for every other kind.
+    public let destination: String?
+    public let group: Group?
 
     public init(
         id: String = UUID().uuidString,
@@ -30,7 +83,10 @@ public struct Proposal: Codable, Sendable, Equatable, Identifiable {
         body: String,
         agent: String,
         summary: String,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        kind: Kind = .edit,
+        destination: String? = nil,
+        group: Group? = nil
     ) {
         self.id = id
         self.notePath = notePath
@@ -39,6 +95,35 @@ public struct Proposal: Codable, Sendable, Equatable, Identifiable {
         self.agent = agent
         self.summary = summary
         self.createdAt = createdAt
+        self.kind = kind
+        self.destination = destination
+        self.group = group
+    }
+
+    /// Hand-written, because the synthesised one requires every field: adding
+    /// `kind`, `destination` and `group` would have made every proposal
+    /// written before them undecodable, and the failure mode is a proposal
+    /// that silently disappears from the list. Same lesson as
+    /// `PDFExportOptions` and `TypingSettings`: a stored file is a format, and
+    /// a format has to tolerate being older than the code reading it.
+    ///
+    /// A proposal from before kinds existed carried a body, so it is an edit —
+    /// or a create when it had no base to edit against, which is exactly what
+    /// nil `base` used to mean.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        notePath = try container.decode(String.self, forKey: .notePath)
+        base = try container.decodeIfPresent(String.self, forKey: .base)
+        body = try container.decodeIfPresent(String.self, forKey: .body) ?? ""
+        agent = try container.decodeIfPresent(String.self, forKey: .agent) ?? "agent"
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+            ?? ProposalStore.defaultSummary
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind)
+            ?? (base == nil ? .create : .edit)
+        destination = try container.decodeIfPresent(String.self, forKey: .destination)
+        group = try container.decodeIfPresent(Group.self, forKey: .group)
     }
 
     public var noteName: String {
@@ -61,6 +146,41 @@ public struct Proposal: Codable, Sendable, Equatable, Identifiable {
         guard let base else { return false }
         return base != current
     }
+
+    /// Whether this is a change to the tree rather than to a note's text.
+    ///
+    /// The line that matters for review: an edit is answered hunk by hunk, and
+    /// a structural change has no hunks to answer — it happens or it does not.
+    public var isStructural: Bool {
+        kind == .delete || kind == .move
+    }
+
+    /// One line naming what would happen, for a list that has no note to sit
+    /// above and so cannot rely on context to say what it is about.
+    public var headline: String {
+        switch kind {
+        case .edit: "Edit \(noteName)"
+        case .create: "New note \(notePath)"
+        case .delete: "Delete \(notePath)"
+        case .move: "Move \(notePath) to \(destination ?? "?")"
+        }
+    }
+}
+
+/// A set of proposals made together, with the change they belong to.
+public struct ProposalGroup: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let summary: String
+    public let proposals: [Proposal]
+
+    public init(id: String, summary: String, proposals: [Proposal]) {
+        self.id = id
+        self.summary = summary
+        self.proposals = proposals
+    }
+
+    public var agent: String { proposals.first?.agent ?? "" }
+    public var createdAt: Date { proposals.map(\.createdAt).min() ?? Date() }
 }
 
 /// The proposals waiting in a vault.
@@ -215,6 +335,60 @@ public enum ProposalStore {
 
     public static func forNote(_ relativePath: String, in vaultRoot: URL) -> [Proposal] {
         all(in: vaultRoot).filter { $0.notePath == relativePath }
+    }
+
+    /// What is waiting, sorted into the three things a review list shows:
+    /// groups, single edits to one note, and structural changes.
+    ///
+    /// A group of one is not a group. An agent that names a change while
+    /// touching a single note has described that one proposal, and listing it
+    /// under a heading of its own would be a fold with nothing inside it.
+    public struct Pending: Sendable, Equatable {
+        public var groups: [ProposalGroup] = []
+        public var edits: [Proposal] = []
+        public var structural: [Proposal] = []
+
+        public var isEmpty: Bool {
+            groups.isEmpty && edits.isEmpty && structural.isEmpty
+        }
+
+        public var count: Int {
+            groups.reduce(0) { $0 + $1.proposals.count } + edits.count + structural.count
+        }
+    }
+
+    public static func pending(in vaultRoot: URL) -> Pending {
+        sort(all(in: vaultRoot))
+    }
+
+    /// Pure, so the sorting can be asked for without a vault.
+    public static func sort(_ proposals: [Proposal]) -> Pending {
+        var result = Pending()
+        var grouped: [String: [Proposal]] = [:]
+        var order: [String] = []
+
+        for proposal in proposals {
+            guard let group = proposal.group else { continue }
+            if grouped[group.id] == nil { order.append(group.id) }
+            grouped[group.id, default: []].append(proposal)
+        }
+
+        let realGroups = Set(order.filter { (grouped[$0]?.count ?? 0) > 1 })
+        for id in order where realGroups.contains(id) {
+            let members = grouped[id] ?? []
+            result.groups.append(ProposalGroup(
+                id: id,
+                summary: members.first?.group?.summary ?? id,
+                proposals: members
+            ))
+        }
+
+        for proposal in proposals {
+            if let group = proposal.group, realGroups.contains(group.id) { continue }
+            if proposal.isStructural { result.structural.append(proposal) }
+            else { result.edits.append(proposal) }
+        }
+        return result
     }
 
     public static func remove(_ id: String, in vaultRoot: URL) {

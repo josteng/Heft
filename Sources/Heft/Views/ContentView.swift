@@ -79,7 +79,13 @@ struct ContentView: View {
             InboxCaptureView()
         }
         .sheet(item: $model.reviewing) { proposal in
-            ProposalReviewView(proposal: proposal).environmentObject(model)
+            // A delete, a move or a note that does not exist yet has no hunks
+            // to answer: there is nothing to accept part of.
+            if proposal.isStructural || proposal.kind == .create {
+                StructuralReviewView(proposal: proposal).environmentObject(model)
+            } else {
+                ProposalReviewView(proposal: proposal).environmentObject(model)
+            }
         }
         .sheet(item: $model.reviewingConflict) { conflict in
             ConflictReviewView(conflict: conflict).environmentObject(model)

@@ -970,6 +970,19 @@ final class AppModel: ObservableObject {
             status = refusal.message
             return false
         }
+        return performMove(item, to: renamedPath)
+    }
+
+    /// Moves a file to a vault-relative path, repointing every link into it.
+    ///
+    /// Split out of `rename` so an accepted move proposal takes the same road:
+    /// a rename is a move whose destination happens to be the same folder, and
+    /// the difference is entirely in how the destination is arrived at. The
+    /// window checks above — another window holding the file, a save conflict —
+    /// belong to whoever asks.
+    @discardableResult
+    func performMove(_ item: VaultItem, to renamedPath: String) -> Bool {
+        guard let vaultRoot else { return false }
         let filename = (renamedPath as NSString).lastPathComponent
         let target = vaultRoot.appendingPathComponent(renamedPath)
         let changes = pathChanges(for: item, movingTo: renamedPath)
@@ -982,6 +995,11 @@ final class AppModel: ObservableObject {
         guard let rewrites = prepareLinkRewrites(for: changes) else { return false }
 
         do {
+            // A move may name a folder that is not there yet, which a rename
+            // never could.
+            try FileManager.default.createDirectory(
+                at: target.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
             try FileManager.default.moveItem(at: item.url, to: target)
             if item.isFolder, let scopePath,
                scopePath == item.relativePath || scopePath.hasPrefix(item.relativePath + "/") {
@@ -2119,7 +2137,41 @@ final class AppModel: ObservableObject {
 
     var proposalsForCurrentNote: [Proposal] {
         guard let current else { return [] }
-        return proposals.filter { $0.notePath == current.relativePath }
+        // Only what the banner can actually decide. A move or a delete is a
+        // fact about the tree, and the note it names is the one you are
+        // reading: a banner offering to delete the page under you belongs in
+        // the review centre, not over the text.
+        return proposals.filter { $0.notePath == current.relativePath && !$0.isStructural }
+    }
+
+    /// Everything waiting, sorted the way the review centre lists it.
+    var pendingProposals: ProposalStore.Pending {
+        ProposalStore.sort(proposals)
+    }
+
+    /// The group the open note's proposal belongs to, if it belongs to one.
+    ///
+    /// One banner per note, ever: if the change is part of something larger,
+    /// the banner says so and points at the centre rather than a second banner
+    /// appearing above it.
+    func group(of proposal: Proposal) -> ProposalGroup? {
+        guard let id = proposal.group?.id else { return nil }
+        return pendingProposals.groups.first { $0.id == id }
+    }
+
+    /// Whether the review centre has anything to show.
+    var hasProposals: Bool { !proposals.isEmpty }
+
+    /// Opens whatever a row in the centre points at.
+    ///
+    /// A structural proposal has no note to open — that is the whole reason
+    /// the centre exists — so it is selected for review where it stands.
+    func review(_ proposal: Proposal) {
+        if proposal.isStructural || proposal.kind == .create {
+            reviewing = proposal
+            return
+        }
+        openAndReview(proposal)
     }
 
     /// The note a proposal is about, as it stands right now. The open buffer
@@ -2195,6 +2247,92 @@ final class AppModel: ObservableObject {
         refreshProposals()
         let diff = proposal.diff(against: before)
         status = "Applied \(diff.hunks.count) change(s) to \(proposal.noteName)"
+    }
+
+    /// Carries out a proposal that is not an edit.
+    ///
+    /// A create is already an edit with no note behind it — the same write
+    /// path, which makes the folders it needs — so only delete and move are
+    /// here. Both are answered whole: there are no hunks in "remove this file".
+    func applyStructural(_ proposal: Proposal) {
+        guard let vaultRoot else { return }
+        // The window's tree first, and a fresh scan when it has nothing to
+        // say: a vault whose scan has not finished yet would otherwise look
+        // like a vault the file had been taken out of.
+        //
+        // And a proposal for a file that really is gone is *kept*, not
+        // dropped. Discarding somebody's pending change because a lookup came
+        // back empty is the failure this whole feature exists to avoid.
+        let known = tree?.flattened().first { $0.relativePath == proposal.notePath }
+        let found = known ?? VaultScanner.scan(root: vaultRoot).flattened().first {
+            $0.relativePath == proposal.notePath
+        }
+        guard let item = found else {
+            status = "\(proposal.notePath) is no longer in the vault"
+            return
+        }
+
+        switch proposal.kind {
+        case .delete:
+            // Through the same `delete` a person uses, so it asks the same
+            // question and goes to the Trash rather than being unlinked.
+            delete(item)
+            // Only settled if it actually went: `delete` refuses when another
+            // window holds the file, and a proposal dropped after a refusal
+            // would look like it had been applied.
+            guard !FileManager.default.fileExists(atPath: item.url.path) else { return }
+        case .move:
+            guard let destination = proposal.destination else {
+                status = "That move names nowhere to go"
+                return
+            }
+            guard !FileManager.default.fileExists(
+                atPath: vaultRoot.appendingPathComponent(destination).path
+            ) else {
+                status = "\(destination) already exists"
+                return
+            }
+            guard performMove(item, to: destination) else { return }
+        case .edit, .create:
+            return
+        }
+
+        recordReview(of: proposal)
+        ProposalStore.remove(proposal.id, in: vaultRoot)
+        reviewing = nil
+        refreshProposals()
+    }
+
+    /// Accepts every proposal in a group, in an order that cannot trip over
+    /// itself: the edits first, then the moves and deletes.
+    ///
+    /// A move renames the file every edit in the group was written against, so
+    /// applying it first would leave the rest pointing at a path that is no
+    /// longer there. Doing the text first and the tree afterwards is the same
+    /// order a person would take by hand.
+    ///
+    /// Not atomic. A half-applied rename across twelve notes is worse than
+    /// either end, but refusing to apply eleven because the twelfth is stale
+    /// is worse still, and the existing rule already covers it: what is left
+    /// unanswered stays in the list as a smaller change.
+    func acceptGroup(_ group: ProposalGroup) {
+        for proposal in group.proposals where !proposal.isStructural {
+            acceptAll(proposal)
+        }
+        for proposal in group.proposals where proposal.isStructural {
+            applyStructural(proposal)
+        }
+        status = "Applied \(group.summary)"
+    }
+
+    func discardGroup(_ group: ProposalGroup) {
+        guard let vaultRoot else { return }
+        for proposal in group.proposals {
+            ProposalStore.remove(proposal.id, in: vaultRoot)
+        }
+        reviewing = nil
+        refreshProposals()
+        status = "Discarded \(group.summary)"
     }
 
     func discard(_ proposal: Proposal) {

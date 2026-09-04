@@ -132,7 +132,10 @@ struct AppCommand: Identifiable {
                 // The one for the open note if there is one, since that is
                 // what the reviewer is already looking at.
                 let next = model.proposalsForCurrentNote.first ?? model.proposals.first
-                if let next { model.openAndReview(next) }
+                // `review` rather than `openAndReview`: a delete, a move or a
+                // note that does not exist yet has no note to open, which is
+                // the whole reason the review centre exists.
+                if let next { model.review(next) }
             }
         ),
         Self(
