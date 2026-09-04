@@ -255,69 +255,41 @@ refreshes Heft's section and leaves anything else in each file alone.
 
 It also writes `.claude/settings.json`, which turns the main instruction from a
 request into a rule: editing a file **inside the vault** is denied, and `heft`
-is allowed without a prompt. One rule, `Edit(**)`, because Claude Code matches a
-path-scoped rule against the file a tool would touch and only `Edit(path)` takes
-part in that check, so it covers Write and NotebookEdit too. Writing outside the
-vault is untouched, since `heft propose --from /tmp/new.md` depends on it. Your
-own settings in that file are merged with, never replaced.
+is allowed without a prompt. Writing outside the vault is untouched, since
+`heft propose --from /tmp/new.md` depends on it, and your own settings in that
+file are merged with rather than replaced.
 
 This is a guardrail, not a sandbox: an agent with a shell can still write a
 file, and the point is that the easy path and the correct path are the same
-path.
+path. Codex has no per-project permission file at all, so there the rule lives
+in `AGENTS.md` and is followed rather than enforced.
 
-Codex has no per-project permission file, so nothing can be shipped into the
-vault for it: its `[projects]` table carries only trust, and permissions live in
-your `~/.codex/config.toml`. Its enforcement is a sandbox rather than a deny
-list, and neither ready-made mode fits — `read-only` blocks `heft propose` as
-well as editing, and `workspace-write` allows both. A `[permissions]` profile
-can express the rule exactly, mapping the vault to `read` and its `.heft` folder
-to `write`, but it is yours to add and is keyed by absolute path. So for Codex
-the rule lives in `AGENTS.md` and is followed rather than enforced.
-
-[`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the detail.
+[`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the detail, including
+what Codex's sandbox can and cannot be made to do.
 
 ## The `heft` command
 
-Every verb is declared in one place, so `heft help` is always the full list and
-`heft help --json` is the same thing for an agent.
+Every verb is declared in one place, so **`heft help` is the list** and
+`heft help --json` is the same thing for an agent, including which verbs are
+read-only and therefore safe against a live vault. Most of them are. What
+follows is the shape, not a second copy of it: this README learned that lesson
+once already, when a hand-written verb list drifted and turned `heft export`
+into `heft open export`.
 
 ```bash
-# Yours
-heft [path]                     # open a folder or note, like `code .`
-heft help [--json]              # every verb and flag
-heft daily <vault> [YYYY-MM-DD] # create a daily note from the template
-heft rename <vault> <path> <new> # rename a note, attachment or folder,
-                                 #   repointing the links into it (--dry-run)
-heft agent-setup <vault>        # write CLAUDE.md, AGENTS.md and the permission rules
-heft export <vault> <note> <out.pdf>   # the rendered note as a PDF
-    # --text-size 12  --paper a4|letter|legal|tabloid
-    # --landscape --margin narrow|normal|wide --title
-
-# An agent's, and all read-only
-heft find <vault> <query>       # full-text search
-heft read <vault> <note>        # a note's source
-heft files <vault>              # every note, vault-relative
-    # --by-use   most-used first, the order Quick Open opens on
-    # --by-agent what an agent has proposed changes to, kept separately
-    # --scores   show each note's score   --limit N
-heft outline <vault> <note>     # the note's headings, with line numbers
-heft links <vault> <note>       # links out, resolved and unresolved
-heft backlinks <vault> <note>   # what links here, with the referencing line
-heft tags <vault> [tag]         # tags with counts, or the notes carrying one
-heft config <vault>             # the vault's settings, as JSON
-heft attachment <vault> <note> [file]  # where an attachment goes, and the link
-heft changes <vault> <note>     # what moved since you last read it
-heft propose <vault> <note>     # propose a new body, from stdin
-heft proposals <vault>          # what is waiting for review
-heft diff <vault> <id>          # what one of them would change
-
-# Diagnostics, about Heft's rendering rather than about your notes
-heft stats <vault>              # index report: counts, timings, resolution
-heft render <vault> <note>      # what the live surface would draw, fragment by fragment
+heft [path]                    # open a folder or note, like `code .`
+heft help [--json]             # every verb and flag
 ```
 
-`heft help --json` says which verbs are read-only and therefore safe against a
-live vault; most of them are.
+**Yours**: `daily`, `rename`, `export`, `agent-setup`.
+
+**An agent's, all read-only**: `find`, `read`, `files` (`--by-use` is the order
+Quick Open opens on), `outline`, `links`, `backlinks`, `tags`, `config`,
+`attachment`, `changes`, `keys`. Plus the proposal verbs: `propose`,
+`proposals`, `diff`, `drop`.
+
+**Diagnostics**, about Heft's rendering rather than about your notes: `stats`,
+`render`.
 
 The query verbs are why an agent is better off with Heft than with a folder of
 Markdown. Heft keeps a **resolved** link index, so `backlinks` and `links`
@@ -325,7 +297,8 @@ understand `[[Note|alias]]`, `[[Note#Heading]]` and the escaped pipe inside
 `![[chart.png\|500]]`, none of which grep can resolve and all of which turn up
 in real vaults. `config` reports the daily-note folder, filename format and
 attachment folder, so a note an agent writes fits the vault's conventions
-instead of guessing at them.
+instead of guessing at them. And `keys` means "how do I do X in the app" has an
+answer that is looked up rather than invented.
 
 ## Obsidian compatibility
 
@@ -378,9 +351,9 @@ templates, the full token table, the typing-substitution snippets, and how
 
 ## Keyboard
 
-The ones worth knowing. `heft keys` prints all of them, including the
-formatting and find commands, which is also how an agent answers when you
-ask it how to do something in the app.
+The notable ones, which a test keeps in step with the app. `heft keys` prints
+every one, grouped, and is also how an agent answers when you ask it how to do
+something in the app.
 
 | Shortcut | Action |
 |---|---|
@@ -433,7 +406,7 @@ Scripts/run.sh --sandbox [vault]   # ...with its preferences isolated
 Scripts/bundle.sh debug         # build the .app without launching
 ```
 
-`Scripts/run.sh` is the one to use while iterating: it launches from `.build`
+`Scripts/run.sh` is the one to use while iterating: it builds and launches
 and takes a vault path, so risky editor changes can be pointed at a disposable
 copy. The GUI autosaves; never aim it at a vault you care about while testing.
 `--sandbox` puts every preference in its own suite, so a test launch cannot
@@ -443,16 +416,21 @@ rewrite the Spotlight capture destination or Open Recent.
 nothing in the suite notices an app that starts and immediately exits. One
 shipped that way. It launches with no arguments, the way the Dock does.
 
-The suite is 277 tests across 58 suites: pure checks over parsing, formatting,
-links, paths and settings; a live-surface check that runs edit scripts through
-both an incrementally styled buffer and a from-scratch one and compares every
-attribute on every character; a differential decoration check that drives the
-same scripts through the incremental and from-scratch parsers and fails if the
-fast path never ran; a typing-performance check that holds the per-keystroke
-budget; and a disposable-vault integration check covering autosave, save
-conflicts, recovery, renames and link repointing. Temporary vaults are
-UUID-named and removed afterwards, and the harness restores any user setting it
-touches.
+The suite is 374 tests across 65 suites. Most are pure checks over parsing,
+formatting, links, paths and settings; the ones worth knowing about are the
+awkward ones:
+
+- a live-surface check that runs edit scripts through both an incrementally
+  styled buffer and a from-scratch one and compares every attribute on every
+  character, plus a differential decoration check that fails if the fast path
+  never ran;
+- a typing-performance check that holds the per-keystroke budget;
+- a disposable-vault integration check covering autosave, save conflicts,
+  recovery, renames and link repointing;
+- the agent verbs, driven as a subprocess against the built binary.
+
+Temporary vaults are UUID-named and removed afterwards, and the harness
+restores any user setting it touches.
 
 Rendering is checked by *rendering*: `heft export` writes a note to PDF
 headlessly, so a claim about how a table, callout or formula is drawn can be

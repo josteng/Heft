@@ -129,6 +129,30 @@ the first one cached. Give each stub bundle its own `CFBundleIdentifier` when
 comparing designs, and treat "the change had no effect" as a cache hit until
 proven otherwise. The `.icns` route is not cached and is the tiebreaker.
 
+That caching bites the shipped app too, and worse, because it is invisible
+there. Every `Heft.app` on the machine claims one bundle identifier — build
+products under `.build`, one per worktree — so the identifier names several
+bundles with several icons, and Spotlight's App Shortcut rows ("Add to Today's
+Note") draw from that registration rather than from the app you installed.
+`Scripts/install.sh` now unregisters the others, which is necessary and was not
+sufficient: the rows kept an icon from two designs earlier because the caches
+had it. Three levels, and only the last one worked here:
+
+```bash
+# 1. the registration (install.sh does this)
+lsregister -u <every other Heft.app>; lsregister -f /Applications/Heft.app
+# 2. the per-user icon index
+rm -f "$(getconf DARWIN_USER_CACHE_DIR)com.apple.iconservices/store.index"
+killall iconservicesagent siriactionsd Dock
+# 3. the system store, which needs root and is what actually fixed it
+sudo rm -rf /Library/Caches/com.apple.iconservices.store
+sudo killall iconservicesagent && killall Dock
+```
+
+`NSWorkspace.icon(forFile:)` is *not* a way to check whether this worked: it
+answered with the current icon while Spotlight was still drawing the old one,
+because they read different caches. Look at Spotlight.
+
 The `tinted` appearance has no offline preview here; it is derived from layer
 luminance, so keep the layers distinct in luminance and not only in hue.
 

@@ -718,8 +718,13 @@ each carried a copy of the merge, the back-up and the error wording, and a
 second file would have made that four.
 
 `AgentPermissions` is what turns the main instruction from a request into a
-rule. `Edit(**)`, `Write(**)` and `NotebookEdit(**)` are denied and
-`Bash(heft:*)` is allowed. The deny rules carry a **path** rather than being
+rule. `Edit(**)` is denied and `Bash(heft:*)` is allowed. One rule, because
+Claude Code matches a path-scoped rule against the file a tool would touch and
+only `Edit(path)` takes part in that check, so it covers Write and NotebookEdit
+too; `Write(**)` and `NotebookEdit(**)` are rejected as rules that match
+nothing, and a settings file carrying one is set aside whole, leaving the vault
+with no rule at all. `AgentPermissions.superseded` removes the two Heft wrote
+until guide version 10. The deny rules carry a **path** rather than being
 bare tool names, because the workflow the guide teaches writes a scratch file in
 `/tmp` and reads it back with `--from`: denying the tools outright would make
 the setup that enforces the contract the setup that prevents following it. The
@@ -1307,9 +1312,11 @@ put two elements under one identifier in the same scroll namespace.
   quote, callout or code block last in a note is no longer a line taller than
   its contents. About a fifth of a line of that fragment's line spacing is
   still in there, which would take guessing at a paragraph style to remove.
-- The "one paragraph" line-break setting reaches the rendered views, not the
-  editing surface: joining two source lines into one rendered paragraph would
-  mean rewriting the buffer, and the buffer is the file.
+- Consecutive lines are always line breaks in the editor, whatever the vault's
+  `strictLineBreaks` says: joining two source lines into one rendered paragraph
+  would mean rewriting the buffer, and the buffer is the file. Only
+  Presentation reads the vault's setting. The Appearance override that used to
+  sit over it was removed for the same reason.
 - A group of proposals is applied in an order that works but is not atomic, and
   nothing rolls back if one member fails partway.
 - Deferred: graph view, plugins.
