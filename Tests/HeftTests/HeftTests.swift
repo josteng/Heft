@@ -2252,7 +2252,7 @@ struct SwitcherRankingTests {
         for _ in 1...50 { frecency.record("Weekly Meeting Notes.md") }
 
         let ranked = index.search("meet", limit: 10) {
-            min(1, frecency.score($0.relativePath) / 4)
+            frecency.score($0.relativePath)
         }.map(\.name)
         // "Meeting" is a prefix match, the other only contains it. No amount
         // of use may reorder that.
@@ -2276,9 +2276,41 @@ struct SwitcherRankingTests {
         var frecency = Frecency()
         for _ in 1...4 { frecency.record("Report Alpha.md") }
         let ranked = index.search("report", limit: 10) {
-            min(1, frecency.score($0.relativePath) / 4)
+            frecency.score($0.relativePath)
         }.map(\.name)
         #expect(ranked.first == "Report Alpha", "got \(ranked)")
+    }
+
+    /// The bug this replaced: Quick Open saturated the score before handing
+    /// it over, so every note used four or more times arrived at the ceiling
+    /// together and the empty list fell through to the alphabetical tiebreak.
+    /// A note opened thirty times sat below one opened five times, in a
+    /// switcher whose whole claim is to open on what you use.
+    @Test("With nothing typed, use is not saturated: thirty beats five")
+    func emptyQueryDoesNotSaturate() {
+        let index = index(["Alpha", "Beta", "Gamma"])
+        var frecency = Frecency()
+        for _ in 1...30 { frecency.record("Gamma.md") }
+        for _ in 1...5 { frecency.record("Beta.md") }
+        for _ in 1...5 { frecency.record("Alpha.md") }
+
+        // All three are well past `wellUsed`, so saturating would tie them.
+        #expect(frecency.score("Alpha.md") > VaultIndex.wellUsed)
+        let ranked = index.search("", limit: 10) { frecency.score($0.relativePath) }.map(\.name)
+        #expect(ranked.first == "Gamma", "got \(ranked)")
+    }
+
+    /// And with something typed it *must* saturate, or one heavily-used note
+    /// would head every search it matched at all.
+    @Test("With something typed, familiarity still cannot cross a tier")
+    func typedQueryStillSaturates() {
+        let index = index(["Report", "Report Notes"])
+        var frecency = Frecency()
+        for _ in 1...200 { frecency.record("Report Notes.md") }
+        let ranked = index.search("report", limit: 10) {
+            frecency.score($0.relativePath)
+        }.map(\.name)
+        #expect(ranked.first == "Report", "an exact match outranks any amount of use")
     }
 
     @Test("An unused vault still returns everything, in order")

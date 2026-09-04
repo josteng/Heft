@@ -398,19 +398,33 @@ public final class VaultIndex: @unchecked Sendable {
     /// Conservative filename search for Quick Open and the sidebar. Literal
     /// matches rank first; compact or word-boundary fuzzy matches are accepted,
     /// while loose subsequences such as `eee` across a long title are rejected.
-    /// - Parameter boost: 0...1 per note, folded into the score so a note the
-    ///   reader actually uses wins a tie against a stranger that matches
-    ///   equally well. Deliberately small: at most `boostWeight`, which is
-    ///   less than the gap between any two match tiers, so familiarity
+    /// - Parameter familiarity: a note's raw frecency score, which this uses
+    ///   two different ways.
+    ///
+    ///   With something typed it is a tie-break worth at most `boostWeight`,
+    ///   which is less than the gap between any two match tiers: familiarity
     ///   reorders results *within* a tier and can never lift a substring match
-    ///   above a prefix one. An unfamiliar note that matches better still
-    ///   wins, which is what keeps typing predictable.
+    ///   above a prefix one, so an unfamiliar note that matches better still
+    ///   wins and typing stays predictable. It saturates at `wellUsed`,
+    ///   because past that point one heavily-used note would sit at the top of
+    ///   every search it matched at all.
+    ///
+    ///   With nothing typed it is the whole ranking, **unsaturated**. That
+    ///   distinction is the bug this parameter used to have: the caller
+    ///   saturated before handing the score over, so every note used four or
+    ///   more times tied at the ceiling and the empty list fell through to the
+    ///   alphabetical tiebreak — a switcher that claimed to open on what you
+    ///   use and did not. Both rules live here now, where one of them cannot
+    ///   be applied without the other being considered.
     public static let boostWeight = 60
+
+    /// Uses within a half-life past which a note is simply "familiar".
+    public static let wellUsed: Double = 4
 
     public func search(
         _ query: String,
         limit: Int = 50,
-        boost: ((NoteRef) -> Double)? = nil
+        familiarity: ((NoteRef) -> Double)? = nil
     ) -> [NoteRef] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else {
@@ -421,7 +435,7 @@ public final class VaultIndex: @unchecked Sendable {
             // *only* the boost: what you use, most-used first. Alphabetical
             // order is the fallback for everything unused, and the whole list
             // for a vault nobody has opened yet.
-            guard let boost else { return Array(alphabetical.prefix(limit)) }
+            guard let familiarity else { return Array(alphabetical.prefix(limit)) }
             // Sorted with the original index as the tiebreak, because Swift's
             // sort is not stable: without it every note scoring zero — which
             // in a fresh vault is all of them — would come back in whatever
@@ -430,7 +444,7 @@ public final class VaultIndex: @unchecked Sendable {
             var byFamiliarity: [(offset: Int, note: NoteRef, score: Double)] = []
             byFamiliarity.reserveCapacity(alphabetical.count)
             for (offset, note) in alphabetical.enumerated() {
-                byFamiliarity.append((offset, note, boost(note)))
+                byFamiliarity.append((offset, note, familiarity(note)))
             }
             byFamiliarity.sort { left, right in
                 left.score == right.score ? left.offset < right.offset : left.score > right.score
@@ -449,8 +463,10 @@ public final class VaultIndex: @unchecked Sendable {
                 score = 100 + fuzzy
             }
             else { continue }
-            let familiarity = boost.map { Int(($0(note)).clamped(to: 0...1) * Double(Self.boostWeight)) } ?? 0
-            scored.append((note, score + familiarity))
+            let known = familiarity.map {
+                Int(($0(note) / Self.wellUsed).clamped(to: 0...1) * Double(Self.boostWeight))
+            } ?? 0
+            scored.append((note, score + known))
         }
         return scored.enumerated()
             .sorted { a, b in

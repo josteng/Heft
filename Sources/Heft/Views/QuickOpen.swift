@@ -22,13 +22,14 @@ struct QuickOpenView: View {
         // is a directory listing, not a switcher, and the note wanted is
         // almost always one of the last few. With something typed it is only a
         // nudge within a tier: a better match always wins.
+        //
+        // The raw score, not a saturated one. Saturating here — which is what
+        // this used to do — made every note used four or more times tie, and
+        // the empty list then fell through to the alphabetical tiebreak.
+        // `VaultIndex.search` saturates for the typed case, where it belongs.
         let frecency = model.noteFrecency
         return model.index.search(query, limit: 60) { note in
-            guard let frecency else { return 0 }
-            // Saturating: four uses in a half-life is "familiar", and more
-            // than that must not keep pulling ahead, or one heavily-used note
-            // would sit at the top of every search it matches at all.
-            return min(1, frecency.score(note.relativePath) / 4)
+            frecency?.score(note.relativePath) ?? 0
         }
     }
 

@@ -455,12 +455,35 @@ as a final tiebreak, because Swift's sort is not stable and every unused note
 scores the same: without it a fresh vault's list would reshuffle between
 openings.
 
+Those are two different uses of one number, and **both rules live in
+`VaultIndex.search`** because applying one without considering the other is a
+bug that reads as working. It was: Quick Open saturated the score at
+`wellUsed` (4) *before* handing it over, which is right for the typed case and
+wrong for the empty one — every note used four or more times arrived at the
+ceiling together, and the empty list fell through to the alphabetical
+tiebreak. A note opened thirty times sat below one opened five times, in a
+switcher whose whole claim is to open on what you use. The caller now passes
+the raw score and `search` decides.
+
 #### What counts as a use
 
-Only the reader's own opens. `recordRecent` is reached from `AppModel.open`
-and nowhere else, so `heft open` and `heft .` count — a person opening a note
-from a terminal is the same act of attention as opening it in the window — and
-the agent verbs record nothing, because `AgentCLI` never touches `AppModel`.
+The reader's own opens, and the reader's own reviews. `recordRecent` is reached
+from `AppModel.open` and nowhere else, so `heft open` and `heft .` count — a
+person opening a note from a terminal is the same act of attention as opening
+it in the window — and the agent verbs record nothing, because `AgentCLI` never
+touches `AppModel`.
+
+`VaultSession.recordReview` is the second door, and it is one only a person can
+walk through: it is reachable from the review panel and nowhere else. Accepting
+or rejecting a hunk is the most deliberate attention a note can get — every
+change was read and answered — and it used to count for nothing, while opening
+a note and looking away counted fully. It records the ranking only, never
+`recentPaths`: that list is a history of what was *opened*, and the note is
+already in it.
+
+Once per **proposal**, not once per hunk, which `AppModel.countedReviews`
+enforces on the id `settle` preserves. A ten-hunk proposal must not outweigh
+ten mornings of opening the note.
 
 That is deliberate, not an oversight. The store is a model of *one person's*
 attention, and it is the thing Quick Open opens on. A single `heft propose`

@@ -80,6 +80,23 @@ final class VaultSession: ObservableObject {
         noteFrecency.record(relativePath)
     }
 
+    /// Reviewing an agent's proposal for a note, which is attention too.
+    ///
+    /// Only the ranking, not the Recent list: that is a history of what was
+    /// *opened*, and a review is not an opening — the note is already on
+    /// screen and already in it. Deciding a hunk is a stronger signal than
+    /// opening a note and looking away, and until now it counted for nothing,
+    /// so a note worked through change by change sat below one glanced at.
+    ///
+    /// Reachable only from the review panel, which is the second door into the
+    /// reader's index and has to stay one a person alone can walk through. An
+    /// agent's own activity is recorded in a separate store for the reason
+    /// this one exists: `heft propose` over thirty notes must not displace
+    /// weeks of the reader's own signal.
+    func recordReview(_ relativePath: String) {
+        noteFrecency.record(relativePath)
+    }
+
     func replaceRecentPath(_ oldPath: String, with newPath: String) {
         recentPaths = recentPaths.map { $0 == oldPath ? newPath : $0 }
         HeftDefaults.shared.set(recentPaths, forKey: recentsKey)

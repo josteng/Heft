@@ -2077,11 +2077,25 @@ final class AppModel: ObservableObject {
         reviewing = proposal
     }
 
+    /// Proposals whose review has already been counted as attention.
+    ///
+    /// Once per proposal, not once per hunk: `decide` is called for each
+    /// decision, and a ten-hunk proposal would otherwise outweigh ten mornings
+    /// of opening the note. The id survives `settle`, which rewrites a
+    /// part-reviewed proposal under the same one.
+    private var countedReviews: Set<String> = []
+
+    private func recordReview(of proposal: Proposal) {
+        guard countedReviews.insert(proposal.id).inserted else { return }
+        session?.recordReview(proposal.notePath)
+    }
+
     /// Accepts or rejects one hunk. Either way the proposal is rewritten to
     /// hold only what is still undecided, so a half-reviewed proposal is a
     /// smaller proposal rather than a lost one.
     func decide(_ proposal: Proposal, hunk: Int, accept: Bool) {
         guard let vaultRoot else { return }
+        recordReview(of: proposal)
         let before = currentText(for: proposal)
         do {
             let outcome = try ProposalStore.settle(
@@ -2104,6 +2118,7 @@ final class AppModel: ObservableObject {
 
     func acceptAll(_ proposal: Proposal) {
         guard let vaultRoot else { return }
+        recordReview(of: proposal)
         let before = currentText(for: proposal)
         write(proposal.body, to: proposal.notePath)
         ProposalStore.remove(proposal.id, in: vaultRoot)

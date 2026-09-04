@@ -262,6 +262,60 @@ struct ProposalTests {
         model.closeWorkspace()
     }
 
+    /// Accepting hunks one at a time is the most deliberate attention a note
+    /// can get: every change was read and answered. It counted for nothing,
+    /// while opening a note and looking away counted fully.
+    @Test("Reviewing a proposal counts as attention, once per proposal")
+    @MainActor
+    func reviewCountsAsAttention() async throws {
+        let root = try disposableVault()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            HeftDefaults.shared.removeObject(
+                forKey: "dev.stenglein.Heft.frecency.notes.\(root.path)"
+            )
+        }
+
+        let note = root.appendingPathComponent("Note.md")
+        let original = "alpha\n\nbeta\n\ngamma\n"
+        try original.write(to: note, atomically: true, encoding: .utf8)
+        try ProposalStore.write(
+            Proposal(
+                notePath: "Note.md", base: original, body: "ALPHA\n\nbeta\n\nGAMMA\n",
+                agent: "claude-code", summary: "Shout at both ends"
+            ),
+            in: root
+        )
+
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+        model.refreshProposals()
+        let pending = try #require(model.proposalsForCurrentNote.first)
+        let hunks = pending.diff(against: model.currentText(for: pending)).hunks
+        #expect(hunks.count == 2)
+
+        // Opening the note already counted once; the review is what is being
+        // measured here, so the comparison is against that.
+        let opened = try #require(model.noteFrecency?.score("Note.md"))
+        model.decide(pending, hunk: hunks[0].id, accept: true)
+        let afterFirst = try #require(model.noteFrecency?.score("Note.md"))
+        #expect(afterFirst > opened, "deciding a hunk is attention")
+
+        // Once per proposal, not once per hunk: a ten-hunk proposal must not
+        // outweigh ten mornings of opening the note. `settle` keeps the id.
+        let remaining = try #require(model.proposalsForCurrentNote.first)
+        #expect(remaining.id == pending.id)
+        model.decide(remaining, hunk: remaining.diff(against: model.text).hunks[0].id, accept: false)
+        // With a tolerance: the score decays continuously, so two reads a
+        // moment apart differ far below the size of a use.
+        let afterSecond = try #require(model.noteFrecency?.score("Note.md"))
+        #expect(abs(afterSecond - afterFirst) < 0.01, "a second hunk must not count again")
+
+        model.closeWorkspace()
+    }
+
     @MainActor
     private func waitUntil(
         _ condition: () -> Bool, within seconds: Double = 5
