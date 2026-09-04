@@ -146,4 +146,5 @@ half-reviewed proposal is a smaller proposal rather than a lost one.
 | `Docs/AgentIntegration.md` | the agent verbs in full |
 | `Docs/TemplatesAndSlides.md` | templates, date tokens, snippets, slides |
 | `Docs/VimMode.md` | the experimental modal editing, and its limits |
-| `CLAUDE.md` | architecture and every hard-won gotcha, for contributors |
+| `CLAUDE.md` | the rules and a map of the rest, for contributors and agents |
+| `Docs/Gotchas.md` | every hard-won gotcha, and the known gaps |

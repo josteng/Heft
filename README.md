@@ -176,6 +176,11 @@ whole document twice per character.
   already keep theirs. On a vault whose attachment folders were named three
   different ways, that found all three with nothing configured. Only a rule
   that names a single folder ever creates one.
+- **Where new notes go** (Settings ▸ General): beside the note you have open,
+  in the folder the sidebar has selected, or a folder you name, which is the
+  one case Heft will create. A folder picked in the sidebar always wins: that
+  is you pointing at a place, and a setting should not override a gesture. The
+  same pane decides when a window opens its calendar.
 - **What opens on startup** (Settings ▸ Startup, per vault): nothing, the note
   you were last on, today's daily note, one named note, or a path worked out
   from the date in the same tokens a daily-note template uses, so
@@ -457,7 +462,7 @@ runtime, and the checks skip when `nvim` is absent.
   lists beyond the previous-position mark, full blockwise put.
 - Rough edges in the editing surface: selecting across table cells, changing a
   column's alignment from the grid, widgets inside an embedded note, and
-  callout folding. `CLAUDE.md` lists them.
+  callout folding. [`Docs/Gotchas.md`](Docs/Gotchas.md) lists them.
 
 ## Licence
 
