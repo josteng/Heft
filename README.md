@@ -254,12 +254,25 @@ brought. Both are written between markers, so running it again after an upgrade
 refreshes Heft's section and leaves anything else in each file alone.
 
 It also writes `.claude/settings.json`, which turns the main instruction from a
-request into a rule: Edit, Write and NotebookEdit are denied **inside the
-vault**, and `heft` is allowed without a prompt. Writing outside the vault is
-untouched, since `heft propose --from /tmp/new.md` depends on it. Your own
-settings in that file are merged with, never replaced. Codex and the rest have
-no per-project equivalent, so for them the rule lives in `AGENTS.md` and is
-followed rather than enforced.
+request into a rule: editing a file **inside the vault** is denied, and `heft`
+is allowed without a prompt. One rule, `Edit(**)`, because Claude Code matches a
+path-scoped rule against the file a tool would touch and only `Edit(path)` takes
+part in that check, so it covers Write and NotebookEdit too. Writing outside the
+vault is untouched, since `heft propose --from /tmp/new.md` depends on it. Your
+own settings in that file are merged with, never replaced.
+
+This is a guardrail, not a sandbox: an agent with a shell can still write a
+file, and the point is that the easy path and the correct path are the same
+path.
+
+Codex has no per-project permission file, so nothing can be shipped into the
+vault for it: its `[projects]` table carries only trust, and permissions live in
+your `~/.codex/config.toml`. Its enforcement is a sandbox rather than a deny
+list, and neither ready-made mode fits — `read-only` blocks `heft propose` as
+well as editing, and `workspace-write` allows both. A `[permissions]` profile
+can express the rule exactly, mapping the vault to `read` and its `.heft` folder
+to `write`, but it is yours to add and is keyed by absolute path. So for Codex
+the rule lives in `AGENTS.md` and is followed rather than enforced.
 
 [`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the detail.
 

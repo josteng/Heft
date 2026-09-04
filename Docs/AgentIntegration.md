@@ -197,8 +197,28 @@ the same thing from the app. Three files:
   left alone rather than overwritten.
 
 Codex has no per-project deny list of this kind, so for it the rule lives in
-`AGENTS.md` and is followed rather than enforced. Running it read-only outside
-a scratch directory achieves the same thing, if you want the belt as well.
+`AGENTS.md` and is followed rather than enforced. Its `[projects."/path"]` table
+carries only `trust_level`; permissions live in `~/.codex/config.toml`, which
+Heft has no business writing.
+
+Its enforcement is a sandbox rather than a deny list, and neither ready-made
+mode is the rule we want. Measured with `codex sandbox`, which runs a command
+under the same seatbelt without a model:
+
+| mode | direct edit to a note | `heft propose` |
+| --- | --- | --- |
+| `read-only` | blocked | **blocked** (cannot create `.heft/proposals`) |
+| `workspace-write` | **allowed** | allowed |
+
+A `[permissions.<name>.filesystem]` profile maps absolute paths to `read`,
+`write`, `none` or `deny`, and can express the rule exactly: the vault `read`,
+its `.heft` folder `write`. It replaces the default access set, so the system
+paths have to be granted alongside, and it is selected with `default_permissions`
+or `-P`. That is a thing to hand somebody, not a thing to install for them.
+
+Where Codex is *stronger*: its sandbox is enforced by the kernel, so it also
+covers the shell. Claude Code's deny rule does not — `Bash` is not denied, so
+`sed -i` is not covered by it.
 
 The guide is stamped with a version, because it is copied *into* your vault and
 frozen there. Every agent verb checks the stamp and says on stderr when the
