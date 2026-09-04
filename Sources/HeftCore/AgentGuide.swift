@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 11
+    public static let version = 12
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -225,6 +225,25 @@ public enum AgentGuide {
         apply in order, each to the result of the last. Heft resolves them
         against the current note and stores an ordinary full-body proposal, so
         a bad anchor fails here and now rather than at review time.
+
+        ## Changing your mind about a proposal
+
+        One note holds one pending proposal. Proposing a second is refused,
+        because both would be measured against the note as it is now and
+        accepting either leaves the other asking for a note it was never
+        rebased onto. There is no amend: an id is a name, and a name that
+        quietly comes to mean something else makes the review list lie.
+
+        So a changed proposal is a new proposal, in one command:
+
+        ```bash
+        heft propose . "Path/To/Note.md" --replacing <old id> \\
+            --from /tmp/new.md --summary "one line on what this changes"
+        ```
+
+        It drops the old one and stores yours in its place. `heft proposals`
+        prints the ids, and `heft drop` is still there when you want the
+        change gone rather than redone.
 
         ## Removing, moving, and changes that span notes
 

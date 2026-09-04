@@ -99,6 +99,8 @@ public enum CommandLineSpec {
             Flag("--move", value: "path", "Propose moving it there, repointing links."),
             Flag("--group", value: "s",
                  "Join these changes into one, by repeating the same words."),
+            Flag("--replacing", value: "id",
+                 "Take a pending proposal's place. Drops it and stores this instead."),
         ], isReadOnly: false),
         Verb("changes", "<vault> <note>",
              "What moved in a note since you last `read` it."),

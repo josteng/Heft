@@ -387,6 +387,98 @@ struct AgentCLITests {
         #expect(AgentGuide.status(ofVaultAt: root) == .outdated(found: 2))
     }
 
+    // MARK: - One proposal per note
+
+    @Test("A second proposal on the same note is refused, and says how to replace it")
+    func secondProposalIsRefused() throws {
+        let root = try vault(["Note.md": "one\ntwo\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let first = try run(["propose", root.path, "Note.md", "--summary", "widen the intro"],
+                            stdin: "one\ntwo\nthree\n")
+        #expect(first.status == 0)
+
+        let second = try run(["propose", root.path, "Note.md", "--summary", "something else"],
+                             stdin: "one\nfour\n")
+        #expect(second.status != 0)
+        let complaint = second.error
+        // Names the one in the way, and both ways out of it.
+        #expect(complaint.contains("widen-the-intro"))
+        #expect(complaint.contains("--replacing"))
+        #expect(complaint.contains("heft drop"))
+
+        // Nothing was written: refusing has to mean refusing.
+        #expect(ProposalStore.forNote("Note.md", in: root).count == 1)
+    }
+
+    @Test("`--replacing` swaps one proposal for another in a single command")
+    func replacingSwapsTheProposal() throws {
+        let root = try vault(["Note.md": "one\ntwo\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["propose", root.path, "Note.md", "--summary", "remove the image"],
+                        stdin: "one\n").status == 0)
+        let old = try #require(ProposalStore.all(in: root).first)
+
+        let output = try run(
+            ["propose", root.path, "Note.md", "--replacing", old.id,
+             "--summary", "remove the whole quote block"],
+            stdin: "\n"
+        )
+        #expect(output.status == 0)
+        #expect(output.text.contains("replaced \(old.id)"))
+
+        // One proposal on the note, and it is the new one under its own name.
+        let pending = ProposalStore.forNote("Note.md", in: root)
+        #expect(pending.count == 1)
+        #expect(pending.first?.id == "remove-the-whole-quote-block")
+        #expect(pending.first?.summary == "remove the whole quote block")
+    }
+
+    @Test("Replacing under the same summary keeps the name rather than numbering it")
+    func replacingReusesTheName() throws {
+        let root = try vault(["Note.md": "one\ntwo\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["propose", root.path, "Note.md", "--summary", "tighten the opening"],
+                        stdin: "one\n").status == 0)
+        #expect(try run(["propose", root.path, "Note.md", "--replacing", "tighten-the-opening",
+                         "--summary", "tighten the opening"],
+                        stdin: "two\n").status == 0)
+
+        let pending = ProposalStore.all(in: root)
+        #expect(pending.count == 1)
+        // Not `tighten-the-opening-2` beside a deleted `tighten-the-opening`.
+        #expect(pending.first?.id == "tighten-the-opening")
+        #expect(pending.first?.body == "two\n")
+    }
+
+    @Test("A proposal on another note is not a collision")
+    func otherNotesAreUnaffected() throws {
+        let root = try vault(["A.md": "a\n", "B.md": "b\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["propose", root.path, "A.md", "--summary", "change a"],
+                        stdin: "a2\n").status == 0)
+        #expect(try run(["propose", root.path, "B.md", "--summary", "change b"],
+                        stdin: "b2\n").status == 0)
+        #expect(ProposalStore.all(in: root).count == 2)
+    }
+
+    @Test("A delete cannot be stacked on a pending edit to the same note either")
+    func structuralProposalsCollideToo() throws {
+        let root = try vault(["Note.md": "one\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["propose", root.path, "Note.md", "--summary", "rewrite it"],
+                        stdin: "two\n").status == 0)
+        let delete = try run(["propose", root.path, "Note.md", "--delete",
+                              "--summary", "drop the note"])
+        #expect(delete.status != 0)
+        #expect(delete.error.contains("rewrite-it"))
+        #expect(ProposalStore.all(in: root).count == 1)
+    }
+
     // MARK: - Permissions
 
     @Test("Setup ships permission rules, and keeps whatever was already in them")

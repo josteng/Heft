@@ -34,6 +34,7 @@ heft propose <vault> <note.md> --replace   # anchored old/new pairs instead
 heft propose <vault> <path> --delete    # propose removing it; reads no body
 heft propose <vault> <path> --move <to> # propose moving it, repointing links
 heft propose <vault> <note> --group "…" # join several into one change
+heft propose <vault> <note> --replacing <id>   # take a pending one's place
 
 heft changes <vault> <note>            # what moved since you last read it
 heft proposals <vault>                 # what is waiting for review
@@ -51,6 +52,19 @@ takes the whole id**, because it cannot be undone: a prefix names a different
 set of proposals at different times, so one that is unique today deletes
 something else next week without ever being reported as ambiguous. Reading the
 wrong proposal costs nothing; dropping it costs the work.
+
+**One note holds one pending proposal.** A second is refused, naming the one in
+the way. Both would be diffed against the note *as it is now*, so accepting
+either leaves the other asking for a note it was never rebased onto, and its
+hunks read as an attempt to undo what was just accepted.
+
+There is no amend verb, deliberately: an id is a name, and a name that quietly
+comes to mean something else makes the review list lie about what it is asking.
+A changed proposal is a new proposal, and `--replacing` is the drop and the
+propose in one command. It stores the new one first and drops the old one
+after, so a failed write leaves the old proposal standing rather than neither,
+and re-proposing under the same summary keeps the same name rather than
+numbering it.
 
 An empty string is refused outright — it is a prefix of every id, and
 `heft drop "$ID"` from a shell that expanded `$ID` to nothing used to delete

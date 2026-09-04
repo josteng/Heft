@@ -354,6 +354,23 @@ public enum ProposalStore {
         all(in: vaultRoot).filter { $0.notePath == relativePath }
     }
 
+    /// A proposal already waiting on this note, which a new one would collide
+    /// with. Pure, so `propose` can refuse without a vault to ask.
+    ///
+    /// Two proposals on one note is not two changes, it is two answers to the
+    /// same question, each written as though the other did not exist. Both are
+    /// diffed against the note *as it is now*, so accepting one leaves the
+    /// other proposing the note it was never rebased onto, and the hunks read
+    /// as an agent trying to undo work you just accepted.
+    ///
+    /// `ignoring` is the id `--replacing` names: the one being taken the place
+    /// of is not a collision with itself.
+    public static func conflict(
+        forNote relativePath: String, among proposals: [Proposal], ignoring: String? = nil
+    ) -> Proposal? {
+        proposals.first { $0.notePath == relativePath && $0.id != ignoring }
+    }
+
     /// What is waiting, sorted into the three things a review list shows:
     /// groups, single edits to one note, and structural changes.
     ///

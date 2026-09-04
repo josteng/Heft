@@ -65,7 +65,8 @@ public enum AgentCLI {
         guard let notePath = arguments.first, !notePath.hasPrefix("--") else {
             fail("usage: heft propose <vault> <note.md> [--summary s] [--agent a] [--from file]"
                 + "\n       heft propose <vault> <path> --delete [--summary s]"
-                + "\n       heft propose <vault> <path> --move <new path> [--summary s]")
+                + "\n       heft propose <vault> <path> --move <new path> [--summary s]"
+                + "\n       heft propose <vault> <note.md> --replacing <id> …")
         }
         let options = Options(arguments.dropFirst())
         let relative = normalized(notePath)
@@ -78,6 +79,9 @@ public enum AgentCLI {
         if options.flag("delete") || options["move"] != nil {
             proposeStructural(root: root, path: notePath, options: options)
         }
+
+        // Before stdin is read, so a collision costs nothing to discover.
+        let replaced = replacement(for: relative, root: root, options: options)
 
         var body: String
         if let from = options["from"] {
@@ -148,7 +152,7 @@ public enum AgentCLI {
             id: ProposalStore.identifier(
                 summary: summary,
                 noteName: (relative as NSString).lastPathComponent,
-                taken: Set(ProposalStore.all(in: root).map(\.id))
+                taken: taken(in: root, freeing: replaced)
             ),
             notePath: relative,
             base: current,
@@ -163,6 +167,7 @@ public enum AgentCLI {
         } catch {
             fail("could not write the proposal: \(error.localizedDescription)")
         }
+        retire(replaced, replacedBy: proposal, in: root)
 
         // Recorded in the *agent's* index, never the reader's.
         //
@@ -205,6 +210,7 @@ public enum AgentCLI {
             destination = cleaned
         }
 
+        let replaced = replacement(for: item.relativePath, root: root, options: options)
         let summary = options["summary"]
         let described = summary ?? (isMove
             ? "Move \(item.relativePath) to \(destination ?? "")"
@@ -213,7 +219,7 @@ public enum AgentCLI {
             id: ProposalStore.identifier(
                 summary: described,
                 noteName: (item.relativePath as NSString).lastPathComponent,
-                taken: Set(ProposalStore.all(in: root).map(\.id))
+                taken: taken(in: root, freeing: replaced)
             ),
             notePath: item.relativePath,
             base: nil,
@@ -229,6 +235,7 @@ public enum AgentCLI {
         } catch {
             fail("could not write the proposal: \(error.localizedDescription)")
         }
+        retire(replaced, replacedBy: proposal, in: root)
         MainActor.assumeIsolated {
             FrecencyStore.agentNotes(forVaultAt: root.standardizedFileURL.path)
                 .record(item.relativePath)
@@ -448,6 +455,64 @@ public enum AgentCLI {
 
     /// The one proposal an id names, or an exit. `ProposalStore.match` decides;
     /// this only turns each answer into a message and a status.
+    /// The proposal `--replacing` names, and a refusal when the note already
+    /// has one that is not it.
+    ///
+    /// There is no amend verb, and this is why one is not wanted. A proposal's
+    /// id is a *name*, printed in `heft proposals` and shown in the sidebar; if
+    /// `remove-the-middle-image` could quietly come to mean a six-line block
+    /// deletion, the review list would be lying about what it is asking. So a
+    /// changed proposal is a new proposal, and `--replacing` is only the two
+    /// commands that took in one, without pretending the name survived.
+    ///
+    /// What was missing was the refusal. `propose` twice on one note happily
+    /// wrote two, each measured against the note as it is now and each blind to
+    /// the other, which is a trap an agent walks into while doing exactly what
+    /// it was asked.
+    private static func replacement(
+        for relative: String, root: URL, options: Options
+    ) -> Proposal? {
+        // Resolved exactly, like `drop`: this deletes something, and a prefix
+        // names a different set of proposals at different times.
+        let replaced = options["replacing"].map {
+            resolve($0, in: root, verb: "propose --replacing", exactly: true)
+        }
+        guard let waiting = ProposalStore.conflict(
+            forNote: relative, among: ProposalStore.all(in: root), ignoring: replaced?.id
+        ) else { return replaced }
+
+        fail("""
+            \(relative) already has a proposal waiting: \(waiting.id)
+            Both would be measured against the note as it is now, so accepting one \
+            leaves the other asking for a note it was never rebased onto.
+            Take its place with --replacing \(waiting.id), or drop it first:
+              heft drop "\(root.path)" \(waiting.id)
+            """)
+    }
+
+    /// The ids already spoken for, minus the one about to be taken over.
+    ///
+    /// Freeing it matters: re-proposing under the same summary would otherwise
+    /// come back as `\(name)-2` while `\(name)` was deleted a line later,
+    /// which reads as a rename nobody asked for.
+    private static func taken(in root: URL, freeing replaced: Proposal?) -> Set<String> {
+        var ids = Set(ProposalStore.all(in: root).map(\.id))
+        if let replaced { ids.remove(replaced.id) }
+        return ids
+    }
+
+    /// Removes the proposal that has just been superseded.
+    ///
+    /// After the new one is safely on disk, so a failed write leaves the old
+    /// proposal standing rather than neither. Skipped when the ids match: the
+    /// new file is already at that path, and removing it would delete what was
+    /// just written.
+    private static func retire(_ replaced: Proposal?, replacedBy new: Proposal, in root: URL) {
+        guard let replaced else { return }
+        if replaced.id != new.id { ProposalStore.remove(replaced.id, in: root) }
+        print("replaced \(replaced.id)")
+    }
+
     private static func resolve(
         _ id: String?, in root: URL, verb: String, exactly: Bool = false
     ) -> Proposal {
