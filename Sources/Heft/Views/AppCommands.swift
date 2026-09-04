@@ -1,29 +1,58 @@
 import HeftCore
 import SwiftUI
 
+/// A `KeyboardShortcuts.Shortcut` in the form SwiftUI wants.
+///
+/// The table itself is in HeftCore so `heft keys` can print it and a test can
+/// hold the menu against it; this is only the translation, because
+/// `KeyEquivalent` and `EventModifiers` are SwiftUI types and HeftCore does
+/// not import SwiftUI.
 struct AppCommandShortcut {
     let key: KeyEquivalent
     let modifiers: EventModifiers
     let display: String
 
-    static let openToday = Self(
-        key: "t", modifiers: [.command, .shift], display: "⇧⌘T"
-    )
-    static let toggleCalendar = Self(
-        key: "d", modifiers: [.command, .shift], display: "⇧⌘D"
-    )
-    static let toggleSidebar = Self(
-        key: "s", modifiers: [.command, .shift], display: "⇧⌘S"
-    )
-    static let toggleBacklinks = Self(
-        key: "b", modifiers: [.command, .option], display: "⌥⌘B"
-    )
-    static let captureInbox = Self(
-        key: "i", modifiers: [.command, .shift], display: "⇧⌘I"
-    )
-    static let exportPDF = Self(
-        key: "e", modifiers: [.command, .shift], display: "⇧⌘E"
-    )
+    init(_ id: String) {
+        let shortcut = KeyboardShortcuts.shortcut(id)
+        key = KeyEquivalent(shortcut.key)
+        var found: EventModifiers = []
+        if shortcut.modifiers.contains(.command) { found.insert(.command) }
+        if shortcut.modifiers.contains(.shift) { found.insert(.shift) }
+        if shortcut.modifiers.contains(.option) { found.insert(.option) }
+        if shortcut.modifiers.contains(.control) { found.insert(.control) }
+        modifiers = found
+        display = shortcut.display
+    }
+
+    static let openToday = Self("openToday")
+    static let toggleCalendar = Self("toggleCalendar")
+    static let toggleSidebar = Self("toggleSidebar")
+    static let toggleBacklinks = Self("toggleBacklinks")
+    static let captureInbox = Self("captureInbox")
+    static let exportPDF = Self("exportPDF")
+    static let newNote = Self("newNote")
+    static let newWindow = Self("newWindow")
+    static let openVaultInNewWindow = Self("openVaultInNewWindow")
+    static let save = Self("save")
+    static let bold = Self("bold")
+    static let italic = Self("italic")
+    static let strikethrough = Self("strikethrough")
+    static let highlight = Self("highlight")
+    static let code = Self("code")
+    static let link = Self("link")
+    static let find = Self("find")
+    static let findNext = Self("findNext")
+    static let findPrevious = Self("findPrevious")
+    static let searchVault = Self("searchVault")
+    static let quickOpen = Self("quickOpen")
+    static let commandPalette = Self("commandPalette")
+}
+
+extension View {
+    /// Applies a shortcut from the one table.
+    func keyboardShortcut(_ shortcut: AppCommandShortcut) -> some View {
+        keyboardShortcut(shortcut.key, modifiers: shortcut.modifiers)
+    }
 }
 
 /// One command owns all of its palette metadata and behaviour. Adding a

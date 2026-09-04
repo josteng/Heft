@@ -24,7 +24,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 5
+    public static let version = 6
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -146,6 +146,13 @@ public enum AgentGuide {
         format, the attachment folder, and whether this vault prefers
         wikilinks over Markdown links. Guessing produces notes that look
         wrong in the editor and links that do not resolve.
+
+        ## When they ask how to do something in the app
+
+        `heft keys` prints the app's keyboard shortcuts. The person you are
+        helping is reading these notes in a Mac app, and "how do I search the
+        vault" is a fair question to be asked in the middle of a task. Run it
+        rather than guessing: a wrong shortcut is worse than no answer.
 
         `heft outline` is usually the right thing to read before restructuring
         a long note, and `heft backlinks` before renaming or moving one:

@@ -337,19 +337,23 @@ templates, the full token table, the typing-substitution snippets, and how
 
 ## Keyboard
 
+The ones worth knowing. `heft keys` prints all of them, including the
+formatting and find commands, which is also how an agent answers when you
+ask it how to do something in the app.
+
 | Shortcut | Action |
 |---|---|
-| ⌘O | Quick open |
-| ⌘N | New note |
-| ⌘P | Command palette |
+| ⌘N | New Note |
+| ⇧⌘I | Capture to Inbox |
+| ⇧⌘T | Today's Daily Note |
+| ⇧⌘O | Open Vault in New Window |
+| ⇧⌘E | Export as PDF |
 | ⌘S | Save pending edits now |
 | ⇧⌘F | Search the vault |
-| ⇧⌘E | Export as PDF |
-| ⇧⌘I | Capture to Inbox |
-| ⇧⌘T | Today's daily note |
+| ⌘O | Quick open |
+| ⌘P | Command palette |
 | ⇧⌘S | Toggle sidebar |
 | ⇧⌘D | Toggle calendar |
-| ⇧⌘O | Open vault in new window |
 | ⌥⌘B | Toggle backlinks |
 
 ## Architecture

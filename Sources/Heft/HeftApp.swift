@@ -118,25 +118,19 @@ struct HeftCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Note…") { model?.createNote() }
-                .keyboardShortcut("n", modifiers: .command)
+                .keyboardShortcut(.newNote)
                 .disabled(model == nil)
             Button("New Window") {
                 openWindow(value: model?.descriptor(scopePath: model?.scopePath) ?? WorkspaceDescriptor())
             }
-            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .keyboardShortcut(.newWindow)
             Divider()
             Button("Capture to Inbox…") { model?.presentInboxCapture() }
-                .keyboardShortcut(
-                    AppCommandShortcut.captureInbox.key,
-                    modifiers: AppCommandShortcut.captureInbox.modifiers
-                )
+                .keyboardShortcut(.captureInbox)
                 .disabled(model?.vaultRoot == nil)
             if model?.dailyNotesAreInScope != false {
                 Button("Today's Daily Note") { model?.openDailyNote(for: Date()) }
-                    .keyboardShortcut(
-                        AppCommandShortcut.openToday.key,
-                        modifiers: AppCommandShortcut.openToday.modifiers
-                    )
+                    .keyboardShortcut(.openToday)
                     .disabled(model == nil)
             }
             Button("Daily Note Settings…") {
@@ -145,7 +139,7 @@ struct HeftCommands: Commands {
             .disabled(model?.vaultRoot == nil)
             Divider()
             Button("Open Vault in New Window…") { openVaultInNewWindow() }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .keyboardShortcut(.openVaultInNewWindow)
             Menu("Open Recent") {
                 ForEach(registry.recentVaults, id: \.url) { recent in
                     // Switches this window rather than opening another: the
@@ -185,10 +179,7 @@ struct HeftCommands: Commands {
         // reserved by the system" and is nothing of the kind.
         CommandGroup(after: .importExport) {
             Button("Export as PDF…") { model?.exportPDF() }
-                .keyboardShortcut(
-                    AppCommandShortcut.exportPDF.key,
-                    modifiers: AppCommandShortcut.exportPDF.modifiers
-                )
+                .keyboardShortcut(.exportPDF)
                 // On the model, not on the open note: `exportPDF` already says
                 // "No note to export", and a shortcut that reports why it did
                 // nothing beats one that silently does nothing.
@@ -197,55 +188,52 @@ struct HeftCommands: Commands {
         CommandGroup(after: .textEditing) {
             Menu("Format") {
                 Button("Bold") { NSApp.sendAction(#selector(HeftTextKit2View.formatBold), to: nil, from: nil) }
-                    .keyboardShortcut("b", modifiers: .command)
+                    .keyboardShortcut(.bold)
                 Button("Italic") { NSApp.sendAction(#selector(HeftTextKit2View.formatItalic), to: nil, from: nil) }
-                    .keyboardShortcut("i", modifiers: .command)
+                    .keyboardShortcut(.italic)
                 Button("Strikethrough") { NSApp.sendAction(#selector(HeftTextKit2View.formatStrikethrough), to: nil, from: nil) }
-                    .keyboardShortcut("x", modifiers: [.command, .shift])
+                    .keyboardShortcut(.strikethrough)
                 Button("Highlight") { NSApp.sendAction(#selector(HeftTextKit2View.formatHighlight), to: nil, from: nil) }
-                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                    .keyboardShortcut(.highlight)
                 Button("Code") { NSApp.sendAction(#selector(HeftTextKit2View.formatCode), to: nil, from: nil) }
-                    .keyboardShortcut("e", modifiers: .command)
+                    .keyboardShortcut(.code)
                 Divider()
                 Button("Link") { NSApp.sendAction(#selector(HeftTextKit2View.formatLink), to: nil, from: nil) }
-                    .keyboardShortcut("k", modifiers: .command)
+                    .keyboardShortcut(.link)
             }
             Divider()
             Menu("Find") {
                 Button("Find…") { model?.showFind() }
-                    .keyboardShortcut("f", modifiers: .command)
+                    .keyboardShortcut(.find)
                 Button("Find Next") { model?.findNext() }
-                    .keyboardShortcut("g", modifiers: .command)
+                    .keyboardShortcut(.findNext)
                 Button("Find Previous") { model?.findPrevious() }
-                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .keyboardShortcut(.findPrevious)
                 Divider()
                 Button("Search Workspace…") { model?.isVaultSearchPresented = true }
-                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                    .keyboardShortcut(.searchVault)
             }
             Divider()
             Button("Quick Open…") { model?.isQuickOpenPresented = true }
-                .keyboardShortcut("o", modifiers: .command)
+                .keyboardShortcut(.quickOpen)
             Button("Command Palette…") { model?.isCommandPalettePresented = true }
-                .keyboardShortcut("p", modifiers: .command)
+                .keyboardShortcut(.commandPalette)
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save") { model?.flushPendingSave() }
-                .keyboardShortcut("s", modifiers: .command)
+                .keyboardShortcut(.save)
                 .disabled(model == nil)
         }
         CommandGroup(after: .toolbar) {
             Button(model?.columnVisibility == .detailOnly ? "Show Sidebar" : "Hide Sidebar") {
                 model?.toggleSidebar()
             }
-            .keyboardShortcut("s", modifiers: [.command, .shift])
+            .keyboardShortcut(.toggleSidebar)
             Toggle("Show Calendar", isOn: binding(\.isCalendarVisible))
-                .keyboardShortcut(
-                    AppCommandShortcut.toggleCalendar.key,
-                    modifiers: AppCommandShortcut.toggleCalendar.modifiers
-                )
+                .keyboardShortcut(.toggleCalendar)
             Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
             Toggle("Show Backlinks", isOn: binding(\.isInspectorVisible))
-                .keyboardShortcut("b", modifiers: [.command, .option])
+                .keyboardShortcut(.toggleBacklinks)
         }
     }
 

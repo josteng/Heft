@@ -24,6 +24,17 @@ enum HeftMain {
             exit(0)
         }
 
+        // Needs no vault: the keys are the app's, not a vault's. That is also
+        // why it answers when Heft has never been pointed anywhere.
+        if arguments.first == "keys" {
+            if arguments.contains("--markdown") {
+                print(KeyboardShortcuts.markdownTable(all: arguments.contains("--all")))
+            } else {
+                print(KeyboardShortcuts.rendered(), terminator: "")
+            }
+            exit(0)
+        }
+
         // The agent verbs: propose, proposals, diff, drop, read, find.
         if AgentCLI.run(arguments) { return }
 

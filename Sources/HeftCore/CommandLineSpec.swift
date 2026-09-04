@@ -66,6 +66,8 @@ public enum CommandLineSpec {
         Verb("open", "<path>", "Open a vault, folder or note. The default for a bare path.",
              isReadOnly: false),
         Verb("help", "[--json]", "This list. `--json` is the machine-readable form."),
+        Verb("keys", "", "The app's keyboard shortcuts, so an agent can answer for them.",
+             flags: [Flag("--all", "Every one, not just the ones worth memorising.")]),
 
         // Reading a vault
         Verb("files", "<vault>", "Every note, vault-relative.", flags: [
