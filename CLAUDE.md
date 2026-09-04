@@ -208,6 +208,21 @@ And the carried bullet is drawn *left* of that origin, so `renderingSurfaceBound
 has to open the same 44pt gutter `.list` gets or the clip shaves it off
 entirely — which is what happened: the picture moved, the bullet vanished.
 
+### A bullet that wraps
+
+A paragraph style applies to a paragraph, and a hard line break starts a new
+one, so the indent a list marker gave its line stopped at that line's newline
+and the rest of the item fell back to the left margin — a long bullet in a
+narrow window rendered ragged. `.listContinuation` carries the item's depth to
+those lines, with no glyph and no markup, since the bullet belongs to the first
+line and the editor draws one widget per line.
+
+The pass runs **last** in `blockDecorations` so it can see every other block
+construct found on the same pass and decline the lines they own: `- item`
+followed by `# Heading` is a heading. Fences, tables and frontmatter are already
+in `protected` by then; `$$` is found afterwards and so needs naming. A blank
+line ends the run.
+
 ### Tables are edited in place
 
 A table is the one construct with a third reveal state. Everything else is
@@ -531,15 +546,16 @@ row can be found, not so one vault spells a callout four ways.
 ### Agent proposals
 
 An agent does not edit the vault; it proposes, and the editor asks. `AgentCLI`
-adds `propose`, `proposals`, `diff`, `drop`, `read` and `find` to the same
-headless dispatch in `Main.swift` that `stats` and `render` use, so the whole
-integration is a CLI rather than a daemon or a port. `heft propose` takes the
-**complete new body** on stdin, not a patch: an agent already has the finished
-text, and a full body cannot fail to apply. Where that would mean restating a
-long note to change a paragraph, `--replace` takes anchored `old`/`new` pairs
-instead; `AnchoredEdit` resolves them against the note as it is now and refuses
-an anchor matching more than once, so a bad anchor fails at the command rather
-than at review time and what reaches the store is still a full-body proposal.
+adds `propose`, `proposals`, `diff`, `drop`, `read`, `find`, `changes` and
+`attachment` to the same headless dispatch in `Main.swift` that `stats` and
+`render` use, so the whole integration is a CLI rather than a daemon or a port.
+`heft propose` takes the **complete new body** on stdin, not a patch: an agent
+already has the finished text, and a full body cannot fail to apply. Where that
+would mean restating a long note to change a paragraph, `--replace` takes
+anchored `old`/`new` pairs instead; `AnchoredEdit` resolves them against the
+note as it is now and refuses an anchor matching more than once, so a bad anchor
+fails at the command rather than at review time and what reaches the store is
+still a full-body proposal.
 
 A proposal is one JSON file under `<vault>/.heft/proposals/`, which the existing
 vault watcher already sees. `NoteDiff` in HeftCore turns it into hunks, and each
@@ -557,8 +573,81 @@ Three decisions carry it:
 - An accepted change to the open note goes through the buffer and the normal
   autosave, rather than writing the file under the editor and racing it.
 
+An id is a **name**, not a UUID: `ProposalStore.identifier` slugs the summary,
+or the note when there is no summary, because the default summary is the same
+words every time. It is also the filename, so the slug can produce neither a
+slash, a dot nor an empty string. `ProposalStore.match` resolves a prefix and
+answers `.missing` for an empty one — `heft drop "$ID"` from a shell that
+expanded `$ID` to nothing used to delete whichever proposal was first, and
+report success.
+
 `Docs/AgentIntegration.md` has the verbs and the `CLAUDE.md` snippet that makes
 Claude Code reach for `propose` instead of `Write`.
+
+#### Read before you replace
+
+`propose` refuses a whole-body proposal for a note that changed since the agent
+read it. Without that, a line typed between the read and the proposal came back
+as an ordinary removal among the agent's own hunks, with nothing to say the
+agent had never seen it — `base` was captured at *propose* time, so `isStale`
+could not fire for that window at all.
+
+`ReadLog` records what `heft read` handed over, and the same record answers the
+question an agent could not ask before: `heft changes` diffs the last read
+against the file now. One snapshot per note, replaced on each read and swept
+after a week.
+
+It lives in **Application Support, not `.heft/`**. A proposal is addressed to
+the reader and belongs with their vault; a read snapshot is one machine's
+scratch state, and writing a file into an iCloud vault on every `heft read`
+would sync a file per note read for nobody's benefit. `HEFT_READ_LOG` moves it,
+which is how the CLI checks drive the real binary without writing into the
+reader's own store.
+
+`--replace` is exempt, because its anchors are resolved against the current
+note and fail if the text they named has moved, which is the stricter test.
+
+#### Kinds, groups, and the review centre
+
+A proposal used to be one note's new body, reviewed in a banner above that note,
+and two things ran that out. A proposal for a note that **does not exist** had
+no note to draw a banner above, so it could not be reached from the app at all —
+found by proposing this vault's own TODO note and then having to write it by
+hand. And a change across twelve notes was twelve unrelated proposals: accepting
+seven left the vault half-changed, with nothing recording that they belonged
+together.
+
+So `Proposal.Kind` names edit, create, delete and move, and `Proposal.Group`
+joins several into one change. The group's id is the slug of its summary, which
+is what lets an agent join by repeating the same words rather than by passing an
+id around; a group of one is not a group, because a heading with one row under
+it is a fold with nothing in it. `ProposalStore.sort` is pure and returns the
+three things a list shows.
+
+`Proposal` decodes **by hand**. The synthesised `Codable` requires every field,
+so adding these would have made every proposal written before them undecodable,
+and the failure mode is somebody's pending change silently vanishing from the
+list. A file from before kinds carried a body, so it is an edit — or a create
+when it had no base, which is exactly what nil `base` used to mean. Same lesson
+as `PDFExportOptions` and `TypingSettings`.
+
+`ReviewCenter` sits at the top of the sidebar and is the only place that can
+show a change with no note behind it. The **banner stays**, because seeing a
+diff where you are reading it is the part that already worked. The rule that
+keeps them from fighting is *one banner per note, ever*: a change belonging to a
+group says so on its banner and points at the centre, and a delete or a move
+never appears in a banner at all — a bar over the page offering to delete the
+page is the wrong place to decide that.
+
+Accepting a group applies its **edits before its moves**, or an edit would be
+written to a path the move had already taken away. It is deliberately **not
+atomic**: a half-applied rename across twelve notes is bad, but refusing to
+apply eleven because the twelfth is stale is worse, and the existing rule
+already covers it — what is left unanswered stays as a smaller change.
+
+`performMove` is split out of `rename` so an accepted move takes the same road
+and repoints the same links: a rename is a move whose destination happens to be
+the same folder.
 
 The two markers are **drawn as a labelled rule** rather than hidden with the
 other HTML comments, and reveal their source when the caret is on their line
@@ -567,6 +656,24 @@ at what looks like the end of the file lands on managed ground; with it,
 pressing Return at the end of the rendered marker lands *after* it. Anything
 typed inside anyway is saved to `.heft/claude-md/` before the section is
 replaced.
+
+`agent-setup` writes **three files**: `CLAUDE.md`, `AGENTS.md`, and
+`.claude/settings.json`. Two guides because Claude Code reads one and Codex and
+most of the rest read the other, and the same generated section in both because
+generated text cannot drift; each keeps its own preamble, which is the user's.
+`AgentGuide.install` is the one place that does it — `Main.swift` and `AppModel`
+each carried a copy of the merge, the back-up and the error wording, and a
+second file would have made that four.
+
+`AgentPermissions` is what turns the main instruction from a request into a
+rule. `Edit(**)`, `Write(**)` and `NotebookEdit(**)` are denied and
+`Bash(heft:*)` is allowed. The deny rules carry a **path** rather than being
+bare tool names, because the workflow the guide teaches writes a scratch file in
+`/tmp` and reads it back with `--from`: denying the tools outright would make
+the setup that enforces the contract the setup that prevents following it. The
+file is merged into, never replaced, and one that is not valid JSON is left
+alone. Codex has no per-project equivalent, so for it the rule lives in
+`AGENTS.md` and is followed rather than enforced.
 
 The guide is **stamped with a version**, because it is copied into the user's
 vault and frozen there: an upgraded Heft cannot reach it, so a vault set up a
@@ -615,6 +722,60 @@ app.
 Only the daily note is *created*. It is what the setting means and the vault
 has a template for it. A path typed into a settings field is not a request to
 litter the vault with empty files on every launch.
+
+### Settings that are not about one vault
+
+`GeneralSettings` holds the two app-wide preferences that are not about how
+anything looks: where a new note goes, and when a window opens its calendar.
+Kept apart from Startup, which answers one question **per vault** because
+"always open `Thesis/Overview`" names a note and a note only exists in one
+vault; and apart from Appearance, which is about the page.
+
+`NewNoteLocation` is pure and takes every fallback as an argument, so the rule
+can be shown in a pane and asked for in a test without a window. A folder
+chosen in the sidebar still wins over the setting: that is somebody pointing at
+a place, and a setting must not override a gesture. A named folder is the one
+that may be **created**, when the first note goes in it — naming a folder is
+asking for notes to go there, unlike a startup path, which is a request to open
+something.
+
+`CalendarVisibility`'s default is the old behaviour and is scope-aware: a window
+focused on `Projects/` has no business showing a calendar for daily notes kept
+in `Journal/`. `always` and `never` are not, because someone who says "always"
+has answered that question themselves — and they outrank a restored window's own
+state, or a window that disagreed once would keep overruling the setting.
+
+`LineBreakStyle` in Appearance overrides `strictLineBreaks`, which was only ever
+the vault's own: a folder of Markdown with no `.obsidian` was stuck with
+whichever default Heft carried. It defaults to following the vault so an upgrade
+cannot change how anybody's notes read. **The live surface shows each line where
+it is in the file either way** — the buffer *is* the file, so two source lines
+cannot be joined into one rendered paragraph without rewriting it — so the
+setting reaches the rendered views rather than the editing one.
+
+Folder disclosure arrows are a toggle in Appearance, off by default: the folder
+icon already fills when the row is open, so the arrow was a second way of saying
+the same thing in a column of its own down the right-hand edge of the tree.
+
+### Finding the open note in the tree
+
+Quick Open and a wikilink both open a note without touching the sidebar, so
+after either it is showing somewhere else entirely. `revealCurrentInSidebar`
+opens every folder above the note — every one, or a note four deep is revealed
+behind three closed folders — brings the column back if it is hidden, and sets
+`revealTarget`.
+
+The scroll is a **request the view answers**, because only the sidebar holds the
+`ScrollViewReader` and only it knows which of its three lists is showing. It
+observes the request twice for that reason: once at the top of the sidebar, to
+put the file list back, and once inside the tree to scroll. The inner one is
+`task(id:)` rather than `onChange`, because switching back from Tags builds the
+tree *after* the request was made, and an `onChange` on a view that appears
+later never sees the value it appeared because of.
+
+`SidebarAnchor` wraps the path in a type of its own: the tree's rows come from
+`ForEach` over `VaultItem`, whose `id` is that path, so a bare `.id(path)` would
+put two elements under one identifier in the same scroll namespace.
 
 ## Gotchas, all of them hard-won
 
@@ -1025,6 +1186,11 @@ litter the vault with empty files on every launch.
   quote, callout or code block last in a note is no longer a line taller than
   its contents. About a fifth of a line of that fragment's line spacing is
   still in there, which would take guessing at a paragraph style to remove.
+- The "one paragraph" line-break setting reaches the rendered views, not the
+  editing surface: joining two source lines into one rendered paragraph would
+  mean rewriting the buffer, and the buffer is the file.
+- A group of proposals is applied in an order that works but is not atomic, and
+  nothing rolls back if one member fails partway.
 - Deferred: graph view, plugins.
 
 ## The icon
