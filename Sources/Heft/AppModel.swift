@@ -287,7 +287,14 @@ final class AppModel: ObservableObject {
             }
         }
 
-        isCalendarVisible = descriptor?.calendarVisible ?? dailyNotesAreInScope
+        // "Always" and "Never" are a standing instruction and outrank what a
+        // restored window was left showing, or a window that disagreed once
+        // would keep overruling the setting. The default keeps restoration,
+        // because it *is* the old behaviour.
+        isCalendarVisible = GeneralSettings.shared.calendarVisibility.isVisible(
+            dailyNotesAreInScope: dailyNotesAreInScope,
+            remembered: descriptor?.calendarVisible
+        )
 
         // Three sources, in order of how deliberate they are.
         //
@@ -756,7 +763,7 @@ final class AppModel: ObservableObject {
     /// with no obvious way to name it leaves the note unlinkable.
     func createNote(in folder: URL? = nil) {
         guard let vaultRoot else { promptForVault(); return }
-        let directory = folder ?? current?.url.deletingLastPathComponent() ?? scopeRoot ?? vaultRoot
+        let directory = folder ?? newNoteDirectory
         // Pre-filled and selected, so Return alone still gives the old
         // behaviour and typing replaces it.
         let suggestion = (uniqueURL(in: directory, base: "Untitled", extension: "md")
@@ -779,6 +786,23 @@ final class AppModel: ObservableObject {
             return
         }
         createFile(at: target, contents: "")
+    }
+
+    /// Where a note created with no folder named goes.
+    ///
+    /// A folder chosen in the sidebar or a context menu still wins: that is
+    /// somebody pointing at a place, and a setting must not override a
+    /// gesture. This is only the answer for ⌘N and the sidebar's own button,
+    /// which used to mean "beside whatever is open" with no way to say
+    /// otherwise.
+    var newNoteDirectory: URL {
+        guard let vaultRoot else { return URL(fileURLWithPath: NSTemporaryDirectory()) }
+        let openFolder = current.map { relativePath(of: $0.url.deletingLastPathComponent()) }
+        let chosen = GeneralSettings.shared.newNoteLocation.directory(
+            openNoteFolder: openFolder?.isEmpty == true ? "" : openFolder,
+            focus: scopePath
+        )
+        return chosen.isEmpty ? vaultRoot : vaultRoot.appendingPathComponent(chosen, isDirectory: true)
     }
 
     /// Human-readable location for a folder, for use in prompts.
@@ -815,6 +839,11 @@ final class AppModel: ObservableObject {
         guard let vaultRoot else { return nil }
         let target = uniqueURL(in: directory, base: "Untitled", extension: "md")
         do {
+            // The New Notes folder is made when the first note goes in it, so
+            // naming one in Settings does not put an empty folder in the vault.
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true
+            )
             try "".write(to: target, atomically: true, encoding: .utf8)
             guard let ref = NoteRef(url: target, vaultRoot: vaultRoot) else { return nil }
             open(ref)

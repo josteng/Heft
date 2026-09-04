@@ -260,8 +260,22 @@ struct SidebarView: View {
         return target == model.scopeRoot ? model.scopeName : target.lastPathComponent
     }
 
+    /// Where the sidebar's own New Note button writes.
+    ///
+    /// A folder selected in the tree still wins: that is somebody pointing at
+    /// a place, and a setting must not override a gesture. With nothing
+    /// selected the General setting answers, which is the case that used to
+    /// mean "beside whatever is open" with no way to say otherwise.
+    private var noteCreationTarget: URL? {
+        if let selectedFolderPath, let vaultRoot = model.vaultRoot {
+            let selected = vaultRoot.appendingPathComponent(selectedFolderPath, isDirectory: true)
+            if FileManager.default.fileExists(atPath: selected.path) { return selected }
+        }
+        return model.vaultRoot == nil ? nil : model.newNoteDirectory
+    }
+
     private func createNoteAtCreationTarget() {
-        guard let target = creationTarget else { return }
+        guard let target = noteCreationTarget else { return }
         beginCreatingNote(in: target)
     }
 

@@ -87,3 +87,100 @@ struct SettingsPaneSizeTests {
         }
     }
 }
+
+extension SettingsPaneSizeTests {
+
+    /// The General pane has the same shape-changing choice the Startup one
+    /// does: naming a folder adds a field and a line of explanation.
+    @Test("The General pane grows when a folder has to be named")
+    func generalPaneGrowsForAFolder() throws {
+        try withVault { registry, _ in
+            let settings = GeneralSettings.shared
+            let restore = settings.newNoteLocation
+            defer { settings.newNoteLocation = restore }
+
+            settings.newNoteLocation = .besideTheOpenNote
+            let plain = SettingsWindow.idealHeight(of: .general, registry: registry)
+            settings.newNoteLocation = .folder("Inbox")
+            let named = SettingsWindow.idealHeight(of: .general, registry: registry)
+
+            #expect(plain > 0)
+            #expect(named > plain, "a folder field should need room: \(named) vs \(plain)")
+        }
+    }
+}
+
+/// The two General settings, as rules rather than as a pane.
+@Suite("General settings")
+struct GeneralPreferenceTests {
+
+    @Test("Where a new note goes")
+    func newNoteLocation() {
+        // Beside the open note is the old behaviour, and falls back through
+        // the focused folder to the vault root when nothing is open.
+        #expect(NewNoteLocation.besideTheOpenNote
+            .directory(openNoteFolder: "Projects", focus: "Work") == "Projects")
+        #expect(NewNoteLocation.besideTheOpenNote
+            .directory(openNoteFolder: nil, focus: "Work") == "Work")
+        #expect(NewNoteLocation.besideTheOpenNote
+            .directory(openNoteFolder: nil, focus: nil) == "")
+
+        // The focused folder is a different answer whenever the open note sits
+        // below it, which is the case the two would otherwise be confused in.
+        #expect(NewNoteLocation.focusedFolder
+            .directory(openNoteFolder: "Work/Projects", focus: "Work") == "Work")
+
+        #expect(NewNoteLocation.vaultRoot
+            .directory(openNoteFolder: "Projects", focus: "Work") == "")
+
+        #expect(NewNoteLocation.folder("Inbox")
+            .directory(openNoteFolder: "Projects", focus: "Work") == "Inbox")
+        // A folder field left empty is not a request to write to the vault
+        // root; it is a setting nobody finished, so the window's own answer
+        // stands.
+        #expect(NewNoteLocation.folder("")
+            .directory(openNoteFolder: "Projects", focus: "Work") == "Work")
+    }
+
+    @Test("A typed folder cannot name anywhere outside the vault")
+    func folderIsNormalised() {
+        #expect(NewNoteLocation.normalised("/Inbox/") == "Inbox")
+        #expect(NewNoteLocation.normalised("../../etc") == "etc")
+        #expect(NewNoteLocation.normalised("Work//Notes") == "Work/Notes")
+        #expect(NewNoteLocation.normalised("  ") == "")
+        #expect(NewNoteLocation.folder("../../etc/passwd")
+            .directory(openNoteFolder: nil, focus: nil) == "etc/passwd")
+    }
+
+    @Test("A stored location survives a round trip, and an unknown one is the default")
+    func locationRoundTrips() {
+        for value: NewNoteLocation in [
+            .besideTheOpenNote, .focusedFolder, .vaultRoot, .folder("Inbox/Quick"),
+        ] {
+            #expect(NewNoteLocation(stored: value.stored) == value)
+        }
+        // Written by a later version, or by hand: the default, not a crash and
+        // not a settings file that stops decoding.
+        #expect(NewNoteLocation(stored: "something-new") == .besideTheOpenNote)
+        #expect(NewNoteLocation(stored: "") == .besideTheOpenNote)
+    }
+
+    @Test("When the calendar opens")
+    func calendarVisibility() {
+        // The default is scope-aware and keeps what the window was last left
+        // showing, because it is exactly the behaviour that was there before.
+        #expect(CalendarVisibility.whenDailyNotesAreInScope
+            .isVisible(dailyNotesAreInScope: true, remembered: nil))
+        #expect(!CalendarVisibility.whenDailyNotesAreInScope
+            .isVisible(dailyNotesAreInScope: false, remembered: nil))
+        #expect(!CalendarVisibility.whenDailyNotesAreInScope
+            .isVisible(dailyNotesAreInScope: true, remembered: false))
+
+        // The other two are a standing instruction, so a restored window that
+        // disagreed cannot keep overruling them.
+        #expect(CalendarVisibility.always
+            .isVisible(dailyNotesAreInScope: false, remembered: false))
+        #expect(!CalendarVisibility.never
+            .isVisible(dailyNotesAreInScope: true, remembered: true))
+    }
+}

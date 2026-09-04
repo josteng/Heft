@@ -186,12 +186,13 @@ struct SettingsWindow: View {
     /// itself, so a second hand-written list of which view is in which tab
     /// would be a thing to keep in step and a thing to get wrong.
     enum Tab: String, CaseIterable, Hashable, Identifiable {
-        case appearance, startup, typing, calendar, attachments, vim
+        case general, appearance, startup, typing, calendar, attachments, vim
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
+            case .general: "General"
             case .appearance: "Appearance"
             case .startup: "Startup"
             case .typing: "Typing"
@@ -203,6 +204,7 @@ struct SettingsWindow: View {
 
         var symbol: String {
             switch self {
+            case .general: "gearshape"
             case .appearance: "paintpalette"
             case .startup: "sunrise"
             case .typing: "keyboard"
@@ -214,6 +216,7 @@ struct SettingsWindow: View {
 
         @ViewBuilder var content: some View {
             switch self {
+            case .general: GeneralSettingsView()
             case .appearance: AppearanceSettingsView()
             case .startup: StartupSettingsView()
             case .typing: TypingSettingsView()
@@ -232,7 +235,8 @@ struct SettingsWindow: View {
     @ObservedObject private var startup = StartupSettings.shared
     @ObservedObject private var attachments = AttachmentSettings.shared
     @ObservedObject private var typing = TypingSettings.shared
-    @State private var tab: Tab = .appearance
+    @ObservedObject private var general = GeneralSettings.shared
+    @State private var tab: Tab = .general
 
     /// Measured on every pass rather than cached: it is one hosting view for a
     /// window nobody opens in a loop, and anything cached here has to be
