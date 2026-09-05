@@ -61,11 +61,6 @@ a vault, the five things worth trying first, daily notes and capture.
   folder and filename format, so what an agent writes matches the rest of your
   vault. And when it wants to change something, `heft propose` puts that in a
   banner above the note, to accept or reject hunk by hunk.
-- **It is fast, and stays fast.** A vault of 424 notes and 58 attachments is
-  scanned in 10 ms; the full link index takes 0.44 s off the main thread, so
-  the tree is up immediately. Typing re-styles only what changed, so a long
-  note does not get slower to type in. `heft stats` reports the same numbers
-  for your own vault.
 
 Also in there: daily notes and a calendar, PDF export of the rendered note
 rather than the source, and capture from Spotlight.
@@ -147,6 +142,11 @@ italicise the rest of it.
   date and time placeholders and a `{{caret}}` token, so one trigger can
   expand into a whole code fence with the caret already inside it. Nothing
   fires inside code, math, frontmatter, links, tags or URLs.
+- **CommonMark, give or take the corners.** Headings both ways (`# x` and an
+  underlined line), emphasis, code spans and fences, quotes, lists, links,
+  images, autolinks, backslash escapes, thematic breaks. What is missing is
+  narrow: reference-style links, four-space indented code, HTML, and entity
+  references like `&amp;`. [`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the list.
 - **Experimental Vim mode** (Settings ▸ Vim): an original, Foundation-only
   modal engine, not an embedded Neovim. See [`Docs/VimMode.md`](Docs/VimMode.md).
 
@@ -464,6 +464,10 @@ runtime, and the checks skip when `nvim` is absent.
   actually want. The core is deliberately UI-free so a second shell is a matter
   of writing views, but the editing surface is the part that would need real
   rethinking on a touchscreen.
+- **Performance and battery.** It is not slow to use, but it does not settle
+  to idle the way it should, and typing costs more CPU than it ought to.
+  Obsidian is better at this today. Measuring and fixing it is the next
+  substantial piece of work rather than a tidy-up.
 - Graph view and themes.
 - Advanced Vim: Ex commands, system and clipboard registers, mappings, jump
   lists beyond the previous-position mark, full blockwise put.

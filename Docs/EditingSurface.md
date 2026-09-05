@@ -297,6 +297,28 @@ plain styler and through a real `HeftTextKit2View` + coordinator. Any change to
 caught two genuine bugs that render as "spacing is wrong after Return" and
 "styling silently stops updating", neither of which any other test noticed.
 
+## Backslash escapes, and where they are scanned
+
+`\*` is a literal asterisk, and before this the decorator emphasised it anyway
+*and* hid the backslash, so the note formatted exactly as the author had said
+not to and lost a character doing it.
+
+The fix is one scan that marks a backslash plus an ASCII punctuation mark as a
+protected range. Every inline matcher already takes `excluding: protected`, so
+that single pass stops `\*`, `\_`, `\[` and the rest from opening anything,
+rather than each pattern growing a lookbehind that would still be wrong for
+`\\*`. Matching left to right and non-overlapping is what makes `\\*` right:
+the escaped backslash is consumed first, leaving the `*` free.
+
+**Where the scan sits is load-bearing in both directions**, and getting it
+wrong the first time deleted every formula. It runs *after* maths and code have
+claimed their contents, because those are literal and full of backslashes that
+are not markdown escapes: reading `\,` and `\frac` inside `$$…$$` as escapes
+protected them, so the block stopped matching and the LaTeX was left in the
+note as text. The price is that `` \` `` does not stop a code span opening,
+which CommonMark says it should, and that is a far smaller wrong than losing
+the maths. It runs *before* emphasis and links, which is the point of it.
+
 ## Setext headings
 
 `Text` with `===` under it is an H1, and with `---` under it an H2. It is

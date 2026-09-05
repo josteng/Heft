@@ -404,6 +404,30 @@ preferences or the icon.
 
 ## Known gaps
 
+Markdown Heft does not read, all of it found by auditing the decorator against
+CommonMark rather than by anyone hitting it:
+
+- **Reference links**, all four forms: the definition `[label]: /url`, full
+  `[text][label]`, collapsed `[label][]` and shortcut `[label]`. Nothing
+  renders, so the brackets show literally and the definition line sits in the
+  note as though it were a paragraph. It is the only construct needing two
+  passes, since every definition has to be collected before `[label]` can be
+  told from a sentence in brackets.
+- **Indented code blocks** (four spaces). Deferred on purpose: telling one
+  apart from a list-item continuation line is genuinely ambiguous, and getting
+  it wrong turns somebody's nested list into a code block. Fenced blocks won.
+- **Entity references** (`&amp;`, `&#35;`) stay literal.
+- **Hard line breaks** (two trailing spaces) are not recognised. Invisible in
+  the editor, since the buffer already holds the newline, so it would only show
+  in PDF export.
+- **Raw HTML**, inline and block, renders as nothing. A decision rather than a
+  gap: rendering it needs a web view or a hand-written subset renderer, which
+  is days of work and contradicts the rejection of a web renderer in
+  `CLAUDE.md`. Obsidian does render it.
+- **`***x***` and multi-backtick code spans** are handled by targeted patterns
+  rather than CommonMark's delimiter-run algorithm, so a deeply nested or
+  unusual run of delimiters can still be spanned wrongly.
+
 - A transcluded note is styled but gets no widgets of its own, so a table or
   picture inside an embed shows as source. This is also the recursion guard.
 - An embedded note is clipped at 420pt and faded, because a layout fragment

@@ -8,6 +8,10 @@ import Foundation
 /// what makes hybrid editing safe to run against a real vault.
 public struct MarkdownDecoration: Sendable, Equatable {
     public enum Style: Sendable, Equatable {
+        /// A backslash-escaped punctuation mark. The backslash is hidden and
+        /// the character it protects is left alone, which is the whole point
+        /// of having typed it.
+        case escapedCharacter
         case frontmatter
         case comment
         case codeBlock(language: String?)
@@ -385,6 +389,9 @@ public struct Reveal: Equatable, Sendable {
             link.isEmbed
         case .listMarker, .bold, .italic, .strikethrough, .highlight, .inlineCode,
              .link, .tag, .inlineMath, .footnoteReference,
+             // Two characters wide, so the caret is inside it only while
+             // actually editing the escape.
+             .escapedCharacter,
              // Nothing to reveal: it has no markup of its own. Answering
              // `true` would flip its reveal state as the caret crossed it,
              // which `RestyleScope` would have to restyle the line for.
@@ -599,6 +606,19 @@ public enum LiveDecorator {
             protected.insert(match)
         }
 
+        // A double-backtick span, before the single one, which would otherwise
+        // stop at the first backtick inside it. This is how a code span holds
+        // a backtick of its own: ``a ` b``.
+        for match in matches(#"``[^\n]+?``"#, text, excluding: protected) {
+            result.append(MarkdownDecoration(
+                range: match,
+                syntax: [NSRange(location: match.location, length: 2),
+                         NSRange(location: NSMaxRange(match) - 2, length: 2)],
+                style: .inlineCode
+            ))
+            protected.insert(match)
+        }
+
         for match in matches(#"`[^`\n]+`"#, text, excluding: protected) {
             result.append(MarkdownDecoration(
                 range: match,
@@ -626,6 +646,37 @@ public enum LiveDecorator {
         // Block constructs were already collected above, before inline spans
         // were protected; collecting them again here would emit every heading
         // and list marker twice.
+        // Backslash escapes, last of the protections and immediately before
+        // inline matching. The order is load-bearing in both directions.
+        //
+        // After maths and code, because their contents are literal and full of
+        // backslashes that are not markdown escapes at all: reading `\,` and
+        // `\frac` in `$$…$$` as escapes protected them, which stopped the
+        // block matching, and the LaTeX was left in the note as text. The cost
+        // is that `\`` does not stop a code span from opening, which
+        // CommonMark says it should; that is a far smaller wrong than losing
+        // every formula.
+        //
+        // Before emphasis and links, which is the whole point.
+        //
+        // Protecting the pair is what does the work. Every inline matcher
+        // already excludes protected ranges, so one scan here stops `\*`,
+        // `\_`, `\[`, `\`` and the rest from opening anything, rather than
+        // each pattern having to grow a lookbehind that would still be wrong
+        // for `\\*`.
+        //
+        // Left to right and non-overlapping is also what makes `\\*` correct:
+        // the escaped backslash is matched first and consumes both characters,
+        // leaving the `*` free to emphasise, which is what CommonMark says.
+        for match in matches(#"\\[!-/:-@\[-`{-~]"#, text, excluding: protected) {
+            result.append(MarkdownDecoration(
+                range: match,
+                syntax: [NSRange(location: match.location, length: 1)],
+                style: .escapedCharacter
+            ))
+            protected.insert(match)
+        }
+
         result.append(contentsOf: inlineDecorations(text, protected: protected))
         return result
     }
@@ -823,10 +874,17 @@ public enum LiveDecorator {
                   line[line.index(line.startIndex, offsetBy: syntaxLength)] == " " {
                 syntaxLength += 1
             }
+            var syntax = [NSRange(location: match.location, length: syntaxLength)]
+            // A closing sequence is decoration, not content: `## x ##` is the
+            // heading "x". It has to be preceded by a space, or `x#` in a
+            // heading would lose its hash.
+            if let closing = firstMatch(#"[ \t]+#+[ \t]*$"#, line as NSString) {
+                syntax.append(NSRange(
+                    location: match.location + closing.location, length: closing.length
+                ))
+            }
             result.append(MarkdownDecoration(
-                range: match,
-                syntax: [NSRange(location: match.location, length: syntaxLength)],
-                style: .heading(level: level)
+                range: match, syntax: syntax, style: .heading(level: level)
             ))
         }
 
@@ -1363,6 +1421,21 @@ public enum LiveDecorator {
             }
         }
 
+        // `***x***` is strong *and* emphasis. Before the double, which would
+        // otherwise take the first two asterisks and strand the third inside
+        // the span it made.
+        for match in matches(#"\*\*\*(?=\S)([^\n]+?)(?<=\S)\*\*\*"#, text, excluding: protected) {
+            let syntax = [
+                NSRange(location: match.location, length: 3),
+                NSRange(location: NSMaxRange(match) - 3, length: 3),
+            ]
+            // Two decorations over one range: the styler adds a font trait per
+            // decoration, so bold and italic compose rather than replace.
+            result.append(MarkdownDecoration(range: match, syntax: syntax, style: .bold))
+            result.append(MarkdownDecoration(range: match, syntax: syntax, style: .italic))
+            protected.insert(match)
+        }
+
         wrapped(#"\*\*(?=\S)([^\n]+?)(?<=\S)\*\*"#, 2, .bold)
         wrapped(#"(?<![*\w])\*(?=[^\s*])([^\n*]+?)(?<=[^\s*])\*(?![*\w])"#, 1, .italic)
         wrapped(#"(?<![_\w])_(?=\S)([^\n_]+?)(?<=\S)_(?![_\w])"#, 1, .italic)
@@ -1530,6 +1603,45 @@ public enum LiveDecorator {
             }
             let range = NSRange(location: match.location, length: (body as NSString).length)
             result.append(MarkdownDecoration(range: range, style: .link(destination: body)))
+            protected.insert(range)
+        }
+
+        // An email in angle brackets is CommonMark's other autolink, and a
+        // bare one is GFM's. Neither carries a scheme, so the pattern above
+        // cannot see them; the destination gets `mailto:` so the link opens a
+        // composer rather than being handed to the browser as a path.
+        for match in matches(#"<[^\s<>@]+@[^\s<>@.]+\.[^\s<>@]+>"#, text, excluding: protected) {
+            let address = String(text.substring(with: match).dropFirst().dropLast())
+            result.append(MarkdownDecoration(
+                range: match,
+                syntax: [
+                    NSRange(location: match.location, length: 1),
+                    NSRange(location: NSMaxRange(match) - 1, length: 1),
+                ],
+                style: .link(destination: "mailto:\(address)")
+            ))
+            protected.insert(match)
+        }
+
+        for match in matches(
+            #"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}"#, text, excluding: protected
+        ) {
+            let address = text.substring(with: match)
+            result.append(MarkdownDecoration(
+                range: match, style: .link(destination: "mailto:\(address)")
+            ))
+            protected.insert(match)
+        }
+
+        // GFM's `www.` autolink. No scheme is typed, so one is supplied.
+        for match in matches(#"(?<![\w.@/-])www\.[^\s<>]+"#, text, excluding: protected) {
+            var body = text.substring(with: match)
+            while let last = body.last, ".,;:!?\"'".contains(last) { body.removeLast() }
+            guard body.count > "www.".count else { continue }
+            let range = NSRange(location: match.location, length: (body as NSString).length)
+            result.append(MarkdownDecoration(
+                range: range, style: .link(destination: "https://\(body)")
+            ))
             protected.insert(range)
         }
 

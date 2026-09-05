@@ -549,6 +549,12 @@ enum LiveStyler {
         let text = storage.storage.string as NSString
 
         switch decoration.style {
+        // Nothing to style: the backslash is collapsed as syntax, and the
+        // character it protects is meant to look like ordinary text. Which is
+        // the point of having escaped it.
+        case .escapedCharacter:
+            break
+
         case .frontmatter:
             storage.addAttributes([
                 .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),
