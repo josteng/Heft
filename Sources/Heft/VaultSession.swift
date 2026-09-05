@@ -23,9 +23,18 @@ final class VaultSession: ObservableObject {
     @Published private(set) var settings: ObsidianSettings
     @Published private(set) var tree: VaultItem?
     @Published private(set) var index = VaultIndex.empty
-    @Published private(set) var isLoading = false
-    @Published private(set) var diskChangeGeneration = 0
+    /// The newest build, whether or not it was worth publishing. A reload
+    /// starts from this one, so a note re-read for a save that changed no
+    /// answer is not re-read again on every event after it.
+    private(set) var latestIndex = VaultIndex.empty
     @Published private(set) var recentPaths: [String] = []
+    /// Fires on every interesting disk event, before the reload it schedules.
+    ///
+    /// A subject rather than a published counter: `objectWillChange` is
+    /// forwarded to every window's model, so a published property here
+    /// re-renders every window on every event, and an iCloud vault raises
+    /// several per save that change nothing the windows show.
+    let diskChanges = PassthroughSubject<Void, Never>()
 
     private var watcher: VaultWatcher?
     private var reloadTask: Task<Void, Never>?
@@ -103,27 +112,47 @@ final class VaultSession: ObservableObject {
     }
 
     /// Coalesced because iCloud and atomic saves arrive as event bursts.
+    ///
+    /// Two things keep this cheap enough to run on every event. The build
+    /// starts from the previous index, so only notes whose file changed are
+    /// read again; and nothing is published unless what the windows would see
+    /// differs, because each published property reaches every window through
+    /// `objectWillChange` and a redraw of the whole chrome costs more than the
+    /// scan does. On an iCloud vault the daemon follows every save with a
+    /// clone and an attribute rewrite of the same file, and those reloads now
+    /// read nothing and publish nothing; the save itself re-reads one note
+    /// and publishes only if a link, tag or attachment mention changed.
     func reload(immediately: Bool = false) {
-        isLoading = true
         reloadTask?.cancel()
         let root = root
+        let previous = latestIndex
         reloadTask = Task { [weak self] in
             if !immediately { try? await Task.sleep(for: .milliseconds(400)) }
             guard !Task.isCancelled else { return }
             let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings) in
                 let tree = VaultScanner.scan(root: root)
-                return (tree, VaultIndex.build(root: tree), ObsidianSettings.load(vaultRoot: root))
+                return (tree, VaultIndex.build(root: tree, reusing: previous), ObsidianSettings.load(vaultRoot: root))
             }.value
             guard !Task.isCancelled, let self else { return }
-            tree = scanned.0
-            index = scanned.1
-            settings = scanned.2
-            isLoading = false
+            latestIndex = scanned.1
+            let treeChanged = tree != scanned.0
+            if treeChanged { tree = scanned.0 }
+            if treeChanged || !scanned.1.answersMatch(index) { index = scanned.1 }
+            if settings != scanned.2 { settings = scanned.2 }
+        }
+    }
+
+    /// Waits until no reload is pending, including one that replaced the one
+    /// running when this was called. For tests; the app never waits on it.
+    func awaitReload() async {
+        while let task = reloadTask {
+            await task.value
+            if reloadTask == task { break }
         }
     }
 
     private func vaultDidChangeOnDisk() {
-        diskChangeGeneration += 1
+        diskChanges.send()
         reload()
     }
 }

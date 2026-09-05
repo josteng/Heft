@@ -1,5 +1,27 @@
 import Foundation
 
+/// What a file looked like when it was scanned: enough to tell, without
+/// opening it, whether its contents can have changed since.
+///
+/// The index keeps what it parsed out of each note against this, so a vault
+/// reload re-reads only the notes whose file actually changed. On an
+/// iCloud-backed vault that is the difference between a rescan costing a few
+/// milliseconds and one that reads every note, because the daemon touches
+/// files it has not changed all the time.
+public struct FileFingerprint: Hashable, Sendable {
+    public let size: Int
+    /// Modification time in whole nanoseconds. Kept as an integer rather than
+    /// a `Date`: two `Date`s made from one unchanged timestamp have been seen
+    /// to compare unequal while printing identically, and a fingerprint that
+    /// never matched would put the full re-read straight back.
+    public let modifiedNanoseconds: Int64
+
+    public init(size: Int, modified: Date) {
+        self.size = size
+        modifiedNanoseconds = Int64((modified.timeIntervalSince1970 * 1_000_000_000).rounded())
+    }
+}
+
 /// One node in the vault's file tree.
 public struct VaultItem: Identifiable, Hashable, Sendable {
     public enum Kind: Sendable { case folder, markdown, image, pdf, canvas, other }
@@ -13,21 +35,44 @@ public struct VaultItem: Identifiable, Hashable, Sendable {
     /// True when iCloud has evicted the file's contents and only a placeholder
     /// is on disk. Reading it needs a download first.
     public let needsDownload: Bool
+    /// Size and modification time at scan time; nil for folders and for items
+    /// built by hand rather than scanned, which the index then always reads.
+    public let fingerprint: FileFingerprint?
     public var children: [VaultItem]
 
     public var id: String { relativePath }
     public var isFolder: Bool { kind == .folder }
     public var isMarkdown: Bool { kind == .markdown }
 
+    /// Equality is the tree as the sidebar sees it, so it leaves the
+    /// fingerprint out. That is bookkeeping for the index, which compares it
+    /// itself, and keeping it out of `==` is what lets a save that moved one
+    /// file's date leave the published tree equal, and the windows unbothered.
+    public static func == (lhs: VaultItem, rhs: VaultItem) -> Bool {
+        lhs.relativePath == rhs.relativePath && lhs.url == rhs.url && lhs.kind == rhs.kind
+            && lhs.name == rhs.name && lhs.needsDownload == rhs.needsDownload
+            && lhs.children == rhs.children
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(relativePath)
+        hasher.combine(kind)
+        hasher.combine(name)
+        hasher.combine(needsDownload)
+        hasher.combine(children)
+    }
+
     public init(
         url: URL, relativePath: String, kind: Kind, name: String,
-        needsDownload: Bool = false, children: [VaultItem] = []
+        needsDownload: Bool = false, fingerprint: FileFingerprint? = nil,
+        children: [VaultItem] = []
     ) {
         self.url = url
         self.relativePath = relativePath
         self.kind = kind
         self.name = name
         self.needsDownload = needsDownload
+        self.fingerprint = fingerprint
         self.children = children
     }
 
@@ -68,7 +113,9 @@ public enum VaultScanner {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+            includingPropertiesForKeys: [
+                .isDirectoryKey, .isRegularFileKey, .fileSizeKey, .contentModificationDateKey,
+            ],
             options: []
         ) else { return [] }
 
@@ -110,9 +157,17 @@ public enum VaultScanner {
                 ? (displayFilename as NSString).deletingPathExtension
                 : displayFilename
 
+            // Read from the entry as listed, so a placeholder is fingerprinted
+            // as the placeholder: when the real file arrives it has a
+            // different size and date, which is exactly a change.
+            let values = try? entry.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let fingerprint = values?.contentModificationDate.map {
+                FileFingerprint(size: values?.fileSize ?? 0, modified: $0)
+            }
+
             items.append(VaultItem(
                 url: presentedURL, relativePath: rel, kind: kind, name: name,
-                needsDownload: needsDownload
+                needsDownload: needsDownload, fingerprint: fingerprint
             ))
         }
 

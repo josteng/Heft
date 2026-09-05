@@ -56,6 +56,60 @@ public struct Backlink: Identifiable, Sendable {
     public var id: String { "\(source.relativePath)#\(line)#\(link.target)" }
 }
 
+/// What one read of a note yielded, kept so the next build can skip reading
+/// the note again while its file has not changed.
+///
+/// Only what comes out of the text itself. Which note a link *resolves* to
+/// depends on every other file in the vault, so resolution is redone on every
+/// build from these; a note cached before its target existed still gets its
+/// backlink the moment the target appears.
+struct ParsedNote: Sendable {
+    struct Mention: Equatable, Sendable {
+        let line: Int
+        let context: String
+        let link: WikiLink
+    }
+
+    let fingerprint: FileFingerprint?
+    let mentions: [Mention]
+    let tags: [String]
+    let attachmentNames: Set<String>
+
+    /// Whether the note would contribute the same links, tags and attachment
+    /// mentions as `other`, whatever the file's date says. Most saves are
+    /// prose, and a prose save changes none of these.
+    func sameContent(as other: ParsedNote) -> Bool {
+        mentions == other.mentions && tags == other.tags && attachmentNames == other.attachmentNames
+    }
+
+    static func parse(_ text: String, fingerprint: FileFingerprint?) -> ParsedNote {
+        var mentions: [Mention] = []
+        NoteText.forEachProseLine(text) { lineNumber, line in
+            for link in WikiLinkParser.links(in: line) {
+                mentions.append(Mention(
+                    line: lineNumber,
+                    context: line.trimmingCharacters(in: .whitespaces),
+                    link: link
+                ))
+            }
+        }
+        return ParsedNote(
+            fingerprint: fingerprint,
+            mentions: mentions,
+            tags: NoteTags.all(in: text),
+            attachmentNames: AttachmentNames.mentioned(in: text)
+        )
+    }
+
+    /// A note that could not be read, most often because iCloud has evicted
+    /// it. Remembered against its fingerprint so a reload does not try the
+    /// same unreadable file again; the download that brings it back changes
+    /// the fingerprint.
+    static func unreadable(fingerprint: FileFingerprint?) -> ParsedNote {
+        ParsedNote(fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [])
+    }
+}
+
 /// Vault-wide link graph.
 ///
 /// Built off the main thread from a full scan, then treated as immutable; a
@@ -66,6 +120,12 @@ public final class VaultIndex: @unchecked Sendable {
     public let notes: [NoteRef]
     /// Every file, including attachments, keyed for resolution.
     public let allFiles: [NoteRef]
+    /// How many notes this build read from disk. Zero means every note was
+    /// carried over from the index it was built on, and so nothing the index
+    /// answers can differ from that one.
+    public let notesRead: Int
+    /// By relative path, so the next build can skip unchanged files.
+    let parsed: [String: ParsedNote]
 
     private let byPath: [String: NoteRef]       // lowercased relative path, with and without .md
     private let byName: [String: [NoteRef]]     // lowercased basename
@@ -88,7 +148,8 @@ public final class VaultIndex: @unchecked Sendable {
 
     public static let empty = VaultIndex(
         notes: [], allFiles: [], byPath: [:], byName: [:], outgoing: [:], backlinks: [:],
-        notesByTag: [:], tagSpelling: [:], tagsByPath: [:], attachmentUsage: [:]
+        notesByTag: [:], tagSpelling: [:], tagsByPath: [:], attachmentUsage: [:],
+        parsed: [:], notesRead: 0
     )
 
     private init(
@@ -96,7 +157,8 @@ public final class VaultIndex: @unchecked Sendable {
         byPath: [String: NoteRef], byName: [String: [NoteRef]],
         outgoing: [String: [WikiLink]], backlinks: [String: [Backlink]],
         notesByTag: [String: [NoteRef]], tagSpelling: [String: String],
-        tagsByPath: [String: [String]], attachmentUsage: [String: [String: Int]]
+        tagsByPath: [String: [String]], attachmentUsage: [String: [String: Int]],
+        parsed: [String: ParsedNote], notesRead: Int
     ) {
         self.notes = notes
         self.allFiles = allFiles
@@ -108,16 +170,43 @@ public final class VaultIndex: @unchecked Sendable {
         self.tagSpelling = tagSpelling
         self.tagsByPath = tagsByPath
         self.attachmentUsage = attachmentUsage
+        self.parsed = parsed
+        self.notesRead = notesRead
+    }
+
+    /// Whether every answer this index gives is the one `other` gives.
+    ///
+    /// The same files, and the same parse of each: resolution, backlinks and
+    /// tags are functions of those alone. A session uses this to leave the
+    /// published index in place after a save that changed only prose, which
+    /// spares every window a redraw.
+    public func answersMatch(_ other: VaultIndex) -> Bool {
+        guard allFiles == other.allFiles, parsed.count == other.parsed.count else { return false }
+        for (path, entry) in parsed {
+            guard let theirs = other.parsed[path], entry.sameContent(as: theirs) else { return false }
+        }
+        return true
     }
 
     // MARK: - Building
 
-    public static func build(root: VaultItem) -> VaultIndex {
+    /// Builds the index for `root`, reading only the notes `previous` did not
+    /// already parse from an identical file.
+    ///
+    /// Reading and parsing every note is nearly the whole cost of a build, and
+    /// the vault watcher asks for one on every event, including the ones an
+    /// iCloud daemon raises by cloning a file or rewriting its attributes
+    /// after a save. With `previous` supplied, such a reload reads nothing,
+    /// and a save re-reads one note. Resolution, backlinks and tag tables are
+    /// rebuilt every time regardless; they are cheap and they depend on the
+    /// whole vault, not the one file.
+    public static func build(root: VaultItem, reusing previous: VaultIndex? = nil) -> VaultIndex {
         let files = root.flattened().filter { !$0.isFolder }
 
         var allFiles: [NoteRef] = []
         var byPath: [String: NoteRef] = [:]
         var byName: [String: [NoteRef]] = [:]
+        var fingerprints: [String: FileFingerprint] = [:]
 
         for item in files {
             let ref = NoteRef(
@@ -125,6 +214,7 @@ public final class VaultIndex: @unchecked Sendable {
                 name: item.name, kind: item.kind
             )
             allFiles.append(ref)
+            fingerprints[item.relativePath] = item.fingerprint
 
             let lowerPath = item.relativePath.lowercased()
             byPath[lowerPath] = ref
@@ -149,11 +239,31 @@ public final class VaultIndex: @unchecked Sendable {
         let partial = VaultIndex(
             notes: notes, allFiles: allFiles, byPath: byPath, byName: byName,
             outgoing: [:], backlinks: [:], notesByTag: [:], tagSpelling: [:],
-            tagsByPath: [:], attachmentUsage: [:]
+            tagsByPath: [:], attachmentUsage: [:], parsed: [:], notesRead: 0
         )
 
-        // Second pass: read note bodies and build the link graph. Resolution
-        // needs the tables above, hence the two passes.
+        // Second pass: read the notes that changed, take the rest from the
+        // previous index. A note without a fingerprint was built by hand
+        // rather than scanned and is always read.
+        var parsed: [String: ParsedNote] = [:]
+        var notesRead = 0
+        for note in notes {
+            let fingerprint = fingerprints[note.relativePath]
+            if let fingerprint, let cached = previous?.parsed[note.relativePath],
+               cached.fingerprint == fingerprint {
+                parsed[note.relativePath] = cached
+                continue
+            }
+            notesRead += 1
+            if let text = try? String(contentsOf: note.url, encoding: .utf8) {
+                parsed[note.relativePath] = ParsedNote.parse(text, fingerprint: fingerprint)
+            } else {
+                parsed[note.relativePath] = ParsedNote.unreadable(fingerprint: fingerprint)
+            }
+        }
+
+        // Third pass: the link graph. Resolution needs the tables above and
+        // every note's parse, hence the passes.
         var outgoing: [String: [WikiLink]] = [:]
         var backlinks: [String: [Backlink]] = [:]
         var notesByTag: [String: [NoteRef]] = [:]
@@ -170,39 +280,27 @@ public final class VaultIndex: @unchecked Sendable {
         }
 
         for note in notes {
-            guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { continue }
-            var links: [WikiLink] = []
+            guard let entry = parsed[note.relativePath] else { continue }
 
-            NoteText.forEachProseLine(text) { lineNumber, line in
-                for link in WikiLinkParser.links(in: line) {
-                    links.append(link)
-                    guard let target = partial.resolve(link, from: note) else { continue }
-                    backlinks[target.relativePath, default: []].append(Backlink(
-                        source: note,
-                        line: lineNumber,
-                        context: line.trimmingCharacters(in: .whitespaces),
-                        link: link
-                    ))
-                }
+            for mention in entry.mentions {
+                guard let target = partial.resolve(mention.link, from: note) else { continue }
+                backlinks[target.relativePath, default: []].append(Backlink(
+                    source: note, line: mention.line, context: mention.context, link: mention.link
+                ))
             }
-            if !links.isEmpty { outgoing[note.relativePath] = links }
+            if !entry.mentions.isEmpty { outgoing[note.relativePath] = entry.mentions.map(\.link) }
 
-            // Where this note keeps its attachments, from the same read.
-            if !attachmentFolders.isEmpty {
-                for name in AttachmentNames.mentioned(in: text) {
-                    guard let folders = attachmentFolders[name] else { continue }
-                    for folder in folders {
-                        attachmentUsage[note.folder, default: [:]][folder, default: 0] += 1
-                    }
+            // Where this note keeps its attachments.
+            for name in entry.attachmentNames {
+                guard let folders = attachmentFolders[name] else { continue }
+                for folder in folders {
+                    attachmentUsage[note.folder, default: [:]][folder, default: 0] += 1
                 }
             }
 
-            // Tags come from the same read, so indexing them costs nothing
-            // beyond the parse.
-            let tags = NoteTags.all(in: text)
-            if !tags.isEmpty {
-                tagsByPath[note.relativePath] = tags
-                for tag in tags {
+            if !entry.tags.isEmpty {
+                tagsByPath[note.relativePath] = entry.tags
+                for tag in entry.tags {
                     let key = tag.lowercased()
                     notesByTag[key, default: []].append(note)
                     // First spelling seen wins, so `#Project` and `#project`
@@ -216,7 +314,7 @@ public final class VaultIndex: @unchecked Sendable {
             notes: notes, allFiles: allFiles, byPath: byPath, byName: byName,
             outgoing: outgoing, backlinks: backlinks,
             notesByTag: notesByTag, tagSpelling: tagSpelling, tagsByPath: tagsByPath,
-            attachmentUsage: attachmentUsage
+            attachmentUsage: attachmentUsage, parsed: parsed, notesRead: notesRead
         )
     }
 

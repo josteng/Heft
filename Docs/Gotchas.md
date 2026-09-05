@@ -293,6 +293,16 @@ preferences or the icon.
   known` silently answered "changed" every time, which would have left the
   per-second file read in place while looking like it had been fixed. Compare
   modification dates with a tolerance, never with `==`.
+- **An iCloud vault is never quiet after a save.** `IgnoreSelf` hides Heft's
+  own write, but a second later the sync daemon clones the file and rewrites
+  its attributes, from another process, and those events pass every path
+  filter. Each one used to re-read every note and redraw every window; a note
+  being typed in paid that every few seconds. Filtering by event flag would
+  be guessing what the daemon means by each, so instead the index reuses the
+  previous parse of any file whose size and date are unchanged, and the
+  session publishes only when the tree or the answers differ. Before and
+  after, CPU seconds over 30s on a 430-note vault: attribute churn 9.6 and
+  0.8, saves 22.4 and 1.0.
 - **The open note is polled once a second, and that tick must stay at one
   second.** It is the only thing that catches a *same-process* write, which
   the vault watcher ignores on purpose; backing the interval off while the app

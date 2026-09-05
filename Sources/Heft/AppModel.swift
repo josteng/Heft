@@ -77,7 +77,6 @@ final class AppModel: ObservableObject {
     var settings: ObsidianSettings { session?.settings ?? ObsidianSettings() }
     var tree: VaultItem? { session?.tree }
     var index: VaultIndex { session?.index ?? .empty }
-    var isLoading: Bool { session?.isLoading ?? false }
 
     /// Nil means the entire vault. A non-empty path is a view boundary only:
     /// link resolution and the underlying index remain vault-wide.
@@ -470,7 +469,7 @@ final class AppModel: ObservableObject {
         sessionChangeSubscription = session.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
-        diskChangeSubscription = session.$diskChangeGeneration.dropFirst().sink { [weak self] _ in
+        diskChangeSubscription = session.diskChanges.sink { [weak self] _ in
             self?.reloadCurrentIfChangedExternally()
             self?.refreshProposals()
         }

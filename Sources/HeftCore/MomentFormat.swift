@@ -162,7 +162,7 @@ public enum MomentFormat {
                  .weekday, .weekOfYear, .yearForWeekOfYear, .dayOfYear],
                 from: date
             )
-            self.symbols = Symbols(locale: locale)
+            self.symbols = Symbols.cached(for: locale)
         }
 
         func value(for token: String) -> String {
@@ -250,6 +250,32 @@ public enum MomentFormat {
         let weekdays: [String]
         let shortWeekdays: [String]
         let minWeekdays: [String]
+
+        /// One table per locale, built once.
+        ///
+        /// Making a `DateFormatter` and asking it for five symbol lists costs
+        /// about 25µs, and the calendar panel formats a date for every one of
+        /// its 42 cells, twice, on every redraw; the symbols never change for
+        /// a locale, so that was pure repetition.
+        private final class Cache: @unchecked Sendable {
+            private var tables: [String: Symbols] = [:]
+            private let lock = NSLock()
+
+            func symbols(for locale: Locale) -> Symbols {
+                lock.lock()
+                defer { lock.unlock() }
+                if let hit = tables[locale.identifier] { return hit }
+                let made = Symbols(locale: locale)
+                tables[locale.identifier] = made
+                return made
+            }
+        }
+
+        private static let cache = Cache()
+
+        static func cached(for locale: Locale) -> Symbols {
+            cache.symbols(for: locale)
+        }
 
         init(locale: Locale) {
             let df = DateFormatter()

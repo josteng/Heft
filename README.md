@@ -464,10 +464,9 @@ runtime, and the checks skip when `nvim` is absent.
   actually want. The core is deliberately UI-free so a second shell is a matter
   of writing views, but the editing surface is the part that would need real
   rethinking on a touchscreen.
-- **Performance and battery.** It is not slow to use, but it does not settle
-  to idle the way it should, and typing costs more CPU than it ought to.
-  Obsidian is better at this today. Measuring and fixing it is the next
-  substantial piece of work rather than a tidy-up.
+- **Performance and battery.** Idle is idle now, and a save no longer
+  re-indexes the vault. What remains: the open note is polled once a second,
+  and a keystroke in a very long note rescans more than it needs to.
 - Graph view and themes.
 - Advanced Vim: Ex commands, system and clipboard registers, mappings, jump
   lists beyond the previous-position mark, full blockwise put.

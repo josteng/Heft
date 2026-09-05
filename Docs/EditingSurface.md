@@ -246,6 +246,12 @@ depth — `paragraph(containing:)` rejecting blank lines already subsumes them
 today, which the check confirms, but that is a property of `paragraph` rather
 than of them.
 
+Among the multiline markers, `---` counts only at the start of a line, where
+a thematic break or frontmatter fence can stand. Counted anywhere, a table's
+separator row barred every cell from the fast path, ten times the cost per
+keystroke. `TableFastPathTests` pins both the cell edit that must be local
+and the line of dashes that must not be.
+
 The reparsed paragraph's decorations are appended as a group rather than left
 in phase order. That is safe because decorations only ever overlap within a
 paragraph, so their relative order — a heading applied before the bold inside

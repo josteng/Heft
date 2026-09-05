@@ -40,7 +40,25 @@ extension LiveDecorator {
     /// Sequences that can begin or end something spanning more than one line.
     /// A paragraph containing any of them is not safely local: adding a
     /// backtick fence changes how the rest of the note parses.
-    static let multilineMarkers = ["```", "~~~", "---", "$$", "<!--", "-->"]
+    static let multilineMarkers = ["```", "~~~", "$$", "<!--", "-->"]
+
+    /// Whether `text` holds a marker from the list above, or a `---` where a
+    /// frontmatter fence or a thematic break could stand.
+    ///
+    /// `---` used to be in the list outright, and it disqualified every table:
+    /// a separator row is `|---|---|`, so a keystroke inside a cell went
+    /// through the full rescan in a note where that costs ten times what the
+    /// fast path does. The dashes only mean something at the start of a line;
+    /// inside one they are a separator row, which is confined to its
+    /// paragraph like the rest of the table.
+    static func containsMultilineMarker(_ text: String) -> Bool {
+        for marker in multilineMarkers where text.contains(marker) { return true }
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false)
+        where line.drop(while: { $0 == " " || $0 == "\t" }).hasPrefix("---") {
+            return true
+        }
+        return false
+    }
 
     /// Whether `decoration` describes text the paragraph does not contain.
     ///
@@ -100,9 +118,7 @@ extension LiveDecorator {
         // Proven load-bearing: without it the differential check disagrees on
         // 16 edits, because a paragraph that gains a fence or a pipe changes
         // how text outside it parses.
-        for marker in multilineMarkers {
-            guard !newText.contains(marker), !oldText.contains(marker) else { return nil }
-        }
+        guard !containsMultilineMarker(newText), !containsMultilineMarker(oldText) else { return nil }
 
         // Nothing may reach into the paragraph from outside it: a fence opened
         // above makes its text code, and a `$…$` can pair across a blank line.

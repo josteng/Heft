@@ -121,6 +121,23 @@ instance built *before* a write therefore passes even when both stores share a
 key, which is how the separation test first passed against a mutation that
 merged them. Read through a fresh instance.
 
+## Reloading, and what it costs the windows
+
+`VaultSession` forwards its `objectWillChange` to every `AppModel` attached to
+it, so every published property on the session redraws every window, and the
+chrome costs more to redraw than the vault costs to scan.
+
+So `reload` publishes only what differs. The index is built from the previous
+one, re-reading only files whose size or date changed. `tree` is assigned
+only when it differs, and `VaultItem`'s equality leaves the fingerprint out
+so a moved date alone is no difference. `index` is assigned only when
+`answersMatch` says the files or their links, tags and mentions changed; a
+prose save re-reads one note and publishes nothing. The unpublished build is
+kept as `latestIndex` and the next reload starts from it, or the saved note
+would be read again on every event. Two published properties that redrew
+every window per event were removed outright: an `isLoading` nothing read,
+and the disk-change counter, now a `PassthroughSubject`.
+
 ## Renaming, in one place
 
 `VaultRename` in HeftCore does the work: which files move, which notes point at
