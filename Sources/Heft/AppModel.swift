@@ -61,7 +61,7 @@ final class AppModel: ObservableObject {
     // MARK: Vault state
     let workspaceID: UUID
     private let registry: VaultRegistry
-    private var session: VaultSession?
+    private(set) var session: VaultSession?
     /// Keeps this window's calendar in step with the General setting.
     ///
     /// Reading it once in `init` was not enough: choosing "Never" changed
@@ -144,7 +144,16 @@ final class AppModel: ObservableObject {
 
     // MARK: Open document
     @Published private(set) var current: NoteRef?
-    @Published var text: String = "" { didSet { textDidChange(from: oldValue) } }
+    /// The open note's source. Deliberately not `@Published`.
+    ///
+    /// The editor writes the whole note here on every keystroke, and every
+    /// view in the window observes this model, so publishing it redrew the
+    /// sidebar, the calendar, the status bar and the toolbar for each
+    /// character typed: a held key took a whole core. What depends on the
+    /// text, such as the word count, is told at most every 300ms instead
+    /// (`scheduleTextPublish`); a replacement from outside the editor bumps
+    /// `documentGeneration`, which is published, so nothing waits for that.
+    var text: String = "" { didSet { textDidChange(from: oldValue) } }
     @Published private(set) var isDirty = false
     /// Bumped whenever `text` is replaced from outside the editor, so the
     /// NSTextView knows to reset rather than treat it as user typing.
@@ -265,9 +274,21 @@ final class AppModel: ObservableObject {
     /// coarse modification dates without producing false conflicts.
     private var lastKnownDiskText: String?
 
+    /// Cached against the vault and its settings: building one resolves the
+    /// daily-notes folder, which may look at the disk, and the calendar asks
+    /// for this for every cell it draws. Cleared on disk changes, since the
+    /// unconfigured answer depends on what the vault root holds.
     var dailyNotes: DailyNotes? {
-        vaultRoot.map { DailyNotes(vaultRoot: $0, settings: settings) }
+        guard let vaultRoot else { return nil }
+        if let cached = dailyNotesCache, cached.root == vaultRoot, cached.settings == settings {
+            return cached.notes
+        }
+        let notes = DailyNotes(vaultRoot: vaultRoot, settings: settings)
+        dailyNotesCache = (vaultRoot, settings, notes)
+        return notes
     }
+
+    private var dailyNotesCache: (root: URL, settings: ObsidianSettings, notes: DailyNotes)?
 
     /// Whether the configured daily-note path lives below this window's
     /// focused folder. The calendar can still be enabled manually when false.
@@ -470,6 +491,7 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
         }
         diskChangeSubscription = session.diskChanges.sink { [weak self] _ in
+            self?.dailyNotesCache = nil
             self?.reloadCurrentIfChangedExternally()
             self?.refreshProposals()
         }
@@ -1747,10 +1769,30 @@ final class AppModel: ObservableObject {
     // MARK: - Saving
 
     private func textDidChange(from oldValue: String) {
-        guard !isApplyingExternalText, current != nil, text != oldValue else { return }
-        isDirty = true
+        guard text != oldValue else { return }
+        scheduleTextPublish()
+        guard !isApplyingExternalText, current != nil else { return }
+        // Assigning a published property sends even when the value is the
+        // same, and this is set on every keystroke.
+        if !isDirty { isDirty = true }
         scheduleSave()
     }
+
+    /// Tells the window about the text, at most once per interval.
+    ///
+    /// Trailing edge, not cancelled by the next keystroke, so steady typing
+    /// refreshes the word count a few times a second rather than never.
+    private func scheduleTextPublish() {
+        guard textPublishTask == nil else { return }
+        textPublishTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self else { return }
+            self.textPublishTask = nil
+            self.objectWillChange.send()
+        }
+    }
+
+    private var textPublishTask: Task<Void, Never>?
 
     private func scheduleSave() {
         saveTask?.cancel()

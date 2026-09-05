@@ -138,6 +138,12 @@ would be read again on every event. Two published properties that redrew
 every window per event were removed outright: an `isLoading` nothing read,
 and the disk-change counter, now a `PassthroughSubject`.
 
+The same rule governs typing. `AppModel.text` is written by the editor on
+every keystroke and is deliberately not `@Published`: it reaches the window
+through a 300ms timer, which is often enough for a word count. A replacement
+from outside the editor bumps `documentGeneration`, which is published.
+`TypingPublishTests` counts what fifty keystrokes send.
+
 ## Renaming, in one place
 
 `VaultRename` in HeftCore does the work: which files move, which notes point at

@@ -303,6 +303,16 @@ preferences or the icon.
   session publishes only when the tree or the answers differ. Before and
   after, CPU seconds over 30s on a 430-note vault: attribute churn 9.6 and
   0.8, saves 22.4 and 1.0.
+- **Nothing on `AppModel` may be published per keystroke.** Every view in
+  the window observes the model, so each publish redraws the sidebar, the
+  calendar, the status bar and the toolbar. `text` was `@Published` and set on
+  every keystroke, and a held key took a whole core. It is a plain property
+  now, published on a 300ms timer, and `isDirty` is set only when it changes.
+  The calendar made it worse: each of its 42 cells asked `DailyNotes` for a
+  path, and with no folder configured that checked sixty files in the vault
+  root per call. The folder is resolved once, in `init`, and the model caches
+  the helper. `WindowTypingCheck` hosts the real window and types at
+  key-repeat cadence: 98% of a core before, 20% after, all of it the editor.
 - **The open note is polled once a second, and that tick must stay at one
   second.** It is the only thing that catches a *same-process* write, which
   the vault watcher ignores on purpose; backing the interval off while the app
