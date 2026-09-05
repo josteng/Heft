@@ -68,7 +68,15 @@ struct BracketPairingTests {
     @Test("An emphasis marker closes itself")
     func closesEmphasis() {
         #expect(act("*", "", caret: 0) == .insert("**", caretOffset: 1, selects: 0))
-        #expect(act("`", "", caret: 0) == .insert("``", caretOffset: 1, selects: 0))
+        #expect(act("_", "", caret: 0) == .insert("__", caretOffset: 1, selects: 0))
+    }
+
+    /// A code fence is three backticks typed in a row. Pairing them would make
+    /// six, and Obsidian does not pair them either.
+    @Test("A backtick is typed alone")
+    func backtickIsNotPaired() {
+        #expect(act("`", "", caret: 0) == .none)
+        #expect(act("`", "``", caret: 2) == .none)
     }
 
     /// The second `*` of `**bold**` must open another pair. Stepping over the

@@ -354,7 +354,9 @@ Obsidian splits this into "Auto pair brackets" and "Auto pair Markdown syntax"
 (`autoPairBrackets` and `autoPairMarkdown` in `.obsidian/app.json`), and so
 does Heft, because closing a bracket and closing an emphasis marker feel
 different enough that people want one without the other. Neither character set
-is documented anywhere by Obsidian, so Heft's are `(` `[` `{` and `*` `_` `` ` ``.
+is documented anywhere by Obsidian, so Heft's are `(` `[` `{` and `*` `_`. Not
+the backtick: it was paired at first, and typing a code fence then produced
+six of them with the caret in the middle. Obsidian leaves it alone as well.
 
 `BracketPairing` is pure and lives in HeftCore, and deliberately is *not* a
 `SmartTypography` rule: a substitution runs after a character has landed, and

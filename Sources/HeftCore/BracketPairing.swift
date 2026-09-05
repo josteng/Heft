@@ -21,10 +21,12 @@ public enum BracketPairing {
     /// Openers that close with something else.
     public static let brackets: [Character: Character] = ["(": ")", "[": "]", "{": "}"]
 
-    /// Markers that close with themselves. `*` and `_` are emphasis, `` ` ``
-    /// is code. `==` and `~~` are two characters and so are not a single
+    /// Markers that close with themselves: `*` and `_`, the emphasis pair.
+    /// Not the backtick, which Obsidian leaves alone too: pairing it turns
+    /// the three of a code fence into six, with the caret stranded in the
+    /// middle. `==` and `~~` are two characters and so are not a single
     /// keystroke's decision.
-    public static let symmetric: Set<Character> = ["*", "_", "`"]
+    public static let symmetric: Set<Character> = ["*", "_"]
 
     public enum Action: Equatable {
         /// Insert this text, then put the caret `caretOffset` into it. When

@@ -754,7 +754,7 @@ enum AppIntegrationCheck {
         // of the check is that `->` inside code stays `->`, and it does.
         editor.string = ""
         type("`a ->")
-        expectEqual(editor.string, "`a ->`", "the editor leaves inline code alone")
+        expectEqual(editor.string, "`a ->", "the editor leaves inline code alone")
 
         editor.string = ""
         editor.insertText("a -> b", replacementRange: editor.selectedRange())
