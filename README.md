@@ -134,6 +134,9 @@ italicise the rest of it.
 - **Callout completion**: typing `> [!` lists the thirteen kinds with their
   icons and finds one by any of its Obsidian spellings, so `tldr` offers
   `abstract`. Accepting always writes the canonical name.
+- **Setext headings**: a line with `===` under it is an H1 and one with `---`
+  under it an H2, the way CommonMark and Obsidian read it, rather than a
+  paragraph followed by a rule.
 - **Auto-pairing**: typing `(`, `[` or `{` writes the closing half and leaves
   the caret between them; with text selected it wraps the selection. The same
   for `*`, `_` and `` ` `` at the start of a word. Typing the closing half

@@ -297,6 +297,29 @@ plain styler and through a real `HeftTextKit2View` + coordinator. Any change to
 caught two genuine bugs that render as "spacing is wrong after Return" and
 "styling silently stops updating", neither of which any other test noticed.
 
+## Setext headings
+
+`Text` with `===` under it is an H1, and with `---` under it an H2. It is
+CommonMark, so it is what Obsidian shows, and without it a note written that
+way lost its headings *and* gained a rule across the page, because `---` fell
+through to the thematic break.
+
+Matched before the thematic break, which CommonMark also requires: setext takes
+precedence for the same characters. The underline collapses like any other
+block marker and comes back when the caret is on either line.
+
+Two guards decide whether an underline is one. The line above must be an
+ordinary paragraph line: blank means the `---` really is a rule, and a line
+that opens a block of its own (a list item, a quote, a fence, an ATX heading, a
+table row) is that block rather than heading text waiting to be underlined.
+
+One deliberate divergence from CommonMark, which accepts a *single* `-` as an
+underline. Honouring that would turn the line above into a heading the instant
+you typed the `-` of a list item, on every list started under a paragraph, so
+two are required. Setext content is also only ever the single line above;
+CommonMark makes the whole preceding paragraph the heading, which is rare
+enough in a note to be worth the simpler rule.
+
 ## Auto-pairing
 
 Obsidian splits this into "Auto pair brackets" and "Auto pair Markdown syntax"
