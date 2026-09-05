@@ -263,9 +263,15 @@ enum AppIntegrationCheck {
             "a nested item with content still continues at its own level"
         )
 
+        // Both brackets are typed, rather than the first being fabricated:
+        // pairing means a lone "[" is no longer a state real typing can reach,
+        // and the wikilink's four brackets now fall out of the ordinary rules
+        // instead of a case of their own.
         let completionEditor = HeftTextKit2View(usingTextLayoutManager: true)
-        completionEditor.string = "["
-        completionEditor.setSelectedRange(NSRange(location: 1, length: 0))
+        completionEditor.string = ""
+        completionEditor.setSelectedRange(NSRange(location: 0, length: 0))
+        completionEditor.insertText("[", replacementRange: completionEditor.selectedRange())
+        expect(completionEditor.string == "[]", "typing [ closes itself")
         completionEditor.insertText("[", replacementRange: completionEditor.selectedRange())
         expect(completionEditor.string == "[[]]", "typing [[ adds closing brackets")
         expect(completionEditor.selectedRange().location == 2,
@@ -744,9 +750,11 @@ enum AppIntegrationCheck {
         editor.deleteBackward(nil)
         expectEqual(editor.string, "x -", "a second backspace deletes normally")
 
+        // The trailing backtick is the pairing, not a substitution: the point
+        // of the check is that `->` inside code stays `->`, and it does.
         editor.string = ""
         type("`a ->")
-        expectEqual(editor.string, "`a ->", "the editor leaves inline code alone")
+        expectEqual(editor.string, "`a ->`", "the editor leaves inline code alone")
 
         editor.string = ""
         editor.insertText("a -> b", replacementRange: editor.selectedRange())

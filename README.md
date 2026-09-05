@@ -134,6 +134,10 @@ italicise the rest of it.
 - **Callout completion**: typing `> [!` lists the thirteen kinds with their
   icons and finds one by any of its Obsidian spellings, so `tldr` offers
   `abstract`. Accepting always writes the canonical name.
+- **Auto-pairing**: typing `(`, `[` or `{` writes the closing half and leaves
+  the caret between them; with text selected it wraps the selection. The same
+  for `*`, `_` and `` ` `` at the start of a word. Typing the closing half
+  yourself steps over the one already there. Two switches, matching Obsidian's.
 - **Typing substitutions**: `->` becomes an arrow, `--` an en dash, quotes
   curl, as you type; backspace immediately afterwards puts back what you
   typed. Eight groups, each switchable, plus your own trigger table with

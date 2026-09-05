@@ -2126,20 +2126,31 @@ final class HeftTextKit2View: NSTextView {
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         let inserted = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
         let selection = selectedRange()
-        if inserted == "[", selection.length == 0, selection.location > 0 {
-            let source = string as NSString
-            let previous = source.substring(with: NSRange(location: selection.location - 1, length: 1))
-            let remaining = NSRange(
-                location: selection.location,
-                length: min(2, source.length - selection.location)
-            )
-            let alreadyClosed = remaining.length == 2 && source.substring(with: remaining) == "]]"
-            if previous == "[", !alreadyClosed {
-                completionIsActive = true
-                super.insertText("[]]", replacementRange: replacementRange)
-                setSelectedRange(NSRange(location: selection.location + 1, length: 0))
-                updateLinkCompletion(allowStart: true)
+
+        // Closing a bracket or an emphasis marker as the opening one is typed.
+        // `[[` needs no case of its own any more: the second `[` sees the `]`
+        // the first one wrote, which is not a word character, so it pairs
+        // again and the wikilink's four brackets fall out of the ordinary
+        // rules. Only the completion panel still has to be told.
+        if let inserted {
+            switch BracketPairing.action(
+                typing: inserted, in: string as NSString, selection: selection,
+                brackets: TypingSettings.shared.pairsBrackets,
+                markdown: TypingSettings.shared.pairsMarkdown
+            ) {
+            case let .insert(text, caretOffset, selects):
+                if inserted == "[" { completionIsActive = true }
+                super.insertText(text, replacementRange: replacementRange)
+                setSelectedRange(NSRange(
+                    location: selection.location + caretOffset, length: selects
+                ))
+                if inserted == "[" { updateLinkCompletion(allowStart: true) }
                 return
+            case .skip:
+                setSelectedRange(NSRange(location: selection.location + 1, length: 0))
+                return
+            case .none:
+                break
             }
         }
         // A literal pipe inside a table has to be written `\|`, or it is read
@@ -2210,6 +2221,22 @@ final class HeftTextKit2View: NSTextView {
     /// `->`, and it is what Obsidian's Smart Typography does.
     override func deleteBackward(_ sender: Any?) {
         guard let substitution = pendingSubstitution else {
+            // Backspacing the opening half of a pair takes the closing half
+            // with it, or every abandoned `(` leaves a `)` behind.
+            let caret = selectedRange()
+            if caret.length == 0, BracketPairing.deletesPair(
+                in: string as NSString, at: caret.location,
+                brackets: TypingSettings.shared.pairsBrackets,
+                markdown: TypingSettings.shared.pairsMarkdown
+            ) {
+                let pair = NSRange(location: caret.location - 1, length: 2)
+                if shouldChangeText(in: pair, replacementString: "") {
+                    textStorage?.replaceCharacters(in: pair, with: "")
+                    didChangeText()
+                    setSelectedRange(NSRange(location: pair.location, length: 0))
+                    return
+                }
+            }
             super.deleteBackward(sender)
             return
         }

@@ -34,6 +34,18 @@ final class TypingSettings: ObservableObject {
         }
     }
 
+    /// Obsidian's two settings, kept as two here for the same reason it has
+    /// two: closing a bracket and closing an emphasis marker feel different
+    /// enough that people want one without the other. Both default on, as
+    /// they do there.
+    @Published var pairsBrackets: Bool {
+        didSet { HeftDefaults.shared.set(pairsBrackets, forKey: Self.bracketsKey) }
+    }
+
+    @Published var pairsMarkdown: Bool {
+        didSet { HeftDefaults.shared.set(pairsMarkdown, forKey: Self.markdownKey) }
+    }
+
     var config: SmartTypographyConfig {
         SmartTypographyConfig(
             isEnabled: substitutionsEnabled, enabledGroups: enabledGroups, custom: customRules
@@ -78,6 +90,9 @@ final class TypingSettings: ObservableObject {
         "quotes", "dashes", "ellipsis", "arrows", "guillemets", "comparisons", "fractions",
     ]
 
+    private static let bracketsKey = "dev.stenglein.Heft.typing.pairsBrackets"
+    private static let markdownKey = "dev.stenglein.Heft.typing.pairsMarkdown"
+
     private static func persist(_ groups: Set<SmartTypographyGroup>) {
         let disabled = Set(SmartTypographyGroup.allCases).subtracting(groups)
         HeftDefaults.shared.set(disabled.map(\.rawValue).sorted(), forKey: disabledGroupsKey)
@@ -88,6 +103,12 @@ final class TypingSettings: ObservableObject {
         substitutionsEnabled = defaults.object(forKey: Self.enabledKey) == nil
             ? true
             : defaults.bool(forKey: Self.enabledKey)
+        pairsBrackets = defaults.object(forKey: Self.bracketsKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.bracketsKey)
+        pairsMarkdown = defaults.object(forKey: Self.markdownKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.markdownKey)
         let groups = Self.groups(
             disabled: defaults.array(forKey: Self.disabledGroupsKey) as? [String],
             legacyEnabled: defaults.array(forKey: Self.legacyGroupsKey) as? [String]
@@ -170,6 +191,38 @@ struct TypingSettingsView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // Outside the substitutions group on purpose: pairing happens as
+            // the key lands rather than after it, and switching substitutions
+            // off is no reason to stop closing a bracket.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Auto-Pairing").font(.headline)
+                Toggle(isOn: $settings.pairsBrackets) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Brackets")
+                        Text("Typing ( [ or { writes the closing half and leaves the caret "
+                             + "between them. With text selected, it wraps the selection.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.checkbox)
+
+                Toggle(isOn: $settings.pairsMarkdown) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Markdown Syntax")
+                        Text("The same for * _ and `, at the start of a word. Typing the "
+                             + "closing half yourself steps over the one already there.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.checkbox)
+            }
+
+            Divider()
+
             Toggle(isOn: $settings.substitutionsEnabled) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Text Substitutions").font(.headline)

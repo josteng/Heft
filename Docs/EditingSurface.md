@@ -297,6 +297,39 @@ plain styler and through a real `HeftTextKit2View` + coordinator. Any change to
 caught two genuine bugs that render as "spacing is wrong after Return" and
 "styling silently stops updating", neither of which any other test noticed.
 
+## Auto-pairing
+
+Obsidian splits this into "Auto pair brackets" and "Auto pair Markdown syntax"
+(`autoPairBrackets` and `autoPairMarkdown` in `.obsidian/app.json`), and so
+does Heft, because closing a bracket and closing an emphasis marker feel
+different enough that people want one without the other. Neither character set
+is documented anywhere by Obsidian, so Heft's are `(` `[` `{` and `*` `_` `` ` ``.
+
+`BracketPairing` is pure and lives in HeftCore, and deliberately is *not* a
+`SmartTypography` rule: a substitution runs after a character has landed, and
+cannot put the caret back between two characters it just wrote. Pairing has to
+answer before the insertion, so `HeftTextKit2View.insertText` asks it directly.
+
+Four rules, each of which exists because the obvious version is annoying:
+
+- **A closer already under the caret is stepped over**, not written twice, so
+  finishing a pair by hand does not leave `())`.
+- **Nothing pairs immediately before a word.** Typing `(` in front of existing
+  text is how wrapping it by hand starts, and a closer inserted there is one
+  you have to delete before you can carry on.
+- **A symmetric marker does not pair immediately after a word either**, or
+  `snake_case` pairs the underscore in the middle of the word.
+- **...except that a second `*` inside a pair opens another one**, because that
+  is how `**bold**` gets started. Stepping over would leave `**` with nothing
+  to close it.
+
+`[[` needed a case of its own before this and no longer has one: the second `[`
+sees the `]` the first wrote, which is not a word character, so it pairs again
+and the wikilink's four brackets fall out of the ordinary rules. Only the
+completion panel still has to be told. Quotes are left alone on purpose, since
+`"` and `'` belong to the curling substitution and two features must not fight
+over one keystroke.
+
 ## Typing substitutions
 
 `SmartTypography` in HeftCore is the Obsidian Smart Typography equivalent, plus
