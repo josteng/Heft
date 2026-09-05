@@ -144,6 +144,16 @@ word count, through `NoteStats`, which the status bar alone observes, on a
 300ms timer. A replacement from outside the editor bumps `documentGeneration`,
 which is published. `TypingPublishTests` counts what fifty keystrokes send.
 
+The window's edited marker, the dot in the close button, does not mean
+"unsaved": autosave makes that true for under a second at a time, and a dot
+flickering with every pause tells the reader nothing they can act on. It
+means the note *cannot* be written, a failed write or a conflict that has
+paused saving (`AppModel.saveIsBlocked`), and it stays until that is dealt
+with; it also makes the window ask before closing, which is right for exactly
+that note. The status bar used to say "Saved" after every autosave and never
+stopped; it now carries the vim mode, transient messages, and the note's
+backlink, word and character counts, as Obsidian's does.
+
 ## Renaming, in one place
 
 `VaultRename` in HeftCore does the work: which files move, which notes point at

@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import HeftCore
@@ -58,6 +59,85 @@ struct TypingPublishTests {
         }
         #expect(statsPublished == 1, "the count is published once")
         #expect(model.stats.wordCount == 51, "Start and fifty more words")
+        #expect(model.stats.characterCount == 105, "five, plus fifty times two")
         #expect(published == 0, "and the window itself hears nothing")
+    }
+
+    /// The window's edited marker, the dot in the close button, means the
+    /// note cannot be written: a failed write or a paused save. Not the
+    /// ordinary moment between a keystroke and its autosave, which needs
+    /// nothing from the reader and would flicker with every pause.
+    @Test("The window's edited marker shows a blocked save, not an edit")
+    func editedMarkerShowsBlockedSaves() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-edited-marker-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let writable = [FileAttributeKey.posixPermissions: 0o755]
+        defer {
+            try? FileManager.default.setAttributes(writable, ofItemAtPath: root.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let note = root.appendingPathComponent("Note.md")
+        try "Start".write(to: note, atomically: true, encoding: .utf8)
+
+        let registry = VaultRegistry()
+        let model = AppModel(
+            registry: registry,
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+        defer { model.closeWorkspace() }
+        func makeWindow() -> NSWindow {
+            NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
+                styleMask: [.titled, .closable], backing: .buffered, defer: false
+            )
+        }
+        let window = makeWindow()
+        registry.register(model: model) { _ in }
+        registry.register(window: window, for: model.workspaceID)
+
+        // An ordinary edit, and its save, show nothing.
+        model.text += " typed"
+        #expect(model.isDirty)
+        #expect(!window.isDocumentEdited, "an edit on its way to disk is not a warning")
+        model.flushPendingSave()
+        #expect(!model.isDirty)
+        #expect(!window.isDocumentEdited)
+
+        // A write that fails is.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o555], ofItemAtPath: root.path
+        )
+        model.text += " again"
+        model.flushPendingSave()
+        #expect(model.isDirty, "the buffer stays dirty to retry")
+        #expect(model.writeFailed)
+        #expect(window.isDocumentEdited, "a failed write marks the window")
+        // A window that arrives while the save is blocked starts out marked.
+        // It replaces the first as the workspace's window from here on.
+        let late = makeWindow()
+        registry.register(window: late, for: model.workspaceID)
+        #expect(late.isDocumentEdited)
+
+        try FileManager.default.setAttributes(writable, ofItemAtPath: root.path)
+        model.flushPendingSave()
+        #expect(!model.isDirty)
+        #expect(!late.isDocumentEdited, "and the write that succeeds clears it")
+        // Including for the next edit: a failure that outlived its recovery
+        // would mark every note from then on.
+        model.text += " once more"
+        #expect(!late.isDocumentEdited, "an edit after the recovery is an ordinary edit")
+        model.flushPendingSave()
+
+        // So is a conflict, until it is resolved.
+        try "Changed elsewhere".write(to: note, atomically: true, encoding: .utf8)
+        model.text += " mine"
+        model.flushPendingSave()
+        #expect(model.saveConflict != nil, "the note changed on disk under the edit")
+        #expect(late.isDocumentEdited, "a paused save marks the window")
+        model.resolveSaveConflict(.keepMine)
+        #expect(model.saveConflict == nil)
+        #expect(!model.isDirty)
+        #expect(!late.isDocumentEdited, "and resolving it clears the marker")
     }
 }

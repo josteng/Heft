@@ -62,11 +62,17 @@ enum SaveConflictResolution {
 /// Typing publishes here and nowhere else.
 @MainActor
 final class NoteStats: ObservableObject {
-    @Published private(set) var wordCount = 0
+    private(set) var wordCount = 0
+    private(set) var characterCount = 0
 
+    /// One publish for both counts, and none when neither moved.
     func update(from text: String) {
-        let count = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
-        if count != wordCount { wordCount = count }
+        let words = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+        let characters = text.count
+        guard words != wordCount || characters != characterCount else { return }
+        objectWillChange.send()
+        wordCount = words
+        characterCount = characters
     }
 }
 
@@ -171,7 +177,31 @@ final class AppModel: ObservableObject {
     var text: String = "" { didSet { textDidChange(from: oldValue) } }
     /// What the status bar shows about the open note.
     let stats = NoteStats()
-    @Published private(set) var isDirty = false
+    @Published private(set) var isDirty = false {
+        didSet { if isDirty != oldValue { updateEditedMarker() } }
+    }
+
+    /// Whether the last attempt to write the note failed. Cleared by the
+    /// write that succeeds.
+    private(set) var writeFailed = false {
+        didSet { if writeFailed != oldValue { updateEditedMarker() } }
+    }
+
+    /// Whether the note has edits that cannot reach the disk: a write that
+    /// failed, or a conflict that has paused autosave. This, and not the
+    /// ordinary 700ms between a keystroke and its save, is what the window's
+    /// edited marker shows. During normal autosave there is nothing for the
+    /// reader to do, so a dot flickering with every pause would be noise;
+    /// here there is, and the dot stays until it is done. It also makes the
+    /// window ask before closing, which is right for a note that could not
+    /// be written and wrong for one that will be in half a second.
+    var saveIsBlocked: Bool {
+        isDirty && (saveConflict != nil || writeFailed)
+    }
+
+    private func updateEditedMarker() {
+        registry.window(for: workspaceID)?.isDocumentEdited = saveIsBlocked
+    }
     /// Bumped whenever `text` is replaced from outside the editor, so the
     /// NSTextView knows to reset rather than treat it as user typing.
     @Published private(set) var documentGeneration = 0
@@ -235,7 +265,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var proposals: [Proposal] = []
     /// The proposal whose review sheet is open.
     @Published var reviewing: Proposal?
-    @Published private(set) var saveConflict: SaveConflict?
+    @Published private(set) var saveConflict: SaveConflict? {
+        didSet { if (saveConflict == nil) != (oldValue == nil) { updateEditedMarker() } }
+    }
     /// The conflict currently open in the merge sheet. Held separately from
     /// `saveConflict`, because dismissing the alert to show the sheet resolves
     /// the alert as `.cancel` and clears it.
@@ -490,6 +522,7 @@ final class AppModel: ObservableObject {
         current = nil
         text = ""
         isDirty = false
+        writeFailed = false
         lastKnownDiskText = nil
         saveConflict = nil
         navigationHistory = []
@@ -698,6 +731,7 @@ final class AppModel: ObservableObject {
             recoverDraftIfAny(for: ref)
             setText(contents)
             isDirty = false
+            writeFailed = false
             lastKnownDiskText = contents
             saveConflict = nil
             lastKnownModification = modificationDate(of: ref.url)
@@ -1855,7 +1889,6 @@ final class AppModel: ObservableObject {
                 lastKnownDiskText = text
                 isDirty = false
                 saveConflict = nil
-                status = "Already saved \(current.relativePath)"
                 return
             }
             saveConflict = SaveConflict(
@@ -1938,16 +1971,17 @@ final class AppModel: ObservableObject {
             try text.write(to: current.url, atomically: true, encoding: .utf8)
             discardDraft()
             isDirty = false
+            writeFailed = false
             lastKnownDiskText = text
             lastKnownModification = modificationDate(of: current.url)
             saveConflict = nil
-            status = "Saved \(current.relativePath)"
             reindexIfMetadataChanged(for: current)
         } catch {
             // The buffer stays dirty so the next keystroke retries, but until
             // then the only copy of the work is in memory. A draft puts it on
             // disk, so a full volume or a permissions change cannot cost the
             // note.
+            writeFailed = true
             recordDraft()
             status = "Save failed, kept a draft: \(error.localizedDescription)"
         }

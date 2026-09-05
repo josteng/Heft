@@ -616,9 +616,13 @@ private struct StatusBar: View {
             }
             Text(model.status).lineLimit(1)
             Spacer()
-            if let path = model.current?.relativePath {
+            // What Obsidian's bar shows, and nothing the title bar already
+            // does: the note's name is up there, and its saved state is the
+            // window's edited marker.
+            if let current = model.current {
+                Text("\(model.index.backlinks(to: current.relativePath).count) backlinks")
                 Text("\(stats.wordCount) words")
-                Text(path).foregroundStyle(.tertiary).lineLimit(1)
+                Text("\(stats.characterCount) characters")
             }
         }
         .font(.system(size: 10))

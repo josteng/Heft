@@ -383,6 +383,12 @@ final class VaultRegistry: ObservableObject {
 
     func register(window: NSWindow, for owner: UUID) {
         workspaceWindows[owner] = WeakWindow(window)
+        // The window may arrive while a save is already blocked.
+        window.isDocumentEdited = workspaceModels[owner]?.value?.saveIsBlocked ?? false
+    }
+
+    func window(for owner: UUID) -> NSWindow? {
+        workspaceWindows[owner]?.value
     }
 
     /// Brings forward the window that already owns the note's writable buffer.
