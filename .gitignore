@@ -11,3 +11,4 @@ Resources/Assets.car
 # this repo says so itself: a single `git add -A` would otherwise sweep in a
 # backlog, a worktree, and whatever else lives here.
 .claude/
+.vscode/

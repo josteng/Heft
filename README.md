@@ -466,4 +466,12 @@ runtime, and the checks skip when `nvim` is absent.
 
 ## Licence
 
-Not yet chosen.
+GPL-3.0-or-later. The full text is in [`LICENSE`](LICENSE).
+
+In short: use it, fork it, and if you ship something built on it, ship the
+source too. The code dependencies are permissive (Apache-2.0, MIT, BSD), and
+the maths fonts SwiftMath bundles are under the SIL Open Font License and the
+GUST Font License, so nothing here conflicts.
+
+Contributions come in under the same licence;
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest.
