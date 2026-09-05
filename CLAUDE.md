@@ -99,6 +99,14 @@ not work:
 `Docs/Gotchas.md` also carries the **known gaps**: what is deliberately not
 finished, so a rough edge is not mistaken for a regression.
 
+**What goes where, so the docs stop growing by a paragraph per fix.** The
+comment beside the rule in the code is the primary record and the only place
+a fact has to be. A Docs paragraph is for reasoning that spans files or a
+rejected approach a reader would otherwise retry; it states the rule and the
+one reason, not the story of finding it. A Gotchas bullet is under five
+lines. Measurements go in the commit message, test names stay in the tests,
+and a fix that replaces a rule replaces its paragraph rather than adding one.
+
 ## The icon
 
 `Resources/Heft.icon` is a layered macOS 26 icon, compiled by `actool` during
