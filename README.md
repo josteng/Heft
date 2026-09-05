@@ -85,287 +85,159 @@ in to a notepad. In English it means weight and substance. Both were the point.
 > in every day, and I intend to keep fixing and improving it, with whatever I
 > find or you report.
 
-## The editing surface
+## Writing
 
-There is one surface. Markup is hidden by *collapsing* it: the characters stay
-in the text storage and keep their place in every offset, so the buffer always
+There is one surface. Markup is hidden by collapsing it: the characters stay
+in the buffer and keep their place in every offset, so the buffer always
 equals the file byte for byte, and selecting across hidden markup copies real
-source. Nothing is ever rewritten to make the page look right.
+source. Block markup (heading hashes, list and quote markers, fences) comes
+back when the caret is anywhere on its line; inline spans (`**bold**`,
+`$math$`, links) only when the caret is inside them. Emphasis styles from the
+opening delimiter, so `**bold` is already bold while you are still typing it.
 
-Markup comes back at two granularities, which is most of what makes it feel
-right. Block markup (heading hashes, list and quote markers, fences) reveals
-when the caret is anywhere on its line; inline spans (`**bold**`, `$math$`,
-links) reveal only when the caret is inside that span.
+What renders in the editor: headings both ways (`# x` and an underlined
+line), emphasis, `==highlights==`, code spans and syntax-highlighted fences,
+block quotes, Obsidian callouts, task lists, nested bullets that change shape
+by level, tables, images, LaTeX, note transclusion, footnotes, wikilinks with
+aliases, headings and blocks, and YAML frontmatter as a properties card. What
+is missing is narrow: reference-style links, four-space indented code, raw
+HTML and entity references; [`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the
+list.
 
-Emphasis styles from the opening delimiter, so `**bold` is already bold while
-you are still typing it, and an unclosed `*` left in a note years ago cannot
-italicise the rest of it.
-
-- **Tables are edited in place.** A table stays a drawn grid while the caret is
-  inside it; only the cell being typed into shows its Markdown. Tab walks the
-  cells, rows and columns go in and out without dissolving the grid, and the
-  `---` row is the deliberate way to edit one as plain text.
-- **Lists and headings written inside a quote** render as lists and headings:
-  bullets, numerals, checkboxes and all, rather than as quoted prose.
-- **Pictures render wherever they land**: in prose, on a bullet, inside a quote
-  or callout, in a table cell, at the size the link asks for
-  (`![[shot.png|500]]`, or `|500x300`).
-- **Rendered in the editor**: headings, task lists, syntax-highlighted code
-  blocks, block quotes, Obsidian callouts (`> [!warning]`), `==highlights==`,
-  images, LaTeX, note transclusion, and YAML frontmatter as a properties card.
-- **Nested lists shape their bullets**, filled disc to hollow ring to square,
-  the way browsers have always shaded nesting. Return on an empty item steps
-  *out* one level instead of ending the list.
-- **Wikilinks**: `[[note]]`, `[[note|alias]]`, `[[note#heading]]`,
-  `[[note#^block]]`, embeds `![[image.png|400]]`. Typing `[[` opens filename
-  completion. Unresolved links render dimmed and create the note when clicked.
-- **Task states**: `[ ]` and `[x]`, plus the widespread conventions Obsidian
-  also boxes: `[/]` in progress, `[-]` abandoned, `[>]` deferred, `[?]`
-  uncertain. The character is drawn inside its box. Only `[x]` is struck
-  through, because only `[x]` means finished.
-- **Footnotes**: `[^1]` in the prose is drawn raised and small, the way a
-  footnote marker has looked in print for four hundred years, and `[^1]:`
-  opens a definition with a hanging indent.
-- **Callout completion**: typing `> [!` lists the thirteen kinds with their
-  icons and finds one by any of its Obsidian spellings, so `tldr` offers
-  `abstract`. Accepting always writes the canonical name.
-- **Setext headings**: a line with `===` under it is an H1 and one with `---`
-  under it an H2, the way CommonMark and Obsidian read it, rather than a
-  paragraph followed by a rule.
-- **Auto-pairing**: typing `(`, `[` or `{` writes the closing half and leaves
-  the caret between them; with text selected it wraps the selection. The same
-  for `*`, `_` and `` ` `` at the start of a word. Typing the closing half
-  yourself steps over the one already there. Two switches, matching Obsidian's.
+- **Tables are edited in place.** A table stays a drawn grid while the caret
+  is in it; only the cell being typed into shows its Markdown. Tab walks the
+  cells, rows and columns go in and out, and the `---` row is the deliberate
+  way to edit one as text. A pipe typed inside a cell is escaped for you.
+- **Pictures render wherever they land**: in prose, on a bullet, inside a
+  quote or callout, in a table cell, at the size the link asks for
+  (`![[shot.png|500]]`, or `|500x300`). Paste or drop a file and it is filed
+  where that part of the vault already keeps its attachments.
+- **Lists and headings written inside a quote** render as lists and headings,
+  not as quoted prose.
+- **Task states** beyond `[ ]` and `[x]`: `[/]`, `[-]`, `[>]`, `[?]`, drawn
+  inside their box. Only `[x]` is struck through, because only `[x]` means
+  finished.
+- **Completion** for `[[` (filenames) and `> [!` (the callout kinds, by any of
+  their Obsidian spellings).
+- **Auto-pairing** of `(` `[` `{` and `*` `_`, with two switches matching
+  Obsidian's. Typing the closing half steps over the one already there.
 - **Typing substitutions**: `->` becomes an arrow, `--` an en dash, quotes
-  curl, as you type; backspace immediately afterwards puts back what you
-  typed. Eight groups, each switchable, plus your own trigger table with
-  date and time placeholders and a `{{caret}}` token, so one trigger can
-  expand into a whole code fence with the caret already inside it. Nothing
-  fires inside code, math, frontmatter, links, tags or URLs.
-- **CommonMark, give or take the corners.** Headings both ways (`# x` and an
-  underlined line), emphasis, code spans and fences, quotes, lists, links,
-  images, autolinks, backslash escapes, thematic breaks. What is missing is
-  narrow: reference-style links, four-space indented code, HTML, and entity
-  references like `&amp;`. [`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the list.
-- **Experimental Vim mode** (Settings ▸ Vim): an original, Foundation-only
-  modal engine, not an embedded Neovim. See [`Docs/VimMode.md`](Docs/VimMode.md).
-
-Typing stays quick on a long note because a keystroke re-styles only the
-ranges that actually changed, rather than re-parsing and re-attributing the
-whole document twice per character.
+  curl, as you type; backspace straight after puts back what you typed. Eight
+  switchable groups plus your own trigger table, whose replacements take date
+  and time placeholders and a `{{caret}}` token, so one trigger can expand
+  into a code fence with the caret inside it. Nothing fires inside code,
+  maths, frontmatter, links, tags or URLs.
+- **Vim mode**, experimental: an original modal engine, not an embedded
+  Neovim. [`Docs/VimMode.md`](Docs/VimMode.md) has the command surface.
 
 ## Around the editor
 
-- **File tree** with folders, images and PDFs, and inline creation. Renaming or
-  moving a note *or a folder* repoints the path-qualified wikilinks that
-  pointed into it, including from the notes that travelled with it, while bare
-  `[[Chapter]]` links that still resolve are left exactly as they were written.
-  The same work is `heft rename`, so a misspelled folder can be fixed without
-  clicking through the tree.
-- **Quick open** (⌘O), **content search** (⇧⌘F), **command palette** (⌘P).
-  Quick open and the palette rank by how often you use something, discounted by
-  how long ago, so with nothing typed they open on what you actually work in
-  rather than on an alphabetical listing. Typing still puts the better match
-  first; familiarity only breaks ties.
-- **Calendar** with a dot per existing daily note; clicking a day creates it
-  from the vault's configured template.
-- **Backlinks** panel, with the referencing line as context.
-- **Export as PDF** (⇧⌘E) of the *rendered* note: tables, callouts, bullets,
-  checkboxes and typeset LaTeX, not the Markdown source. It prints the live
-  surface itself rather than a second renderer, so the page matches the editor.
-  Page size, orientation, margin, text size, colours and whether to add the
-  note's name are chosen in the save panel and remembered. Colours default to
-  *adjusted for paper*: your hues, darkened only where they would be too pale
-  on white. Text size is set in **points on the page**, so it means the same
-  thing on any display.
-- **Attachments go where you say** (Settings ▸ Attachments), and the default
-  names no folder at all: it looks at where the notes in that part of the vault
-  already keep theirs. On a vault whose attachment folders were named three
-  different ways, that found all three with nothing configured. Only a rule
-  that names a single folder ever creates one.
-- **Where new notes go** (Settings ▸ General): beside the note you have open,
-  in the folder the sidebar has selected, or a folder you name, which is the
-  one case Heft will create. A folder picked in the sidebar always wins: that
-  is you pointing at a place, and a setting should not override a gesture. The
-  same pane decides when a window opens its calendar.
-- **What opens on startup** (Settings ▸ Startup, per vault): nothing, the note
-  you were last on, today's daily note, one named note, or a path worked out
-  from the date in the same tokens a daily-note template uses, so
-  `Weeks/{{date:GGGG-[W]WW}}.md` gets you a weekly note. A note named on the
-  command line still wins.
+- **File tree** with inline creation and renaming. Renaming or moving a note
+  or a folder repoints the wikilinks that pointed into it and leaves bare
+  links that still resolve exactly as written. `heft rename` is the same
+  operation from a terminal.
+- **Quick open** (⌘O) and the **command palette** (⌘P) rank by how often you
+  use something, discounted by how long ago, so with nothing typed they open
+  on what you actually work in. **Content search** is ⇧⌘F.
+- **Calendar** with a dot per daily note; clicking a day creates it from the
+  vault's template. **Backlinks** panel with the referencing line as context.
+- **PDF export** (⇧⌘E) of the rendered note, tables, callouts and typeset
+  LaTeX included, printed from the live surface itself so the page matches
+  the editor. Page size, margin and text size are set in the save panel and
+  remembered; colours are darkened only where they would be too pale on
+  paper.
+- **Settings** for where attachments go (by default, wherever the notes
+  nearby already keep theirs), where new notes go, and what opens on startup,
+  per vault: nothing, the last note, today's daily note, a named note, or a
+  path from the date, so `Weeks/{{date:GGGG-[W]WW}}.md` opens this week.
 - **Multiple windows** over the same or different vaults, with an optional
-  folder-focused view that scopes the tree, search and quick open without
-  turning that folder into a second vault.
-- **Open Recent** for vaults, so switching between a real vault and a test copy
-  is one menu away. Vaults sharing a folder name are told apart by their parent.
-- **Go to Path…** accepts a path in the form it is actually copied in: shell
-  escaped (`Mobile\ Documents`), quoted, or a `file://` URL.
+  folder focus that scopes the tree, search and quick open. **Open Recent**
+  switches vaults.
 
 ## An agent proposes, you review
 
-Optional, and the part that does not exist elsewhere. Heft has no assistant of
-its own and nothing to subscribe to: it is built for the agent you already use,
-on notes that stay yours.
-
-What it does add is a rule. A coding agent writing straight into a vault is
-indistinguishable from your own typing an hour later, and there is nothing left
-to review. So Heft does not let it.
-
-An agent proposes the new body of a note:
+Optional, and the part that does not exist elsewhere. A coding agent writing
+straight into a vault is indistinguishable from your own typing an hour
+later, and there is nothing left to review. So Heft does not let it. An agent
+proposes the new body of a note, or anchored replacements within it:
 
 ```bash
 heft propose . "Projects/Heft.md" --from /tmp/new.md \
     --summary "tighten the opening and add a Next section"
-```
 
-Restating a long note to change a paragraph is mostly transcription, so
-`--replace` takes anchored edits instead. Each anchor must match exactly once;
-Heft refuses one that matches twice rather than guessing.
-
-```bash
 echo '[{"old": "the exact text", "new": "its replacement"}]' \
     | heft propose . "Projects/Heft.md" --replace --summary "tighten the opening"
 ```
 
-The proposal lands in `.heft/proposals/`, the vault watcher notices, and a
-banner appears above that note: the summary, the agent, `+n −m in k places`,
-and **Review**. Each hunk gets its own Accept and Reject. Accepting one applies
-it and rewrites the proposal to hold only what is still undecided, so a
-half-reviewed proposal is a smaller proposal, never a lost one.
+A banner appears above that note with the summary and `+n −m in k places`.
+**Review** opens it hunk by hunk, each with its own Accept and Reject.
+Accepting one applies it and rewrites the proposal to hold only what is still
+undecided, so a half-reviewed proposal is a smaller proposal, never a lost
+one. Creating, deleting and moving notes are proposals too, and several can be
+grouped into one change, which the sidebar's review centre lists.
 
-Not every change is one note's text, so the sidebar keeps a **review centre**
-listing everything waiting. A new note has no note to draw a banner above; a
-delete or a move is a fact about the tree rather than about a page; and a change
-across twelve notes is one change, not twelve, once the agent names it:
+What makes it trustworthy: the diff is against the note as it is now, not as
+the agent read it, and a whole-body proposal for a note that changed since
+the agent read it is refused. Accepted changes go through the editor's buffer
+and its normal autosave and undo. There is no daemon and no port; the verbs
+live on the same binary as the app.
 
-```bash
-heft propose . "Old/Note.md" --move "New/Note.md" --summary "..."
-heft propose . "Stale.md" --delete --summary "..."
-heft propose . "A.md" --from /tmp/a.md --group "rename the concept" --summary "..."
-```
-
-A note whose change belongs to a group says so on its banner and points at the
-centre. One banner per note, ever.
-
-Four details that make it trustworthy rather than a demo:
-
-- The diff is computed against the note **as it is now**, not against what the
-  agent read. If it moved on since, the banner says so instead of silently
-  rebasing.
-- A whole-body proposal for a note that changed since the agent read it is
-  **refused**, because it would replace text the agent never saw. `heft
-  changes <vault> <note>` shows what moved, and it reads the note again.
-- Accepted changes go through the editor's buffer, so they join the normal
-  autosave and undo path rather than racing it.
-- No daemon and no port. The verbs live on the same binary as the app.
-
-**Teaching an agent to use it** is one command: `heft agent-setup <vault>`, or
-File ▸ Set Up Agent Access. It writes the vault's `CLAUDE.md` and `AGENTS.md`,
-which is where a session started in that folder looks, whichever agent you
-brought. Both are written between markers, so running it again after an upgrade
-refreshes Heft's section and leaves anything else in each file alone.
-
-It also writes `.claude/settings.json`, which turns the main instruction from a
-request into a rule: editing a file **inside the vault** is denied, and `heft`
-is allowed without a prompt. Writing outside the vault is untouched, since
-`heft propose --from /tmp/new.md` depends on it, and your own settings in that
-file are merged with rather than replaced.
-
-This is a guardrail, not a sandbox: an agent with a shell can still write a
-file, and the point is that the easy path and the correct path are the same
-path. Codex has no per-project permission file at all, so there the rule lives
-in `AGENTS.md` and is followed rather than enforced.
-
-[`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the detail, including
-what Codex's sandbox can and cannot be made to do.
+Teaching an agent takes one command, `heft agent-setup <vault>` or File ▸ Set
+Up Agent Access. It writes the vault's `CLAUDE.md` and `AGENTS.md` between
+markers, leaving anything else in them alone, and a `.claude/settings.json`
+that denies editing files inside the vault and allows `heft` without a
+prompt. It is a guardrail rather than a sandbox: the point is that the easy
+path and the correct path are the same path.
+[`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the verbs in full.
 
 ## The `heft` command
 
-Every verb is declared in one place, so **`heft help` is the list** and
-`heft help --json` is the same thing for an agent, including which verbs are
-read-only and therefore safe against a live vault. Most of them are. What
-follows is the shape, not a second copy of it: this README learned that lesson
-once already, when a hand-written verb list drifted and turned `heft export`
-into `heft open export`.
+Every verb is declared in one place, so **`heft help` is the list**, and
+`heft help --json` is the same for an agent, including which verbs are
+read-only and therefore safe against a live vault.
 
 ```bash
 heft [path]                    # open a folder or note, like `code .`
 heft help [--json]             # every verb and flag
 ```
 
-**Yours**: `daily`, `rename`, `export`, `agent-setup`.
-
-**An agent's, all read-only**: `find`, `read`, `files` (`--by-use` is the order
-Quick Open opens on), `outline`, `links`, `backlinks`, `tags`, `config`,
-`attachment`, `changes`, `keys`. Plus the proposal verbs: `propose`,
-`proposals`, `diff`, `drop`.
-
-**Diagnostics**, about Heft's rendering rather than about your notes: `stats`,
-`render`.
+Yours: `daily`, `rename`, `export`, `agent-setup`. An agent's, all read-only:
+`find`, `read`, `files`, `outline`, `links`, `backlinks`, `tags`, `config`,
+`attachment`, `changes`, `keys`; plus `propose`, `proposals`, `diff` and
+`drop`. Diagnostics about Heft's own rendering: `stats`, `render`.
 
 The query verbs are why an agent is better off with Heft than with a folder of
-Markdown. Heft keeps a **resolved** link index, so `backlinks` and `links`
-understand `[[Note|alias]]`, `[[Note#Heading]]` and the escaped pipe inside
-`![[chart.png\|500]]`, none of which grep can resolve and all of which turn up
-in real vaults. `config` reports the daily-note folder, filename format and
-attachment folder, so a note an agent writes fits the vault's conventions
-instead of guessing at them. And `keys` means "how do I do X in the app" has an
-answer that is looked up rather than invented.
+Markdown: the link index is resolved, so `[[Note|alias]]`, `[[Note#Heading]]`
+and the escaped pipe in `![[chart.png\|500]]` all point where they point.
+`config` reports the vault's daily-note folder, filename format and
+attachment folder, so what an agent writes fits the vault's conventions.
 
 ## Obsidian compatibility
 
-Heft reads the vault's own `.obsidian/` config rather than guessing: daily-note
-folder, filename format and template, attachment folder, and wikilink versus
-Markdown link preference. `.obsidian`, `.trash`, `.makemd` and `.space` are
-skipped.
+Heft reads the vault's own `.obsidian/` config: daily-note folder, filename
+format and template, attachment folder, and wikilink versus Markdown link
+preference. Templates use moment.js tokens, as Obsidian's do, implemented
+directly rather than through `DateFormatter`, whose `DD` and `WW` mean
+different things. Comments hide in both spellings, `<!-- -->` and `%%…%%`.
+One deliberate difference: with an attachment subfolder configured, Heft uses
+the nearest such folder above the note rather than making one beside it.
+[`Docs/TemplatesAndSlides.md`](Docs/TemplatesAndSlides.md) covers templates,
+the token table, snippets and slides.
 
-One deliberate difference: with an attachment folder set to a subfolder
-(`./assets`), Heft uses the nearest such folder *above* the note rather than
-always making one beside it, so a project keeps one attachment folder instead
-of growing one per subfolder. Nothing is created by that search.
+## Your notes stay yours
 
-Comments are hidden in both spellings: HTML's `<!-- -->` and Obsidian's own
-`%%…%%`, inline or as a block.
-
-Two syntax details that trip up naive parsers, both found in a real vault and
-both handled:
-
-- `![[chart.png\|500]]`, where the pipe is escaped inside a table. Heft reads
-  that and writes it: typing a `|` inside a table escapes it for you, because
-  an unescaped one ends the cell.
-- `\[[[Paper Name]]`, a literal bracket abutting a link; the link is the
-  innermost pair.
-
-Obsidian templates use moment.js tokens, which collide with ICU: moment `DD` is
-day-of-month where ICU `DD` is day-of-year. Heft implements the moment tokens
-directly rather than routing them through `DateFormatter`.
-
-[`Docs/TemplatesAndSlides.md`](Docs/TemplatesAndSlides.md) covers daily-note
-templates, the full token table, the typing-substitution snippets, and how
-`---` splits a note into slides.
-
-## Not losing your notes
-
-- Saves are atomic and compare the file against the exact source Heft loaded.
-  If Obsidian, iCloud or another process changes the same note while you are
-  editing, autosave pauses and asks which version to keep.
-- While autosave cannot write, whether from an unresolved conflict, a full disk
-  or a permissions change, the buffer is mirrored to a draft on the same 700 ms
-  debounce. If Heft never gets to finish, opening that note again brings the
-  draft back as a `(Heft Recovery)` note beside it. A crash or a flat battery
-  costs the same fraction of a second it does at any other time.
-- An unresolved conflict blocks switching notes or vaults. If a window closes
-  first, the buffer is preserved as a timestamped recovery note.
-- Deletion asks, and moves to the macOS Trash.
-- A note has one writable editor; structural operations are blocked when they
-  would rewrite a note open in another window.
-- iCloud is synchronisation, not backup. Keep Time Machine or Git as well.
+Saves are atomic and compared against the exact source Heft loaded. If
+Obsidian, iCloud or an agent changes the same note while you are editing,
+autosave pauses and asks which version to keep, hunk by hunk if you like.
+While autosave cannot write, the buffer is mirrored to a draft, and opening
+that note again brings it back as a `(Heft Recovery)` note beside it.
+Deletion asks and moves to the Trash. iCloud is synchronisation, not backup;
+keep Time Machine or Git as well.
 
 ## Keyboard
 
-The notable ones, which a test keeps in step with the app. `heft keys` prints
-every one, grouped, and is also how an agent answers when you ask it how to do
-something in the app.
+The notable ones, kept in step with the app by a test. `heft keys` prints
+every shortcut, grouped, and is how an agent answers "how do I do X".
 
 | Shortcut | Action |
 |---|---|
@@ -383,106 +255,35 @@ something in the app.
 | ⇧⌘D | Toggle calendar |
 | ⌥⌘B | Toggle backlinks |
 
-## Architecture
-
-Three targets, and the split is deliberate:
-
-- **`HeftCore`**: pure logic. Parsing, the link index, the vault scanner,
-  moment-style date tokens, live-mode decorations, diffing, and the rules
-  behind renaming and moving. Never imports AppKit or SwiftUI.
-- **`HeftVimCore`**: a Foundation-only modal editing state machine. It emits
-  transactions and selections; it never owns the document buffer.
-- **`Heft`**: the macOS shell. SwiftUI, `NSTextView`, FSEvents.
-
-About 40% of the code is in the two platform-free targets, and the boundary is
-enforced rather than aspirational: neither imports AppKit or SwiftUI. That is
-what lets the whole command line exist without a window, and what would make
-an iOS version a question of writing new views rather than untangling logic
-out of old ones.
-
-Anything no text attribute can express, so tables, LaTeX, image embeds,
-transclusions, callout cards, list bullets and checkboxes, is collapsed and
-then painted by an `NSTextLayoutFragment` subclass. That subclassability is the
-whole reason the editor is on TextKit 2 rather than 1.
-
-Dependencies: Apple's swift-markdown (cmark-gfm), SwiftMath for LaTeX, and
-swift-markdown-engine for its syntax-highlighting grammars.
-
-## Development
-
-```bash
-swift test                      # the full suite
-Scripts/smoke.sh                # does the app actually start?
-Scripts/run.sh [vault] [note]   # debug build, launched without installing
-Scripts/run.sh --sandbox [vault]   # ...with its preferences isolated
-Scripts/bundle.sh debug         # build the .app without launching
-```
-
-`Scripts/run.sh` is the one to use while iterating: it builds and launches
-and takes a vault path, so risky editor changes can be pointed at a disposable
-copy. The GUI autosaves; never aim it at a vault you care about while testing.
-`--sandbox` puts every preference in its own suite, so a test launch cannot
-rewrite the Spotlight capture destination or Open Recent.
-
-`Scripts/smoke.sh` exists because `swift test` cannot launch an app bundle, so
-nothing in the suite notices an app that starts and immediately exits. One
-shipped that way. It launches with no arguments, the way the Dock does.
-
-The suite is 374 tests across 65 suites. Most are pure checks over parsing,
-formatting, links, paths and settings; the ones worth knowing about are the
-awkward ones:
-
-- a live-surface check that runs edit scripts through both an incrementally
-  styled buffer and a from-scratch one and compares every attribute on every
-  character, plus a differential decoration check that fails if the fast path
-  never ran;
-- a typing-performance check that holds the per-keystroke budget;
-- a disposable-vault integration check covering autosave, save conflicts,
-  recovery, renames and link repointing;
-- the agent verbs, driven as a subprocess against the built binary.
-
-Temporary vaults are UUID-named and removed afterwards, and the harness
-restores any user setting it touches.
-
-Rendering is checked by *rendering*: `heft export` writes a note to PDF
-headlessly, so a claim about how a table, callout or formula is drawn can be
-looked at rather than inferred from a probe.
-
-When Neovim is installed, the Vim suite additionally runs command sequences and
-a generated operator/motion/count matrix through `nvim --clean --headless` and
-compares the resulting buffer against `HeftVimCore`. It is a development-only
-oracle: no Neovim or GPL source is linked, copied, bundled or required at
-runtime, and the checks skip when `nvim` is absent.
-
 ## Not built yet
 
-- **No signed release.** This is the one thing standing between Heft and anyone
-  else running it: unsigned and un-notarised, Gatekeeper blocks it on any Mac
-  that did not build it.
-- **No iOS or iPadOS app.** Wanted, and not next: Obsidian opens the same vault
-  on a phone today, which takes the urgency out of it without being what I
-  actually want. The core is deliberately UI-free so a second shell is a matter
-  of writing views, but the editing surface is the part that would need real
-  rethinking on a touchscreen.
-- **Performance and battery.** Idle is idle now, a save no longer re-indexes
-  the vault, and a held key costs a fifth of a core rather than all of it.
-  What remains: the open note is polled once a second, and a keystroke in a
-  very long note rescans more than it needs to.
-- Graph view and themes.
-- Advanced Vim: Ex commands, system and clipboard registers, mappings, jump
-  lists beyond the previous-position mark, full blockwise put.
-- Rough edges in the editing surface: selecting across table cells, changing a
-  column's alignment from the grid, widgets inside an embedded note, and
-  callout folding. [`Docs/Gotchas.md`](Docs/Gotchas.md) lists them.
+- **No signed release**, which is the one thing standing between Heft and
+  anyone else running it.
+- **No iOS or iPadOS app.** Obsidian opens the same vault on a phone today,
+  which takes the urgency out of it. The core is UI-free on purpose, so a
+  second shell is a matter of views; the editing surface is what would need
+  rethinking for touch.
+- **Performance** is where it should be for idle and for typing. What remains:
+  the open note is polled once a second, and a keystroke in a very long note
+  rescans more than it needs to.
+- Graph view and themes; advanced Vim (Ex commands, registers beyond the
+  basics, mappings); and some rough edges in the editing surface that
+  [`Docs/Gotchas.md`](Docs/Gotchas.md) lists.
+
+## Contributing
+
+Bug reports and ideas go in
+[GitHub issues](https://github.com/josteng/Heft/issues);
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has what to include and how the licence
+applies to pull requests. [`CLAUDE.md`](CLAUDE.md) is the map of the code: the
+three targets (`HeftCore` and `HeftVimCore` are pure Swift with no AppKit,
+`Heft` is the macOS shell), the build and test commands, the rules that are
+easy to break quietly, and where the reasoning behind each area lives.
 
 ## Licence
 
-GPL-3.0-or-later. The full text is in [`LICENSE`](LICENSE).
-
-In short: use it, fork it, and if you ship something built on it, ship the
-source too. The code dependencies are permissive (Apache-2.0, MIT, BSD), and
-the maths fonts SwiftMath bundles are under the SIL Open Font License and the
-GUST Font License, so nothing here conflicts.
-
-Contributions come in under the same licence;
-[`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest.
+GPL-3.0-or-later; the full text is in [`LICENSE`](LICENSE). Use it, fork it,
+and if you ship something built on it, ship the source too. The code
+dependencies are permissive, and the maths fonts SwiftMath bundles are under
+the SIL Open Font License and the GUST Font License. Neovim is used only as a
+test oracle during development and is never linked, copied or shipped.
