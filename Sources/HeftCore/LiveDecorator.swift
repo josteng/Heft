@@ -1436,6 +1436,54 @@ public enum LiveDecorator {
                 ],
                 style: .link(destination: destination)
             ))
+            protected.insert(match)
+        }
+
+        // Autolinks, after the bracketed form so `[label](url)` keeps its own
+        // decoration and the URL inside it is already protected. Both forms
+        // matter because both are how a URL actually reaches a note: pasted,
+        // with nobody stopping to wrap it in brackets first.
+        //
+        // `<https://x>` is CommonMark; a bare `https://x` is the GFM
+        // extension. Neither hides anything in the bare case, so the URL stays
+        // on screen exactly as typed and only gains colour and a click.
+        for match in matches(#"<[A-Za-z][A-Za-z0-9+.\-]{1,31}:[^<>\s]*>"#, text, excluding: protected) {
+            let raw = text.substring(with: match)
+            result.append(MarkdownDecoration(
+                range: match,
+                syntax: [
+                    NSRange(location: match.location, length: 1),
+                    NSRange(location: NSMaxRange(match) - 1, length: 1),
+                ],
+                style: .link(destination: String(raw.dropFirst().dropLast()))
+            ))
+            protected.insert(match)
+        }
+
+        for match in matches(#"https?://[^\s<>]+"#, text, excluding: protected) {
+            // GFM trims trailing punctuation, and counts a closing bracket
+            // only when something inside the URL opened it, so the paren that
+            // ends "(see https://example.com)" is not swallowed by the link.
+            var body = text.substring(with: match)
+            while let last = body.last {
+                if ".,;:!?\"'".contains(last) { body.removeLast(); continue }
+                if last == ")" || last == "]" {
+                    let open: Character = last == ")" ? "(" : "["
+                    if body.filter({ $0 == open }).count < body.filter({ $0 == last }).count {
+                        body.removeLast()
+                        continue
+                    }
+                }
+                break
+            }
+            // A scheme with nothing after it is not a link, however much it
+            // looks like the start of one.
+            guard let scheme = body.range(of: "://"), scheme.upperBound < body.endIndex else {
+                continue
+            }
+            let range = NSRange(location: match.location, length: (body as NSString).length)
+            result.append(MarkdownDecoration(range: range, style: .link(destination: body)))
+            protected.insert(range)
         }
 
         for match in matches(#"(?<![\w/&])#[A-Za-z][\w/-]*"#, text, excluding: protected) {
