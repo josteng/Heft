@@ -359,8 +359,16 @@ struct LiveTextEditor: NSViewRepresentable {
             // from the measured grid, and its cell ranges come from the same
             // layout, so deferring would leave both describing the text as it
             // was before the keystroke.
+            //
+            // And only while a restyle actually costs more than a key repeat.
+            // Deferring a cheap one buys nothing and still shows the line's
+            // markup for a frame, which is the bullet flickering on a quick
+            // backspace. That surfaced once the window stopped redrawing per
+            // keystroke: keystrokes got fast enough for two of them to count
+            // as a burst.
             let inTable = (textView as? HeftTextKit2View)?.activeTable != nil
-            if !inTable, editGap < Self.burstGap, let styled,
+            if !inTable, editGap < Self.burstGap,
+               lastRestyleMillis > Self.deferralThresholdMillis, let styled,
                styled.source.length != (textView.string as NSString).length {
                 scheduleRestyle(textView)
                 return
@@ -448,7 +456,20 @@ struct LiveTextEditor: NSViewRepresentable {
         func pretendEditsAreArrivingInABurst() {
             lastEditAt = DispatchTime.now().uptimeNanoseconds
             editGap = 0
+            // A burst only matters when a restyle is slower than a key repeat.
+            lastRestyleMillis = .infinity
         }
+
+        func pretendLastRestyleWasCheap() {
+            lastRestyleMillis = 0
+        }
+
+        /// What the last full restyle cost, so a burst can tell whether
+        /// deferring the next one would save anything.
+        private(set) var lastRestyleMillis: Double = 0
+        /// Below this a restyle fits inside the fastest key repeat with room
+        /// to spare, and is done at once.
+        private static let deferralThresholdMillis: Double = 10
 
         private func scheduleRestyle(_ textView: NSTextView) {
             scheduledRestyleCount += 1
@@ -501,6 +522,7 @@ struct LiveTextEditor: NSViewRepresentable {
             }
 
             completedRestyleCount += 1
+            let started = DispatchTime.now().uptimeNanoseconds
             let selection = textView.selectedRange()
             let source = textView.string as NSString
             reveal = revealsSelection ? Reveal(selection: selection, in: source) : .none
@@ -617,6 +639,9 @@ struct LiveTextEditor: NSViewRepresentable {
             // This pass styled whatever is in the storage now, so a restyle
             // queued by the edit that led here has nothing left to do.
             restyleTask?.cancel()
+            // Only a full pass is timed; the early exits above are cheap and
+            // say nothing about what the next real one will cost.
+            lastRestyleMillis = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
         }
 
         /// Everything a restyle depends on that is not the document itself.

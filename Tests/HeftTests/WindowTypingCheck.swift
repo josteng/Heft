@@ -92,7 +92,7 @@ struct WindowTypingCheck {
         )
         window.contentView = hosting
         window.orderFront(nil)
-        pump(until: Date(timeIntervalSinceNow: 1.5))
+        pump(until: Date(timeIntervalSinceNow: 1.0))
         defer {
             model.closeWorkspace()
             window.orderOut(nil)
@@ -124,7 +124,9 @@ struct WindowTypingCheck {
 
     @Test("A held key leaves most of a core free")
     func heldKey() throws {
-        let keystrokes = Int(ProcessInfo.processInfo.environment["HEFT_WINDOW_KEYSTROKES"] ?? "") ?? 120
+        // Short by default: this holds the main thread for the duration, and
+        // every other main-actor test in the suite waits behind it.
+        let keystrokes = Int(ProcessInfo.processInfo.environment["HEFT_WINDOW_KEYSTROKES"] ?? "") ?? 60
         let sample = try Self.measure(keystrokes: keystrokes, cadence: 0.03)
         print(String(
             format: "WINDOW held key: %.0f%% of a core, %d keystrokes %.0fms apart",

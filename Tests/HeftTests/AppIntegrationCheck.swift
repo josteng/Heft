@@ -345,7 +345,10 @@ enum AppIntegrationCheck {
         // Neovim subprocesses in parallel and has been seen to take longer
         // under load. A timeout is only ever spent on genuine failure, so
         // there is nothing to save by keeping it tight.
-        let autosaved = await waitUntil(timeout: .seconds(15)) {
+        // Thirty rather than fifteen since `WindowTypingCheck` joined the
+        // suite: it holds the main thread for a few seconds, and this save
+        // runs on the main actor behind it and every other synchronous check.
+        let autosaved = await waitUntil(timeout: .seconds(30)) {
             (try? String(contentsOf: draftURL, encoding: .utf8)) == "autosaved"
         }
         expect(autosaved, "autosave writes the open note atomically")

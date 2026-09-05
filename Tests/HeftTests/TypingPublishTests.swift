@@ -32,25 +32,32 @@ struct TypingPublishTests {
         await model.session?.awaitReload()
 
         var published = 0
+        var statsPublished = 0
         let subscription = model.objectWillChange.sink { _ in published += 1 }
-        defer { subscription.cancel() }
+        let statsSubscription = model.stats.objectWillChange.sink { _ in statsPublished += 1 }
+        defer {
+            subscription.cancel()
+            statsSubscription.cancel()
+        }
 
-        for _ in 0..<50 { model.text += "d" }
+        for _ in 0..<50 { model.text += " d" }
         #expect(published == 1, "only the dirty flag, once")
+        #expect(statsPublished == 0, "the count waits for the interval")
         #expect(model.isDirty)
 
-        // Save now, so the autosave cannot land inside the wait below and be
-        // mistaken for the text arriving.
+        // Save now, so the autosave cannot land inside the wait below.
         model.flushPendingSave()
         #expect(!model.isDirty)
         published = 0
 
-        // Then the text, once the interval has passed. Polled rather than
-        // slept for, since other suites can hold the main thread.
+        // Then the word count, once the interval has passed. Polled rather
+        // than slept for, since other suites can hold the main thread.
         let deadline = Date(timeIntervalSinceNow: 3)
-        while published < 1, Date() < deadline {
+        while statsPublished < 1, Date() < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(published == 1, "the text is published once")
+        #expect(statsPublished == 1, "the count is published once")
+        #expect(model.stats.wordCount == 51, "Start and fifty more words")
+        #expect(published == 0, "and the window itself hears nothing")
     }
 }

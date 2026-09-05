@@ -55,6 +55,21 @@ enum SaveConflictResolution {
     case cancel
 }
 
+/// What the status bar shows about the open note as it is typed.
+///
+/// Its own object rather than properties on `AppModel`, because every view
+/// in the window observes the model and only the status bar wants this.
+/// Typing publishes here and nowhere else.
+@MainActor
+final class NoteStats: ObservableObject {
+    @Published private(set) var wordCount = 0
+
+    func update(from text: String) {
+        let count = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+        if count != wordCount { wordCount = count }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -149,11 +164,13 @@ final class AppModel: ObservableObject {
     /// The editor writes the whole note here on every keystroke, and every
     /// view in the window observes this model, so publishing it redrew the
     /// sidebar, the calendar, the status bar and the toolbar for each
-    /// character typed: a held key took a whole core. What depends on the
-    /// text, such as the word count, is told at most every 300ms instead
-    /// (`scheduleTextPublish`); a replacement from outside the editor bumps
-    /// `documentGeneration`, which is published, so nothing waits for that.
+    /// character typed: a held key took a whole core. Typing publishes
+    /// nothing here at all; the word count goes to `stats`, which only the
+    /// status bar observes, at most every 300ms. A replacement from outside
+    /// the editor bumps `documentGeneration`, which is published.
     var text: String = "" { didSet { textDidChange(from: oldValue) } }
+    /// What the status bar shows about the open note.
+    let stats = NoteStats()
     @Published private(set) var isDirty = false
     /// Bumped whenever `text` is replaced from outside the editor, so the
     /// NSTextView knows to reset rather than treat it as user typing.
@@ -771,6 +788,8 @@ final class AppModel: ObservableObject {
         isApplyingExternalText = true
         text = new
         isApplyingExternalText = false
+        // A note just opened shows its count at once, not after the interval.
+        stats.update(from: new)
         documentGenerationKeepsPosition = keepingPosition
         documentGeneration += 1
     }
@@ -1770,7 +1789,7 @@ final class AppModel: ObservableObject {
 
     private func textDidChange(from oldValue: String) {
         guard text != oldValue else { return }
-        scheduleTextPublish()
+        scheduleStatsUpdate()
         guard !isApplyingExternalText, current != nil else { return }
         // Assigning a published property sends even when the value is the
         // same, and this is set on every keystroke.
@@ -1778,21 +1797,20 @@ final class AppModel: ObservableObject {
         scheduleSave()
     }
 
-    /// Tells the window about the text, at most once per interval.
-    ///
-    /// Trailing edge, not cancelled by the next keystroke, so steady typing
-    /// refreshes the word count a few times a second rather than never.
-    private func scheduleTextPublish() {
-        guard textPublishTask == nil else { return }
-        textPublishTask = Task { [weak self] in
+    /// Brings the status bar's word count up to date, at most once per
+    /// interval. Trailing edge, not cancelled by the next keystroke, so
+    /// steady typing refreshes it a few times a second rather than never.
+    private func scheduleStatsUpdate() {
+        guard statsTask == nil else { return }
+        statsTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard let self else { return }
-            self.textPublishTask = nil
-            self.objectWillChange.send()
+            self.statsTask = nil
+            self.stats.update(from: self.text)
         }
     }
 
-    private var textPublishTask: Task<Void, Never>?
+    private var statsTask: Task<Void, Never>?
 
     private func scheduleSave() {
         saveTask?.cancel()

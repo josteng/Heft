@@ -409,7 +409,7 @@ struct EditorPane: View {
             .frame(maxWidth: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
 
-            StatusBar()
+            StatusBar(stats: model.stats)
         }
         .task(id: model.documentGeneration) {
             closeFind()
@@ -602,6 +602,9 @@ struct EditorPane: View {
 
 private struct StatusBar: View {
     @EnvironmentObject private var model: AppModel
+    /// The one thing here that follows the text as it is typed. Observed on
+    /// its own so typing publishes to this bar alone, not to the window.
+    @ObservedObject var stats: NoteStats
     @ObservedObject private var vim = VimSettings.shared
 
     var body: some View {
@@ -614,7 +617,7 @@ private struct StatusBar: View {
             Text(model.status).lineLimit(1)
             Spacer()
             if let path = model.current?.relativePath {
-                Text("\(wordCount) words")
+                Text("\(stats.wordCount) words")
                 Text(path).foregroundStyle(.tertiary).lineLimit(1)
             }
         }
@@ -624,10 +627,6 @@ private struct StatusBar: View {
         .padding(.vertical, 5)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
-    }
-
-    private var wordCount: Int {
-        model.text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
     }
 }
 

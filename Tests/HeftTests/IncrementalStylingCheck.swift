@@ -342,6 +342,22 @@ enum IncrementalStylingCheck {
             }
             coordinator.restyle(view)
 
+            // But only while a restyle is slower than a key repeat. Deferring
+            // a cheap one saves nothing and shows the markup for a frame: the
+            // bullet flickering on a quick backspace.
+            coordinator.pretendEditsAreArrivingInABurst()
+            coordinator.pretendLastRestyleWasCheap()
+            let beforeCheap = coordinator.completedRestyleCount
+            view.insertText("z", replacementRange: view.selectedRange())
+            if coordinator.completedRestyleCount == beforeCheap {
+                result.failures.append(
+                    "editor \(name): a character mid-burst was deferred although the "
+                        + "last restyle was cheap, which is the bullet flicker"
+                )
+            } else {
+                result.passed += 1
+            }
+
             // Backspace, which is where markup that failed to reset shows up.
             for step in 0..<6 {
                 view.setSelectedRange(NSRange(

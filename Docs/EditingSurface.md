@@ -218,6 +218,13 @@ and `scheduleRestyle` waits longer than a repeat interval while edits are
 arriving in a burst, so holding a key costs one restyle at the end rather than
 one per character. The critical path fell to 3.1ms on that note.
 
+The deferral applies only while a full restyle costs more than about 10ms,
+measured on the previous pass. Once the window stopped redrawing per
+keystroke, two quick backspaces on a bullet counted as a burst, and deferring
+a restyle that takes a millisecond showed the bullet as `- ` for a frame.
+Deferring a cheap restyle saves nothing; `IncrementalStylingCheck` asserts
+both halves, the expensive burst that defers and the cheap one that does not.
+
 Two things must stay synchronous, and both are load-bearing: a caret move that
 is *only* a caret move (or arrow keys stutter), and anything reading the layout
 it just invalidated — `TableSurface.apply` calls `restyleNow()` because the row

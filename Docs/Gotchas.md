@@ -307,7 +307,9 @@ preferences or the icon.
   the window observes the model, so each publish redraws the sidebar, the
   calendar, the status bar and the toolbar. `text` was `@Published` and set on
   every keystroke, and a held key took a whole core. It is a plain property
-  now, published on a 300ms timer, and `isDirty` is set only when it changes.
+  now; typing publishes only a word count, to a `NoteStats` object that the
+  status bar alone observes, on a 300ms timer, and `isDirty` is set only when
+  it changes.
   The calendar made it worse: each of its 42 cells asked `DailyNotes` for a
   path, and with no folder configured that checked sixty files in the vault
   root per call. The folder is resolved once, in `init`, and the model caches

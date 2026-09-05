@@ -139,10 +139,10 @@ every window per event were removed outright: an `isLoading` nothing read,
 and the disk-change counter, now a `PassthroughSubject`.
 
 The same rule governs typing. `AppModel.text` is written by the editor on
-every keystroke and is deliberately not `@Published`: it reaches the window
-through a 300ms timer, which is often enough for a word count. A replacement
-from outside the editor bumps `documentGeneration`, which is published.
-`TypingPublishTests` counts what fifty keystrokes send.
+every keystroke and is deliberately not `@Published`. Typing publishes only a
+word count, through `NoteStats`, which the status bar alone observes, on a
+300ms timer. A replacement from outside the editor bumps `documentGeneration`,
+which is published. `TypingPublishTests` counts what fifty keystrokes send.
 
 ## Renaming, in one place
 
