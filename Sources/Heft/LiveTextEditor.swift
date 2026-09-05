@@ -2099,6 +2099,20 @@ final class HeftTextKit2View: NSTextView {
         return (centre - Self.checkboxReach)...(centre + Self.checkboxReach)
     }
 
+    /// Pictures, so that Paste is offered for one at all.
+    ///
+    /// AppKit will not enable Paste unless the view says it can read something
+    /// the pasteboard is carrying, and a plain-text `NSTextView` reads strings,
+    /// RTF, URLs and filenames but no image types. A screenshot on the
+    /// clipboard is only `public.png` and `public.tiff`, so the menu item was
+    /// disabled and command-V never reached `paste(_:)`: pasting a screenshot
+    /// did nothing whatsoever, no error and no insertion. Dragging the same
+    /// picture in worked the whole time, because a drag is offered to
+    /// `performDragOperation` without this question being asked.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.png, .tiff]
+    }
+
     override func paste(_ sender: Any?) {
         if let markdown = onAttachment?(NSPasteboard.general) {
             insertText(markdown, replacementRange: selectedRange())
