@@ -294,23 +294,35 @@ extension HeftTextKit2View {
         pendingTableCommand = (grid, cell.row, cell.column)
 
         let menu = NSMenu()
-        let groups: [[(String, Selector)]] = [
+        // Symbols as the sidebar's menus carry them. AppKit draws an item's
+        // image as a template, so these need none of the pinning a SwiftUI
+        // menu row does. No two rows of one menu share a symbol: reusing one
+        // for unrelated commands is the specific way menus full of icons are
+        // slower to read than menus without them.
+        let groups: [[(String, Selector, String)]] = [
             [
-                ("Insert Row Above", #selector(HeftTextKit2View.insertTableRowAbove(_:))),
-                ("Insert Row Below", #selector(HeftTextKit2View.insertTableRowBelow(_:))),
-                ("Delete Row", #selector(HeftTextKit2View.deleteTableRow(_:))),
+                ("Insert Row Above", #selector(HeftTextKit2View.insertTableRowAbove(_:)),
+                 "arrow.up.to.line"),
+                ("Insert Row Below", #selector(HeftTextKit2View.insertTableRowBelow(_:)),
+                 "arrow.down.to.line"),
+                ("Delete Row", #selector(HeftTextKit2View.deleteTableRow(_:)),
+                 "minus.rectangle"),
             ],
             [
-                ("Insert Column Before", #selector(HeftTextKit2View.insertTableColumnBefore(_:))),
-                ("Insert Column After", #selector(HeftTextKit2View.insertTableColumnAfter(_:))),
-                ("Delete Column", #selector(HeftTextKit2View.deleteTableColumn(_:))),
+                ("Insert Column Before", #selector(HeftTextKit2View.insertTableColumnBefore(_:)),
+                 "arrow.left.to.line"),
+                ("Insert Column After", #selector(HeftTextKit2View.insertTableColumnAfter(_:)),
+                 "arrow.right.to.line"),
+                ("Delete Column", #selector(HeftTextKit2View.deleteTableColumn(_:)),
+                 "minus.rectangle.portrait"),
             ],
         ]
         for (index, group) in groups.enumerated() {
             if index > 0 { menu.addItem(.separator()) }
-            for (title, action) in group {
+            for (title, action, symbol) in group {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = self
+                item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
                 menu.addItem(item)
             }
         }

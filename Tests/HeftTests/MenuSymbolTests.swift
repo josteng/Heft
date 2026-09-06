@@ -12,17 +12,28 @@ import Testing
 struct MenuSymbolTests {
     @Test("Every systemImage in the sidebar resolves to a real SF Symbol")
     func symbolsResolve() throws {
-        let source = URL(fileURLWithPath: #filePath)
+        let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()      // HeftTests
             .deletingLastPathComponent()      // Tests
             .deletingLastPathComponent()      // package root
-            .appendingPathComponent("Sources/Heft/Views/SidebarView.swift")
-        let text = try String(contentsOf: source, encoding: .utf8)
+        // Every menu Heft builds for itself, the AppKit one included.
+        let sources = [
+            "Sources/Heft/Views/SidebarView.swift",
+            "Sources/Heft/Views/MenuButton.swift",
+            "Sources/Heft/Views/CalendarPanel.swift",
+            "Sources/Heft/Views/ReviewCenter.swift",
+            "Sources/Heft/TableSurface.swift",
+        ]
+        let text = try sources
+            .map { try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8) }
+            .joined(separator: "\n")
 
-        let pattern = try Regex(#"symbol: "([^"]+)""#)
+        let pattern = try Regex(#"symbol: "([^"]+)"|systemSymbolName: "([^"]+)""#)
         var names: Set<String> = []
         for match in text.matches(of: pattern) {
-            names.insert(String(match.output[1].substring ?? ""))
+            for index in 1...2 where match.output[index].substring != nil {
+                names.insert(String(match.output[index].substring ?? ""))
+            }
         }
         #expect(names.count >= 10, "the menus stopped naming their symbols")
 
@@ -30,16 +41,30 @@ struct MenuSymbolTests {
         // rendering `MenuButton` pins, and comes out in the window's accent
         // colour while the rows beside it are drawn in the label's ink. Two
         // did, because their titles hold quotes and a rewrite skipped them.
+        #expect(names.count >= 18, "a menu stopped carrying symbols")
+
+        // The sidebar's menus are all rows of `MenuButton`. One built the
+        // plain way misses the rendering that view pins and comes out in the
+        // window's accent colour beside its neighbours, which is how two of
+        // them did: their titles hold quotes and a rewrite skipped them.
+        let sidebar = try String(
+            contentsOf: root.appendingPathComponent("Sources/Heft/Views/SidebarView.swift"),
+            encoding: .utf8
+        )
         #expect(
-            !text.contains("systemImage:"),
-            "every menu row goes through MenuButton, symbols and all"
+            !sidebar.contains("systemImage:"),
+            "every sidebar menu row goes through MenuButton, symbols and all"
         )
 
-        // And that row dims its symbol with itself. A pinned ink outranks
-        // the dimming a disabled row does for its title, which left Paste
-        // grey beside a full-strength icon.
+        // And that row dims its symbol with itself. A pinned ink outranks the
+        // dimming a disabled row does for its title, which left Paste grey
+        // beside a full-strength icon.
+        let menuRow = try String(
+            contentsOf: root.appendingPathComponent("Sources/Heft/Views/MenuButton.swift"),
+            encoding: .utf8
+        )
         #expect(
-            text.contains("@Environment(\\.isEnabled)"),
+            menuRow.contains("@Environment(\\.isEnabled)"),
             "the menu row reads back whether it is enabled, to dim its symbol"
         )
         for name in names.sorted() {

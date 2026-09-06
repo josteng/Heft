@@ -211,8 +211,12 @@ not answer for it. The item is disabled while nothing in the tree is clicked,
 which lets the key through to the text, where it deletes to the start of the
 line.
 
-Every row of those menus goes through one small view that pins the symbol to
-the label's ink and dims it when the row is disabled. A row built as a plain
+Every menu Heft builds for itself carries symbols, which is what macOS 26 does
+throughout its own apps. The one rule the criticism of that change is worth
+taking from: no two rows of one menu share a symbol, since an icon reused for
+unrelated commands makes a menu slower to read than no icons at all. Every row
+of the SwiftUI menus goes through one small view that pins the symbol to the
+label's ink and dims it when the row is disabled. A row built as a plain
 button with a `systemImage` inherits the window's accent instead and comes out
 coloured beside its neighbours, and a pinned ink that ignores the row's state
 leaves a full-strength icon beside greyed-out text.

@@ -120,8 +120,12 @@ struct ReviewCenter: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .contextMenu {
-            Button("Accept All \(group.proposals.count) Changes") { model.acceptGroup(group) }
-            Button("Discard", role: .destructive) { model.discardGroup(group) }
+            MenuButton("Accept All \(group.proposals.count) Changes", symbol: "checkmark") {
+                model.acceptGroup(group)
+            }
+            MenuButton("Discard", symbol: "xmark", role: .destructive) {
+                model.discardGroup(group)
+            }
         }
     }
 
@@ -192,8 +196,10 @@ struct ReviewCenter: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Review") { model.review(proposal) }
-            Button("Discard", role: .destructive) { model.discard(proposal) }
+            MenuButton("Review", symbol: "eye") { model.review(proposal) }
+            MenuButton("Discard", symbol: "xmark", role: .destructive) {
+                model.discard(proposal)
+            }
         }
     }
 

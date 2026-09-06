@@ -561,30 +561,37 @@ private struct DayMenu: View {
     let onCreate: () -> Void
 
     var body: some View {
+        // The same rows the file list gives a note, with the same symbols:
+        // one menu learned here is every menu.
         if let note {
-            Button("Open") { model.open(note) }
+            MenuButton("Open", symbol: "doc.text") { model.open(note) }
             Divider()
-            Button("Copy Wikilink") {
+            MenuButton("Copy Wikilink", symbol: "link") {
                 model.copyToPasteboard("[[\(note.name)]]", describedAs: "wikilink")
             }
             // The vault-relative path is what a link needs, the absolute one
             // what a terminal or another app needs, as in the file list.
-            Button("Copy Path") {
+            MenuButton("Copy Path", symbol: "arrow.right.doc.on.clipboard") {
                 model.copyToPasteboard(note.relativePath, describedAs: "path")
             }
-            Button("Copy Absolute Path") {
+            MenuButton("Copy Absolute Path", symbol: "terminal") {
                 model.copyToPasteboard(note.url.path, describedAs: "absolute path")
             }
-            Button("Reveal in Finder") { model.revealInFinder(note.url) }
+            MenuButton("Reveal in Finder", symbol: "magnifyingglass") {
+                model.revealInFinder(note.url)
+            }
             Divider()
-            Button("Move to Trash", role: .destructive) {
+            MenuButton("Move to Trash", symbol: "trash", role: .destructive) {
                 model.delete(VaultItem(
                     url: note.url, relativePath: note.relativePath,
                     kind: note.kind, name: note.name
                 ))
             }
         } else {
-            Button("Create Note for \(MomentFormat.format(date, pattern: "MMMM Do"))") {
+            MenuButton(
+                "Create Note for \(MomentFormat.format(date, pattern: "MMMM Do"))",
+                symbol: "square.and.pencil"
+            ) {
                 onCreate()
             }
         }
