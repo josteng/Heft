@@ -25,8 +25,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, such as 0.1.0"
-        required: true
+        description: "Version to release; empty means MARKETING_VERSION in Config/Heft.xcconfig"
+        required: false
         type: string
 
 permissions:
@@ -40,6 +40,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the build number is the commit count
+
+      - name: Decide the version
+        run: |
+          VERSION="${{ inputs.version }}"
+          [[ -n "$VERSION" ]] || VERSION="$(sed -n 's/^MARKETING_VERSION *= *\([0-9.]*\).*/\1/p' Config/Heft.xcconfig)"
+          echo "Releasing $VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Select the newest Xcode 26
         run: |
@@ -74,16 +81,16 @@ jobs:
         run: |
           echo "$NOTARY_KEY_CONTENTS" > "$RUNNER_TEMP/notary.p8"
           export HEFT_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
-          Scripts/release.sh --version "${{ inputs.version }}" --notarize
+          Scripts/release.sh --version "$VERSION" --notarize
 
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ inputs.version }}" \
-            "dist/Heft-${{ inputs.version }}.zip" "dist/heft.rb" \
-            --draft --generate-notes --title "Heft ${{ inputs.version }}"
-          echo "Drafted v${{ inputs.version }}. Publish it, then put dist/heft.rb into the tap."
+          gh release create "v$VERSION" \
+            "dist/Heft-$VERSION.zip" "dist/heft.rb" \
+            --draft --generate-notes --title "Heft $VERSION"
+          echo "Drafted v$VERSION. Publish it, then put dist/heft.rb into the tap."
 
       - name: Remove the keychain
         if: always()

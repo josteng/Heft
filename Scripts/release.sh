@@ -2,7 +2,7 @@
 # Builds a release of Heft the way a Homebrew cask expects one: a signed,
 # notarised, stapled Heft.app in a zip, with the cask file to publish it.
 #
-#   Scripts/release.sh                       # version from the Xcode project
+#   Scripts/release.sh                       # version from Config/Heft.xcconfig
 #   Scripts/release.sh --version 0.2.0       # a specific version
 #   Scripts/release.sh --notarize            # also notarise and staple
 #   Scripts/release.sh --universal           # arm64 and x86_64 in one binary
@@ -41,11 +41,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# The project's MARKETING_VERSION unless one was given. The build number is
-# the commit count, so two builds of different commits never share one.
+# MARKETING_VERSION from Config/Heft.xcconfig unless one was given. The build
+# number is the commit count, so two builds of different commits never share
+# one.
 if [[ -z "$VERSION" ]]; then
-    VERSION="$(sed -n 's/.*MARKETING_VERSION = \([0-9.]*\);/\1/p' "$ROOT/Heft.xcodeproj/project.pbxproj" | head -1)"
+    VERSION="$(sed -n 's/^MARKETING_VERSION *= *\([0-9.]*\).*/\1/p' "$ROOT/Config/Heft.xcconfig" | head -1)"
 fi
+[[ -n "$VERSION" ]] || { echo "No version: set MARKETING_VERSION in Config/Heft.xcconfig or pass --version" >&2; exit 1; }
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
 
 # The team comes from Config/Local.xcconfig when there is one, which is the

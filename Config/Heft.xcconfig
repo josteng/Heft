@@ -3,3 +3,7 @@
 // go in Local.xcconfig beside this file: it is read when it exists, git
 // ignores it, and Local.xcconfig.example lists what it can hold.
 #include? "Local.xcconfig"
+
+// The version a release carries. Bump it here; the build number is the
+// commit count and looks after itself.
+MARKETING_VERSION = 0.1.0

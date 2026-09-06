@@ -350,7 +350,6 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Heft-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft;
 				PRODUCT_NAME = Heft;
 				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
@@ -370,7 +369,6 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Heft-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft;
 				PRODUCT_NAME = Heft;
 				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
