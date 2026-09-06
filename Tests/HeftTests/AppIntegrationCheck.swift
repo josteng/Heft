@@ -514,41 +514,16 @@ enum AppIntegrationCheck {
             "typing [[ presents its completion panel"
         )
 
-        let beforeCapture = files.current?.relativePath
-        let firstCapture = "Remember the useful thing"
-        expect(files.captureToInbox(firstCapture), "the app captures to Inbox.md")
         let inboxURL = root.appendingPathComponent("Inbox.md")
-        expect(
-            contents(inboxURL)?.contains(firstCapture) == true,
-            "an inbox capture is written as plain markdown"
-        )
-        expect(
-            files.current?.relativePath == beforeCapture,
-            "capturing does not disturb the current note"
-        )
-        let secondCapture = "This should be newer"
-        expect(files.captureToInbox(secondCapture), "a second inbox capture succeeds")
-        if let inboxText = contents(inboxURL),
-           let firstRange = inboxText.range(of: firstCapture),
-           let secondRange = inboxText.range(of: secondCapture) {
-            expect(secondRange.lowerBound < firstRange.lowerBound, "newer inbox captures come first")
-        } else {
-            result.failures.append("inbox captures were unavailable for ordering")
+        expect(!FileManager.default.fileExists(atPath: inboxURL.path), "the vault starts without an inbox")
+        expect(files.openInbox(), "Open Inbox creates and opens Inbox.md")
+        expect(files.current?.relativePath == "Inbox.md", "Open Inbox shows Inbox.md")
+        let inboxListed = await waitUntil {
+            files.tree?.flattened().contains { $0.relativePath == "Inbox.md" } == true
         }
+        expect(inboxListed, "the inbox Open Inbox created appears in the tree")
 
-        if let inboxRef = NoteRef(url: inboxURL, vaultRoot: root) {
-            files.open(inboxRef)
-            files.text += "\nManual inbox edit\n"
-            expect(
-                files.captureToInbox("Captured while Inbox was open"),
-                "capturing safely saves and reloads an open Inbox"
-            )
-            expect(
-                files.text.contains("Manual inbox edit")
-                    && files.text.contains("Captured while Inbox was open"),
-                "an open Inbox keeps both editor changes and the capture"
-            )
-
+        do {
             let intentStyleCapture = "Captured outside the editor model"
             _ = try? InboxCapture(vaultRoot: root).capture(intentStyleCapture)
             let openInboxRefreshed = await waitUntil {
@@ -568,8 +543,6 @@ enum AppIntegrationCheck {
                 genericExternalEditRefreshed,
                 "an open clean note refreshes after a same-process disk edit"
             )
-        } else {
-            result.failures.append("Inbox.md could not be represented as a note")
         }
 
         let created = files.createUntitledNote(in: root)

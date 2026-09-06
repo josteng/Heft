@@ -10,7 +10,7 @@ import Foundation
 ///
 /// So the table is here, in the pure target, where `heft keys` can print it
 /// without starting a window and a test can hold it against the menu that
-/// uses it. It also means an agent asked "how do I capture to my inbox" has
+/// uses it. It also means an agent asked "how do I open today's note" has
 /// something to run, rather than guessing at a shortcut it cannot see.
 public enum KeyboardShortcuts {
 
@@ -80,7 +80,6 @@ public enum KeyboardShortcuts {
     public static let all: [Shortcut] = [
         .init(id: "newNote", title: "New Note", key: "n", modifiers: [.command], group: .file, isNotable: true),
         .init(id: "newWindow", title: "New Window", key: "n", modifiers: [.command, .shift], group: .file),
-        .init(id: "captureInbox", title: "Capture to Inbox", key: "i", modifiers: [.command, .shift], group: .file, isNotable: true),
         .init(id: "openToday", title: "Today's Daily Note", key: "t", modifiers: [.command, .shift], group: .file, isNotable: true),
         .init(id: "openVaultInNewWindow", title: "Open Vault in New Window", key: "o", modifiers: [.command, .shift], group: .file, isNotable: true),
         .init(id: "exportPDF", title: "Export as PDF", key: "e", modifiers: [.command, .shift], group: .file, isNotable: true),

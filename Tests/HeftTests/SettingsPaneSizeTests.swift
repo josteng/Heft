@@ -336,7 +336,7 @@ struct RevealTests {
     }
 }
 
-/// "Inbox" means one thing in Heft: the note ⇧⌘I appends to. Offering it as
+/// "Inbox" means one thing in Heft: the note Spotlight capture appends to. Offering it as
 /// the example anywhere else makes two features look like they point at the
 /// same place, and a folder named after a note is a mess nobody asked for.
 @Suite("Inbox means one thing")

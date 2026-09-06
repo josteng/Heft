@@ -52,8 +52,8 @@ being silently deleted, so a typo is visible instead of destructive.
 ```
 
 On its own line in a template, this is where captures land. Anything filed
-with **⇧⌘I**, "Add to Today's Note" from Spotlight, or the Shortcuts action is
-inserted *immediately above* it, so the marker stays the insertion point and
+with "Add to Today's Note" from Spotlight or the Shortcuts action is inserted
+*immediately above* it, so the marker stays the insertion point and
 the log stays in the order it happened. Without a marker, captures are
 appended to the end of the note.
 

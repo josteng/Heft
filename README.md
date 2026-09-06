@@ -256,7 +256,6 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | Shortcut | Action |
 |---|---|
 | ⌘N | New Note |
-| ⇧⌘I | Capture to Inbox |
 | ⇧⌘T | Today's Daily Note |
 | ⇧⌘O | Open Vault in New Window |
 | ⇧⌘E | Export as PDF |

@@ -134,8 +134,7 @@ struct HeftCommands: Commands {
             }
             .keyboardShortcut(.newWindow)
             Divider()
-            Button("Capture to Inbox…") { model?.presentInboxCapture() }
-                .keyboardShortcut(.captureInbox)
+            Button("Open Inbox") { model?.openInbox() }
                 .disabled(model?.vaultRoot == nil)
             if model?.dailyNotesAreInScope != false {
                 Button("Today's Daily Note") { model?.openDailyNote(for: Date()) }

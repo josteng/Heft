@@ -264,9 +264,7 @@ final class AppModel: ObservableObject {
     @Published var isCommandPalettePresented = false
     @Published var isVaultSearchPresented = false
     @Published var isDailyNotesSettingsPresented = false
-    @Published var isInboxCapturePresented = false
     private var shouldPresentDailyNotesSettingsAfterPalette = false
-    private var shouldPresentInboxCaptureAfterPalette = false
     @Published var isFindPresented = false
     @Published private(set) var findFocusGeneration = 0
     @Published private(set) var findNavigationGeneration = 0
@@ -1691,19 +1689,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func presentInboxCapture() {
-        guard vaultRoot != nil else {
-            promptForVault()
-            return
-        }
-        if isCommandPalettePresented {
-            shouldPresentInboxCaptureAfterPalette = true
-            isCommandPalettePresented = false
-        } else {
-            isInboxCapturePresented = true
-        }
-    }
-
     /// Types `text` at the caret, putting the caret `caretOffset` into it.
     ///
     /// Goes through the editor rather than the buffer so it joins the same
@@ -1731,39 +1716,27 @@ final class AppModel: ObservableObject {
         if shouldPresentDailyNotesSettingsAfterPalette {
             shouldPresentDailyNotesSettingsAfterPalette = false
             isDailyNotesSettingsPresented = true
-        } else if shouldPresentInboxCaptureAfterPalette {
-            shouldPresentInboxCaptureAfterPalette = false
-            isInboxCapturePresented = true
         }
     }
 
-    /// Adds a timestamped bullet without changing the note this window is
-    /// showing. If Inbox.md itself is being edited here, save and reload it so
-    /// the capture and the editor cannot silently overwrite each other.
+    /// Opens Inbox.md, the note Spotlight's "Capture to Inbox" appends to,
+    /// creating it when the vault has none yet.
     @discardableResult
-    func captureToInbox(_ capture: String, at date: Date = Date()) -> Bool {
+    func openInbox() -> Bool {
         guard let vaultRoot else {
-            status = InboxCaptureError.vaultUnavailable.localizedDescription
+            promptForVault()
             return false
         }
-
-        let inbox = InboxCapture(vaultRoot: vaultRoot)
-        let isEditingInbox = current?.url.standardizedFileURL == inbox.url.standardizedFileURL
-        if isEditingInbox, !flushPendingSave() {
-            status = "Resolve the Inbox save conflict before capturing"
-            return false
-        }
-
         do {
-            let url = try inbox.capture(capture, at: date)
-            if isEditingInbox, let ref = NoteRef(url: url, vaultRoot: vaultRoot) {
-                open(ref, recordingNavigation: false)
-            }
-            reload(immediately: true)
-            status = "Captured to Inbox.md"
+            let inbox = InboxCapture(vaultRoot: vaultRoot)
+            let existed = FileManager.default.fileExists(atPath: inbox.url.path)
+            let url = try inbox.ensureFile()
+            guard let ref = NoteRef(url: url, vaultRoot: vaultRoot) else { return false }
+            open(ref)
+            if !existed { reload(immediately: true) }
             return true
         } catch {
-            status = "Could not capture to Inbox: \(error.localizedDescription)"
+            status = "Could not open Inbox: \(error.localizedDescription)"
             return false
         }
     }

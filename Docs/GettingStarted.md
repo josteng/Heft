@@ -62,10 +62,13 @@ If your vault has Obsidian daily notes configured, Heft uses that
 configuration. If not, `File ▸ Daily Note Settings…` sets it up and will
 create the folders. **⇧⌘T** opens today's.
 
-**⇧⌘I** files a line into `Inbox.md`. The same two actions are available from
-Spotlight and Shortcuts — "Add to Today's Note" and "Capture to Inbox" — which
-is the point: you can file a thought without leaving what you are doing, and
-Heft stays where it was.
+Capture lives in Spotlight, on purpose: "Capture to Inbox" files a line into
+`Inbox.md`, "Add to Today's Note" into today's note, and both work from
+whatever you are doing, Heft included, without bringing it forward. Spotlight
+on macOS 26 lets you give an action a quick key, so `in` can stand for
+"Capture to Inbox" and `t` for "Add to Today's Note". "Open Inbox" and "Open
+Today's Note" are there too, and in the palette (⌘P) inside the app. The same
+actions are available to Shortcuts.
 
 `Docs/TemplatesAndSlides.md` covers templates, the date tokens, typing
 snippets, and how `---` turns a note into a slide deck.

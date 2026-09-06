@@ -23,9 +23,6 @@ struct ContentView: View {
         .sheet(isPresented: $model.isDailyNotesSettingsPresented) {
             DailyNotesSettingsView()
         }
-        .sheet(isPresented: $model.isInboxCapturePresented) {
-            InboxCaptureView()
-        }
         .sheet(item: $model.reviewing) { proposal in
             // A delete, a move or a note that does not exist yet has no hunks
             // to answer: there is nothing to accept part of.

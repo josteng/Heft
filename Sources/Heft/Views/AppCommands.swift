@@ -28,7 +28,6 @@ struct AppCommandShortcut {
     static let toggleCalendar = Self("toggleCalendar")
     static let toggleSidebar = Self("toggleSidebar")
     static let toggleBacklinks = Self("toggleBacklinks")
-    static let captureInbox = Self("captureInbox")
     static let exportPDF = Self("exportPDF")
     static let newNote = Self("newNote")
     static let newWindow = Self("newWindow")
@@ -91,13 +90,12 @@ struct AppCommand: Identifiable {
 
     static let registry: [Self] = [
         Self(
-            id: "captureInbox",
-            title: "Capture to Inbox…",
-            symbol: "tray.and.arrow.down",
-            searchTerms: "quick note add jot remember thought inbox",
-            shortcut: .captureInbox,
+            id: "openInbox",
+            title: "Open Inbox",
+            symbol: "tray.full",
+            searchTerms: "inbox captures spotlight open",
             enabled: { $0.vaultRoot != nil },
-            action: { $0.presentInboxCapture() }
+            action: { $0.openInbox() }
         ),
         Self(
             id: "revealInSidebar",
