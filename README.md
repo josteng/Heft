@@ -33,7 +33,7 @@ Oh, and it has daily notes, capture from Spotlight, and a Vim mode (yes,
 really).
 
 ```bash
-brew install --cask josteng/heft/heft
+brew install --cask josteng/tap/heft
 ```
 
 Requires macOS 26 on Apple Silicon. That installs `Heft.app` and a `heft`

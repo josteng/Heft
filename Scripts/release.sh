@@ -236,5 +236,5 @@ echo
 echo "To publish:"
 echo "  git tag v$VERSION && git push origin v$VERSION"
 echo "  gh release create v$VERSION '$ZIP' --title 'Heft $VERSION' --notes-file <notes.md>"
-echo "  cp '$CASK' <tap checkout>/Casks/heft.rb   # the homebrew-heft repository, then commit and push"
-echo "Users then run: brew install --cask josteng/heft/heft"
+echo "  cp '$CASK' <tap checkout>/Casks/heft.rb   # the homebrew-tap repository, then commit and push"
+echo "Users then run: brew install --cask josteng/tap/heft"
