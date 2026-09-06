@@ -222,8 +222,9 @@ covers the shell. Claude Code's deny rule does not — `Bash` is not denied, so
 
 The guide is stamped with a version, because it is copied *into* your vault and
 frozen there. Every agent verb checks the stamp and says on stderr when the
-vault is behind; the editor offers the same as a banner. Nothing rewrites these
-files on its own. A vault with no guide is asked once, and Not Now is
+vault is behind; the review centre at the top of the sidebar offers the same.
+Nothing rewrites these files on its own. A vault with no guide is asked once,
+in that same slot while nothing is waiting for review, and Not Now is
 remembered for that vault; General settings can switch the question off.
 
 ### The guide, by hand

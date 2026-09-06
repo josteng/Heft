@@ -106,7 +106,7 @@ equivalent, so for it the rule lives in `AGENTS.md`.
 
 The guide is stamped with a version, because it is copied into the vault and
 frozen there. Every agent verb writes one line to stderr when the vault is
-behind, and the editor offers a refresh banner; nothing rewrites the user's
+behind, and the review centre offers a refresh; nothing rewrites the user's
 file on its own. Bump `AgentGuide.version` whenever the wording an agent
 depends on changes.
 

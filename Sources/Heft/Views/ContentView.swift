@@ -227,22 +227,8 @@ private struct DetailColumn: View {
                 if model.vaultRoot == nil {
                     WelcomeView()
                 } else if model.current == nil {
-                    // The offer belongs here above all: opening a folder that
-                    // has never been set up is exactly the moment there is no
-                    // note open yet, so hanging it only over the editor meant
-                    // it appeared everywhere except where it was needed.
-                    VStack(spacing: 0) {
-                        if model.shouldOfferAgentSetup {
-                            // The unified toolbar draws over the top of this
-                            // column, so a banner placed flush with it is
-                            // hidden behind the title. `EditorPane` reserves
-                            // the same height for the same reason.
-                            Color.clear.frame(height: topChromeHeight)
-                            AgentSetupBanner()
-                        }
-                        EmptySelectionView()
-                            .frame(maxHeight: .infinity)
-                    }
+                    EmptySelectionView()
+                        .frame(maxHeight: .infinity)
                 } else {
                     EditorPane(topChromeHeight: topChromeHeight)
                 }
@@ -385,14 +371,6 @@ struct EditorPane: View {
                     Color.clear.frame(height: topChromeHeight)
                 }
                 ProposalBanner()
-            } else if model.shouldOfferAgentSetup {
-                // Below the proposals, never beside them: a vault with a
-                // proposal waiting is already set up, and two banners stacked
-                // over one note is noise.
-                if !model.isFindPresented {
-                    Color.clear.frame(height: topChromeHeight)
-                }
-                AgentSetupBanner()
             }
 
             // One surface, always. Source and preview modes were removed once

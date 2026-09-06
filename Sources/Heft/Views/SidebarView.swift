@@ -452,6 +452,7 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, 6)
+            .padding(.top, 8)
             .padding(.bottom, 8)
         }
     }
@@ -506,6 +507,7 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, 6)
+            .padding(.top, 8)
             .padding(.bottom, 8)
         }
     }

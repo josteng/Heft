@@ -6,58 +6,6 @@ import SwiftUI
 ///
 /// Above the text rather than in the toolbar: a proposal is about *this* note,
 /// and a toolbar badge is a thing you learn to stop seeing.
-/// Offers to teach this vault's agents to propose rather than write.
-///
-/// Shown once per vault, because the alternative is a feature nobody finds:
-/// the verbs and the menu item existed for a while before this, and a Claude
-/// Code session opened in a vault without the guide has no way to know any of
-/// it is there — so it edits notes directly, which is exactly what proposals
-/// exist to prevent.
-struct AgentSetupBanner: View {
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.appAccent) private var accent
-
-    private var isRefresh: Bool {
-        if case .outdated = model.agentGuideStatus { return true }
-        return false
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(accent)
-                .font(.system(size: 12, weight: .semibold))
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(isRefresh
-                     ? "This vault's agent instructions are out of date"
-                     : "Let agents propose changes to this vault")
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                Text(isRefresh
-                     ? "Rewrites Heft's section of CLAUDE.md and AGENTS.md and leaves the rest of each file alone."
-                     : "Writes CLAUDE.md and AGENTS.md, so whichever agent you bring proposes edits here for review instead of editing notes directly.")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 8)
-
-            Button(isRefresh ? "Update" : "Set Up") { model.setUpAgentAccess() }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-            Button("Not Now") { model.dismissAgentSetupOffer() }
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottom) { Divider() }
-        .transition(.move(edge: .top).combined(with: .opacity))
-    }
-}
-
 struct ProposalBanner: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.appAccent) private var accent
