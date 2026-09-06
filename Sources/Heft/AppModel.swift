@@ -273,7 +273,27 @@ final class AppModel: ObservableObject {
     @Published var isPresentationPresented = false
     @Published var calendarMonth = Date()
     @Published var expandedFolders: Set<String> = []
-    @Published var status: String = ""
+    /// A line of feedback about the last thing the reader did. It expires,
+    /// because nothing else overwrites it: routine saves used to, and a
+    /// "Renamed" from the morning is not information by the afternoon. Any
+    /// state that outlasts the message has its own place: a blocked save is
+    /// the window's edited marker, a conflict is its alert.
+    @Published var status: String = "" {
+        didSet { expireStatus() }
+    }
+    /// How long a message stays. A test shortens it.
+    var statusLifetime: Duration = .seconds(5)
+    private var statusExpiry: Task<Void, Never>?
+
+    private func expireStatus() {
+        statusExpiry?.cancel()
+        guard !status.isEmpty else { return }
+        statusExpiry = Task { [weak self, statusLifetime] in
+            try? await Task.sleep(for: statusLifetime)
+            guard !Task.isCancelled, let self else { return }
+            self.status = ""
+        }
+    }
     /// Edits agents have proposed and nobody has answered yet, vault-wide.
     @Published private(set) var proposals: [Proposal] = []
     /// The proposal whose review sheet is open.
@@ -752,7 +772,6 @@ final class AppModel: ObservableObject {
             lastKnownDiskText = contents
             saveConflict = nil
             lastKnownModification = modificationDate(of: ref.url)
-            status = ref.relativePath
             if let previous, previous.url.standardizedFileURL != ref.url.standardizedFileURL {
                 registry.release(previous.url, for: workspaceID)
             }
