@@ -51,6 +51,8 @@ struct LiveTextEditor: NSViewRepresentable {
     let generationKeepsPosition: Bool
     let findSelection: FindSelection?
     let insertion: EditorInsertion?
+    /// Changes when the model asks the editor to take the keyboard.
+    var focusRequest: Int = 0
     let context: RenderContext
     let onAttachment: (NSPasteboard) -> String?
     let onFollowLink: (URL) -> Void
@@ -158,6 +160,11 @@ struct LiveTextEditor: NSViewRepresentable {
                 - (typed as NSString).length + lead.count + insertion.caretOffset
             textView.setSelectedRange(NSRange(location: max(0, caret), length: 0))
             nsContext.coordinator.restyle(textView)
+        }
+
+        if focusRequest != nsContext.coordinator.lastFocusRequest {
+            nsContext.coordinator.lastFocusRequest = focusRequest
+            nsContext.coordinator.takeKeyboard(textView)
         }
 
         if let findSelection,
@@ -301,6 +308,19 @@ struct LiveTextEditor: NSViewRepresentable {
         /// drops every attribute on the floor, so the next pass cannot assume
         /// anything it did not rewrite is still styled.
         func resetStyling() { styled = nil }
+
+        var lastFocusRequest = 0
+
+        /// Puts the caret in the text view, taking it from whatever has it,
+        /// the sidebar's naming field included. The window may not be
+        /// attached yet on the update that carries the request.
+        func takeKeyboard(_ textView: HeftTextKit2View) {
+            if let window = textView.window {
+                window.makeFirstResponder(textView)
+            } else {
+                DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
+            }
+        }
 
         /// Replaces the buffer with another document.
         ///

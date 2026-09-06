@@ -598,7 +598,10 @@ struct SidebarView: View {
             inlineEdit = nil
             // A new note that kept the name it was offered still has a name,
             // and nothing has opened it yet.
-            if edit.isNew { model.open(item: item) }
+            if edit.isNew {
+                model.open(item: item)
+                model.focusEditor()
+            }
             return
         }
         if !model.rename(item, to: edit.name, thenOpen: edit.isNew) {
@@ -766,7 +769,10 @@ private struct TreeRow: View {
         guard let edit = inlineEdit, edit.path == item.relativePath else { return }
         guard edit.name != item.name else {
             inlineEdit = nil
-            if edit.isNew { model.open(item: item) }
+            if edit.isNew {
+                model.open(item: item)
+                model.focusEditor()
+            }
             return
         }
         if !model.rename(item, to: edit.name, thenOpen: edit.isNew) {

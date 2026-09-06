@@ -380,6 +380,7 @@ struct EditorPane: View {
                 generationKeepsPosition: model.documentGenerationKeepsPosition,
                 findSelection: findSelection,
                 insertion: model.pendingInsertion,
+                focusRequest: model.editorFocusRequest,
                 context: context,
                 onAttachment: handleAttachment,
                 onFollowLink: { url in

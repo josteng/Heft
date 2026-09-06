@@ -306,10 +306,12 @@ struct VaultHostTests {
 
         let created = try #require(model.createUntitledNote(in: root))
         let untitled = try await item(model, awaiting: created.path)
+        let focusRequests = model.editorFocusRequest
         #expect(model.rename(untitled, to: "Kickoff", thenOpen: true))
 
         // Opened at the path the plan produced, not one rebuilt from the name.
         #expect(model.current?.relativePath == "Kickoff.md")
+        #expect(model.editorFocusRequest == focusRequests + 1, "the caret goes to the new note")
         #expect(FileManager.default.fileExists(
             atPath: root.appendingPathComponent("Kickoff.md").path
         ))
@@ -325,8 +327,10 @@ struct VaultHostTests {
         let untitled = try await item(model, awaiting: created.path)
         // What Return on an unchanged name does: a rename to the same name,
         // which is not a failure and has nothing to move.
+        let focusRequests = model.editorFocusRequest
         #expect(model.rename(untitled, to: untitled.name, thenOpen: true))
         #expect(model.current?.relativePath == created.path)
+        #expect(model.editorFocusRequest == focusRequests + 1, "the caret goes to the new note")
     }
 
     @Test("Anything but an empty, still-unnamed note is left alone")

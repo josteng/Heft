@@ -318,6 +318,14 @@ final class AppModel: ObservableObject {
     /// Line the editor should jump to once the note is open, 1-based. Consumed
     /// by the editor, which clears it.
     @Published var pendingLineReveal: Int?
+
+    /// Asks the editor to take the keyboard. Stamped so that one request is
+    /// one focus: a note just named in the sidebar has the caret in the
+    /// sidebar's field, and a page that shows an empty note without a caret
+    /// reads as no note at all.
+    @Published private(set) var editorFocusRequest = 0
+
+    func focusEditor() { editorFocusRequest += 1 }
     /// Text a command asked to be typed at the caret. Stamped with a
     /// generation so the editor performs it exactly once, the way a find
     /// selection is applied.
@@ -1185,7 +1193,10 @@ final class AppModel: ObservableObject {
             // Renaming to the name it already has is not a failure; there is
             // simply nothing to do.
             guard move.from != move.to else {
-                if thenOpen { open(item: item) }
+                if thenOpen {
+                    open(item: item)
+                    focusEditor()
+                }
                 return true
             }
             renamedPath = move.to
@@ -1198,6 +1209,7 @@ final class AppModel: ObservableObject {
             url: vaultRoot.appendingPathComponent(renamedPath), vaultRoot: vaultRoot
         ) {
             open(ref)
+            focusEditor()
         }
         return true
     }
