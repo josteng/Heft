@@ -2191,6 +2191,10 @@ final class AppModel: ObservableObject {
             let outcome = try AgentGuide.install(
                 in: vaultRoot, binaryPath: binary, vaultName: vaultName
             )
+            // The watcher ignores this process's own file events, which is
+            // right for saves and wrong here: the guides are new files, and
+            // without a rescan the sidebar shows the vault as it was.
+            reload(immediately: true)
             let names = outcome.written.map(\.url.lastPathComponent).joined(separator: " and ")
             if let saved = outcome.backedUp {
                 status = "Updated \(names); your edits inside the guide were saved to "
