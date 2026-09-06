@@ -83,6 +83,18 @@ jobs:
           export HEFT_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
           Scripts/release.sh --version "$VERSION" --notarize
 
+      # A first submission on a new account can outlast the wait in the script.
+      # The zip and the submission id survive the runner this way, and
+      # Scripts/release.sh --resume finishes the job on a Mac once Apple
+      # answers, without rebuilding.
+      - name: Keep the zip even when notarisation is still pending
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Heft-${{ env.VERSION }}
+          path: dist/
+          if-no-files-found: ignore
+
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
