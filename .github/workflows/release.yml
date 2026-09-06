@@ -1,0 +1,90 @@
+# Builds, signs, notarises and drafts a GitHub release. Started by hand only:
+# nothing on push or on a tag, so a release is always a decision.
+#
+# Secrets it needs, set once under Settings, Secrets and variables, Actions:
+#   DEVELOPER_ID_P12          the Developer ID Application certificate and its
+#                             key, exported from Keychain Access as .p12 and
+#                             base64-encoded (base64 -i cert.p12 | pbcopy)
+#   DEVELOPER_ID_P12_PASSWORD the password given when exporting it
+#   NOTARY_KEY                the App Store Connect API key (.p8 contents)
+#   NOTARY_KEY_ID             its key id
+#   NOTARY_ISSUER             the issuer id shown beside the keys
+#
+# Only someone with write access to the repository can start it, and a fork
+# never receives the secrets. The job runs in the "release" environment: give
+# that environment a required reviewer under Settings, Environments, and every
+# run waits for that approval before the secrets are handed over.
+#
+# The release is created as a draft with the zip attached and the cask file
+# as a second asset. Publishing it, and putting the cask into the tap, stay
+# manual until that has gone right a few times.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, such as 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the build number is the commit count
+
+      - name: Select the newest Xcode 26
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Import the Developer ID certificate
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" \
+            -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          # Without this, codesign stops to ask for the keychain password.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Build, sign and notarise
+        env:
+          HEFT_NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          HEFT_NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          NOTARY_KEY_CONTENTS: ${{ secrets.NOTARY_KEY }}
+        run: |
+          echo "$NOTARY_KEY_CONTENTS" > "$RUNNER_TEMP/notary.p8"
+          export HEFT_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
+          Scripts/release.sh --version "${{ inputs.version }}" --notarize
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" \
+            "dist/Heft-${{ inputs.version }}.zip" "dist/heft.rb" \
+            --draft --generate-notes --title "Heft ${{ inputs.version }}"
+          echo "Drafted v${{ inputs.version }}. Publish it, then put dist/heft.rb into the tap."
+
+      - name: Remove the keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true

@@ -5,17 +5,20 @@
 #   Scripts/release.sh                       # version from the Xcode project
 #   Scripts/release.sh --version 0.2.0       # a specific version
 #   Scripts/release.sh --notarize            # also notarise and staple
+#   Scripts/release.sh --universal           # arm64 and x86_64 in one binary
 #
 # Signing: a "Developer ID Application" certificate is used when the keychain
 # holds one (or name it in HEFT_DEVELOPER_ID). Without one the app is signed
 # ad hoc, which is fine for trying the pipeline and useless for shipping:
 # Gatekeeper refuses an ad-hoc app on any other Mac.
 #
-# Notarising needs a keychain profile made once with
+# Notarising needs credentials: a keychain profile made once with
 #   xcrun notarytool store-credentials heft-notary ...
-# (HEFT_NOTARY_PROFILE overrides the name). The zip is submitted, the ticket
-# is stapled to the app, and the zip is made again, since the staple lives
-# inside the bundle.
+# (HEFT_NOTARY_PROFILE overrides the name), or, where no keychain profile can
+# exist such as a CI runner, an App Store Connect API key in
+# HEFT_NOTARY_KEY (path to the .p8), HEFT_NOTARY_KEY_ID and
+# HEFT_NOTARY_ISSUER. The zip is submitted, the ticket is stapled to the app,
+# and the zip is made again, since the staple lives inside the bundle.
 #
 # Nothing here pushes, tags or publishes. The last lines say what to run for
 # that, and the cask lands in dist/ for the tap repository.
@@ -27,10 +30,12 @@ export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Develope
 
 VERSION=""
 NOTARIZE=0
+UNIVERSAL=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --version)  VERSION="${2:?--version needs a number}"; shift 2 ;;
-        --notarize) NOTARIZE=1; shift ;;
+        --version)   VERSION="${2:?--version needs a number}"; shift 2 ;;
+        --notarize)  NOTARIZE=1; shift ;;
+        --universal) UNIVERSAL=1; shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -75,6 +80,12 @@ APP="$DERIVED_DATA/Build/Products/Release/Heft.app"
 DIST="$ROOT/dist"
 ZIP="$DIST/Heft-$VERSION.zip"
 
+if [[ "$UNIVERSAL" == "1" ]]; then
+    ARCH_ARGS=(-destination "generic/platform=macOS" "ARCHS=arm64 x86_64" ONLY_ACTIVE_ARCH=NO)
+else
+    ARCH_ARGS=(-destination "platform=macOS,arch=$(uname -m)")
+fi
+
 echo "Building Heft $VERSION ($BUILD_NUMBER)"
 # Hardened runtime is what notarisation requires; the app needs no
 # entitlements beyond it. Both configurations build fine with it on, so it is
@@ -85,7 +96,7 @@ xcodebuild \
     -project "$ROOT/Heft.xcodeproj" \
     -scheme Heft \
     -configuration Release \
-    -destination "platform=macOS,arch=$(uname -m)" \
+    "${ARCH_ARGS[@]}" \
     -derivedDataPath "$DERIVED_DATA" \
     -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
     "MARKETING_VERSION=$VERSION" \
@@ -95,6 +106,7 @@ xcodebuild \
     build
 
 codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | sed 's/^/  /'
+echo "  architectures: $(lipo -archs "$APP/Contents/MacOS/Heft")"
 
 mkdir -p "$DIST"
 package() {
@@ -106,9 +118,15 @@ package() {
 package
 
 if [[ "$NOTARIZE" == "1" ]]; then
-    PROFILE="${HEFT_NOTARY_PROFILE:-heft-notary}"
-    echo "Notarising with keychain profile '$PROFILE'"
-    xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
+    if [[ -n "${HEFT_NOTARY_KEY:-}" ]]; then
+        echo "Notarising with an App Store Connect API key"
+        NOTARY_AUTH=(--key "$HEFT_NOTARY_KEY" --key-id "${HEFT_NOTARY_KEY_ID:?HEFT_NOTARY_KEY_ID}" --issuer "${HEFT_NOTARY_ISSUER:?HEFT_NOTARY_ISSUER}")
+    else
+        PROFILE="${HEFT_NOTARY_PROFILE:-heft-notary}"
+        echo "Notarising with keychain profile '$PROFILE'"
+        NOTARY_AUTH=(--keychain-profile "$PROFILE")
+    fi
+    xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --wait
     xcrun stapler staple "$APP"
     xcrun stapler validate "$APP"
     package
@@ -133,6 +151,7 @@ cask "heft" do
   end
 
   depends_on macos: :tahoe
+  depends_on arch: :arm64
 
   app "Heft.app"
   binary "#{appdir}/Heft.app/Contents/MacOS/Heft", target: "heft"
