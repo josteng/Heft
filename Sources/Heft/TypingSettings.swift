@@ -165,14 +165,16 @@ struct TypingSettingsView: View {
 
     /// How tall the pane is allowed to get before it scrolls as a whole.
     ///
-    /// Taken from the screen rather than fixed: this tab is a long list, and a
-    /// constant chosen to be safe on a small display wasted most of a large
-    /// one, leaving the rule table below the fold on a screen with room to
-    /// spare. The reserve covers the title bar, the tab strip, and enough
-    /// margin that the window is not jammed against the Dock.
+    /// From the screen on a small display, so the tab still fits with the
+    /// title bar, the tab strip and a margin off the Dock; a ceiling on a
+    /// large one. The ceiling was the screen's, and on a big display the
+    /// tab took the window to its edge: a settings window nine hundred
+    /// points tall for one tab, while every other tab sits under six
+    /// hundred. What the ceiling costs is the end of the rule table, which
+    /// scrolls into view.
     private static var maxPaneHeight: CGFloat {
         let available = (NSScreen.main?.visibleFrame.height ?? 900) - 140
-        return min(max(available, 460), 1000)
+        return min(max(available, 460), 760)
     }
 
     /// And how tall it is even when it does not need to be.

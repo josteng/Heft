@@ -793,9 +793,12 @@ enum AppIntegrationCheck {
             forty == hundred,
             "the pane stops growing and scrolls instead (\(forty)pt vs \(hundred)pt)"
         )
+        // The pane's own content already reaches the cap on a large screen,
+        // so rules cannot make it taller there; what must hold everywhere is
+        // that they never make it shorter.
         expect(
-            forty > paneSize.height,
-            "the pane does grow with rules until it reaches that cap"
+            forty >= paneSize.height,
+            "rules never shrink the pane (\(forty)pt with forty, \(paneSize.height)pt with none)"
         )
         typing.customRules = []
 
