@@ -111,6 +111,11 @@ preferences or the icon.
   zero-width, clipped, transparent item still pushed the sidebar toggle away
   from the traffic lights; the cost is the item's slot, which no hosting
   measurement can see. The only fix is not to contribute the item.
+- **No `fixedSize(vertical: true)` on text in the sidebar.** The split view
+  probes its sidebar at zero width for a minimum and the window takes it; a
+  vertically fixed text answers with one character per line, and a fresh
+  vault opened a window taller than the screen. Inside a popover or a sheet
+  it is harmless.
 - **`.tint()` does not reach `Color.accentColor`.** A view filling a shape
   with it keeps the system accent. Views painting their own highlight read
   `@Environment(\.appAccent)`; AppKit views read `AppearanceSettings.shared`.

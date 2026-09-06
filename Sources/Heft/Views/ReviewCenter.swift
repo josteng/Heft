@@ -347,7 +347,10 @@ struct AgentSetupOffer: View {
                  : "Writes CLAUDE.md and AGENTS.md, so the agent you bring proposes edits here instead of editing notes.")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                // No `fixedSize(vertical: true)` here: the split view probes
+                // its sidebar at zero width for a minimum, a text fixed
+                // vertically answers with one character per line, and that
+                // becomes the window's minimum height, taller than a screen.
             HStack(spacing: 6) {
                 Button(isRefresh ? "Update" : "Set Up") { model.setUpAgentAccess() }
                     .controlSize(.small)
