@@ -157,12 +157,7 @@ private struct ConflictHunkCard: View {
         )
     }
 
-    private var label: String {
-        let line = hunk.originalRange.lowerBound + 1
-        if hunk.isInsertion { return "Disk adds \(hunk.added.count) line(s) at line \(line)" }
-        if hunk.isDeletion { return "Disk drops \(hunk.removed.count) line(s) at line \(line)" }
-        return "Line \(line): \(hunk.removed.count) of yours, \(hunk.added.count) on disk"
-    }
+    private var label: String { hunk.conflictLabel }
 }
 
 /// `buttonStyle` takes a concrete type, so the prominent/bordered pair cannot

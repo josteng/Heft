@@ -28,6 +28,29 @@ public struct NoteDiff: Sendable, Equatable {
         public var isInsertion: Bool { removed.isEmpty }
         public var isDeletion: Bool { added.isEmpty }
 
+        /// The 1-based line in the original where the hunk starts.
+        public var firstLine: Int { originalRange.lowerBound + 1 }
+
+        /// What accepting the hunk does, as a review sheet's header: "Insert
+        /// 2 lines at line 11", "Replace 1 line with 3 at line 4".
+        public var reviewLabel: String {
+            if isInsertion { return "Insert \(Self.lines(added.count)) at line \(firstLine)" }
+            if isDeletion { return "Delete \(Self.lines(removed.count)) at line \(firstLine)" }
+            if removed.count == added.count {
+                return "Replace \(Self.lines(removed.count)) at line \(firstLine)"
+            }
+            return "Replace \(Self.lines(removed.count)) with \(added.count) at line \(firstLine)"
+        }
+
+        /// The same for a save conflict, where the other side is the disk.
+        public var conflictLabel: String {
+            if isInsertion { return "Disk adds \(Self.lines(added.count)) at line \(firstLine)" }
+            if isDeletion { return "Disk drops \(Self.lines(removed.count)) at line \(firstLine)" }
+            return "Line \(firstLine): \(removed.count) of yours, \(added.count) on disk"
+        }
+
+        static func lines(_ count: Int) -> String { "\(count) line\(count == 1 ? "" : "s")" }
+
         public init(
             id: Int, originalRange: Range<Int>, removed: [String], added: [String],
             leading: [String] = [], trailing: [String] = []

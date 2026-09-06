@@ -263,12 +263,7 @@ struct HunkCard: View {
         )
     }
 
-    private var label: String {
-        let line = hunk.originalRange.lowerBound + 1
-        if hunk.isInsertion { return "Insert \(hunk.added.count) line(s) at line \(line)" }
-        if hunk.isDeletion { return "Delete \(hunk.removed.count) line(s) at line \(line)" }
-        return "Replace \(hunk.removed.count) with \(hunk.added.count) line(s) at line \(line)"
-    }
+    private var label: String { hunk.reviewLabel }
 
     typealias Kind = DiffLine.Kind
 
