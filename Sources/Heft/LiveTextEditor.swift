@@ -60,9 +60,11 @@ struct LiveTextEditor: NSViewRepresentable {
     /// Whether there is a file for ⌘C to copy, asked while the Edit menu
     /// validates Copy. Nothing is copied by asking.
     var canCopyFile: (() -> Bool)? = nil
-    /// ⌘C and ⌘V when the sidebar's last click was a folder: the host
-    /// copies or pastes the file, and returns true. False leaves the key
-    /// to the text.
+    /// ⌘C and ⌘V when the sidebar's last click was a row: the host copies
+    /// or pastes the file, and returns true. False leaves the key to the
+    /// text. ⌘⌫ is not here: it is a File menu command, because a menu's
+    /// key equivalent is offered before any view sees the event, and a row
+    /// in the tree has taken the keyboard from this view by then.
     var onSidebarCopy: (() -> Bool)? = nil
     var onSidebarPaste: (() -> Bool)? = nil
     /// A click or a keystroke in the text, after which the sidebar's last

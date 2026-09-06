@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import HeftCore
 import Testing
@@ -927,6 +928,104 @@ struct VaultHostTests {
     /// What ⌘C then ⌘V means with a file clicked in the tree: the copy lands
     /// beside it, which is the Finder's duplicate. It used to go to the text
     /// view instead, which wrote a link into whatever note was open.
+    /// ⌘⌫ on a row, the way the Finder trashes a selected file. It asks
+    /// first, as every other route to the Trash does.
+    @Test("The delete key trashes the row the sidebar clicked last")
+    func deleteFromTheKeyboard() async throws {
+        let root = try vault(["Ideas/Plan.md": "p\n", "Index.md": "\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.confirmations = [true]
+        let model = try await ready(model(root, host, open: "Index.md"))
+
+        // Nothing clicked in the tree: the key is the text's own.
+        #expect(!model.deleteFromKeyboard())
+        #expect(host.asked.isEmpty)
+
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Ideas/Plan.md")
+        #expect(model.deleteFromKeyboard())
+        #expect(host.asked == ["confirm: Delete Plan?"])
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Ideas/Plan.md").path))
+        // The row is gone, so it is nothing for the next key to act on.
+        #expect(model.sidebarKeyboardTarget == nil)
+
+        // A folder clicked in the tree is a row like any other. Its URL is
+        // built as a directory, which is a different spelling of the same
+        // path, and the lookup has to survive that.
+        host.confirmations = [true]
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Ideas", isDirectory: true)
+        #expect(model.deleteFromKeyboard())
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Ideas").path))
+    }
+
+    /// What enables File ▸ Move to Trash, and so whether ⌘⌫ is a menu
+    /// command at all: while it is off, the key belongs to the text, where
+    /// it deletes to the start of the line.
+    @Test("The delete key is the tree's only while a row there is clicked")
+    func deleteKeyIsOfferedOnlyForARow() async throws {
+        let root = try vault(["Ideas/Plan.md": "p\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost(), open: "Index.md"))
+
+        #expect(!model.canDeleteFromSidebar)
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Ideas", isDirectory: true)
+        #expect(model.canDeleteFromSidebar)
+        // Blank space stands for the vault root, which is not a row.
+        model.sidebarKeyboardTarget = root
+        #expect(!model.canDeleteFromSidebar)
+
+        // Typing hands the key back, and does it without waking the window
+        // on every keystroke.
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Ideas", isDirectory: true)
+        model.releaseSidebarKeys()
+        #expect(!model.canDeleteFromSidebar)
+    }
+
+    /// The menu item's enabled state is settled when the menu is built, not
+    /// asked for when the key is pressed, so the thing it is built from has
+    /// to say when it changes. Without this the item kept whatever state it
+    /// had when the window last drew, and ⌘⌫ worked only sometimes.
+    @Test("A row clicked in the tree tells the menu bar it changed")
+    func rowChangeReachesTheMenu() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        var announcements = 0
+        let subscription = model.sidebarKeys.objectWillChange.sink { _ in announcements += 1 }
+        defer { subscription.cancel() }
+
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Note.md")
+        #expect(announcements == 1)
+        #expect(model.sidebarKeys.url == root.appendingPathComponent("Note.md"))
+
+        model.releaseSidebarKeys()
+        #expect(announcements == 2)
+
+        // Already handed back: nothing changed, so the menu is left alone.
+        model.releaseSidebarKeys()
+        #expect(announcements == 2)
+    }
+
+    @Test("Saying no to the question keeps the file, and blank space is never deleted")
+    func deleteFromTheKeyboardRefuses() async throws {
+        let root = try vault(["Ideas/Plan.md": "p\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.confirmations = [false]
+        let model = try await ready(model(root, host))
+
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Ideas/Plan.md")
+        #expect(model.deleteFromKeyboard())
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Ideas/Plan.md").path))
+
+        // Blank space stands for the vault root, which no keystroke deletes.
+        model.sidebarKeyboardTarget = root
+        #expect(!model.deleteFromKeyboard())
+        #expect(host.asked == ["confirm: Delete Plan?"])
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Ideas").path))
+    }
+
     @Test("Copy and paste on a file row is the duplicate it is in the Finder")
     func keyboardDuplicatesAFile() async throws {
         let root = try vault(["Ideas/Plan.md": "p\n", "Index.md": "\n"])

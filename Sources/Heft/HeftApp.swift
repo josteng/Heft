@@ -97,6 +97,7 @@ private struct WorkspaceWindow: View {
         ContentView()
             .environmentObject(model)
             .focusedSceneValue(\.workspaceModel, model)
+            .focusedSceneObject(model.sidebarKeys)
             .onAppear {
                 descriptor = model.restorationDescriptor
                 registry.register(model: model) { descriptor in
@@ -115,6 +116,9 @@ struct HeftCommands: Commands {
     // list was when the scene was built.
     @ObservedObject var registry: VaultRegistry
     @FocusedValue(\.workspaceModel) private var model
+    /// Watched, not merely read: see `AppModel.sidebarKeys`. Without this the
+    /// Trash item below keeps the enabled state it was built with.
+    @FocusedObject private var sidebarKeys: SidebarKeyTarget?
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var appearance = AppearanceSettings.shared
 
@@ -187,6 +191,17 @@ struct HeftCommands: Commands {
         // has no working key equivalent — which reads as "the shortcut is
         // reserved by the system" and is nothing of the kind.
         CommandGroup(after: .importExport) {
+            // ⌘⌫ lives here rather than in the text view, and the menu is what
+            // makes it work at all: a menu item's key equivalent is offered
+            // before any view sees the event, and clicking a row in the tree
+            // takes the keyboard off the editor, so the editor could not
+            // answer for it there. Disabled while nothing is clicked in the
+            // tree, which lets the key through to the text, where it deletes
+            // to the start of the line.
+            Button("Move to Trash") { model?.deleteFromKeyboard() }
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(sidebarKeys?.url == nil || model?.canDeleteFromSidebar != true)
+            Divider()
             Button("Export as PDF…") { model?.exportPDF() }
                 .keyboardShortcut(.exportPDF)
                 // On the model, not on the open note: `exportPDF` already says

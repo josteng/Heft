@@ -387,7 +387,7 @@ struct EditorPane: View {
                 canCopyFile: { model.canCopyFile },
                 onSidebarCopy: { model.copyFromKeyboard() },
                 onSidebarPaste: { model.pasteFromKeyboard() },
-                onEditorClaimed: { model.sidebarKeyboardTarget = nil },
+                onEditorClaimed: { model.releaseSidebarKeys() },
                 onFollowLink: { url in
                     if !model.handle(url: url) { NSWorkspace.shared.open(url) }
                 },

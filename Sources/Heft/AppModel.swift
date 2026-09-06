@@ -76,6 +76,13 @@ final class NoteStats: ObservableObject {
     }
 }
 
+/// The row the sidebar last clicked, on its own, so the menu bar can watch
+/// what a keystroke would act on without watching everything else.
+@MainActor
+final class SidebarKeyTarget: ObservableObject {
+    @Published var url: URL?
+}
+
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -1391,7 +1398,35 @@ final class AppModel: ObservableObject {
     /// gets ⌘C and ⌘V. Giving the tree SwiftUI focus as well ran both: a
     /// file pasted into the folder *and* a link into the note. So there is
     /// one owner and the sidebar only says what was clicked.
-    var sidebarKeyboardTarget: URL?
+    ///
+    /// Kept in an object of its own, which the File menu watches. The menu's
+    /// Move to Trash is enabled by this, and a menu item's enabled state is
+    /// settled when the menu is built rather than asked for when the key is
+    /// pressed: with nothing to observe, the item kept whatever state it had
+    /// when the window last drew, so ⌘⌫ worked or did nothing depending on
+    /// what else had happened since. It is a small object rather than this
+    /// one because `AppModel` publishes on every keystroke, and the menu bar
+    /// has no business being rebuilt that often.
+    let sidebarKeys = SidebarKeyTarget()
+
+    var sidebarKeyboardTarget: URL? {
+        get { sidebarKeys.url }
+        set { sidebarKeys.url = newValue }
+    }
+
+    /// Hands the keys back to the text. Guarded rather than assigned, since
+    /// this runs on every keystroke and publishing on each one would wake
+    /// the whole window to say nothing.
+    func releaseSidebarKeys() {
+        if sidebarKeyboardTarget != nil { sidebarKeyboardTarget = nil }
+    }
+
+    /// Whether ⌘⌫ has a row to trash. False while the reader is in the text,
+    /// where that key deletes to the start of the line.
+    var canDeleteFromSidebar: Bool {
+        guard sidebarKeyboardTarget != nil, copyTargetIsNotTheVaultRoot else { return false }
+        return true
+    }
 
     /// Whether ⌘C has a file to copy at all: a row clicked in the tree, or a
     /// note open. Asked when the Edit menu validates Copy, and it has to
@@ -1433,6 +1468,23 @@ final class AppModel: ObservableObject {
         else { return false }
         let isFolder = (try? target.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
         paste(into: isFolder ? target : target.deletingLastPathComponent())
+        return true
+    }
+
+    /// ⌘⌫ on what the sidebar last clicked, the way the Finder trashes a
+    /// selected file. It asks first, as every other route to the Trash does.
+    ///
+    /// Blank space is not a row: the vault root is where things are pasted,
+    /// and no keystroke is going to delete it.
+    @discardableResult
+    func deleteFromKeyboard() -> Bool {
+        guard let target = sidebarKeyboardTarget, copyTargetIsNotTheVaultRoot,
+              let item = tree?.flattened().first(where: { $0.relativePath == relativePath(of: target) })
+        else { return false }
+        delete(item)
+        // The row is gone, or the reader said no; either way it is no longer
+        // what a key should act on.
+        sidebarKeyboardTarget = nil
         return true
     }
 

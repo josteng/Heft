@@ -1025,6 +1025,12 @@ private struct TreeViewportHeightKey: PreferenceKey {
 /// out accent-coloured, which no menu on the system does: macOS 26 draws
 /// them in the label's ink.
 private struct MenuButton<Title: StringProtocol>: View {
+    /// A disabled row dims its title by itself, but not a symbol given a
+    /// colour of its own: the pinned ink outranks the dimming, and Paste
+    /// with an empty pasteboard came out grey text beside a full-strength
+    /// icon. The row's own state is read back and the ink follows it.
+    @Environment(\.isEnabled) private var isEnabled
+
     let title: Title
     let symbol: String
     var role: ButtonRole?
@@ -1044,10 +1050,10 @@ private struct MenuButton<Title: StringProtocol>: View {
             } icon: {
                 Image(systemName: symbol)
                     .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
             }
         }
-        .tint(.primary)
+        .tint(isEnabled ? Color.primary : Color.secondary)
     }
 }
 
@@ -1111,6 +1117,7 @@ private struct FileMenu: View {
         }
         Divider()
         MenuButton("Move to Trash", symbol: "trash", role: .destructive) { model.delete(item) }
+            .keyboardShortcut(.delete, modifiers: .command)
     }
 }
 
@@ -1125,10 +1132,10 @@ private struct FolderMenu: View {
     let onRename: () -> Void
 
     var body: some View {
-        Button("Focus This Window on \"\(item.name)\"", systemImage: "scope") {
+        MenuButton("Focus This Window on \"\(item.name)\"", symbol: "scope") {
             model.setScope(to: item)
         }
-        Button("Open \"\(item.name)\" in New Window", systemImage: "macwindow.badge.plus") {
+        MenuButton("Open \"\(item.name)\" in New Window", symbol: "plus.rectangle.on.rectangle") {
             openWindow(value: model.descriptor(scopePath: item.relativePath))
         }
         Divider()
@@ -1155,6 +1162,7 @@ private struct FolderMenu: View {
         }
         Divider()
         MenuButton("Move to Trash", symbol: "trash", role: .destructive) { model.delete(item) }
+            .keyboardShortcut(.delete, modifiers: .command)
     }
 }
 

@@ -25,6 +25,23 @@ struct MenuSymbolTests {
             names.insert(String(match.output[1].substring ?? ""))
         }
         #expect(names.count >= 10, "the menus stopped naming their symbols")
+
+        // A row built as a plain `Button(..., systemImage:)` misses the
+        // rendering `MenuButton` pins, and comes out in the window's accent
+        // colour while the rows beside it are drawn in the label's ink. Two
+        // did, because their titles hold quotes and a rewrite skipped them.
+        #expect(
+            !text.contains("systemImage:"),
+            "every menu row goes through MenuButton, symbols and all"
+        )
+
+        // And that row dims its symbol with itself. A pinned ink outranks
+        // the dimming a disabled row does for its title, which left Paste
+        // grey beside a full-strength icon.
+        #expect(
+            text.contains("@Environment(\\.isEnabled)"),
+            "the menu row reads back whether it is enabled, to dim its symbol"
+        )
         for name in names.sorted() {
             #expect(
                 NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil,

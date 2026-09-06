@@ -193,6 +193,27 @@ while the marker shows. The list only moves when that row is off screen, since
 scrolling the tree under a reader who can see the thing already is what reads
 as losing their place.
 
+⌘⌫ on a clicked row is the Finder's Move to Trash, and asks the same question
+every other route to the Trash asks. It is a File menu command rather than
+something the text view intercepts, and that is what makes it work: a menu
+item's key equivalent is offered before any view sees the event, and clicking
+a folder in the tree takes the keyboard off the editor, so the editor could
+not answer for it. The item is disabled while nothing in the tree is clicked,
+which lets the key through to the text, where it deletes to the start of the
+line.
+
+Every row of those menus goes through one small view that pins the symbol to
+the label's ink and dims it when the row is disabled. A row built as a plain
+button with a `systemImage` inherits the window's accent instead and comes out
+coloured beside its neighbours, and a pinned ink that ignores the row's state
+leaves a full-strength icon beside greyed-out text.
+
+The Trash item's enabled state is why the row the tree last clicked lives in a
+small observable object of its own. A menu item settles that state when the
+menu is built rather than when the key is pressed, so something has to say
+when it changes, and it cannot be `AppModel`, which publishes on every
+keystroke and would rebuild the menu bar with it.
+
 A file copied into the vault keeps its own name while that is free, and
 takes `Name copy`, then `Name copy 1`, when it is not, whether it arrived
 through the sidebar or through a paste into the text. The two halves used to
