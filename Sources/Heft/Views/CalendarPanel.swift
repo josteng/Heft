@@ -117,24 +117,39 @@ struct CalendarPanel: View {
         }
     }
 
+    /// The grid draws from a value it can compare, so a publish on the model
+    /// that changed nothing a cell shows, which is most of them, skips all 42.
     private var grid: some View {
-        LazyVGrid(columns: columns, spacing: 2) {
-            ForEach(days) { day in
-                DayCell(
+        CalendarGrid(
+            days: days.map { day in
+                DayState(
                     date: day.date,
+                    isInMonth: day.isInMonth,
                     isToday: calendar.isDateInToday(day.date),
                     marksMissing: settings.marksMissingToday,
                     isSelected: isOpen(day.date),
-                    note: note(for: day.date),
-                    isOutsideMonth: !day.isInMonth
-                ) {
-                    open(day)
-                }
-            }
+                    note: note(for: day.date)
+                )
+            },
+            columns: columns
+        ) { day in
+            open(CalendarDay(date: day.date, isInMonth: day.isInMonth))
         }
+        .equatable()
     }
 
     // MARK: - Data
+
+    /// Everything a cell draws from.
+    struct DayState: Equatable, Identifiable {
+        let date: Date
+        let isInMonth: Bool
+        let isToday: Bool
+        let marksMissing: Bool
+        let isSelected: Bool
+        let note: NoteRef?
+        var id: Date { date }
+    }
 
     private struct CalendarDay: Identifiable {
         let date: Date
@@ -418,6 +433,36 @@ struct DailyNotesSettingsView: View {
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// Equal when its days are, whatever closure it was given: the action only
+/// matters when a cell is clicked, and the comparison is what lets SwiftUI
+/// leave the grid alone when nothing in it changed.
+private struct CalendarGrid: View, Equatable {
+    let days: [CalendarPanel.DayState]
+    let columns: [GridItem]
+    let open: (CalendarPanel.DayState) -> Void
+
+    static func == (lhs: CalendarGrid, rhs: CalendarGrid) -> Bool {
+        lhs.days == rhs.days
+    }
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 2) {
+            ForEach(days) { day in
+                DayCell(
+                    date: day.date,
+                    isToday: day.isToday,
+                    marksMissing: day.marksMissing,
+                    isSelected: day.isSelected,
+                    note: day.note,
+                    isOutsideMonth: !day.isInMonth
+                ) {
+                    open(day)
+                }
+            }
         }
     }
 }
