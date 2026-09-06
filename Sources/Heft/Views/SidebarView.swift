@@ -83,6 +83,11 @@ struct SidebarView: View {
     /// beside it", so its enclosing folder is what highlights, exactly as
     /// Finder does it.
     @State private var dropTarget: String?
+    /// Measured only while a reveal is in flight: where that row sits in the
+    /// viewport, and how tall the viewport is.
+    @State private var revealedRow: CGRect?
+    @State private var viewportHeight: CGFloat = 0
+    static let treeViewport = "heft.tree.viewport"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -237,8 +242,23 @@ struct SidebarView: View {
         // This belongs to the viewport, not the lazy content. The tree can be
         // only a few rows tall; attaching here keeps every blank pixel below it
         // useful, regardless of window height.
+        .coordinateSpace(.named(Self.treeViewport))
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: TreeViewportHeightKey.self, value: geometry.size.height)
+            }
+        }
+        .onPreferenceChange(TreeViewportHeightKey.self) { viewportHeight = $0 }
+        .onPreferenceChange(RevealRowFrameKey.self) { revealedRow = $0 }
         .contentShape(.rect)
         .contextMenu { rootContextActions }
+        // Blank space below the rows: the vault root, or the focused folder,
+        // is what ⌘V pastes into and what the + button creates in.
+        .onTapGesture {
+            selectedFolderPath = nil
+            model.highlightedPath = nil
+            model.sidebarKeyboardTarget = model.scopeRoot
+        }
         // `task(id:)` rather than `onChange`, because the tree may not have
         // existed when the request was made: switching back from Tags builds
         // it afterwards, and an `onChange` on a view that appears later never
@@ -268,8 +288,13 @@ struct SidebarView: View {
             }
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
-                proxy.scrollTo(SidebarAnchor(path: target), anchor: .center)
+            // A row already on screen is not scrolled to. Moving the list
+            // under a reader who can see the thing already is the part that
+            // reads as the app losing their place.
+            if RevealScroll.needsScrolling(row: revealedRow, inViewportOfHeight: viewportHeight) {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(SidebarAnchor(path: target), anchor: .center)
+                }
             }
             model.finishReveal()
         }
@@ -310,13 +335,19 @@ struct SidebarView: View {
     @ViewBuilder
     private var rootContextActions: some View {
         if let root = model.scopeRoot {
-            Button("New Note") { beginCreatingNote(in: root) }
-            Button("New Folder") { beginCreatingFolder(in: root) }
+            MenuButton("New Note", symbol: "square.and.pencil") { beginCreatingNote(in: root) }
+            MenuButton("New Folder", symbol: "folder.badge.plus") { beginCreatingFolder(in: root) }
+            MenuButton("Paste", symbol: "doc.on.clipboard") { model.paste(into: root) }
+                .keyboardShortcut("v", modifiers: .command)
+                .disabled(!model.canPaste)
             Divider()
-            Button("Copy Absolute Path") {
+            MenuButton("Copy Absolute Path", symbol: "terminal") {
                 model.copyToPasteboard(root.path, describedAs: "absolute path")
             }
-            Button(model.scopePath == nil ? "Reveal Vault in Finder" : "Reveal Focused Folder in Finder") {
+            MenuButton(
+                model.scopePath == nil ? "Reveal Vault in Finder" : "Reveal Focused Folder in Finder",
+                symbol: "magnifyingglass"
+            ) {
                 model.revealInFinder(root)
             }
         }
@@ -649,7 +680,11 @@ private struct TreeRow: View {
             NoteRow(
                 name: item.name,
                 detail: nil,
-                isSelected: selectedFolderPath == item.relativePath,
+                isSelected: SidebarHighlight.litsFolder(
+                    item.relativePath,
+                    highlighted: model.highlightedPath,
+                    selectedFolder: selectedFolderPath
+                ),
                 depth: depth,
                 symbol: isExpanded ? "folder.fill" : "folder",
                 disclosure: isExpanded,
@@ -659,10 +694,13 @@ private struct TreeRow: View {
                 onRenameCancel: cancelRename
             ) {
                 selectedFolderPath = item.relativePath
+                model.highlightedPath = nil
+                model.sidebarKeyboardTarget = item.url
                 if isExpanded { model.expandedFolders.remove(item.relativePath) }
                 else { model.expandedFolders.insert(item.relativePath) }
             }
             .id(SidebarAnchor(path: item.relativePath))
+            .background { revealProbe }
             .contextMenu {
                 FolderMenu(
                     item: item,
@@ -708,8 +746,12 @@ private struct TreeRow: View {
             NoteRow(
                 name: item.name,
                 detail: nil,
-                isSelected: selectedFolderPath == nil
-                    && model.current?.relativePath == item.relativePath,
+                isSelected: SidebarHighlight.litsFile(
+                    item.relativePath,
+                    highlighted: model.highlightedPath,
+                    current: model.current?.relativePath,
+                    selectedFolder: selectedFolderPath
+                ),
                 depth: depth,
                 symbol: symbol(for: item.kind),
                 isDimmed: item.needsDownload,
@@ -718,9 +760,14 @@ private struct TreeRow: View {
                 onRenameCancel: cancelRename
             ) {
                 selectedFolderPath = nil
+                model.highlightedPath = nil
+                // The row stays the keyboard's subject until the text is
+                // clicked or typed into: ⌘C then ⌘V here duplicates the file.
+                model.sidebarKeyboardTarget = item.url
                 model.open(item: item)
             }
             .id(SidebarAnchor(path: item.relativePath))
+            .background { revealProbe }
             .contextMenu {
                 FileMenu(
                     item: item,
@@ -743,6 +790,20 @@ private struct TreeRow: View {
                 return true
             } isTargeted: { targeted in
                 dropTarget = targeted ? destinationPath : nil
+            }
+        }
+    }
+
+    /// Reports this row's place in the viewport, but only while it is the
+    /// row being revealed: one probe during a reveal, not one per row.
+    @ViewBuilder
+    private var revealProbe: some View {
+        if model.revealTarget == item.relativePath {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: RevealRowFrameKey.self,
+                    value: geometry.frame(in: .named(SidebarView.treeViewport))
+                )
             }
         }
     }
@@ -903,6 +964,93 @@ final class FileDragSource: NSObject, NSDraggingSource {
 
 // MARK: - Context menus
 
+/// Which rows the tree draws as lit.
+///
+/// Two rows can be lit at once, on purpose. The note being read keeps its
+/// row for as long as it is open; the light a reveal puts on a row is a
+/// marker for what just arrived, it lasts a couple of seconds, and taking
+/// the selection off the open note for those seconds would be a worse lie
+/// than showing both.
+enum SidebarHighlight {
+    static func litsFile(
+        _ path: String, highlighted: String?, current: String?, selectedFolder: String?
+    ) -> Bool {
+        if highlighted == path { return true }
+        return selectedFolder == nil && current == path
+    }
+
+    static func litsFolder(_ path: String, highlighted: String?, selectedFolder: String?) -> Bool {
+        highlighted == path || selectedFolder == path
+    }
+}
+
+/// Whether a reveal has to move the list.
+///
+/// A row already on screen is left where it is: scrolling the tree under a
+/// reader who can already see the thing is what reads as the app losing
+/// their place. A row that was never measured is scrolled to, since not
+/// knowing where it is means it is probably not in front of them.
+enum RevealScroll {
+    /// Slack at both edges, so a row flush with the viewport counts as seen
+    /// rather than nudging the whole list by a few points.
+    static let margin: CGFloat = 4
+
+    static func needsScrolling(row: CGRect?, inViewportOfHeight height: CGFloat) -> Bool {
+        guard let row, height > 0 else { return true }
+        return row.minY < -margin || row.maxY > height + margin
+    }
+}
+
+/// Where the row being revealed sits inside the tree's viewport, and how
+/// tall that viewport is. Only the revealed row reports itself, so this
+/// costs one probe during a reveal rather than one per row per layout.
+private struct RevealRowFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
+    }
+}
+
+private struct TreeViewportHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// One row of a context menu: a title, a symbol, and what it does.
+///
+/// The symbol is drawn in the text's own colour. The whole scene carries the
+/// reader's accent as its tint, and a menu icon left to inherit that comes
+/// out accent-coloured, which no menu on the system does: macOS 26 draws
+/// them in the label's ink.
+private struct MenuButton<Title: StringProtocol>: View {
+    let title: Title
+    let symbol: String
+    var role: ButtonRole?
+    let action: () -> Void
+
+    init(_ title: Title, symbol: String, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.symbol = symbol
+        self.role = role
+        self.action = action
+    }
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: symbol)
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.primary)
+            }
+        }
+        .tint(.primary)
+    }
+}
+
 /// Actions on a note or attachment.
 private struct FileMenu: View {
     @EnvironmentObject private var model: AppModel
@@ -911,36 +1059,58 @@ private struct FileMenu: View {
     var onRename: (() -> Void)? = nil
 
     var body: some View {
-        Button("Open") { model.open(item: item) }
+        // Every item carries a symbol: macOS 26 draws them in menus, and a
+        // menu this long is read by shape before it is read by word.
+        MenuButton("Open", symbol: "doc.text") { model.open(item: item) }
         if !item.isMarkdown {
-            Button("Open in Default App") { NSWorkspace.shared.open(item.url) }
+            MenuButton("Open in Default App", symbol: "arrow.up.forward.app") {
+                NSWorkspace.shared.open(item.url)
+            }
         }
         Divider()
-        Button("New Note Here") {
+        MenuButton("New Note Here", symbol: "square.and.pencil") {
             if let onCreateNote { onCreateNote() }
             else { model.createNote(in: item.url.deletingLastPathComponent()) }
         }
-        Button("Rename") {
+        MenuButton("Rename", symbol: "pencil") {
             if let onRename { onRename() }
             else { model.rename(item) }
         }
-        Button("Move to…") { model.promptToMove(item) }
-        Button("Duplicate") { model.duplicate(item) }
+        MenuButton("Move to…", symbol: "folder") { model.promptToMove(item) }
+        MenuButton("Duplicate", symbol: "plus.square.on.square") { model.duplicate(item) }
         Divider()
+        // The file itself, for pasting into a folder here or in the Finder.
         // The vault-relative path is what a link needs; the absolute one is
-        // what a terminal or another app needs. Both are worth having.
-        Button("Copy Path") { model.copyToPasteboard(item.relativePath, describedAs: "path") }
-        Button("Copy Absolute Path") {
+        // what a terminal or another app needs. All three are worth having.
+        //
+        // The shortcut is shown rather than bound: the content of a context
+        // menu is built when it opens, so this draws the ⌘C a reader is
+        // looking for without registering a second handler for it. What the
+        // key actually does is decided in the text view, which holds the
+        // keyboard, against the row clicked last.
+        MenuButton("Copy", symbol: "doc.on.doc") { model.copy(item) }
+            .keyboardShortcut("c", modifiers: .command)
+        MenuButton("Paste", symbol: "doc.on.clipboard") {
+            model.paste(into: item.url.deletingLastPathComponent())
+        }
+        .keyboardShortcut("v", modifiers: .command)
+        .disabled(!model.canPaste)
+        MenuButton("Copy Path", symbol: "arrow.right.doc.on.clipboard") {
+            model.copyToPasteboard(item.relativePath, describedAs: "path")
+        }
+        MenuButton("Copy Absolute Path", symbol: "terminal") {
             model.copyToPasteboard(item.url.path, describedAs: "absolute path")
         }
         if item.isMarkdown {
-            Button("Copy Wikilink") {
+            MenuButton("Copy Wikilink", symbol: "link") {
                 model.copyToPasteboard("[[\(item.name)]]", describedAs: "wikilink")
             }
         }
-        Button("Reveal in Finder") { model.revealInFinder(item.url) }
+        MenuButton("Reveal in Finder", symbol: "magnifyingglass") {
+            model.revealInFinder(item.url)
+        }
         Divider()
-        Button("Move to Trash", role: .destructive) { model.delete(item) }
+        MenuButton("Move to Trash", symbol: "trash", role: .destructive) { model.delete(item) }
     }
 }
 
@@ -955,23 +1125,36 @@ private struct FolderMenu: View {
     let onRename: () -> Void
 
     var body: some View {
-        Button("Focus This Window on \"\(item.name)\"") { model.setScope(to: item) }
-        Button("Open \"\(item.name)\" in New Window") {
+        Button("Focus This Window on \"\(item.name)\"", systemImage: "scope") {
+            model.setScope(to: item)
+        }
+        Button("Open \"\(item.name)\" in New Window", systemImage: "macwindow.badge.plus") {
             openWindow(value: model.descriptor(scopePath: item.relativePath))
         }
         Divider()
-        Button("New Note") { onCreateNote() }
-        Button("New Folder") { onCreateFolder() }
+        MenuButton("New Note", symbol: "square.and.pencil") { onCreateNote() }
+        MenuButton("New Folder", symbol: "folder.badge.plus") { onCreateFolder() }
         Divider()
-        Button("Rename") { onRename() }
-        Button("Move to…") { model.promptToMove(item) }
-        Button("Copy Path") { model.copyToPasteboard(item.relativePath, describedAs: "path") }
-        Button("Copy Absolute Path") {
+        MenuButton("Rename", symbol: "pencil") { onRename() }
+        MenuButton("Move to…", symbol: "folder") { model.promptToMove(item) }
+        MenuButton("Duplicate", symbol: "plus.square.on.square") { model.duplicate(item) }
+        Divider()
+        MenuButton("Copy", symbol: "doc.on.doc") { model.copy(item) }
+            .keyboardShortcut("c", modifiers: .command)
+        MenuButton("Paste", symbol: "doc.on.clipboard") { model.paste(into: item.url) }
+            .keyboardShortcut("v", modifiers: .command)
+            .disabled(!model.canPaste)
+        MenuButton("Copy Path", symbol: "arrow.right.doc.on.clipboard") {
+            model.copyToPasteboard(item.relativePath, describedAs: "path")
+        }
+        MenuButton("Copy Absolute Path", symbol: "terminal") {
             model.copyToPasteboard(item.url.path, describedAs: "absolute path")
         }
-        Button("Reveal in Finder") { model.revealInFinder(item.url) }
+        MenuButton("Reveal in Finder", symbol: "magnifyingglass") {
+            model.revealInFinder(item.url)
+        }
         Divider()
-        Button("Move to Trash", role: .destructive) { model.delete(item) }
+        MenuButton("Move to Trash", symbol: "trash", role: .destructive) { model.delete(item) }
     }
 }
 

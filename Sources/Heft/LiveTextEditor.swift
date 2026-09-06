@@ -55,6 +55,19 @@ struct LiveTextEditor: NSViewRepresentable {
     var focusRequest: Int = 0
     let context: RenderContext
     let onAttachment: (NSPasteboard) -> String?
+    /// ⌘C with nothing selected. True when the host copied something.
+    var onCopyFile: (() -> Bool)? = nil
+    /// Whether there is a file for ⌘C to copy, asked while the Edit menu
+    /// validates Copy. Nothing is copied by asking.
+    var canCopyFile: (() -> Bool)? = nil
+    /// ⌘C and ⌘V when the sidebar's last click was a folder: the host
+    /// copies or pastes the file, and returns true. False leaves the key
+    /// to the text.
+    var onSidebarCopy: (() -> Bool)? = nil
+    var onSidebarPaste: (() -> Bool)? = nil
+    /// A click or a keystroke in the text, after which the sidebar's last
+    /// click no longer decides what ⌘C and ⌘V mean.
+    var onEditorClaimed: (() -> Void)? = nil
     let onFollowLink: (URL) -> Void
     let onVimSearch: (VimHostAction) -> Void
 
@@ -83,6 +96,11 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.linkTextAttributes = [:]
         textView.delegate = nsContext.coordinator
         textView.onAttachment = onAttachment
+        textView.onCopyFile = onCopyFile
+        textView.canCopyFile = canCopyFile
+        textView.onSidebarCopy = onSidebarCopy
+        textView.onSidebarPaste = onSidebarPaste
+        textView.onEditorClaimed = onEditorClaimed
         textView.onVimSearch = onVimSearch
         textView.completionIndex = context.index
         // Also set here, not only in `updateNSView`: a note typed into before
@@ -131,6 +149,11 @@ struct LiveTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? HeftTextKit2View else { return }
         nsContext.coordinator.parent = self
         textView.onAttachment = onAttachment
+        textView.onCopyFile = onCopyFile
+        textView.canCopyFile = canCopyFile
+        textView.onSidebarCopy = onSidebarCopy
+        textView.onSidebarPaste = onSidebarPaste
+        textView.onEditorClaimed = onEditorClaimed
         textView.onVimSearch = onVimSearch
         textView.completionIndex = context.index
         textView.vimCaretColor = context.accentColor
@@ -878,6 +901,11 @@ private struct VimRepeatRecipe {
 /// Text view with vault-aware paste and list continuation.
 final class HeftTextKit2View: NSTextView {
     var onAttachment: ((NSPasteboard) -> String?)?
+    var onCopyFile: (() -> Bool)?
+    var canCopyFile: (() -> Bool)?
+    var onSidebarCopy: (() -> Bool)?
+    var onSidebarPaste: (() -> Bool)?
+    var onEditorClaimed: (() -> Void)?
     var onVimSearch: ((VimHostAction) -> Void)?
     var onFirstResponderChange: ((Bool) -> Void)?
     var completionIndex = VaultIndex.empty
@@ -982,6 +1010,7 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.intersection([.command, .control]).isEmpty { onEditorClaimed?() }
         guard vimEnabled,
               event.modifierFlags.intersection([.command, .option]).isEmpty,
               let key = vimKey(for: event)
@@ -1703,8 +1732,32 @@ final class HeftTextKit2View: NSTextView {
         return tableMenu(at: point) ?? super.menu(for: event)
     }
 
+    /// ⌘C, before the menu bar can answer for it.
+    ///
+    /// The Edit menu's Copy is disabled while nothing is selected. A disabled
+    /// item does not perform its key equivalent, so the key falls through to
+    /// the view hierarchy and then to nothing at all, which is the beep: the
+    /// menu had already decided there was nothing to copy. Taking the key
+    /// here is what makes copying the file work whatever the menu thinks.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command, event.charactersIgnoringModifiers == "c",
+           copiesFileInsteadOfText {
+            if onSidebarCopy?() == true { return true }
+            if onCopyFile?() == true { return true }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if let action = item.action, let table = validatesTableCommand(action) { return table }
+        // A text view disables Copy while nothing is selected, and a disabled
+        // Edit menu item swallows its own key equivalent: ⌘C beeped and never
+        // reached `copy(_:)` at all. With no selection the file is what ⌘C
+        // copies, so Copy stays enabled while there is a file to copy.
+        if item.action == #selector(copy(_:)), copiesFileInsteadOfText, canCopyFile?() == true {
+            return true
+        }
         return super.validateMenuItem(item)
     }
 
@@ -1982,6 +2035,7 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onEditorClaimed?()
         vimPreferredX = nil
         dismissLinkCompletion()
         if event.clickCount == 1, toggleTask(at: convert(event.locationInWindow, from: nil)) {
@@ -2172,10 +2226,30 @@ final class HeftTextKit2View: NSTextView {
     /// picture in worked the whole time, because a drag is offered to
     /// `performDragOperation` without this question being asked.
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
-        super.readablePasteboardTypes + [.png, .tiff]
+        super.readablePasteboardTypes + [.png, .tiff, .fileURL]
+    }
+
+    /// With text selected, copy copies it. With none there is nothing to
+    /// copy as text, and the note on screen is the file the sidebar has lit,
+    /// so the file goes on the pasteboard instead, the way the row's own
+    /// Copy does. The sidebar cannot take this itself: clicking a note there
+    /// leaves the keyboard with the editor on purpose, so typing can start.
+    var copiesFileInsteadOfText: Bool { selectedRange().length == 0 && onCopyFile != nil }
+
+    /// Selected text is always what ⌘C copies. With none, there is nothing to
+    /// copy as text and the sidebar's last click decides: the row clicked
+    /// there, else the note that is open. This view holds the keyboard the
+    /// whole time, so it is the one place both keys arrive.
+    override func copy(_ sender: Any?) {
+        if copiesFileInsteadOfText {
+            if onSidebarCopy?() == true { return }
+            if onCopyFile?() == true { return }
+        }
+        super.copy(sender)
     }
 
     override func paste(_ sender: Any?) {
+        if onSidebarPaste?() == true { return }
         if let markdown = onAttachment?(NSPasteboard.general) {
             insertText(markdown, replacementRange: selectedRange())
             return

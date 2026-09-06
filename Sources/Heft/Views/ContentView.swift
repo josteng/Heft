@@ -383,6 +383,11 @@ struct EditorPane: View {
                 focusRequest: model.editorFocusRequest,
                 context: context,
                 onAttachment: handleAttachment,
+                onCopyFile: { model.copyCurrentNote() },
+                canCopyFile: { model.canCopyFile },
+                onSidebarCopy: { model.copyFromKeyboard() },
+                onSidebarPaste: { model.pasteFromKeyboard() },
+                onEditorClaimed: { model.sidebarKeyboardTarget = nil },
                 onFollowLink: { url in
                     if !model.handle(url: url) { NSWorkspace.shared.open(url) }
                 },
@@ -587,20 +592,21 @@ struct EditorPane: View {
             settings: model.settings
         )
         do {
-            if let payload = Attachments.imagePayload(from: pasteboard) {
-                return try Attachments.save(
-                    imageData: payload.data, preferredName: payload.name,
-                    vaultRoot: vaultRoot, noteURL: model.current?.url,
-                    settings: model.settings, destination: destination
-                )
-            }
-            if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
-               let file = urls.first, file.isFileURL {
+            switch Attachments.pasted(from: pasteboard) {
+            case .file(let file):
                 return try Attachments.importFile(
                     at: file, vaultRoot: vaultRoot,
                     noteURL: model.current?.url, settings: model.settings,
                     destination: destination
                 )
+            case .image(let data, let name):
+                return try Attachments.save(
+                    imageData: data, preferredName: name,
+                    vaultRoot: vaultRoot, noteURL: model.current?.url,
+                    settings: model.settings, destination: destination
+                )
+            case nil:
+                break
             }
         } catch {
             model.status = "Attachment failed: \(error.localizedDescription)"

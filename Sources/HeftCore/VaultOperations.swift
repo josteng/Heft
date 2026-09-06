@@ -121,6 +121,9 @@ public enum VaultOperations {
         /// A folder dropped into itself or into its own descendant. The move
         /// would delete it.
         case intoItself(name: String)
+        /// A folder pasted into itself or into its own descendant. The copy
+        /// would never finish.
+        case copyIntoItself(name: String)
         /// Already in that folder, so there is nothing to do.
         case alreadyThere(name: String)
         /// The vault is still being scanned, so the item's contents are not
@@ -139,6 +142,8 @@ public enum VaultOperations {
                 "\(name) is outside the vault"
             case .intoItself(let name):
                 "Cannot move \(name) inside itself"
+            case .copyIntoItself(let name):
+                "Cannot copy \(name) inside itself"
             case .alreadyThere(let name):
                 "\(name) is already there"
             case .stillLoading(let name):
@@ -203,14 +208,39 @@ public enum VaultOperations {
         return .success(Move(from: path, to: destination))
     }
 
+    /// Where a copy of `name` lands in `folder`, both vault-relative.
+    ///
+    /// A copy never refuses over a taken name: that is what a duplicate is,
+    /// a copy into the folder the original is already in. The name is kept
+    /// when it is free and becomes `A copy`, then `A copy 1`, when it is not,
+    /// with the extension kept at the end. What a copy cannot do is land
+    /// inside the folder being copied, which would never finish.
+    public static func planCopy(
+        _ path: String, into folder: String, isFolder: Bool, exists: (String) -> Bool
+    ) -> Result<Move, Refusal> {
+        let name = (path as NSString).lastPathComponent
+        guard !isFolder || !(folder == path || folder.hasPrefix(path + "/")) else {
+            return .failure(.copyIntoItself(name: name))
+        }
+        let prefix = folder.isEmpty ? "" : folder + "/"
+        guard exists(prefix + name) else { return .success(Move(from: path, to: prefix + name)) }
+        let ext = isFolder ? "" : (name as NSString).pathExtension
+        let stem = isFolder ? name : (name as NSString).deletingPathExtension
+        let copy = uniqueName(base: stem + " copy", extension: ext) { exists(prefix + $0) }
+        return .success(Move(from: path, to: prefix + copy))
+    }
+
     /// Whether a URL a drop carried is somewhere this vault may move it from.
     ///
     /// A drop can carry anything Finder had on the pasteboard. Pulling a file
     /// in from elsewhere would take it out of wherever the reader keeps it,
     /// which is not what dragging something onto a note list should mean.
     public static func isInside(_ url: URL, vaultRoot: URL) -> Bool {
-        let root = vaultRoot.standardizedFileURL.path
-        let candidate = url.standardizedFileURL.path
+        // Symlinks resolved on both sides, as `relativePath` does it: the
+        // same file is spelled `/tmp/…` and `/private/tmp/…`, and a vault
+        // reached through a link would otherwise disown its own contents.
+        let root = vaultRoot.standardizedFileURL.resolvingSymlinksInPath().path
+        let candidate = url.standardizedFileURL.resolvingSymlinksInPath().path
         return candidate == root || candidate.hasPrefix(root + "/")
     }
 

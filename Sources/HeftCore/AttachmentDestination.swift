@@ -72,6 +72,23 @@ public struct AttachmentDestination: Sendable {
         Self.link(to: target, from: noteURL, vaultRoot: vaultRoot, settings: settings)
     }
 
+    /// What to write to point at another note, as opposed to embed a file:
+    /// `[[Name]]` without the extension, or a Markdown link to the note's
+    /// path. A note pasted or dragged in from the sidebar wants a link to
+    /// follow, not its contents drawn inline, which is what `link` makes.
+    public static func noteLink(
+        to target: URL, from noteURL: URL?, vaultRoot: URL, settings: ObsidianSettings
+    ) -> String {
+        let name = target.deletingPathExtension().lastPathComponent
+        guard settings.useWikilinks else {
+            let base = noteURL?.deletingLastPathComponent() ?? vaultRoot
+            let path = relativePath(from: base, to: target)
+            let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+            return "[\(name)](\(encoded))"
+        }
+        return "[[\(name)]]"
+    }
+
     public static func relativePath(from base: URL, to target: URL) -> String {
         let baseParts = base.standardizedFileURL.pathComponents
         let targetParts = target.standardizedFileURL.pathComponents

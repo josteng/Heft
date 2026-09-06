@@ -27,6 +27,10 @@ final class ScriptedHost: VaultHost {
     private(set) var opened: [URL] = []
     private(set) var revealed: [URL] = []
     private(set) var copied: [String] = []
+    /// The pasteboard, as far as the model can tell: what `copyFiles` put
+    /// there is what `filesOnPasteboard` hands back, and a test can preload
+    /// it to stand in for a copy made in the Finder.
+    var pasteboardFiles: [URL] = []
 
     func name(title: String, message: String, initial: String, confirm: String) -> String? {
         asked.append("name: \(title)")
@@ -56,6 +60,14 @@ final class ScriptedHost: VaultHost {
     func openExternally(_ url: URL) { opened.append(url) }
     func revealInFinder(_ url: URL) { revealed.append(url) }
     func copyToPasteboard(_ string: String) { copied.append(string) }
+    func copyFiles(_ urls: [URL]) { pasteboardFiles = urls }
+    func filesOnPasteboard() -> [URL] { pasteboardFiles }
+}
+
+/// The temporary folder is reached through a symlink, so a URL the tree
+/// scanned and one a test built by hand differ in spelling, not in file.
+private extension URL {
+    var resolved: String { resolvingSymlinksInPath().path }
 }
 
 @Suite("Vault operations through a window")
@@ -610,7 +622,10 @@ struct VaultHostTests {
 
     /// A drop can carry anything Finder had on the pasteboard. Pulling a file
     /// in from elsewhere would take it out of wherever the reader keeps it.
-    @Test("A drop from outside the vault is refused, not copied in")
+    /// A drop moves what is in the vault. What comes from outside is copied
+    /// in and left where it was: taking it out of the reader's Downloads is
+    /// not what dropping it on a note list should mean.
+    @Test("A drop from outside the vault is copied in, and stays where it was")
     func moveFromOutside() async throws {
         let root = try vault()
         let outside = try vault(["Stray.md": "elsewhere\n"])
@@ -622,12 +637,31 @@ struct VaultHostTests {
         let model = try await ready(model(root, host))
 
         model.move([outside.appendingPathComponent("Stray.md")], into: root)
-        #expect(model.status == "Stray.md is outside the vault")
-        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Stray.md").path))
-        // And it is still where its owner left it.
+        #expect(model.status == "Copied 1 item in to the vault root")
+        #expect(try String(contentsOf: root.appendingPathComponent("Stray.md"), encoding: .utf8) == "elsewhere\n")
         #expect(FileManager.default.fileExists(
             atPath: outside.appendingPathComponent("Stray.md").path
         ))
+    }
+
+    @Test("A drop mixing a vault note and an outside file moves one and copies the other")
+    func moveAndCopyInOneDrop() async throws {
+        let root = try vault(["Note.md": "n\n", "Archive/.keep": ""])
+        let outside = try vault(["Stray.md": "elsewhere\n"])
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        model.move(
+            [root.appendingPathComponent("Note.md"), outside.appendingPathComponent("Stray.md")],
+            into: root.appendingPathComponent("Archive")
+        )
+        #expect(model.status == "Moved 1 item, Copied 1 item in to Archive")
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive/Note.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive/Stray.md").path))
     }
 
     @Test("A folder dropped inside itself is refused rather than deleted")
@@ -698,6 +732,299 @@ struct VaultHostTests {
         #expect(FileManager.default.fileExists(
             atPath: root.appendingPathComponent("Q3-Q4 plan.md").path
         ))
+    }
+
+    // MARK: - Copying and pasting files
+
+    /// The pasteboard holds a reference, and the copy is made at paste
+    /// time, so what was typed a moment ago has to be on disk by then.
+    @Test("Copying the open note saves it first and puts the file on the pasteboard")
+    func copyPutsTheFileOnThePasteboard() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host, open: "Note.md"))
+        model.text = "# Note\ntyped\n"
+        try #require(model.isDirty)
+
+        model.copy(try item(model, "Note.md"))
+        #expect(host.pasteboardFiles.map(\.resolved) == [root.appendingPathComponent("Note.md").resolved])
+        #expect(!model.isDirty)
+        #expect(try String(contentsOf: root.appendingPathComponent("Note.md"), encoding: .utf8)
+            == "# Note\ntyped\n")
+        #expect(model.status == "Copied Note")
+    }
+
+    @Test("⌘C with nothing selected copies the note that is open")
+    func copyCurrentNote() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host, open: "Index.md"))
+
+        #expect(model.copyCurrentNote())
+        #expect(host.pasteboardFiles.map(\.resolved) == [root.appendingPathComponent("Index.md").resolved])
+
+        let empty = try await ready(self.model(root, ScriptedHost()))
+        #expect(!empty.copyCurrentNote())
+    }
+
+    @Test("A pasted note lands in the folder under its own name, and is opened")
+    func pasteIntoFolder() async throws {
+        let root = try vault(["Note.md": "# Note\n", "Archive/.keep": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.pasteboardFiles = [root.appendingPathComponent("Note.md")]
+        let model = try await ready(model(root, host))
+
+        #expect(model.canPaste)
+        model.paste(into: root.appendingPathComponent("Archive"))
+        #expect(try String(contentsOf: root.appendingPathComponent("Archive/Note.md"), encoding: .utf8)
+            == "# Note\n")
+        // The original is a copy's source, not a move's.
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+        #expect(model.current?.relativePath == "Archive/Note.md")
+        #expect(model.status == "Pasted Note.md into Archive")
+    }
+
+    @Test("Pasting beside the original makes a copy, and a second one counts up")
+    func pasteBesideItself() async throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.pasteboardFiles = [root.appendingPathComponent("Note.md")]
+        let model = try await ready(model(root, host))
+
+        model.paste(into: root)
+        model.paste(into: root)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note copy.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note copy 1.md").path))
+        #expect(model.status == "Pasted Note copy 1.md into the vault root")
+    }
+
+    /// The opposite of the drop rule, on purpose: a drop moves, and moving
+    /// a file out of the reader's Downloads is not what a drop should mean.
+    /// A paste copies, so the file stays where it was as well.
+    @Test("A file copied in the Finder pastes into the vault, and stays where it was")
+    func pasteFromOutside() async throws {
+        let root = try vault()
+        let outside = try vault(["Stray.md": "stray\n"])
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let host = ScriptedHost()
+        host.pasteboardFiles = [outside.appendingPathComponent("Stray.md")]
+        let model = try await ready(model(root, host))
+
+        model.paste(into: root)
+        #expect(try String(contentsOf: root.appendingPathComponent("Stray.md"), encoding: .utf8) == "stray\n")
+        #expect(FileManager.default.fileExists(atPath: outside.appendingPathComponent("Stray.md").path))
+    }
+
+    @Test("Several files paste in one go, and none of them is opened")
+    func pasteSeveral() async throws {
+        let root = try vault(["A.md": "a\n", "B.md": "b\n", "Archive/.keep": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.pasteboardFiles = [root.appendingPathComponent("A.md"), root.appendingPathComponent("B.md")]
+        let model = try await ready(model(root, host))
+
+        model.paste(into: root.appendingPathComponent("Archive"))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive/A.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive/B.md").path))
+        #expect(model.current == nil)
+        #expect(model.status == "Pasted 2 items into Archive")
+    }
+
+    @Test("With nothing on the pasteboard, paste says so and changes nothing")
+    func pasteNothing() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host))
+
+        #expect(!model.canPaste)
+        model.paste(into: root)
+        #expect(model.status == "Nothing on the pasteboard to paste")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).sorted() == ["Index.md", "Note.md"])
+    }
+
+    @Test("Duplicating a note puts a copy beside it and opens the copy")
+    func duplicateNote() async throws {
+        let root = try vault(["Ideas/Plan.md": "p\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        model.duplicate(try item(model, "Ideas/Plan.md"))
+        #expect(try String(contentsOf: root.appendingPathComponent("Ideas/Plan copy.md"), encoding: .utf8) == "p\n")
+        #expect(try String(contentsOf: root.appendingPathComponent("Ideas/Plan.md"), encoding: .utf8) == "p\n")
+        #expect(model.status == "Duplicated to Plan copy.md")
+        // The copy is what the reader is left in front of.
+        #expect(model.current?.relativePath == "Ideas/Plan copy.md")
+    }
+
+    @Test("A folder duplicates whole, beside itself")
+    func duplicateFolder() async throws {
+        let root = try vault(["Projects/A.md": "a\n", "Projects/Sub/B.md": "b\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host))
+
+        model.duplicate(try item(model, "Projects"))
+        #expect(try String(contentsOf: root.appendingPathComponent("Projects copy/Sub/B.md"), encoding: .utf8) == "b\n")
+        #expect(model.status == "Duplicated to Projects copy")
+        // A folder is not a note: nothing was opened.
+        #expect(model.current == nil)
+    }
+
+    /// ⌘C on a folder, then ⌘V with that folder still selected. The Finder
+    /// answers with a copy beside it, and so does this.
+    @Test("A folder pasted onto itself lands beside it as a copy")
+    func pasteFolderOntoItself() async throws {
+        let root = try vault(["Yearly/2026.md": "y\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.pasteboardFiles = [root.appendingPathComponent("Yearly")]
+        let model = try await ready(model(root, host))
+
+        model.paste(into: root.appendingPathComponent("Yearly"))
+        #expect(try String(contentsOf: root.appendingPathComponent("Yearly copy/2026.md"), encoding: .utf8) == "y\n")
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Yearly/Yearly").path))
+        #expect(model.status == "Pasted Yearly copy into the vault root")
+    }
+
+    @Test("The keys go to the row the sidebar clicked last, and to the text otherwise")
+    func keyboardFollowsTheSidebarsLastClick() async throws {
+        let root = try vault(["Note.md": "n\n", "Archive/.keep": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host, open: "Note.md"))
+        let archive = root.appendingPathComponent("Archive")
+
+        // Nothing clicked in the sidebar: both keys are the text's own.
+        #expect(!model.copyFromKeyboard())
+        #expect(!model.pasteFromKeyboard())
+
+        model.sidebarKeyboardTarget = archive
+        #expect(model.copyFromKeyboard())
+        #expect(host.pasteboardFiles == [archive])
+        #expect(model.pasteFromKeyboard())
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive copy").path))
+
+        // Blank space is the root: a place to paste into, not a thing to copy.
+        model.sidebarKeyboardTarget = root
+        host.pasteboardFiles = [root.appendingPathComponent("Note.md")]
+        #expect(!model.copyFromKeyboard())
+        #expect(model.pasteFromKeyboard())
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note copy.md").path))
+
+        // A folder that has gone since it was clicked is nobody's target.
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Gone")
+        #expect(!model.pasteFromKeyboard())
+    }
+
+    /// What ⌘C then ⌘V means with a file clicked in the tree: the copy lands
+    /// beside it, which is the Finder's duplicate. It used to go to the text
+    /// view instead, which wrote a link into whatever note was open.
+    @Test("Copy and paste on a file row is the duplicate it is in the Finder")
+    func keyboardDuplicatesAFile() async throws {
+        let root = try vault(["Ideas/Plan.md": "p\n", "Index.md": "\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host, open: "Index.md"))
+
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Ideas/Plan.md")
+        #expect(model.copyFromKeyboard())
+        #expect(model.pasteFromKeyboard())
+        // Beside the original, not inside it and not in the vault root.
+        #expect(try String(contentsOf: root.appendingPathComponent("Ideas/Plan copy.md"), encoding: .utf8) == "p\n")
+        // And nothing was written into the note that happened to be open.
+        #expect(try String(contentsOf: root.appendingPathComponent("Index.md"), encoding: .utf8) == "\n")
+
+        // A different file pasted with that same row clicked goes beside it,
+        // into its folder. The row is not a folder and cannot be pasted into.
+        host.pasteboardFiles = [root.appendingPathComponent("Index.md")]
+        #expect(model.pasteFromKeyboard())
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Ideas/Index.md").path))
+    }
+
+    /// Text on the pasteboard belongs to the text view even when the tree was
+    /// the last thing clicked, or copying a paragraph and pressing ⌘V would
+    /// answer that there is nothing to paste.
+    @Test("With no files on the pasteboard the keys fall through to the text")
+    func textPasteIsNotTakenFromTheEditor() async throws {
+        let root = try vault(["Archive/.keep": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host))
+
+        model.sidebarKeyboardTarget = root.appendingPathComponent("Archive")
+        model.status = ""
+        #expect(!model.pasteFromKeyboard())
+        // Not even a complaint about an empty pasteboard: the key was never
+        // taken, so the text view has it.
+        #expect(model.status.isEmpty)
+    }
+
+    /// A vault of any size orders the tree by name, so a PDF dropped in lands
+    /// somewhere down a folder that may not even be open.
+    @Test("A file copied in is scrolled to and lit, even though it is no note")
+    func copiedFileIsRevealed() async throws {
+        let root = try vault(["Papers/.keep": "", "Index.md": "\n"])
+        let outside = try vault(["Report.pdf": "%PDF-1.4\n"])
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let host = ScriptedHost()
+        host.pasteboardFiles = [outside.appendingPathComponent("Report.pdf")]
+        let model = try await ready(model(root, host, open: "Index.md"))
+
+        model.paste(into: root.appendingPathComponent("Papers"))
+        #expect(model.revealTarget == "Papers/Report.pdf")
+        #expect(model.highlightedPath == "Papers/Report.pdf")
+        // The folder above it is opened, or there is nothing to scroll to.
+        #expect(model.expandedFolders.contains("Papers"))
+        // A PDF is not opened in the editor; the note stays put.
+        #expect(model.current?.relativePath == "Index.md")
+
+        // Opening a note takes the light back, so only one row is lit.
+        model.open(item: try item(model, "Index.md"))
+        #expect(model.highlightedPath == nil)
+    }
+
+    /// A light that stayed would be read as the selection, and a PDF is never
+    /// selected the way a note is. It marks what arrived, then goes out.
+    @Test("The light on a revealed row goes out by itself")
+    func revealLightGoesOut() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost()))
+        model.highlightDuration = .milliseconds(60)
+
+        model.reveal("Note.md")
+        #expect(model.highlightedPath == "Note.md")
+        // Waited for rather than slept through: the whole suite runs in
+        // parallel, and a fixed wait fails on a busy machine instead of on
+        // a light that stayed on.
+        for _ in 0..<600 where model.highlightedPath != nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.highlightedPath == nil)
+    }
+
+    @Test("A folder pasted inside itself is refused rather than copied without end")
+    func pasteFolderIntoItself() async throws {
+        let root = try vault(["Projects/A.md": "a\n", "Projects/Sub/.keep": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.pasteboardFiles = [root.appendingPathComponent("Projects")]
+        let model = try await ready(model(root, host))
+
+        model.paste(into: root.appendingPathComponent("Projects/Sub"))
+        #expect(model.status == "Cannot copy Projects inside itself")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Projects/Sub").path) == [".keep"])
     }
 
     // MARK: - Handing files to the system

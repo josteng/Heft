@@ -174,6 +174,43 @@ rather than a fixed delay, since a note is on disk well before it is in the
 tree. The note is not opened until it is named, or there are two insertion
 points; naming it opens it at the path read back from the rename plan.
 
+Files copy and paste through the general pasteboard as files, the way the
+Finder does it, so a note copied here pastes into the Finder and a file
+copied there pastes into a folder here. A file from outside the vault is
+copied in, by a paste and by a drop alike, and stays where it was: a drop
+moves only what is already in the vault, because moving a file out of the
+reader's Downloads is not what dropping it on a note list should mean.
+Pasted into the text, a file already in the vault becomes a link, `[[Name]]`
+for a note, an embed for a picture; a note from outside is copied in beside
+the open note and linked the same way.
+
+A file that lands in the vault is scrolled to and lit for a moment, since the
+tree orders by name and a PDF dropped in appears halfway down a folder. The
+light goes out after a couple of seconds: one that stayed would be read as the
+selection, which a PDF never has. It sits beside the open note's own row
+rather than replacing it, because the note being read is still the selection
+while the marker shows. The list only moves when that row is off screen, since
+scrolling the tree under a reader who can see the thing already is what reads
+as losing their place.
+
+A file copied into the vault keeps its own name while that is free, and
+takes `Name copy`, then `Name copy 1`, when it is not, whether it arrived
+through the sidebar or through a paste into the text. The two halves used to
+answer the same collision differently, one counting `Name 1`.
+
+⌘C and ⌘V arrive at the text view, always: clicking a note in the tree
+leaves the keyboard with the editor on purpose, so typing can start. Giving
+the tree SwiftUI focus as well ran both handlers, a file into the folder
+and a link into the note. So the sidebar only records what was clicked last
+(`sidebarKeyboardTarget`), and the text view asks that first: after a folder
+or blank space, ⌘C copies the folder and ⌘V pastes into it, with a folder
+pasted onto itself landing beside it as the Finder does; after a note, a
+click in the text or a keystroke, the keys are the text's own, except that
+⌘C with nothing selected copies the open note as a file. That last one needs
+the Edit menu's Copy to stay enabled: a text view disables it while nothing
+is selected, and a disabled item swallows its own key equivalent, so ⌘C beeped
+instead of ever reaching the view.
+
 Naming in place writes the file first, so backing out used to leave an
 `Untitled.md` behind. `discardUnnamedNote` takes it back, and every guard on
 it is about being certain it is that file: still called `Untitled`, still

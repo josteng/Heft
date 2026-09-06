@@ -223,6 +223,15 @@ final class AppModel: ObservableObject {
     /// of its three lists is showing. Everything a *model* can do about it —
     /// opening the folders above the note, showing the column — happens here.
     @Published var revealTarget: String?
+    /// The row the sidebar lights while it is not the open note: a PDF just
+    /// dropped in, a folder just pasted. It outranks the open note's own row
+    /// while it lasts, so the tree never shows two lit rows, and it goes out
+    /// by itself: a light that stayed would be read as the selection, and a
+    /// PDF is never selected in the sense a note is.
+    @Published var highlightedPath: String?
+    private var highlightTask: Task<Void, Never>?
+    /// How long that light stays on. A property so a test does not wait.
+    var highlightDuration: Duration = .seconds(2.5)
     /// Driven explicitly rather than left to the system. Without this, a
     /// collapsed sidebar is restored on the next launch and the app reopens
     /// with no visible file tree. Lives here rather than as view state so the
@@ -744,6 +753,9 @@ final class AppModel: ObservableObject {
     /// halves. A setting to turn the old behaviour off would have been a
     /// setting for a half-finished one.
     private func open(_ ref: NoteRef, recordingNavigation: Bool) {
+        // Before the hand-off: opening a PDF externally still means the
+        // reader chose that row, so the row a paste lit stops being lit.
+        highlightedPath = nil
         guard ref.isMarkdown else {
             host.openExternally(ref.url)
             return
@@ -940,21 +952,40 @@ final class AppModel: ObservableObject {
             status = "No note to show"
             return
         }
+        reveal(current.relativePath)
+    }
+
+    /// Opens every folder above `relativePath`, brings the sidebar back if it
+    /// is hidden, and asks it to scroll there.
+    ///
+    /// Every ancestor, so a note four deep is not revealed behind three closed
+    /// folders. The path itself is not a folder and is what is scrolled to.
+    func reveal(_ relativePath: String) {
         if columnVisibility == .detailOnly { columnVisibility = .automatic }
-        // Every ancestor, so a note four deep is not revealed behind three
-        // closed folders. The note's own path is not a folder and is what the
-        // sidebar scrolls to.
-        let parts = current.relativePath.split(separator: "/").dropLast()
+        light(relativePath)
+        let parts = relativePath.split(separator: "/").dropLast()
         var path = ""
         for part in parts {
             path = path.isEmpty ? String(part) : path + "/" + part
             expandedFolders.insert(path)
         }
-        revealTarget = current.relativePath
+        revealTarget = relativePath
     }
 
     func finishReveal() {
         revealTarget = nil
+    }
+
+    /// Lights a row for a moment, and takes the light back off it after.
+    private func light(_ relativePath: String) {
+        highlightedPath = relativePath
+        highlightTask?.cancel()
+        let duration = highlightDuration
+        highlightTask = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled, self?.highlightedPath == relativePath else { return }
+            self?.highlightedPath = nil
+        }
     }
 
     // MARK: - Creating notes
@@ -1340,20 +1371,170 @@ final class AppModel: ObservableObject {
         return summary
     }
 
-    func duplicate(_ item: VaultItem) {
-        guard let vaultRoot else { return }
-        let directory = item.url.deletingLastPathComponent()
-        let ext = item.url.pathExtension
-        let base = (item.url.lastPathComponent as NSString).deletingPathExtension
-        let target = uniqueURL(in: directory, base: base + " copy", extension: ext)
-        do {
-            try FileManager.default.copyItem(at: item.url, to: target)
-            reload()
-            if item.isMarkdown, let ref = NoteRef(url: target, vaultRoot: vaultRoot) { open(ref) }
-            status = "Duplicated to \(target.lastPathComponent)"
-        } catch {
-            status = "Duplicate failed: \(error.localizedDescription)"
+    // MARK: - Copying
+
+    /// Puts the file itself on the pasteboard, the way the Finder does, so
+    /// it pastes into a folder here, into the Finder, or into a note as a
+    /// link. The note being typed in is saved first: the pasteboard holds a
+    /// reference to the file on disk, and the copy is made at paste time.
+    func copy(_ item: VaultItem) {
+        copyFile(at: item.url, named: item.name)
+    }
+
+    /// What the sidebar's last click chose: the row ⌘C copies, and the folder
+    /// ⌘V pastes into, which for a file is the folder holding it, so ⌘C then
+    /// ⌘V on a note is the duplicate it is in the Finder. Nil once the text
+    /// itself is clicked, or typing starts.
+    ///
+    /// The text view keeps the keyboard through all of that on purpose, so
+    /// that clicking a note and typing works, and it is the text view that
+    /// gets ⌘C and ⌘V. Giving the tree SwiftUI focus as well ran both: a
+    /// file pasted into the folder *and* a link into the note. So there is
+    /// one owner and the sidebar only says what was clicked.
+    var sidebarKeyboardTarget: URL?
+
+    /// Whether ⌘C has a file to copy at all: a row clicked in the tree, or a
+    /// note open. Asked when the Edit menu validates Copy, and it has to
+    /// answer without copying anything.
+    ///
+    /// Load bearing. `NSTextView` disables Copy while nothing is selected, a
+    /// disabled menu item swallows its own key equivalent, and ⌘C beeped
+    /// without ever reaching the text view.
+    var canCopyFile: Bool {
+        if sidebarKeyboardTarget != nil, copyTargetIsNotTheVaultRoot { return true }
+        return current != nil
+    }
+
+    private var copyTargetIsNotTheVaultRoot: Bool {
+        guard let target = sidebarKeyboardTarget, let vaultRoot else { return false }
+        return target.resolvingSymlinksInPath().path != vaultRoot.resolvingSymlinksInPath().path
+    }
+
+    /// ⌘C on what the sidebar last clicked. False when that was blank space,
+    /// since the vault root is a place to paste into rather than a thing to
+    /// copy, and the text view goes on to its own rule.
+    @discardableResult
+    func copyFromKeyboard() -> Bool {
+        guard let target = sidebarKeyboardTarget, copyTargetIsNotTheVaultRoot else { return false }
+        copyFile(at: target, named: target.lastPathComponent)
+        return true
+    }
+
+    /// ⌘V into what the sidebar last clicked: a folder, or the folder holding
+    /// the file, the way the Finder pastes beside a selected file.
+    ///
+    /// Only files are taken. Text on the pasteboard is the text view's, or
+    /// copying a paragraph and pressing ⌘V after a click in the tree would
+    /// report that there was nothing to paste.
+    @discardableResult
+    func pasteFromKeyboard() -> Bool {
+        guard let target = sidebarKeyboardTarget, canPaste,
+              FileManager.default.fileExists(atPath: target.path)
+        else { return false }
+        let isFolder = (try? target.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        paste(into: isFolder ? target : target.deletingLastPathComponent())
+        return true
+    }
+
+    /// ⌘C in the editor with nothing selected. There is nothing to copy as
+    /// text, and the row lit in the sidebar is this note, so this is what
+    /// "copy" means there: the file.
+    @discardableResult
+    func copyCurrentNote() -> Bool {
+        guard let current else { return false }
+        copyFile(at: current.url, named: current.name)
+        return true
+    }
+
+    private func copyFile(at url: URL, named name: String) {
+        if isCurrent(url) { flushPendingSave() }
+        host.copyFiles([url])
+        status = "Copied \(name)"
+    }
+
+    /// By resolved path, not URL equality: a pasteboard URL comes back
+    /// through `/private/var` where the note was opened through `/var`.
+    private func isCurrent(_ url: URL) -> Bool {
+        guard let current else { return false }
+        return current.url.resolvingSymlinksInPath().path == url.resolvingSymlinksInPath().path
+    }
+
+    var canPaste: Bool { !host.filesOnPasteboard().isEmpty }
+
+    /// Copies the files on the pasteboard into `folder`. Files from outside
+    /// the vault come in as well: a paste is a copy, so nothing leaves where
+    /// the reader keeps it, which is what a drop from outside refuses over.
+    func paste(into folder: URL) {
+        let urls = host.filesOnPasteboard()
+        guard !urls.isEmpty else {
+            status = "Nothing on the pasteboard to paste"
+            return
         }
+        let made = copyFiles(urls, into: folder, verb: "Paste")
+        guard !made.isEmpty else { return }
+        // Where it went, which for a folder pasted onto itself is beside it.
+        status = made.count == 1
+            ? "Pasted \(made[0].lastPathComponent) into \(describe(made[0].deletingLastPathComponent()))"
+            : "Pasted \(made.count) items into \(describe(folder))"
+    }
+
+    /// A copy beside the original, `Name copy`, and folders duplicate whole.
+    func duplicate(_ item: VaultItem) {
+        let made = copyFiles([item.url], into: item.url.deletingLastPathComponent(), verb: "Duplicate")
+        guard let copy = made.first else { return }
+        status = "Duplicated to \(copy.lastPathComponent)"
+    }
+
+    /// Every copy goes through here. A single note copied is opened, so the
+    /// thing just made is the thing in front of the reader; several files,
+    /// or a folder, stay where they landed in the tree.
+    ///
+    /// A folder pasted onto itself, ⌘C then ⌘V with it still selected, is
+    /// what the Finder answers with a copy beside it, so that is what it
+    /// is here: the copy goes into the folder's parent, not into the folder.
+    private func copyFiles(_ urls: [URL], into folder: URL, verb: String) -> [URL] {
+        guard let vaultRoot else { return [] }
+        if urls.contains(where: isCurrent) { flushPendingSave() }
+        var made: [URL] = []
+        for url in urls {
+            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+            let ontoItself = url.resolvingSymlinksInPath().path == folder.resolvingSymlinksInPath().path
+            let destination = ontoItself ? folder.deletingLastPathComponent() : folder
+            // A file from outside keeps its absolute path in the plan, which
+            // no vault-relative folder can be inside of.
+            let source = VaultOperations.isInside(url, vaultRoot: vaultRoot)
+                ? relativePath(of: url) : url.path
+            let planned = VaultOperations.planCopy(
+                source, into: relativePath(of: destination), isFolder: isFolder
+            ) { candidate in
+                FileManager.default.fileExists(atPath: vaultRoot.appendingPathComponent(candidate).path)
+            }
+            switch planned {
+            case .success(let copy):
+                let target = vaultRoot.appendingPathComponent(copy.to)
+                do {
+                    try FileManager.default.copyItem(at: url, to: target)
+                    made.append(target)
+                } catch {
+                    status = "\(verb) failed: \(error.localizedDescription)"
+                }
+            case .failure(let refusal):
+                status = refusal.message
+            }
+        }
+        guard !made.isEmpty else { return made }
+        reload()
+        // One thing made is a thing to look at: the tree orders by name, so a
+        // PDF dropped in lands halfway down a folder that may not even be
+        // open. A note is opened as well.
+        if made.count == 1 {
+            reveal(relativePath(of: made[0]))
+            if let ref = NoteRef(url: made[0], vaultRoot: vaultRoot), ref.kind == .markdown {
+                open(ref)
+                focusEditor()
+            }
+        }
+        return made
     }
 
     /// Moves to the Trash rather than unlinking, so a mis-click stays
@@ -1416,6 +1597,7 @@ final class AppModel: ObservableObject {
         guard let vaultRoot else { return }
         var moved = 0
         var repointed = VaultRename.Summary()
+        var fromOutside: [URL] = []
 
         for url in urls {
             let name = url.lastPathComponent
@@ -1433,12 +1615,13 @@ final class AppModel: ObservableObject {
                 continue
             }
 
-            // A drop can carry anything Finder had on the pasteboard. Only
-            // things already in the vault are moved: pulling a file in from
-            // elsewhere would take it out of wherever the user keeps it, which
-            // is not what dragging something onto a note list should mean.
+            // A drop can carry anything the Finder had. Only things already
+            // in the vault are moved: pulling a file in from elsewhere would
+            // take it out of wherever the reader keeps it, which is not what
+            // dragging something onto a note list should mean. Those are
+            // copied in instead, below, and stay where they were.
             guard VaultOperations.isInside(url, vaultRoot: vaultRoot) else {
-                status = VaultOperations.Refusal.outsideVault(name: name).message
+                fromOutside.append(url)
                 continue
             }
 
@@ -1529,8 +1712,12 @@ final class AppModel: ObservableObject {
             moved += 1
         }
 
-        guard moved > 0 else { return }
-        status = "Moved \(moved) item\(VaultOperations.plural(moved)) to \(describe(folder))"
+        let copied = copyFiles(fromOutside, into: folder, verb: "Copy").count
+        guard moved > 0 || copied > 0 else { return }
+        var parts: [String] = []
+        if moved > 0 { parts.append("Moved \(moved) item\(VaultOperations.plural(moved))") }
+        if copied > 0 { parts.append("Copied \(copied) item\(VaultOperations.plural(copied)) in") }
+        status = parts.joined(separator: ", ") + " to \(describe(folder))"
         let summary = VaultOperations.repointSummary(repointed)
         if !summary.isEmpty { status += ", " + summary }
         expandedFolders.insert(relativePath(of: folder))

@@ -86,7 +86,14 @@ enum Attachments {
         destination: Destination
     ) throws -> String {
         // Files already inside the vault are linked in place, not duplicated.
-        if source.path.hasPrefix(vaultRoot.path) {
+        // A note among them is linked as a note, `[[Name]]`, since pasting
+        // a note copied from the sidebar means "point at it", not "embed it".
+        if VaultOperations.isInside(source, vaultRoot: vaultRoot) {
+            if source.pathExtension.lowercased() == "md" {
+                return AttachmentDestination.noteLink(
+                    to: source, from: noteURL, vaultRoot: vaultRoot, settings: settings
+                )
+            }
             return linkMarkdown(for: source, vaultRoot: vaultRoot, noteURL: noteURL, settings: settings)
         }
         let data = try Data(contentsOf: source)
@@ -98,16 +105,63 @@ enum Attachments {
             )
         }
 
-        let directory = try destination.directory(vaultRoot: vaultRoot, noteURL: noteURL)
-        var target = directory.appendingPathComponent(source.lastPathComponent)
-        var counter = 1
-        while FileManager.default.fileExists(atPath: target.path) {
-            let stem = (source.lastPathComponent as NSString).deletingPathExtension
-            target = directory.appendingPathComponent("\(stem) \(counter).\(source.pathExtension)")
-            counter += 1
+        // A note from outside is a note, not an attachment: it goes beside
+        // the note it was pasted into, under its own name, and is linked.
+        if source.pathExtension.lowercased() == "md" {
+            let target = freeURL(
+                in: noteURL?.deletingLastPathComponent() ?? vaultRoot,
+                named: source.lastPathComponent
+            )
+            try data.write(to: target, options: .atomic)
+            return AttachmentDestination.noteLink(
+                to: target, from: noteURL, vaultRoot: vaultRoot, settings: settings
+            )
         }
+
+        let directory = try destination.directory(vaultRoot: vaultRoot, noteURL: noteURL)
+        let target = freeURL(in: directory, named: source.lastPathComponent)
         try data.write(to: target, options: .atomic)
         return linkMarkdown(for: target, vaultRoot: vaultRoot, noteURL: noteURL, settings: settings)
+    }
+
+    /// Where a file copied into `directory` lands: its own name while that is
+    /// free, then `Name copy`, `Name copy 1`.
+    ///
+    /// One wording for every copy. This path used to count `Name 1` while the
+    /// sidebar's paste said `Name copy`, so the same collision was answered
+    /// two ways depending on which half of the app was carrying the file.
+    static func freeURL(in directory: URL, named filename: String) -> URL {
+        let taken: (String) -> Bool = {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
+        guard taken(filename) else { return directory.appendingPathComponent(filename) }
+        let name = VaultOperations.uniqueName(
+            base: (filename as NSString).deletingPathExtension + " copy",
+            extension: (filename as NSString).pathExtension,
+            isTaken: taken
+        )
+        return directory.appendingPathComponent(name)
+    }
+
+    /// What a paste or drop carries, in the order it has to be asked.
+    enum Pasted {
+        case file(URL)
+        case image(Data, name: String?)
+    }
+
+    /// A file first, then bare image data. The Finder puts a file's icon on
+    /// the pasteboard as an image beside the file itself, so asking for an
+    /// image first turned a copied note into a `Pasted image … .png`.
+    static func pasted(from pasteboard: NSPasteboard) -> Pasted? {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
+           let file = urls.first {
+            return .file(file)
+        }
+        if let payload = imagePayload(from: pasteboard) {
+            return .image(payload.data, name: payload.name)
+        }
+        return nil
     }
 
     /// Pulls image data out of a pasteboard, preferring a real file over a

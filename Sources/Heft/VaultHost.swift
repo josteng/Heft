@@ -52,6 +52,13 @@ protocol VaultHost {
 
     /// Puts a string on the general pasteboard.
     func copyToPasteboard(_ string: String)
+
+    /// Puts files on the general pasteboard, the way the Finder does, so
+    /// they paste into a folder here or into the Finder alike.
+    func copyFiles(_ urls: [URL])
+
+    /// The files on the general pasteboard, from here or from the Finder.
+    func filesOnPasteboard() -> [URL]
 }
 
 extension VaultHost {

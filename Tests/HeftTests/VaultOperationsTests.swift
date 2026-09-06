@@ -165,6 +165,49 @@ struct VaultOperationsTests {
         #expect(move.to == "A.md")
     }
 
+    // MARK: - Copying
+
+    @Test("A copy into a folder keeps its name when the name is free")
+    func copyKeepsName() throws {
+        let copy = try VaultOperations.planCopy(
+            "Inbox/A.md", into: "Archive", isFolder: false, exists: { _ in false }
+        ).get()
+        #expect(copy.to == "Archive/A.md")
+    }
+
+    /// A taken name is what a duplicate is, so it is never a refusal: the
+    /// copy is named after the original, with the extension kept last.
+    @Test("A taken name becomes a copy, then a numbered copy")
+    func copyBesideItself() throws {
+        let taken: Set<String> = ["Notes/A.md", "Notes/A copy.md"]
+        #expect(try VaultOperations.planCopy(
+            "Notes/A.md", into: "Notes", isFolder: false, exists: { taken.contains($0) }
+        ).get().to == "Notes/A copy 1.md")
+        #expect(try VaultOperations.planCopy(
+            "Notes/A.md", into: "Notes", isFolder: false, exists: { $0 == "Notes/A.md" }
+        ).get().to == "Notes/A copy.md")
+    }
+
+    @Test("A folder's name is whole: a dot in it is not an extension")
+    func copyFolderName() throws {
+        let copy = try VaultOperations.planCopy(
+            "Notes.2026", into: "", isFolder: true, exists: { $0 == "Notes.2026" }
+        ).get()
+        #expect(copy.to == "Notes.2026 copy")
+    }
+
+    @Test("A folder pasted inside itself is refused as that, not as a collision")
+    func copyIntoItself() {
+        // Bounded on purpose: with the guard gone this would otherwise
+        // hunt for a free copy name forever rather than fail.
+        #expect(VaultOperations.planCopy(
+            "Projects", into: "Projects/Sub", isFolder: true,
+            exists: { $0 == "Projects/Sub/Projects" }
+        ) == .failure(.copyIntoItself(name: "Projects")))
+        #expect(VaultOperations.Refusal.copyIntoItself(name: "Projects").message
+            == "Cannot copy Projects inside itself")
+    }
+
     @Test("Only things already in the vault may be dragged within it")
     func insideTheVault() {
         let root = URL(fileURLWithPath: "/vault")

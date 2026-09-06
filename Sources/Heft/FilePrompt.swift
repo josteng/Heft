@@ -147,4 +147,15 @@ struct AppKitHost: VaultHost {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
     }
+
+    func copyFiles(_ urls: [URL]) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects(urls.map { $0 as NSURL })
+    }
+
+    func filesOnPasteboard() -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let read = NSPasteboard.general.readObjects(forClasses: [NSURL.self], options: options)
+        return (read as? [URL]) ?? []
+    }
 }
