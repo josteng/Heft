@@ -32,10 +32,20 @@ struct AgentCLITests {
     }
 
     private func run(
-        _ arguments: [String], stdin: String? = nil, readLog: URL? = nil
+        _ arguments: [String], stdin: String? = nil, readLog: URL? = nil,
+        defaultsSuite: String? = nil
     ) throws -> Output {
         guard let binary = Self.binary else {
             throw CLIUnavailable()
+        }
+        // Nor the reader's preferences: the binary reads and writes the
+        // frecency stores and the capture vault through them. A throwaway
+        // suite per run unless the test wants to look inside one.
+        let suite = defaultsSuite ?? "HeftCLIDefaults-\(UUID().uuidString)"
+        defer {
+            if defaultsSuite == nil {
+                UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            }
         }
         let process = Process()
         process.executableURL = binary
@@ -47,6 +57,7 @@ struct AgentCLITests {
             .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")).path
         environment["HEFT_INDEX_CACHE"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("HeftCLIIndex-\(UUID().uuidString)").path
+        environment[HeftDefaults.suiteEnvironmentKey] = suite
         process.environment = environment
         let out = Pipe(), err = Pipe(), input = Pipe()
         process.standardOutput = out
@@ -314,6 +325,56 @@ struct AgentCLITests {
         #expect(chained.status == 0, Comment(rawValue: chained.error))
         #expect(chained.text.contains("is taken until"))
         #expect(ProposalStore.all(in: root).filter { $0.kind == .move }.count == 2)
+    }
+
+    /// The rank belongs to the note: after `heft rename` the moved note keeps
+    /// its place in `files --by-use`, and the old path has none.
+    @Test("`heft rename` carries the note's rank to its new path")
+    func renameCarriesTheRank() throws {
+        let root = try vault(["Old.md": "x\n", "Other.md": "y\n"])
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        var seeded = Frecency()
+        seeded.record("Old.md")
+        seeded.record("Old.md")
+        // Keyed the way the binary keys it: by the standardized vault path.
+        defaults.set(seeded.encoded, forKey: "dev.stenglein.Heft.frecency.notes.\(root.standardizedFileURL.path)")
+        defaults.synchronize()
+
+        #expect(try run(["rename", root.path, "Old.md", "New.md"], defaultsSuite: suite).status == 0)
+        let ranked = try run(["files", root.path, "--by-use", "--scores"], defaultsSuite: suite).text
+        let lines = ranked.split(separator: "\n").map(String.init)
+        #expect(lines.first?.contains("New.md") == true, Comment(rawValue: ranked))
+        // Each line is a right-aligned score, two spaces, the path.
+        let newScore = lines.first { $0.contains("New.md") }
+            .flatMap { Double($0.trimmingCharacters(in: .whitespaces).split(separator: " ").first ?? "") } ?? 0
+        #expect(newScore > 0, Comment(rawValue: ranked))
+    }
+
+    @Test("Renaming a folder carries the rank of every note inside it")
+    func folderRenameCarriesRanks() throws {
+        let root = try vault(["Old/Inner.md": "x\n", "Other.md": "y\n"])
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        var seeded = Frecency()
+        seeded.record("Old/Inner.md")
+        defaults.set(seeded.encoded, forKey: "dev.stenglein.Heft.frecency.notes.\(root.standardizedFileURL.path)")
+        defaults.synchronize()
+
+        #expect(try run(["rename", root.path, "Old", "New"], defaultsSuite: suite).status == 0)
+        let ranked = try run(["files", root.path, "--by-use", "--scores"], defaultsSuite: suite).text
+        #expect(ranked.split(separator: "\n").first?.contains("New/Inner.md") == true, Comment(rawValue: ranked))
+        let score = ranked.split(separator: "\n").map(String.init).first { $0.contains("New/Inner.md") }
+            .flatMap { Double($0.trimmingCharacters(in: .whitespaces).split(separator: " ").first ?? "") } ?? 0
+        #expect(score > 0, Comment(rawValue: ranked))
     }
 
     @Test("`heft changes` on a note nobody read says so, rather than diffing against nothing")

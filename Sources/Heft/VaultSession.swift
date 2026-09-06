@@ -110,9 +110,13 @@ final class VaultSession: ObservableObject {
         noteFrecency.record(relativePath)
     }
 
+    /// A file moved: the Recent list, the reader's ranking and the agent's
+    /// all follow it, since each is about the note and not the path.
     func replaceRecentPath(_ oldPath: String, with newPath: String) {
         recentPaths = recentPaths.map { $0 == oldPath ? newPath : $0 }
         HeftDefaults.shared.set(recentPaths, forKey: recentsKey)
+        noteFrecency.move(oldPath, to: newPath)
+        FrecencyStore.agentNotes(forVaultAt: root.path).move(oldPath, to: newPath)
     }
 
     /// Coalesced because iCloud and atomic saves arrive as event bursts.

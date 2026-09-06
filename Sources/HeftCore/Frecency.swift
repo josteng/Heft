@@ -48,6 +48,15 @@ public struct Frecency: Codable, Equatable, Sendable {
 
     public func hasRecord(of key: String) -> Bool { entries[key] != nil }
 
+    /// Carries a key's record to a new key: the score belongs to the note,
+    /// and a note that is renamed or moved is the same note. Without this
+    /// the rank stayed at the old path, and whatever was created there next
+    /// inherited it while the moved note started from nothing.
+    public mutating func move(_ key: String, to newKey: String) {
+        guard key != newKey, let entry = entries.removeValue(forKey: key) else { return }
+        entries[newKey] = entry
+    }
+
     /// Orders `keys` by score, highest first, and breaks ties with `tiebreak`
     /// so the result is stable rather than dependent on dictionary order.
     ///

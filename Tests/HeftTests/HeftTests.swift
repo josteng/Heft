@@ -2972,3 +2972,48 @@ struct DraftRecoveryTests {
     }
 }
 
+
+/// A note renamed or moved is the same note, so its quick-open rank goes with
+/// it. It used to stay at the old path: the moved note started from nothing
+/// and whatever was created at the old path next inherited its rank.
+@Suite("A rank follows its note")
+struct FrecencyMoveTests {
+    @Test("Moving a key carries its score and leaves nothing behind")
+    func moveCarriesTheScore() {
+        var store = Frecency()
+        let now = Date()
+        store.record("Heft/v0.2.md", at: now)
+        store.record("Heft/v0.2.md", at: now)
+        let before = store.score("Heft/v0.2.md", at: now)
+        store.move("Heft/v0.2.md", to: "Heft/v0.3.md")
+        #expect(store.score("Heft/v0.3.md", at: now) == before)
+        #expect(store.score("Heft/v0.2.md", at: now) == 0)
+        #expect(!store.hasRecord(of: "Heft/v0.2.md"))
+    }
+
+    @Test("A session's rename moves the reader's rank and the agent's")
+    @MainActor
+    func sessionRenameMovesBothStores() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-rank-move-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let session = VaultSession(root: root)
+        defer {
+            for key in ["dev.stenglein.Heft.frecency.notes.\(session.root.path)",
+                        "dev.stenglein.Heft.frecency.agent.\(session.root.path)"] {
+                HeftDefaults.shared.removeObject(forKey: key)
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
+        session.recordRecent("Old.md")
+        FrecencyStore.agentNotes(forVaultAt: session.root.path).record("Old.md")
+
+        session.replaceRecentPath("Old.md", with: "New.md")
+        #expect(session.noteFrecency.score("New.md") > 0)
+        #expect(session.noteFrecency.score("Old.md") == 0)
+        let agent = FrecencyStore.agentNotes(forVaultAt: session.root.path)
+        #expect(agent.score("New.md") > 0)
+        #expect(agent.score("Old.md") == 0)
+        #expect(session.recentPaths.first == "New.md")
+    }
+}

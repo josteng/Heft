@@ -22,6 +22,12 @@ public final class FrecencyStore {
 
     public func score(_ identifier: String) -> Double { frecency.score(identifier) }
 
+    /// A note renamed or moved keeps its rank under its new path.
+    public func move(_ identifier: String, to newIdentifier: String) {
+        frecency.move(identifier, to: newIdentifier)
+        HeftDefaults.shared.set(frecency.encoded, forKey: key)
+    }
+
     public func ranked<Key>(
         _ keys: [Key],
         by identity: (Key) -> String,

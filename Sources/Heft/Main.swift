@@ -644,6 +644,13 @@ enum HeftMain {
             let summary = try VaultRename.perform(
                 item: item, to: destination, index: index, vaultRoot: root
             )
+            // The ranks follow the files, as they do for a rename in the app.
+            let notes = FrecencyStore.notes(forVaultAt: root.path)
+            let agent = FrecencyStore.agentNotes(forVaultAt: root.path)
+            for (oldPath, newPath) in changes {
+                notes.move(oldPath, to: newPath)
+                agent.move(oldPath, to: newPath)
+            }
             print("renamed: \(item.relativePath) -> \(destination)")
             if changes.count > 1 { print("files moved: \(changes.count)") }
             // One wording, shared with the sidebar's status line, so the two
