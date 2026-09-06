@@ -1589,6 +1589,41 @@ final class AppModel: ObservableObject {
         return made
     }
 
+    /// Drops the notes the reader will not move out of their daily folder.
+    ///
+    /// A daily note is found by its folder and its name, so dragging one
+    /// somewhere else quietly turns it into an ordinary note: the calendar
+    /// stops showing it and ⇧⌘T writes a new one beside where it used to be.
+    /// It is easy to do by accident, since the calendar hands out a drag as
+    /// readily as the file tree does. Asked once for the whole drop, and
+    /// only about the notes actually leaving, so an ordinary note dragged in
+    /// the same gesture is never held up by a question about another file.
+    private func confirmedLeavingDailyNotes(among urls: [URL], into folder: URL) -> [URL] {
+        guard let daily = dailyNotes, !daily.folder.isEmpty else { return urls }
+        guard relativePath(of: folder) != daily.folder else { return urls }
+        let leaving = urls.filter { daily.isFiledAsDaily(relativePath(of: $0)) }
+        guard !leaving.isEmpty else { return urls }
+
+        let subject = leaving.count == 1
+            ? (leaving[0].deletingPathExtension().lastPathComponent)
+            : "\(leaving.count) daily notes"
+        let becomes = leaving.count == 1
+            ? "It stops being a daily note."
+            : "They stop being daily notes."
+        guard host.confirm(
+            title: "Move \(subject) out of \(daily.folder)?",
+            message: "\(becomes) The calendar only looks in \(daily.folder).",
+            confirm: "Move",
+            destructive: false
+        ) else {
+            let refused = Set(leaving.map(\.standardizedFileURL))
+            let kept = urls.filter { !refused.contains($0.standardizedFileURL) }
+            if kept.isEmpty { status = "Left \(subject) in \(daily.folder)" }
+            return kept
+        }
+        return urls
+    }
+
     /// Moves to the Trash rather than unlinking, so a mis-click stays
     /// recoverable, and confirms first because this is the user's real vault.
     /// `confirmed` is for a caller that has already asked, once, about several
@@ -1647,6 +1682,8 @@ final class AppModel: ObservableObject {
     /// ordering to persist.
     func move(_ urls: [URL], into folder: URL) {
         guard let vaultRoot else { return }
+        let urls = confirmedLeavingDailyNotes(among: urls, into: folder)
+        guard !urls.isEmpty else { return }
         var moved = 0
         var repointed = VaultRename.Summary()
         var fromOutside: [URL] = []

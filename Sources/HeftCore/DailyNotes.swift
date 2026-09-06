@@ -65,6 +65,18 @@ public struct DailyNotes: Sendable {
         return folder.isEmpty ? "\(stem).md" : "\(folder)/\(stem).md"
     }
 
+    /// Whether this note is filed as a daily note, so that moving it out of
+    /// `folder` is what stops the calendar and ⇧⌘T from finding it.
+    ///
+    /// Judged by where the note lives, not by reading its name: the date
+    /// format has no parser, and scanning dates to recognise a stem only ever
+    /// covers the window scanned. A vault that keeps its daily notes in the
+    /// root has no folder to leave, so nothing there counts.
+    public func isFiledAsDaily(_ relativePath: String) -> Bool {
+        guard !folder.isEmpty, relativePath.hasSuffix(".md") else { return false }
+        return (relativePath as NSString).deletingLastPathComponent == folder
+    }
+
     public func url(for date: Date) -> URL {
         vaultRoot.appendingPathComponent(relativePath(for: date))
     }

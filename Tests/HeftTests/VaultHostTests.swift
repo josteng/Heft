@@ -735,6 +735,99 @@ struct VaultHostTests {
         ))
     }
 
+    // MARK: - Daily notes leaving their folder
+
+    private func dailyVault(_ extra: [String: String] = [:]) throws -> URL {
+        var files = [
+            ".obsidian/daily-notes.json": #"{"folder": "Daily", "format": "YYYY-MM-DD"}"#,
+            "Daily/2026-09-06.md": "today\n",
+            "Archive/.keep": "",
+        ]
+        for (path, contents) in extra { files[path] = contents }
+        return try vault(files)
+    }
+
+    /// The calendar hands out a drag as readily as the file tree does, and a
+    /// daily note dragged out of its folder quietly stops being one.
+    @Test("Moving a daily note out of its folder asks first")
+    func movingADailyNoteAsks() async throws {
+        let root = try dailyVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.confirmations = [true]
+        let model = try await ready(model(root, host))
+
+        model.move(
+            [root.appendingPathComponent("Daily/2026-09-06.md")],
+            into: root.appendingPathComponent("Archive")
+        )
+        #expect(host.asked == ["confirm: Move 2026-09-06 out of Daily?"])
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive/2026-09-06.md").path))
+    }
+
+    @Test("Saying no leaves the daily note where it is")
+    func decliningKeepsTheDailyNote() async throws {
+        let root = try dailyVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.confirmations = [false]
+        let model = try await ready(model(root, host))
+
+        model.move(
+            [root.appendingPathComponent("Daily/2026-09-06.md")],
+            into: root.appendingPathComponent("Archive")
+        )
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Daily/2026-09-06.md").path))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive/2026-09-06.md").path))
+        #expect(model.status == "Left 2026-09-06 in Daily")
+    }
+
+    /// Only the notes actually leaving. An ordinary note dragged in the same
+    /// gesture is not held up by a question about another file.
+    @Test("An ordinary note in the same drop moves whatever the answer was")
+    func ordinaryNotesAreNotHeldUp() async throws {
+        let root = try dailyVault(["Plan.md": "p\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        host.confirmations = [false]
+        let model = try await ready(model(root, host))
+
+        model.move(
+            [root.appendingPathComponent("Plan.md"),
+             root.appendingPathComponent("Daily/2026-09-06.md")],
+            into: root.appendingPathComponent("Archive")
+        )
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Archive/Plan.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Daily/2026-09-06.md").path))
+    }
+
+    @Test("Nothing is asked when no daily note is leaving")
+    func otherMovesAreNotInterrupted() async throws {
+        let root = try dailyVault(["Plan.md": "p\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host))
+
+        // An ordinary note, moved anywhere.
+        model.move([root.appendingPathComponent("Plan.md")], into: root.appendingPathComponent("Archive"))
+        // And a daily note rearranged inside its own folder, which is where
+        // the calendar goes on finding it.
+        model.move(
+            [root.appendingPathComponent("Archive/Plan.md")],
+            into: root.appendingPathComponent("Daily")
+        )
+        // And a daily note dropped on its own folder, or on a row inside it,
+        // which is where it already is: a question about a move that is not
+        // going to happen is worse than no question.
+        model.move(
+            [root.appendingPathComponent("Daily/2026-09-06.md")],
+            into: root.appendingPathComponent("Daily")
+        )
+        #expect(host.asked.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Daily/Plan.md").path))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Daily/2026-09-06.md").path))
+    }
+
     // MARK: - Copying and pasting files
 
     /// The pasteboard holds a reference, and the copy is made at paste

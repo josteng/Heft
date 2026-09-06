@@ -246,3 +246,37 @@ struct VaultOperationsTests {
             == "repointed 2 links in 1 note; 2 notes changed concurrently and were left untouched")
     }
 }
+
+/// What counts as filed under the daily folder, which is the question behind
+/// the warning when one is dragged out of it.
+@Suite("Daily notes by their folder")
+struct DailyFilingTests {
+    private func notes(folder: String) -> DailyNotes {
+        var settings = ObsidianSettings()
+        settings.dailyNotesFolder = folder
+        settings.dailyNotesFolderIsConfigured = true
+        return DailyNotes(vaultRoot: URL(fileURLWithPath: "/vault"), settings: settings)
+    }
+
+    @Test("A note directly in the daily folder is filed as daily")
+    func insideTheFolder() {
+        let daily = notes(folder: "Daily")
+        #expect(daily.isFiledAsDaily("Daily/2026-09-06.md"))
+        #expect(!daily.isFiledAsDaily("Archive/2026-09-06.md"))
+        // Nested deeper is not where the calendar looks either.
+        #expect(!daily.isFiledAsDaily("Daily/Old/2026-09-06.md"))
+        // An attachment beside the notes is not a note.
+        #expect(!daily.isFiledAsDaily("Daily/shot.png"))
+    }
+
+    /// A vault that keeps its daily notes in the root has no folder to leave,
+    /// and every note in the root would otherwise be treated as one.
+    @Test("With no folder configured, nothing is filed as daily")
+    func rootVaultHasNoFolder() {
+        var settings = ObsidianSettings()
+        settings.dailyNotesFolder = ""
+        settings.dailyNotesFolderIsConfigured = true
+        let daily = DailyNotes(vaultRoot: URL(fileURLWithPath: "/vault"), settings: settings)
+        #expect(!daily.isFiledAsDaily("2026-09-06.md"))
+    }
+}

@@ -193,6 +193,15 @@ while the marker shows. The list only moves when that row is off screen, since
 scrolling the tree under a reader who can see the thing already is what reads
 as losing their place.
 
+Dragging a daily note out of its folder asks first. A daily note is found by
+its folder and its name, so moving one elsewhere quietly turns it into an
+ordinary note: the calendar stops showing it and ⇧⌘T writes a new one in its
+place. The question is asked once for a drop, and only about the notes
+actually leaving, so an ordinary note dragged in the same gesture is not held
+up by a question about another file. Which notes count is decided by where
+they live rather than by reading their names, since the date format has no
+parser and a vault keeping its daily notes in the root has no folder to leave.
+
 ⌘⌫ on a clicked row is the Finder's Move to Trash, and asks the same question
 every other route to the Trash asks. It is a File menu command rather than
 something the text view intercepts, and that is what makes it work: a menu
