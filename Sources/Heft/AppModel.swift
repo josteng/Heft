@@ -1832,6 +1832,18 @@ final class AppModel: ObservableObject {
 
     func revealInFinder(_ url: URL) { host.revealInFinder(url) }
 
+    /// The tree's own entry for the note in front, when the tree has one.
+    ///
+    /// `current` is a `NoteRef`, which says where a note is and no more. The
+    /// file operations want the item the tree holds, because renaming and
+    /// deleting need what is under it and where it sits. Nil while the vault
+    /// is still being scanned, and for a note outside a focused folder, which
+    /// is exactly when those operations should not be offered.
+    var currentItem: VaultItem? {
+        guard let current else { return nil }
+        return tree?.flattened().first { $0.relativePath == current.relativePath }
+    }
+
     // MARK: - Export
 
     /// Writes the open note to PDF, asking where to put it.

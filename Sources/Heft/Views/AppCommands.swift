@@ -215,6 +215,114 @@ struct AppCommand: Identifiable {
             displayTitle: { $0.isCalendarVisible ? "Hide calendar" : "Show calendar" },
             action: { $0.isCalendarVisible.toggle() }
         ),
+        // Everything the sidebar offers on a right click, against the note in
+        // front. A palette is where a reader looks for a verb they cannot
+        // remember the gesture for, and these were reachable only by finding
+        // the row first: getting a note's absolute path meant revealing it in
+        // the Finder, when Copy Absolute Path had been in the menu all along.
+        //
+        // The note is implied rather than named in each title, the way an
+        // editor's palette implies the open file, so the rows stay short and
+        // read as a list of verbs.
+        Self(
+            id: "copyNotePath",
+            title: "Copy Path",
+            symbol: "arrow.right.doc.on.clipboard",
+            searchTerms: "relative path location clipboard note file where",
+            enabled: { $0.current != nil },
+            action: { model in
+                guard let current = model.current else { return }
+                model.copyToPasteboard(current.relativePath, describedAs: "path")
+            }
+        ),
+        Self(
+            id: "copyNoteAbsolutePath",
+            title: "Copy Absolute Path",
+            symbol: "terminal",
+            searchTerms: "full absolute path terminal shell clipboard agent note file",
+            enabled: { $0.current != nil },
+            action: { model in
+                guard let current = model.current else { return }
+                model.copyToPasteboard(current.url.path, describedAs: "absolute path")
+            }
+        ),
+        Self(
+            id: "copyNoteWikilink",
+            title: "Copy Wikilink",
+            symbol: "link",
+            searchTerms: "wikilink link reference clipboard note",
+            // Not `isMarkdown`: an attachment is handed to its default app
+            // rather than opened, so the note in front is always a note and
+            // that guard could never be false.
+            enabled: { $0.current != nil },
+            action: { model in
+                guard let current = model.current else { return }
+                model.copyToPasteboard("[[\(current.name)]]", describedAs: "wikilink")
+            }
+        ),
+        Self(
+            id: "copyNoteFile",
+            title: "Copy Note as File",
+            symbol: "doc.on.doc",
+            searchTerms: "copy file clipboard finder paste note",
+            enabled: { $0.current != nil },
+            action: { $0.copyCurrentNote() }
+        ),
+        Self(
+            id: "revealNoteInFinder",
+            title: "Reveal in Finder",
+            symbol: "magnifyingglass",
+            searchTerms: "finder reveal show enclosing folder note file",
+            enabled: { $0.current != nil },
+            action: { model in
+                guard let current = model.current else { return }
+                model.revealInFinder(current.url)
+            }
+        ),
+        Self(
+            id: "renameNote",
+            title: "Rename Note",
+            symbol: "pencil",
+            searchTerms: "rename title name note file",
+            enabled: { $0.currentItem != nil },
+            action: { model in
+                guard let item = model.currentItem else { return }
+                _ = model.rename(item)
+            }
+        ),
+        Self(
+            id: "duplicateNote",
+            title: "Duplicate Note",
+            symbol: "plus.square.on.square",
+            searchTerms: "duplicate copy note file",
+            enabled: { $0.currentItem != nil },
+            action: { model in
+                guard let item = model.currentItem else { return }
+                model.duplicate(item)
+            }
+        ),
+        Self(
+            id: "moveNote",
+            title: "Move Note to…",
+            symbol: "folder",
+            searchTerms: "move folder relocate note file",
+            enabled: { $0.currentItem != nil },
+            action: { model in
+                guard let item = model.currentItem else { return }
+                model.promptToMove(item)
+            }
+        ),
+        Self(
+            id: "trashNote",
+            title: "Move Note to Trash",
+            symbol: "trash",
+            searchTerms: "delete trash remove note file",
+            enabled: { $0.currentItem != nil },
+            action: { model in
+                guard let item = model.currentItem else { return }
+                model.delete(item)
+            }
+        ),
         Self(
             id: "toggleBacklinks",
             title: "Toggle backlinks",

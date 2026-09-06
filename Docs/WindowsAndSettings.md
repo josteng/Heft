@@ -28,6 +28,23 @@ Read back what the plan decided rather than recomputing it: `move` takes its
 destination from the plan's path, so where the file is written and where every
 link is repointed cannot disagree.
 
+## What the palette can do
+
+Every verb the sidebar offers on a right click is also a palette command,
+acting on the note in front rather than on a clicked row, since the palette
+opens over the editor where there is no row. That includes both paths: the
+vault-relative one a link wants and the absolute one a terminal or an agent
+wants. They were reachable only by finding the note in the tree first, which
+is how someone ends up revealing a note in the Finder to read its path off
+the title bar while Copy Absolute Path sits in the menu.
+
+The four that change a file, rename, duplicate, move and trash, need the
+tree's own item rather than the open note's reference, so they are dimmed
+while the vault is still being scanned. They ask exactly what the menu asks;
+a palette must not be a faster way to lose a note. A test holds the two
+lists against each other, because the failure here is a verb added to the
+menu and forgotten in the palette.
+
 ## Ranking the switchers
 
 Quick Open and the command palette order by **frecency**: `Frecency` in
