@@ -238,6 +238,25 @@ struct AppCommand: Identifiable {
         FrecencyStore.commands.record(id)
         action(model)
     }
+
+    /// Enabled commands first, each group keeping the order it arrived in.
+    ///
+    /// Frecency alone put "Review agent proposals" at the top of a palette
+    /// belonging to someone who reviews often, on a day with nothing to
+    /// review, so Return did nothing and the most-used row was the one that
+    /// could not run. Hiding a disabled command instead is worse: a row that
+    /// is missing rather than dim teaches nobody where it lives, and it moves
+    /// every row above the one you were reaching for.
+    ///
+    /// So it sinks rather than disappears. Because it sinks, the first row is
+    /// runnable whenever any row is, which is the property Return depends on.
+    /// Arrowing down onto a dimmed row and pressing Return still does
+    /// nothing, and should: that one was asked for by name.
+    static func sinkingDisabled<Command>(
+        _ commands: [Command], isEnabled: (Command) -> Bool
+    ) -> [Command] {
+        commands.filter(isEnabled) + commands.filter { !isEnabled($0) }
+    }
 }
 
 struct CommandPaletteView: View {
@@ -253,7 +272,8 @@ struct CommandPaletteView: View {
         // sensible order left is familiarity — falling back to the registry's
         // own order, which is what a fresh install sees.
         let matching = AppCommand.registry.filter { $0.matches(query) }
-        return FrecencyStore.commands.ranked(matching, by: \.id) { _, _ in false }
+        let ranked = FrecencyStore.commands.ranked(matching, by: \.id) { _, _ in false }
+        return AppCommand.sinkingDisabled(ranked) { $0.isEnabled(on: model) }
     }
 
     var body: some View {

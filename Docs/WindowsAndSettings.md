@@ -38,6 +38,14 @@ never lets go of last year's project. `VaultSession.recentPaths` stays as a
 history, because the sidebar's Recent list has to keep the order things
 happened.
 
+A command that cannot run right now sinks below every command that can,
+keeping its rank among the others down there. Frecency alone put "Review
+agent proposals" first for a reader who reviews often, on a day with nothing
+to review, so Return did nothing. Hiding it instead is worse: a dim row
+teaches where a command lives, a missing one teaches nothing and shifts
+every row above what you were reaching for. Because it sinks, the first row
+is runnable whenever any row is.
+
 With nothing typed, frecency is the whole order. With something typed it is
 worth at most `VaultIndex.boostWeight`, less than the gap between match tiers,
 so familiarity reorders within a tier and never lifts a substring match above
