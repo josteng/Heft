@@ -1053,7 +1053,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         at point: CGPoint,
         in context: CGContext
     ) {
-        guard let line = textLineFragments.first else { return }
+        guard !textLineFragments.isEmpty else { return }
         let radius: CGFloat = 7
         let rect = CGRect(
             x: point.x - 10, y: point.y,

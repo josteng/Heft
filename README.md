@@ -6,6 +6,10 @@ A Mac app for Markdown notes: nice to write in, your files stay yours, and a
 command line built for the coding agent you already use. Native Swift, no
 Electron, no lock-in.
 
+```bash
+brew install --cask josteng/tap/heft
+```
+
 ![A note in Heft: a callout, a table, a task list, a formula and a shell snippet on one editing surface, with the caret inside a bold word so its markup shows](Docs/Screenshots/writing.webp)
 
 Apple Notes and Bear feel right, but your notes live in a database nothing else
@@ -31,6 +35,8 @@ would expect them.
 
 Oh, and it has daily notes, capture from Spotlight, and a Vim mode (yes,
 really).
+
+## Install
 
 ```bash
 brew install --cask josteng/tap/heft

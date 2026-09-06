@@ -1601,7 +1601,6 @@ final class AppModel: ObservableObject {
         // would be a strange thing to discover later in a PDF.
         flushPendingSave()
 
-        let appearance = AppearanceSettings.shared
         let options = PDFExportSettings.shared.options
         // The editor's palette is chosen against a dark or light *screen*; on
         // white paper a pale accent can be all but invisible. `PrintColours`
