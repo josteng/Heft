@@ -6,6 +6,7 @@
 #   Scripts/release.sh --version 0.2.0       # a specific version
 #   Scripts/release.sh --notarize            # also notarise and staple
 #   Scripts/release.sh --universal           # arm64 and x86_64 in one binary
+#   Scripts/release.sh --resume              # staple a submission Apple has since accepted
 #
 # Signing: a "Developer ID Application" certificate is used when the keychain
 # holds one (or name it in HEFT_DEVELOPER_ID). Without one the app is signed
@@ -21,6 +22,12 @@
 # HEFT_NOTARY_ISSUER. The zip is submitted, the ticket is stapled to the app,
 # and the zip is made again, since the staple lives inside the bundle.
 #
+# Apple usually answers within minutes, but a new account's first submission
+# can take days. The script waits an hour, then leaves the submission id in
+# dist/ and stops; --resume picks the zip and the id back up, asks Apple, and
+# staples once the answer is Accepted. Nothing is rebuilt on resume, because
+# the ticket is bound to the bytes Apple scanned.
+#
 # Nothing here pushes, tags or publishes. The last lines say what to run for
 # that, and the cask lands in dist/ for the tap repository.
 
@@ -32,11 +39,13 @@ export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Develope
 VERSION=""
 NOTARIZE=0
 UNIVERSAL=0
+RESUME=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version)   VERSION="${2:?--version needs a number}"; shift 2 ;;
         --notarize)  NOTARIZE=1; shift ;;
         --universal) UNIVERSAL=1; shift ;;
+        --resume)    RESUME=1; NOTARIZE=1; shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -49,6 +58,34 @@ if [[ -z "$VERSION" ]]; then
 fi
 [[ -n "$VERSION" ]] || { echo "No version: set MARKETING_VERSION in Config/Heft.xcconfig or pass --version" >&2; exit 1; }
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
+
+DIST="$ROOT/dist"
+ZIP="$DIST/Heft-$VERSION.zip"
+SUBMISSION_FILE="$DIST/Heft-$VERSION.submission"
+
+if [[ "${HEFT_NOTARY_KEY:-}" != "" ]]; then
+    NOTARY_AUTH=(--key "$HEFT_NOTARY_KEY" --key-id "${HEFT_NOTARY_KEY_ID:?HEFT_NOTARY_KEY_ID}" --issuer "${HEFT_NOTARY_ISSUER:?HEFT_NOTARY_ISSUER}")
+    NOTARY_HOW="an App Store Connect API key"
+else
+    NOTARY_AUTH=(--keychain-profile "${HEFT_NOTARY_PROFILE:-heft-notary}")
+    NOTARY_HOW="keychain profile '${HEFT_NOTARY_PROFILE:-heft-notary}'"
+fi
+
+package() {
+    rm -f "$ZIP"
+    # ditto keeps the resource forks and the bundle layout Gatekeeper checks;
+    # a plain zip does not.
+    ditto -c -k --keepParent "$APP" "$ZIP"
+}
+
+if [[ "$RESUME" == "1" ]]; then
+    [[ -f "$ZIP" && -f "$SUBMISSION_FILE" ]] || { echo "Nothing to resume for $VERSION: no $ZIP with a submission id beside it." >&2; exit 1; }
+    SUBMISSION_ID="$(cat "$SUBMISSION_FILE")"
+    STAGE="$(mktemp -d)"
+    ditto -x -k "$ZIP" "$STAGE"
+    APP="$STAGE/Heft.app"
+    echo "Resuming submission $SUBMISSION_ID for $ZIP"
+else
 
 # The team comes from Config/Local.xcconfig when there is one, which is the
 # same file Xcode reads, so the two never disagree. It only matters when the
@@ -87,8 +124,6 @@ fi
 DERIVED_DATA="$ROOT/.build/XcodeDerivedData"
 SOURCE_PACKAGES="$ROOT/.build/XcodeSourcePackages"
 APP="$DERIVED_DATA/Build/Products/Release/Heft.app"
-DIST="$ROOT/dist"
-ZIP="$DIST/Heft-$VERSION.zip"
 
 if [[ "$UNIVERSAL" == "1" ]]; then
     ARCH_ARGS=(-destination "generic/platform=macOS" "ARCHS=arm64 x86_64" ONLY_ACTIVE_ARCH=NO)
@@ -122,24 +157,37 @@ codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | sed 's/^/  /'
 echo "  architectures: $(lipo -archs "$APP/Contents/MacOS/Heft")"
 
 mkdir -p "$DIST"
-package() {
-    rm -f "$ZIP"
-    # ditto keeps the resource forks and the bundle layout Gatekeeper checks;
-    # a plain zip does not.
-    ditto -c -k --keepParent "$APP" "$ZIP"
-}
+rm -f "$SUBMISSION_FILE"
 package
 
 if [[ "$NOTARIZE" == "1" ]]; then
-    if [[ -n "${HEFT_NOTARY_KEY:-}" ]]; then
-        echo "Notarising with an App Store Connect API key"
-        NOTARY_AUTH=(--key "$HEFT_NOTARY_KEY" --key-id "${HEFT_NOTARY_KEY_ID:?HEFT_NOTARY_KEY_ID}" --issuer "${HEFT_NOTARY_ISSUER:?HEFT_NOTARY_ISSUER}")
-    else
-        PROFILE="${HEFT_NOTARY_PROFILE:-heft-notary}"
-        echo "Notarising with keychain profile '$PROFILE'"
-        NOTARY_AUTH=(--keychain-profile "$PROFILE")
-    fi
-    xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --wait
+    echo "Notarising with $NOTARY_HOW"
+    # Waiting is bounded: a first submission can sit for days, and the ticket
+    # can be stapled whenever it arrives. The exit status is ignored because
+    # notarytool exits 0 on Invalid and non-zero on a timeout; the status
+    # line below is what decides.
+    SUBMISSION="$(xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --wait --timeout 1h 2>&1 | tee /dev/stderr || true)"
+    SUBMISSION_ID="$(sed -n 's/^ *id: //p' <<< "$SUBMISSION" | head -1)"
+    [[ -n "$SUBMISSION_ID" ]] || { echo "Submission failed before Apple gave it an id." >&2; exit 1; }
+    echo "$SUBMISSION_ID" > "$SUBMISSION_FILE"
+fi
+
+fi  # not resuming
+
+if [[ "$NOTARIZE" == "1" ]]; then
+    STATUS="$(xcrun notarytool info "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" 2>&1 | sed -n 's/^ *status: //p' | head -1)"
+    case "$STATUS" in
+        Accepted) ;;
+        "In Progress")
+            echo "Apple is still scanning submission $SUBMISSION_ID. Check with" >&2
+            echo "  xcrun notarytool info $SUBMISSION_ID ${NOTARY_AUTH[*]}" >&2
+            echo "and finish with Scripts/release.sh --resume --version $VERSION once it is Accepted." >&2
+            exit 2 ;;
+        *)
+            echo "Notarisation ended as '$STATUS'; Apple's log:" >&2
+            xcrun notarytool log "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" >&2 || true
+            exit 1 ;;
+    esac
     xcrun stapler staple "$APP"
     xcrun stapler validate "$APP"
     package
