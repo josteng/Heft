@@ -6,6 +6,8 @@ A Mac app for Markdown notes: nice to write in, your files stay yours, and a
 command line built for the coding agent you already use. Native Swift, no
 Electron, no lock-in.
 
+![A note in Heft: a callout, a table, a task list, a formula and a shell snippet on one editing surface, with the caret inside a bold word so its markup shows](Docs/Screenshots/writing.webp)
+
 Apple Notes and Bear feel right, but your notes live in a database nothing else
 can open. Obsidian keeps them as plain files you own, but it is a web app in a
 window: drag a note out into a terminal and nothing happens. Heft is the feel
@@ -16,6 +18,8 @@ gives it plain Markdown and nothing else, so it falls back to grep. The apps
 that hold your data answer it by selling you an assistant of their own. Heft
 does neither: the `heft` command hands an agent a resolved index of the vault
 to read from, and lets it propose changes for you to review hunk by hunk.
+
+![Reviewing an agent's proposal hunk by hunk, with an edit, a grouped change and a move waiting in the sidebar](Docs/Screenshots/proposal.webp)
 
 Bring whichever agent you already use. Heft has none of its own to sell you.
 
