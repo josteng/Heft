@@ -33,14 +33,18 @@ Oh, and it has daily notes, capture from Spotlight, and a Vim mode (yes,
 really).
 
 ```bash
+brew install --cask josteng/heft/heft
+```
+
+Requires macOS 26 on Apple Silicon. That installs `Heft.app` and a `heft`
+command, signed and notarised, and `brew upgrade` follows new releases. To
+build it yourself instead, with Xcode installed:
+
+```bash
 git clone https://github.com/josteng/Heft.git
 cd Heft
 Scripts/install.sh
 ```
-
-Requires macOS 26 and Xcode. That installs `Heft.app` into `/Applications` and
-a `heft` command into `~/.local/bin`. There is no signed release yet, so on a
-Mac that did not build it, Gatekeeper will refuse to open the app.
 
 **New here? [`Docs/GettingStarted.md`](Docs/GettingStarted.md)** covers opening
 a vault, the five things worth trying first, daily notes and capture.
@@ -261,8 +265,6 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 
 ## Not built yet
 
-- **No signed release**, which is the one thing standing between Heft and
-  anyone else running it.
 - **No iOS or iPadOS app.** Obsidian opens the same vault on a phone today,
   which takes the urgency out of it. The core is UI-free on purpose, so a
   second shell is a matter of views; the editing surface is what would need
