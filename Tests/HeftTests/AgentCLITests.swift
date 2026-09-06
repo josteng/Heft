@@ -326,6 +326,9 @@ struct AgentCLITests {
 
         #expect(log.freshness(vault: vaultURL, relativePath: "A.md", current: "second\n") == .fresh)
         #expect(log.freshness(vault: vaultURL, relativePath: "B.md", current: "x") == .unread)
+        // Read, then moved away: a proposal at that path creates a note, and
+        // the old read must not stand in its way.
+        #expect(log.freshness(vault: vaultURL, relativePath: "A.md", current: nil) == .unread)
         if case .stale = log.freshness(vault: vaultURL, relativePath: "A.md", current: "third\n") {
         } else {
             Issue.record("a note that moved on should read as stale")

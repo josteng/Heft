@@ -138,6 +138,10 @@ public struct ReadLog: Sendable {
 
     public func freshness(vault: URL, relativePath: String, current: String?) -> Freshness {
         guard let entry = last(vault: vault, relativePath: relativePath) else { return .unread }
-        return entry.text == (current ?? "") ? .fresh : .stale(readAt: entry.readAt)
+        // A note that is gone since it was read, moved or deleted, has nothing
+        // typed in between for a proposal to revert: what arrives now creates
+        // a note, and the old read has nothing to say about that.
+        guard let current else { return .unread }
+        return entry.text == current ? .fresh : .stale(readAt: entry.readAt)
     }
 }
