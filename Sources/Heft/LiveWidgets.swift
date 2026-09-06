@@ -246,15 +246,22 @@ struct TableGrid {
     /// Thickness of the add-row strip under the table and the add-column strip
     /// beside it.
     ///
-    /// The space is reserved whether or not the strips are drawn. Reserving it
-    /// only while the table is active would make clicking one shove the rest of
-    /// the note down by this much, and clicking away shove it back.
+    /// Nothing about the strips changes the layout: showing them only while
+    /// the table is active would make clicking one shove the rest of the note
+    /// down by this much, and clicking away shove it back.
     static let affordance: CGFloat = 17
 
-    /// Including the affordance strips, which is what the line has to be tall
-    /// enough for.
+    /// Including the affordance strips: what is painted and what takes a click.
     var contentSize: CGSize {
         CGSize(width: size.width + Self.affordance, height: size.height + Self.affordance)
+    }
+
+    /// What the table's line has to be tall enough for. The row strip is drawn
+    /// in the inset and paragraph spacing every block already has under it,
+    /// so it costs no height of its own; reserving it as well left a table
+    /// with twice the room below it that any other block gets.
+    var reservedHeight: CGFloat {
+        size.height + max(0, Self.affordance - HeftLayoutFragment.blockInset - LiveStyler.blockSpacing)
     }
 
     /// In grid coordinates: the strip that adds a row, under the last one.

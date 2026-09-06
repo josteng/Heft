@@ -446,3 +446,34 @@ struct PointerCursorTests {
         #expect(!editor("- [x] done\n").pointerRects().isEmpty)
     }
 }
+
+/// A table's line is as tall as its grid and the inset every block gets, and
+/// no taller: the add-row strip under the grid lives in that inset and the
+/// paragraph spacing, not in room of its own.
+@Suite("A table's line")
+@MainActor
+struct TableLineHeightTests {
+
+    @Test("A table reserves its grid and the block inset, not the row strip")
+    func tableReservesNoRoomForTheStrip() throws {
+        let source = "| a | b |\n| --- | --- |\n| 1 | 2 |\n\nafter\n"
+        let storage = NSTextStorage(string: source)
+        let layout = LiveStyler.apply(
+            to: storage, reveal: .none,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 600
+        )
+        let grid = try #require(layout.blocks.values.compactMap { block -> TableGrid? in
+            if case .table(let grid) = block { return grid }
+            return nil
+        }.first)
+        let style = try #require(
+            storage.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        )
+        #expect(style.minimumLineHeight == grid.size.height + HeftLayoutFragment.blockInset * 2)
+        #expect(
+            TableGrid.affordance <= HeftLayoutFragment.blockInset + LiveStyler.blockSpacing,
+            "the strip has to fit under the grid inside the line's own spacing"
+        )
+    }
+}

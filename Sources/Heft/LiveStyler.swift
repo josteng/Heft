@@ -325,7 +325,7 @@ enum LiveStyler {
             // in one note share a grid and differ only in where they sit.
             grid.documentStart = range.location
             grid.accent = context.resolved(context.accentColor)
-            hideWhole(range, in: storage, text: text, reserving: grid.contentSize.height)
+            hideWhole(range, in: storage, text: text, reserving: grid.reservedHeight)
             layout.blocks[lineStart] = .table(grid)
 
         case .blockMath(let latex):
@@ -468,6 +468,9 @@ enum LiveStyler {
         }
     }
 
+    /// The paragraph spacing on either side of a block widget's line.
+    static let blockSpacing: CGFloat = 8
+
     /// Hides every line a multi-line construct occupies, then gives its *first*
     /// line enough height for the widget that replaces it.
     ///
@@ -494,8 +497,8 @@ enum LiveStyler {
         let first = text.lineRange(for: NSRange(location: lines.location, length: 0))
         let block = NSMutableParagraphStyle()
         block.lineSpacing = 0
-        block.paragraphSpacingBefore = 8
-        block.paragraphSpacing = 8
+        block.paragraphSpacingBefore = blockSpacing
+        block.paragraphSpacing = blockSpacing
         block.minimumLineHeight = height + HeftLayoutFragment.blockInset * 2
         // A block on a list line keeps the list's indent, because the widget
         // positions its bullet from where the line's text begins.
