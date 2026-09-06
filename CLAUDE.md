@@ -21,6 +21,7 @@ swift run Heft backlinks|links|outline <vault> <note>   # the resolved link inde
 swift run Heft tags|config <vault>              # tags with counts; settings as JSON
 swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headless
     # --text-size N --paper a4|letter|legal|tabloid --landscape --margin narrow|normal|wide --title
+Scripts/perf.sh <vault>                         # what a keystroke, a publish, idle and a save cost; copies the vault
 ```
 
 ## Architecture
