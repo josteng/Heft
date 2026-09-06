@@ -1166,6 +1166,7 @@ struct VimCoreTests {
             "dis", "das", "cisX\u{1b}", "dip", "dap", "2dip", "2dap",
             "yisP", "yasP", "yipP", "yapP", "visd", "vipd", "vapd",
         ]
+        var cases: [OracleCase] = []
         for source in sources {
             for cursor in 0..<(source as NSString).length {
                 // Vim's sentence object reaches into the next paragraph from a
@@ -1175,33 +1176,29 @@ struct VimCoreTests {
                 for command in commands {
                     var heft = VimHarness(source, cursor: cursor)
                     heft.type(command)
-                    let oracle = try Self.runNeovimKeystrokes(
-                        nvim, source: source, cursor: cursor, keys: command
-                    )
-                    #expect(
-                        heft.text == oracle,
-                        "Prose-object mismatch for \(command) from \(cursor) in \(source.debugDescription)"
-                    )
+                    cases.append(OracleCase(
+                        source: source, cursor: cursor, keys: command, heft: heft.text,
+                        label: "Prose-object mismatch for \(command) from \(cursor) in \(source.debugDescription)"
+                    ))
                 }
             }
         }
+        Self.expectNeovimAgrees(nvim, on: cases)
     }
 
     @Test("External Neovim agrees on tag objects, case operators, and backward word ends")
     func neovimTagAndCaseMatrix() throws {
         guard let nvim = Self.neovimURL else { return }
         let tags = "<div class=\"a\">outer <b>bold text</b> tail</div>\n<p>plain</p>\n"
+        var cases: [OracleCase] = []
         for cursor in 0..<(tags as NSString).length {
             for command in ["dit", "dat", "2dit", "2dat", "3dit", "yitP"] {
                 var heft = VimHarness(tags, cursor: cursor)
                 heft.type(command)
-                let oracle = try Self.runNeovimKeystrokes(
-                    nvim, source: tags, cursor: cursor, keys: command
-                )
-                #expect(
-                    heft.text == oracle,
-                    "Tag-object mismatch for \(command) from \(cursor)"
-                )
+                cases.append(OracleCase(
+                    source: tags, cursor: cursor, keys: command, heft: heft.text,
+                    label: "Tag-object mismatch for \(command) from \(cursor)"
+                ))
             }
         }
 
@@ -1216,15 +1213,13 @@ struct VimCoreTests {
             for command in commands {
                 var heft = VimHarness(code, cursor: cursor)
                 heft.type(command)
-                let oracle = try Self.runNeovimKeystrokes(
-                    nvim, source: code, cursor: cursor, keys: command
-                )
-                #expect(
-                    heft.text == oracle,
-                    "Mismatch for \(command) from \(cursor)"
-                )
+                cases.append(OracleCase(
+                    source: code, cursor: cursor, keys: command, heft: heft.text,
+                    label: "Mismatch for \(command) from \(cursor)"
+                ))
             }
         }
+        Self.expectNeovimAgrees(nvim, on: cases)
     }
 
     @Test("External Neovim agrees on straight quote objects from every cursor position")
@@ -1248,21 +1243,20 @@ struct VimCoreTests {
             "di\"", "da\"", "ci\"X\u{1b}", "yi\"P", "ya\"P", "vi\"d", "va\"d",
             "di'", "da'", "ci'X\u{1b}", "di`", "da`",
         ]
+        var cases: [OracleCase] = []
         for source in sources {
             for cursor in 0..<(source as NSString).length {
                 for command in commands {
                     var heft = VimHarness(source, cursor: cursor)
                     heft.type(command)
-                    let oracle = try Self.runNeovimKeystrokes(
-                        nvim, source: source, cursor: cursor, keys: command
-                    )
-                    #expect(
-                        heft.text == oracle,
-                        "Quote-object mismatch for \(command) from \(cursor) in \(source.debugDescription)"
-                    )
+                    cases.append(OracleCase(
+                        source: source, cursor: cursor, keys: command, heft: heft.text,
+                        label: "Quote-object mismatch for \(command) from \(cursor) in \(source.debugDescription)"
+                    ))
                 }
             }
         }
+        Self.expectNeovimAgrees(nvim, on: cases)
     }
 
     @Test("External Neovim agrees on registers, marks, and macros")
@@ -1545,6 +1539,144 @@ struct VimCoreTests {
     /// whole command when a motion fails, so `vjgU` on the last line reports
     /// "nothing happened" where a real editor still uppercases the character
     /// under the caret.
+    /// One case of an oracle matrix: what Heft did, and what to ask Neovim.
+    struct OracleCase {
+        let source: String
+        let cursor: Int
+        let keys: String
+        let heft: String
+        let label: String
+    }
+
+    /// Asks Neovim about a whole matrix at once: a batch of cases per
+    /// process, the batches on every core. A matrix is thousands of cases,
+    /// and one launch per case was the suite's whole wall time, most of it
+    /// the kernel forking. Inside a batch each case reloads its own fixture
+    /// from disk, starts with an empty register, and writes its result to
+    /// its own file.
+    private static func expectNeovimAgrees(
+        _ executable: URL,
+        on cases: [OracleCase],
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        let batchSize = 64
+        let batches = stride(from: 0, to: cases.count, by: batchSize).map {
+            Array(cases[$0..<min($0 + batchSize, cases.count)])
+        }
+        var oracles = [Result<String, Error>?](repeating: nil, count: cases.count)
+        let lock = NSLock()
+        // At background priority, workers and processes both: the timing
+        // checks in the same run measure the main thread, and an oracle
+        // holding the performance cores pushed it onto the efficiency ones,
+        // where a keystroke looked six times its cost.
+        let workers = max(2, ProcessInfo.processInfo.activeProcessorCount / 3)
+        var next = 0
+        let group = DispatchGroup()
+        for _ in 0..<workers {
+            DispatchQueue.global(qos: .background).async(group: group) {
+                while true {
+                    lock.lock()
+                    let index = next
+                    next += 1
+                    lock.unlock()
+                    guard index < batches.count else { return }
+                    let results = runNeovimBatch(executable, cases: batches[index])
+                    lock.lock()
+                    for (offset, result) in results.enumerated() {
+                        oracles[index * batchSize + offset] = result
+                    }
+                    lock.unlock()
+                }
+            }
+        }
+        group.wait()
+        for (index, item) in cases.enumerated() {
+            switch oracles[index] {
+            case .success(let oracle)?:
+                #expect(item.heft == oracle, "\(item.label)", sourceLocation: sourceLocation)
+            case .failure(let error)?:
+                Issue.record("Neovim failed on \(item.label): \(error)", sourceLocation: sourceLocation)
+            case nil:
+                Issue.record("Neovim was not asked about \(item.label)", sourceLocation: sourceLocation)
+            }
+        }
+    }
+
+    /// `keys` as the body of a double-quoted Vim string: Escape as `\<Esc>`,
+    /// and the characters that string syntax would otherwise read.
+    private static func vimStringLiteral(_ keys: String) -> String {
+        var out = ""
+        for scalar in keys.unicodeScalars {
+            switch scalar {
+            case "\u{1b}": out += "\\<Esc>"
+            case "\r": out += "\\<CR>"
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "|": out += "\\|"
+            case "<": out += "\\<lt>"
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
+    }
+
+    /// One Neovim for a batch of cases. Each case's fixture is its own file,
+    /// reloaded with `:e!` so the buffer starts clean whatever the previous
+    /// case left, its register emptied, and its result written to its own
+    /// file.
+    private static func runNeovimBatch(
+        _ executable: URL, cases: [OracleCase]
+    ) -> [Result<String, Error>] {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-vim-batch-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            // No sync on each write: the results are read back at once and
+            // the directory is deleted, and the syncs were most of the cost.
+            var body = ":set nofsync nowritebackup noswapfile\r"
+            for (index, item) in cases.enumerated() {
+                precondition(item.source.unicodeScalars.allSatisfy { $0.isASCII })
+                let fixture = directory.appendingPathComponent("in-\(index).txt")
+                try Data(item.source.utf8).write(to: fixture)
+                // The unnamed register is emptied first: a yank with nothing
+                // to take leaves it as the previous case did, and the put
+                // that follows would paste that, where a fresh process pastes
+                // nothing. The keys go through `:normal!` under `silent!`: a
+                // command that fails would otherwise flush the typeahead, and
+                // with it the cases after it.
+                body += "\u{1b}:e! \(fixture.path)\r:goto \(item.cursor + 1)\r"
+                    + ":call setreg('\"', '')\r"
+                    + ":silent! exe \"normal! \(Self.vimStringLiteral(item.keys))\"\r"
+                    + ":w! \(directory.appendingPathComponent("out-\(index).txt").path)\r"
+            }
+            body += "\u{1b}:qa!\r"
+            let script = directory.appendingPathComponent("keys.in")
+            try Data(body.utf8).write(to: script)
+
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = ["--clean", "--headless", "-n", "-s", script.path]
+            process.qualityOfService = .background
+            var environment = ProcessInfo.processInfo.environment
+            environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
+            process.environment = environment
+            let errors = Pipe()
+            process.standardError = errors
+            try process.run()
+            process.waitUntilExit()
+            let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
+            return cases.indices.map { index in
+                Result {
+                    String(decoding: try Data(contentsOf: directory.appendingPathComponent("out-\(index).txt")), as: UTF8.self)
+                }
+            }
+        } catch {
+            return cases.map { _ in .failure(error) }
+        }
+    }
+
     private static func runNeovimKeystrokes(
         _ executable: URL,
         source: String,

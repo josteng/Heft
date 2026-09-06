@@ -133,7 +133,10 @@ was read off the oracle, not off the documentation.
 The checked-in fixture suite is original project code. If `nvim` is present on
 `PATH` or in a conventional Homebrew/system location, additional tests invoke
 `nvim --clean --headless` as an external process and compare final buffers and
-cursor positions for representative commands, motion and text-object matrices,
+cursor positions for representative commands, motion and text-object matrices
+(the large matrices send a batch of cases to one process, each case reloading
+its fixture with an emptied register, three processes at a time so the timing
+checks in the same run keep their cores),
 and a generated 216-case cross-product of delete/change/yank, word/line/vertical
 motions, and counts on either side of the operator. It skips when Neovim is
 absent; focused local regressions preserve every discrepancy the matrix has
