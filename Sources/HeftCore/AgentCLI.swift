@@ -196,7 +196,7 @@ public enum AgentCLI {
         let diff = proposal.diff(against: current ?? "")
         print("proposed \(proposal.id)")
         print("note:    \(relative)\(current == nil ? " (new)" : "")")
-        print("change:  +\(diff.addedLines) -\(diff.removedLines) in \(diff.hunks.count) hunk(s)")
+        print("change:  +\(diff.addedLines) -\(diff.removedLines) in \(diff.hunks.count) hunk\(VaultOperations.plural(diff.hunks.count))")
         print("Waiting for review in Heft.")
         exit(0)
     }

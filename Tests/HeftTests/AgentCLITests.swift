@@ -108,6 +108,21 @@ struct AgentCLITests {
         #expect(ProposalStore.all(in: root).isEmpty)
     }
 
+    /// The count on the "change:" line agrees with its noun.
+    @Test("A proposal reports one hunk or two hunks")
+    func hunkCountReadsRight() throws {
+        let root = try vault(["Note.md": "one\ntwo\nthree\nfour\nfive\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let single = try run(["propose", root.path, "Note.md"], stdin: "one\ntwo revised\nthree\nfour\nfive\n")
+        #expect(single.text.contains("in 1 hunk\n"), "\(single.text)")
+        // A second vault: a note with a proposal waiting refuses another.
+        let other = try vault(["Note.md": "one\ntwo\nthree\nfour\nfive\n"])
+        defer { try? FileManager.default.removeItem(at: other) }
+        let double = try run(["propose", other.path, "Note.md"], stdin: "one revised\ntwo\nthree\nfour\nfive revised\n")
+        #expect(double.text.contains("in 2 hunks\n"), "\(double.text)")
+    }
+
     // MARK: - drop
 
     @Test("An empty proposal id drops nothing")
