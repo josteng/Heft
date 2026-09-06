@@ -297,6 +297,25 @@ struct AgentCLITests {
         #expect(output.text.contains("+two and a half"))
     }
 
+    /// Renaming a numbered series: v0.3 to v0.4, then v0.2 to v0.3. The
+    /// second move's target is taken until the first is accepted, and a
+    /// proposal is checked against the vault as the pending moves would
+    /// leave it.
+    @Test("A move into a path a pending move vacates is accepted for review; without that move it is refused")
+    func chainedMoveIsAccepted() throws {
+        let root = try vault(["v0.2.md": "next\n", "v0.3.md": "later\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let refused = try run(["propose", root.path, "v0.2.md", "--move", "v0.3.md"])
+        #expect(refused.status != 0)
+        #expect(refused.error.contains("already exists"))
+
+        #expect(try run(["propose", root.path, "v0.3.md", "--move", "v0.4.md"]).status == 0)
+        let chained = try run(["propose", root.path, "v0.2.md", "--move", "v0.3.md"])
+        #expect(chained.status == 0, Comment(rawValue: chained.error))
+        #expect(chained.text.contains("is taken until"))
+        #expect(ProposalStore.all(in: root).filter { $0.kind == .move }.count == 2)
+    }
+
     @Test("`heft changes` on a note nobody read says so, rather than diffing against nothing")
     func changesWithoutARead() throws {
         let root = try vault(["Note.md": "one\n"])

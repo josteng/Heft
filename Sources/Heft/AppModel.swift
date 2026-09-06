@@ -1731,7 +1731,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Opens the inbox note, the one Spotlight's "Capture to Inbox" appends to
+    /// Opens the inbox note, the one the Capture to Inbox shortcut appends to
     /// and Settings ▸ Capture names, creating it when the vault has none yet.
     @discardableResult
     func openInbox() -> Bool {

@@ -217,8 +217,17 @@ public enum AgentCLI {
         if let requested = options["move"] {
             let cleaned = NewNoteLocation.normalised(requested)
             guard !cleaned.isEmpty else { fail("--move needs a destination path") }
-            guard !existing.contains(where: { $0.relativePath == cleaned }) else {
-                fail("\(cleaned) already exists")
+            if existing.contains(where: { $0.relativePath == cleaned }) {
+                // Taken now, but a pending move takes that file away: the
+                // chain a numbered series is renamed by, v0.3 to v0.4 and
+                // then v0.2 to v0.3. Accepted for review against the vault
+                // as the pending moves would leave it; the review centre
+                // refuses to apply it while the path is still taken.
+                let vacating = ProposalStore.all(in: root).first {
+                    $0.kind == .move && $0.notePath == cleaned && $0.destination != nil
+                }
+                guard let vacating else { fail("\(cleaned) already exists") }
+                print("note:    \(cleaned) is taken until \(vacating.id) is accepted; accept that move first")
             }
             destination = cleaned
         }

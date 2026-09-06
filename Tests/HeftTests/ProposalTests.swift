@@ -625,3 +625,41 @@ struct ProposalTests {
         return root
     }
 }
+
+/// The other half of a chained move: the review centre refuses to apply a
+/// move while its target is still taken, and keeps the proposal for when
+/// the earlier move has gone through.
+@Suite("A move into a taken path")
+struct TakenMoveTests {
+    @Test("Applying a move whose destination exists moves nothing and keeps the proposal")
+    @MainActor
+    func refusedWhileTaken() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-taken-move-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "next\n".write(to: root.appendingPathComponent("v0.2.md"), atomically: true, encoding: .utf8)
+        try "later\n".write(to: root.appendingPathComponent("v0.3.md"), atomically: true, encoding: .utf8)
+        try ProposalStore.write(
+            Proposal(
+                notePath: "v0.2.md", base: nil, body: "",
+                agent: "claude-code", summary: "Shift the list",
+                kind: .move, destination: "v0.3.md"
+            ),
+            in: root
+        )
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "v0.2.md")
+        )
+        defer { model.closeWorkspace() }
+        model.refreshProposals()
+        let move = try #require(model.pendingProposals.structural.first)
+
+        model.applyStructural(move)
+        #expect(try String(contentsOf: root.appendingPathComponent("v0.3.md"), encoding: .utf8) == "later\n")
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("v0.2.md").path))
+        #expect(model.status.contains("already exists"))
+        #expect(!ProposalStore.all(in: root).isEmpty, "the proposal waits for the path to be freed")
+    }
+}
