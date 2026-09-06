@@ -201,6 +201,14 @@ struct AppCommand: Identifiable {
             action: { _ in AppearanceSettings.shared.colorfulFormattingEnabled.toggle() }
         ),
         Self(
+            id: "toggleVim",
+            title: "Toggle Vim mode",
+            symbol: "keyboard",
+            searchTerms: "vim modal editing normal insert key bindings keyboard",
+            displayTitle: { _ in VimSettings.shared.isEnabled ? "Turn off Vim mode" : "Turn on Vim mode" },
+            action: { _ in VimSettings.shared.isEnabled.toggle() }
+        ),
+        Self(
             id: "toggleCalendar",
             title: "Toggle calendar",
             symbol: "calendar",

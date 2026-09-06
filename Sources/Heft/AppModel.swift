@@ -561,8 +561,6 @@ final class AppModel: ObservableObject {
         scopePath = requestedScope
         attach(to: registry.session(for: root))
 
-        // Obsidian's own vim setting is a reasonable default for the editor,
-        // even though modal editing itself is not implemented yet.
         current = nil
         text = ""
         isDirty = false

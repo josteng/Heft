@@ -6,12 +6,12 @@ import HeftCore
 final class VimSettings: ObservableObject {
     static let shared = VimSettings()
 
+    // Off until someone turns it on, and app-wide. A vault's Obsidian vimMode
+    // used to be adopted as the initial value, which switched modal editing
+    // on without a word for anyone opening an Obsidian vault configured that
+    // way on a fresh Mac; bringing that back wants a visible announcement.
     @Published var isEnabled: Bool {
-        didSet {
-            guard !isApplyingVaultDefault else { return }
-            followsVaultDefault = false
-            HeftDefaults.shared.set(isEnabled, forKey: Self.enabledKey)
-        }
+        didSet { HeftDefaults.shared.set(isEnabled, forKey: Self.enabledKey) }
     }
     @Published private(set) var mode: VimMode = .normal
     @Published private(set) var message: String?
@@ -37,12 +37,8 @@ final class VimSettings: ObservableObject {
         "dev.stenglein.Heft.vim.continuesMarkdownStructure"
     private static let matchesTypographicQuotesKey =
         "dev.stenglein.Heft.vim.matchesTypographicQuotes"
-    private var isApplyingVaultDefault = false
-    private(set) var followsVaultDefault: Bool
-
     private init() {
         let defaults = HeftDefaults.shared
-        followsVaultDefault = defaults.object(forKey: Self.enabledKey) == nil
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         continuesMarkdownStructure = defaults.object(
             forKey: Self.continuesMarkdownStructureKey
@@ -50,13 +46,6 @@ final class VimSettings: ObservableObject {
         matchesTypographicQuotes = defaults.object(
             forKey: Self.matchesTypographicQuotesKey
         ) == nil || defaults.bool(forKey: Self.matchesTypographicQuotesKey)
-    }
-
-    func adoptVaultDefault(_ enabled: Bool) {
-        guard followsVaultDefault, isEnabled != enabled else { return }
-        isApplyingVaultDefault = true
-        isEnabled = enabled
-        isApplyingVaultDefault = false
     }
 
     func report(mode: VimMode, message: String? = nil) {
@@ -81,8 +70,8 @@ struct VimSettingsView: View {
                         .background(.orange.opacity(0.12), in: .capsule)
                 }
             }
-            Text("Initially follows the vault's Obsidian Vim setting; changing this toggle creates an "
-                + "app-wide preference. Uses native Swift key handling. Your notes remain ordinary Markdown, "
+            Text("Off by default, and app-wide; the command palette (⌘P) has the same switch. "
+                + "Uses native Swift key handling. Your notes remain ordinary Markdown, "
                 + "and Heft does not bundle or link against Vim or Neovim.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -1,9 +1,10 @@
 # Vim mode
 
-Heft's Vim mode is experimental and is an original, native Swift implementation. It initially
-follows `.obsidian/app.json`'s `vimMode` value; Settings → Vim can override that
-with an app-wide preference. It does not embed JavaScript, Vim, Neovim, VimR,
-XVim, or Zed.
+Heft's Vim mode is experimental and is an original, native Swift implementation. It is
+off until switched on, in Settings → Vim or from the command palette, and the
+setting is app-wide; a vault's `.obsidian/app.json` `vimMode` is read but no
+longer adopted, since it switched modal editing on without a word. It does not
+embed JavaScript, Vim, Neovim, VimR, XVim, or Zed.
 
 ## Architecture
 

@@ -450,9 +450,6 @@ struct EditorPane: View {
         .task(id: model.documentGeneration) {
             closeFind()
         }
-        .task(id: model.settings.vimMode) {
-            VimSettings.shared.adoptVaultDefault(model.settings.vimMode)
-        }
         .task(id: model.pendingLineReveal) {
             guard let line = model.pendingLineReveal else { return }
             // Opening the note resets the caret to the top, and that reset is
