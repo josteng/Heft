@@ -1,0 +1,5 @@
+// Build settings for the Heft app target that do not belong in the project
+// file. Machine-specific ones, such as the team a release is signed under,
+// go in Local.xcconfig beside this file: it is read when it exists, git
+// ignores it, and Local.xcconfig.example lists what it can hold.
+#include? "Local.xcconfig"

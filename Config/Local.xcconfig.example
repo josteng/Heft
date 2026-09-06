@@ -1,0 +1,7 @@
+// Copy to Local.xcconfig, which git ignores. Every line is optional.
+
+// The Apple Developer team a release is signed under. Scripts/release.sh
+// uses it to choose the "Developer ID Application" certificate when the
+// keychain holds one for more than one team; with a single certificate the
+// script finds it without this.
+DEVELOPMENT_TEAM = TEAMID0000

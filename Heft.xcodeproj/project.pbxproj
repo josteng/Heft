@@ -49,6 +49,7 @@
 		020000000000000000000004 /* HeftTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HeftTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		020000000000000000000003 /* Heft.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Heft.icon; sourceTree = "<group>"; };
 		020000000000000000000005 /* Heft-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Heft-Info.plist"; sourceTree = "<group>"; };
+		020000000000000000000007 /* Heft.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Heft.xcconfig; sourceTree = "<group>"; };
 		020000000000000000000006 /* libHeftVimCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libHeftVimCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -128,6 +129,7 @@
 		060000000000000000000004 /* Config */ = {
 			isa = PBXGroup;
 			children = (
+				020000000000000000000007 /* Heft.xcconfig */,
 				020000000000000000000005 /* Heft-Info.plist */,
 			);
 			path = Config;
@@ -337,6 +339,7 @@
 		};
 		100000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = Heft;
 				CODE_SIGN_IDENTITY = "-";
@@ -356,6 +359,7 @@
 		};
 		100000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = Heft;
 				CODE_SIGN_IDENTITY = "-";

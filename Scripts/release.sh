@@ -10,7 +10,8 @@
 # Signing: a "Developer ID Application" certificate is used when the keychain
 # holds one (or name it in HEFT_DEVELOPER_ID). Without one the app is signed
 # ad hoc, which is fine for trying the pipeline and useless for shipping:
-# Gatekeeper refuses an ad-hoc app on any other Mac.
+# Gatekeeper refuses an ad-hoc app on any other Mac. A DEVELOPMENT_TEAM in
+# Config/Local.xcconfig narrows the choice to that team's certificate.
 #
 # Notarising needs credentials: a keychain profile made once with
 #   xcrun notarytool store-credentials heft-notary ...
@@ -47,11 +48,18 @@ if [[ -z "$VERSION" ]]; then
 fi
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD)"
 
+# The team comes from Config/Local.xcconfig when there is one, which is the
+# same file Xcode reads, so the two never disagree. It only matters when the
+# keychain holds Developer ID certificates for more than one team.
+TEAM=""
+if [[ -f "$ROOT/Config/Local.xcconfig" ]]; then
+    TEAM="$(sed -n 's/^DEVELOPMENT_TEAM *= *\([A-Z0-9]*\).*/\1/p' "$ROOT/Config/Local.xcconfig" | head -1)"
+fi
 IDENTITY="${HEFT_DEVELOPER_ID:-}"
 if [[ -z "$IDENTITY" ]]; then
     IDENTITY="$(
         security find-identity -v -p codesigning 2>/dev/null \
-            | awk -F'"' '/"Developer ID Application:/{print $2; exit}'
+            | awk -F'"' -v team="$TEAM" '/"Developer ID Application:/ && (team == "" || index($2, "(" team ")")) {print $2; exit}'
     )"
 fi
 if [[ -n "$IDENTITY" ]]; then

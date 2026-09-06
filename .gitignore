@@ -13,3 +13,6 @@ Resources/Assets.car
 .claude/
 .vscode/
 dist/
+
+# Machine-local build settings; see Config/Local.xcconfig.example.
+Config/Local.xcconfig
