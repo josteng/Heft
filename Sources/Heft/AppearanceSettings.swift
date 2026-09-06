@@ -218,12 +218,12 @@ struct AppearanceSettingsView: View {
             Section {
                 colorRow(
                     "Accent Color",
-                    detail: "The caret and checkboxes. Follows your macOS accent colour, "
-                        + "not a fixed colour, unless set here.",
+                    detail: "The caret and checkboxes. Follows your macOS accent color, "
+                        + "not a fixed color, unless set here.",
                     color: settableBinding(current: appearance.accentColor) { appearance.customAccentColor = $0 },
                     isCustom: appearance.customAccentColor != nil,
                     reset: { appearance.customAccentColor = nil },
-                    resetHelp: "Follow your macOS accent colour again"
+                    resetHelp: "Follow your macOS accent color again"
                 )
             }
 
@@ -233,7 +233,7 @@ struct AppearanceSettingsView: View {
                 colorRow(
                     "Link Color",
                     detail: "Defaults to Accent Color above; set here to use a different "
-                        + "colour just for links.",
+                        + "color just for links.",
                     color: settableBinding(current: appearance.linkColor) { appearance.customLinkColor = $0 },
                     isCustom: appearance.customLinkColor != nil,
                     reset: { appearance.customLinkColor = nil },
@@ -260,8 +260,8 @@ struct AppearanceSettingsView: View {
             Section {
                 Toggle(isOn: $appearance.colorfulFormattingEnabled) {
                     SettingLabel(
-                        "Colourful Formatting",
-                        detail: "Gives bold, italic, and headings each their own colour."
+                        "Colorful Formatting",
+                        detail: "Gives bold, italic, and headings each their own color."
                     )
                 }
                 Group {
@@ -478,7 +478,7 @@ struct AppearanceSettingsView: View {
 
             Button("Reset", action: appearance.resetHeadingColors)
                 .disabled(!appearance.hasCustomHeadingColor)
-                .help("Reset all six to their default colours")
+                .help("Reset all six to their default colors")
                 .frame(width: Self.resetWidth)
           }
         } label: {

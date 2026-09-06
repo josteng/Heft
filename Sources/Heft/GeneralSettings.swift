@@ -74,7 +74,7 @@ struct GeneralSettingsView: View {
             case .beside: "Beside the note I am reading"
             case .focus: "In the folder this window is showing"
             case .root: "At the top of the vault"
-            case .folder: "In one folder"
+            case .folder: "In a specific folder"
             }
         }
     }
@@ -128,7 +128,8 @@ struct GeneralSettingsView: View {
                 } label: {
                     SettingLabel(
                         "New notes go",
-                        detail: "Where ⌘N puts a note. Picking a folder in the sidebar first still wins."
+                        detail: "Where ⌘N and the sidebar's + button put a note. A folder "
+                            + "picked in the sidebar first still wins."
                     )
                 }
                 if choice.wrappedValue == .folder {

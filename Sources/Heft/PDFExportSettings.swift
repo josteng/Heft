@@ -65,7 +65,7 @@ struct PDFExportAccessory: View {
                 }
             }
             GridRow {
-                Text("Colours")
+                Text("Colors")
                 Picker("", selection: $settings.options.colours) {
                     ForEach(PDFExportOptions.Colours.allCases) { Text($0.label).tag($0) }
                 }

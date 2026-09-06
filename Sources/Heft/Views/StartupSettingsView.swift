@@ -26,8 +26,7 @@ struct StartupSettingsView: View {
                 } label: {
                     SettingLabel(
                         "Open",
-                        detail: "macOS brings back the windows you had. This is for a start "
-                            + "with none, after a crash or with restoration off."
+                        detail: "For a start with no windows to bring back."
                     )
                 }
             } header: {
