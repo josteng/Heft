@@ -138,6 +138,18 @@ struct CommonMarkGapTests {
         #expect(links("see www.example.com.").first == "https://www.example.com")
     }
 
+    /// Obsidian links a bare host when a slash follows it, and Heft follows
+    /// Obsidian rather than GFM here, because a vault has to read the same in
+    /// both. Without the slash a dotted word is just a word.
+    @Test("A bare domain links when a path follows, and only then")
+    func bareDomainWithPath() {
+        #expect(links("enrol at developer.example.com/programs today") == ["https://developer.example.com/programs"])
+        #expect(links("see example.com/docs.") == ["https://example.com/docs"])
+        #expect(links("(see example.com/docs)") == ["https://example.com/docs"])
+        #expect(links("example.com alone, then Note.md and Heft.app").isEmpty)
+        #expect(links("a version like 0.2.0/x is not a host either").isEmpty)
+    }
+
     /// An address inside a link's destination is already spoken for.
     @Test("An address inside a link is not linked twice")
     func noDoubleLinking() {

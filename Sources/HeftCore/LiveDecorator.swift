@@ -1405,6 +1405,26 @@ public enum LiveDecorator {
         return result
     }
 
+    /// GFM's end-of-link rule: trailing punctuation is not part of a URL,
+    /// and a closing bracket counts only when something inside the URL
+    /// opened it, so the paren ending "(see https://example.com)" is not
+    /// swallowed by the link.
+    private static func trimmingLinkTail(_ url: String) -> String {
+        var body = url
+        while let last = body.last {
+            if ".,;:!?\"'".contains(last) { body.removeLast(); continue }
+            if last == ")" || last == "]" {
+                let open: Character = last == ")" ? "(" : "["
+                if body.filter({ $0 == open }).count < body.filter({ $0 == last }).count {
+                    body.removeLast()
+                    continue
+                }
+            }
+            break
+        }
+        return body
+    }
+
     private static func isWordCharacter(_ character: unichar) -> Bool {
         (character >= UInt16(48) && character <= UInt16(57))
             || (character >= UInt16(65) && character <= UInt16(90))
@@ -1594,21 +1614,7 @@ public enum LiveDecorator {
         }
 
         for match in matches(#"https?://[^\s<>]+"#, text, excluding: protected) {
-            // GFM trims trailing punctuation, and counts a closing bracket
-            // only when something inside the URL opened it, so the paren that
-            // ends "(see https://example.com)" is not swallowed by the link.
-            var body = text.substring(with: match)
-            while let last = body.last {
-                if ".,;:!?\"'".contains(last) { body.removeLast(); continue }
-                if last == ")" || last == "]" {
-                    let open: Character = last == ")" ? "(" : "["
-                    if body.filter({ $0 == open }).count < body.filter({ $0 == last }).count {
-                        body.removeLast()
-                        continue
-                    }
-                }
-                break
-            }
+            let body = trimmingLinkTail(text.substring(with: match))
             // A scheme with nothing after it is not a link, however much it
             // looks like the start of one.
             guard let scheme = body.range(of: "://"), scheme.upperBound < body.endIndex else {
@@ -1648,9 +1654,24 @@ public enum LiveDecorator {
 
         // GFM's `www.` autolink. No scheme is typed, so one is supplied.
         for match in matches(#"(?<![\w.@/-])www\.[^\s<>]+"#, text, excluding: protected) {
-            var body = text.substring(with: match)
-            while let last = body.last, ".,;:!?\"'".contains(last) { body.removeLast() }
+            let body = trimmingLinkTail(text.substring(with: match))
             guard body.count > "www.".count else { continue }
+            let range = NSRange(location: match.location, length: (body as NSString).length)
+            result.append(MarkdownDecoration(
+                range: range, style: .link(destination: "https://\(body)")
+            ))
+            protected.insert(range)
+        }
+
+        // Obsidian's third case, beyond GFM: a bare host ending in a two- to
+        // four-letter top-level domain, linked only when a slash follows. So
+        // `example.com/docs` is a link and `example.com`, `Note.md` and
+        // `Heft.app` on their own are not. The same rule, false positives
+        // included, because a vault has to read the same in both editors.
+        for match in matches(
+            #"(?<![\w.@/-])[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,4}/[^\s<>]*"#, text, excluding: protected
+        ) {
+            let body = trimmingLinkTail(text.substring(with: match))
             let range = NSRange(location: match.location, length: (body as NSString).length)
             result.append(MarkdownDecoration(
                 range: range, style: .link(destination: "https://\(body)")
