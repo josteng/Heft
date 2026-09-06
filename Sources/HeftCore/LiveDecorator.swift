@@ -1338,7 +1338,7 @@ public enum LiveDecorator {
     /// candidate that so much as touches a protected range — which a line
     /// holding one code span would.
     private static func pendingEmphasis(
-        _ text: NSString, protected: ProtectedRanges, closedStarts: Set<Int>
+        _ text: NSString, protected: ProtectedRanges, closedDelimiters: Set<Int>
     ) -> [MarkdownDecoration] {
         let asterisk = UInt16(42)
         let underscore = UInt16(95)
@@ -1365,8 +1365,8 @@ public enum LiveDecorator {
                 // `***` is ambiguous mid-typing and three-deep emphasis is rare
                 // enough that guessing wrong is worse than doing nothing.
                 guard length == 1 || length == 2 else { continue }
-                // A closed span starts here, so this delimiter is not open.
-                guard !closedStarts.contains(index) else { continue }
+                // A closed span starts or ends here, so this delimiter is not open.
+                guard !closedDelimiters.contains(index) else { continue }
                 guard !protected.intersects(NSRange(location: index, length: length)) else { continue }
 
                 // Must open: something has to follow, and not a space — which
@@ -1375,14 +1375,19 @@ public enum LiveDecorator {
                 let next = text.character(at: runEnd)
                 guard !isBlank(next), next != character else { continue }
 
+                let previous: UInt16? = index > line.location ? text.character(at: index - 1) : nil
                 // `_` never opens inside a word, so `snake_case` is a name and
-                // not the start of an emphasis span.
-                if character == underscore, index > line.location {
-                    let previous = text.character(at: index - 1)
-                    guard !isWordCharacter(previous), previous != underscore else { continue }
+                // not the start of an emphasis span. A single `*` follows the
+                // same rule, because the closed-span grammar does: `5*3` can
+                // never close, so it must not style either.
+                if let previous, character == underscore || length == 1 {
+                    guard !isWordCharacter(previous), previous != character else { continue }
                 }
-                if character == asterisk, index > line.location,
-                   text.character(at: index - 1) == asterisk {
+                if let previous, character == asterisk, previous == asterisk { continue }
+                // A run followed by punctuation opens only after a space or
+                // more punctuation, as in CommonMark: `word**,` is not the
+                // start of anything.
+                if isPunctuation(next), let previous, !isBlank(previous), !isPunctuation(previous) {
                     continue
                 }
 
@@ -1404,6 +1409,11 @@ public enum LiveDecorator {
         (character >= UInt16(48) && character <= UInt16(57))
             || (character >= UInt16(65) && character <= UInt16(90))
             || (character >= UInt16(97) && character <= UInt16(122))
+    }
+
+    private static func isPunctuation(_ character: UInt16) -> Bool {
+        guard let scalar = UnicodeScalar(character) else { return false }
+        return CharacterSet.punctuationCharacters.union(.symbols).contains(scalar)
     }
 
     private static func inlineDecorations(_ text: NSString, protected initial: ProtectedRanges) -> [MarkdownDecoration] {
@@ -1444,14 +1454,17 @@ public enum LiveDecorator {
         // finished; Obsidian styles from the opening delimiter.
         //
         // Every closed span has already been matched above, so a delimiter
-        // that no closed span starts on is an open one.
-        let closedStarts = Set(result.compactMap { decoration -> Int? in
+        // that no closed span starts or ends on is an open one. The closer
+        // counts too: `**bold**,` ends in a run followed by something that is
+        // not a space, which is exactly what an opener looks like.
+        let closedDelimiters = Set(result.flatMap { decoration -> [Int] in
             switch decoration.style {
-            case .bold, .italic: decoration.range.location
-            default: nil
+            case .bold: [decoration.range.location, NSMaxRange(decoration.range) - 2]
+            case .italic: [decoration.range.location, NSMaxRange(decoration.range) - 1]
+            default: []
             }
         })
-        result.append(contentsOf: pendingEmphasis(text, protected: protected, closedStarts: closedStarts))
+        result.append(contentsOf: pendingEmphasis(text, protected: protected, closedDelimiters: closedDelimiters))
 
         wrapped(#"~~(?=\S)([^\n]+?)(?<=\S)~~"#, 2, .strikethrough)
         wrapped(#"==(?=\S)([^\n]+?)(?<=\S)=="#, 2, .highlight)

@@ -1606,7 +1606,7 @@ struct PendingEmphasisTests {
     }
 
     /// A closed span keeps its own styling and does not also start a pending
-    /// one, which is what `closedStarts` is for.
+    /// one, which is what `closedDelimiters` is for.
     @Test("A closed span is not also treated as open")
     func closedSpansWin() {
         let source = "Closed **bold** and plain after."
@@ -1614,6 +1614,41 @@ struct PendingEmphasisTests {
         #expect(!traits(source, caret: source.count, at: after).bold)
         let inside = (source as NSString).range(of: "bold").location
         #expect(traits(source, caret: source.count, at: inside).bold)
+    }
+
+    /// The closer of a finished span is not an opener either. Followed by a
+    /// space it never looked like one; followed by a comma it did, and the
+    /// rest of the line went bold whenever the caret was on it.
+    @Test("A closer followed by punctuation opens nothing")
+    func closerBeforePunctuationIsNotAnOpener() {
+        let source = "Closed **bold**, and plain after."
+        let after = (source as NSString).range(of: "and plain after").location
+        #expect(!traits(source, caret: source.count, at: after).bold)
+        let italic = "Closed *slanted*. Then plain."
+        let plain = (italic as NSString).range(of: "Then plain").location
+        #expect(!traits(italic, caret: italic.count, at: plain).italic)
+        // A run that really is open, after a closed span, still styles.
+        let open = "Closed **bold**, then *open text"
+        let text = (open as NSString).range(of: "open text").location
+        #expect(traits(open, caret: open.count, at: text).italic)
+    }
+
+    /// The closed-span grammar never lets a single `*` open after a word
+    /// character, so `5*3` cannot become italic however it is finished, and
+    /// a run stuck to the end of a word and followed by punctuation is not an
+    /// opener in CommonMark either. Both used to style the rest of the line.
+    @Test("A delimiter that cannot open does not style")
+    func delimitersThatCannotOpen() {
+        let arithmetic = "Cost is 5*3 apples"
+        let apples = (arithmetic as NSString).range(of: "3 apples").location
+        #expect(!traits(arithmetic, caret: arithmetic.count, at: apples).italic)
+        let stuck = "word**, more text"
+        let more = (stuck as NSString).range(of: "more text").location
+        #expect(!traits(stuck, caret: stuck.count, at: more).bold)
+        // Bold may still open inside a word, as its closed form may.
+        let inside = "word**bold now"
+        let bold = (inside as NSString).range(of: "bold now").location
+        #expect(traits(inside, caret: inside.count, at: bold).bold)
     }
 }
 
