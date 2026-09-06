@@ -18,6 +18,7 @@ final class GeneralSettings: ObservableObject {
 
     private static let newNoteKey = "dev.stenglein.Heft.general.newNoteLocation"
     private static let calendarKey = "dev.stenglein.Heft.general.calendarVisibility"
+    private static let agentOfferKey = "dev.stenglein.Heft.general.offersAgentSetup"
 
     @Published var newNoteLocation: NewNoteLocation {
         didSet {
@@ -31,7 +32,19 @@ final class GeneralSettings: ObservableObject {
         }
     }
 
+    /// Whether a vault without agent instructions is offered them. Off is
+    /// for someone who does not use agents and would otherwise answer the
+    /// question once per vault; the menu item and the command line still
+    /// write the guide on request.
+    @Published var offersAgentSetup: Bool {
+        didSet {
+            HeftDefaults.shared.set(offersAgentSetup, forKey: Self.agentOfferKey)
+        }
+    }
+
     private init() {
+        offersAgentSetup = HeftDefaults.shared.object(forKey: Self.agentOfferKey) == nil
+            || HeftDefaults.shared.bool(forKey: Self.agentOfferKey)
         newNoteLocation = NewNoteLocation(
             stored: HeftDefaults.shared.string(forKey: Self.newNoteKey) ?? ""
         )
@@ -150,6 +163,20 @@ struct GeneralSettingsView: View {
                     ? "How a window opens: without the calendar when it is showing a folder "
                         + "that holds no daily notes. ⇧⌘D shows and hides it at any time."
                     : "How every window opens. ⇧⌘D shows and hides it at any time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Offer agent setup for new vaults", isOn: Binding(
+                    get: { settings.offersAgentSetup },
+                    set: { settings.offersAgentSetup = $0 }
+                ))
+            } footer: {
+                Text(settings.offersAgentSetup
+                    ? "A vault without agent instructions is asked once whether to add them. "
+                        + "Not Now is remembered for that vault."
+                    : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

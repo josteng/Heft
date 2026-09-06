@@ -91,6 +91,7 @@ final class AppModel: ObservableObject {
     /// which would otherwise overwrite what a restored window was showing
     /// before anybody had chosen anything.
     private var calendarSettingSubscription: AnyCancellable?
+    private var agentOfferSettingSubscription: AnyCancellable?
     private var sessionChangeSubscription: AnyCancellable?
     private var diskChangeSubscription: AnyCancellable?
 
@@ -432,6 +433,12 @@ final class AppModel: ObservableObject {
             dailyNotesAreInScope: dailyNotesAreInScope,
             remembered: descriptor?.calendarVisible
         )
+        // The banner reads the setting through the model, so the window has
+        // to redraw when it changes.
+        agentOfferSettingSubscription = GeneralSettings.shared.$offersAgentSetup
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
         calendarSettingSubscription = GeneralSettings.shared.$calendarVisibility
             .dropFirst()
             .sink { [weak self] choice in
@@ -2116,11 +2123,19 @@ final class AppModel: ObservableObject {
 
     private static let agentOfferDismissedKey = "dev.stenglein.Heft.agentOfferDismissed"
 
-    /// Turning the offer down is remembered per vault *and per guide version*,
-    /// so a vault that said no once is asked again when the instructions it
-    /// would receive have actually changed — and not before.
-    private static func offerKey(for vaultRoot: URL) -> String {
-        "\(vaultRoot.standardizedFileURL.path)#\(AgentGuide.version)"
+    /// What turning the offer down is remembered under.
+    ///
+    /// A vault with no guide is remembered by path alone: whoever said no
+    /// declined the feature, and a new revision of instructions they never
+    /// wanted is no reason to ask again. A vault whose guide is out of date
+    /// opted in once, so it is remembered per guide version and asked again
+    /// when the instructions it holds have actually changed, and not before.
+    private static func offerKey(
+        for vaultRoot: URL, status: AgentGuide.Status, version: Int
+    ) -> String {
+        let path = vaultRoot.standardizedFileURL.path
+        if case .absent = status { return path }
+        return "\(path)#\(version)"
     }
 
     /// Whether to offer agent setup for the open vault.
@@ -2129,13 +2144,28 @@ final class AppModel: ObservableObject {
     /// the proposal flow invisible: open a folder, and a Claude Code session
     /// in it would reach for Write, which is the one thing proposals exist to
     /// prevent. So a vault without the guide says so once, and remembers being
-    /// turned down.
+    /// turned down; the General setting switches the question off altogether.
     var shouldOfferAgentSetup: Bool {
-        guard let vaultRoot, agentGuideStatus != .current else { return false }
+        shouldOfferAgentSetup(guideVersion: AgentGuide.version)
+    }
+
+    /// The same, for a guide revision other than this build's and a setting
+    /// other than the shared one, which is how a test asks what a later Heft
+    /// would do with today's answer without writing to every open window.
+    func shouldOfferAgentSetup(guideVersion: Int, offered: Bool? = nil) -> Bool {
+        guard offered ?? GeneralSettings.shared.offersAgentSetup else { return false }
+        let status = agentGuideStatus
+        guard let vaultRoot, status != .current else { return false }
         let dismissed = HeftDefaults.shared.stringArray(
             forKey: Self.agentOfferDismissedKey
         ) ?? []
-        return !dismissed.contains(Self.offerKey(for: vaultRoot))
+        if dismissed.contains(Self.offerKey(for: vaultRoot, status: status, version: guideVersion)) {
+            return false
+        }
+        // Earlier builds remembered a vault without a guide per version too.
+        // That answer stands, rather than asking once more after an update.
+        let path = vaultRoot.standardizedFileURL.path
+        return !dismissed.contains("\(path)#\(guideVersion)")
     }
 
     /// Remembers that this vault was offered agent setup and turned down, so
@@ -2145,9 +2175,9 @@ final class AppModel: ObservableObject {
         var dismissed = HeftDefaults.shared.stringArray(
             forKey: Self.agentOfferDismissedKey
         ) ?? []
-        let path = Self.offerKey(for: vaultRoot)
-        guard !dismissed.contains(path) else { return }
-        dismissed.append(path)
+        let key = Self.offerKey(for: vaultRoot, status: agentGuideStatus, version: AgentGuide.version)
+        guard !dismissed.contains(key) else { return }
+        dismissed.append(key)
         HeftDefaults.shared.set(dismissed, forKey: Self.agentOfferDismissedKey)
         objectWillChange.send()
     }
