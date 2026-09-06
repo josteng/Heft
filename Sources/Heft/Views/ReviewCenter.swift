@@ -259,11 +259,19 @@ struct StructuralReviewView: View {
                 ContentUnavailableView(
                     proposal.headline,
                     systemImage: proposal.kind == .delete ? "trash" : "arrow.right.doc.on.clipboard",
-                    description: Text(proposal.kind == .delete
-                        ? "The file is moved to the Trash."
-                        : "Every link pointing at it is repointed to the new path.")
+                    description: Text(structuralDescription)
                 )
                 .frame(maxHeight: .infinity)
+            }
+
+            // Above the buttons rather than in the description, which is the
+            // same grey the standard sentence is: a consequence written in
+            // the same ink as the explanation is read as more explanation.
+            if let warning = ReviewWarning.dailyDeparture(
+                kind: proposal.kind, notePath: proposal.notePath,
+                destination: proposal.destination, daily: model.dailyNotes
+            ) {
+                WarningBand(text: warning)
             }
 
             Divider()
@@ -303,6 +311,12 @@ struct StructuralReviewView: View {
         }
     }
 
+    private var structuralDescription: String {
+        proposal.kind == .delete
+            ? "The file is moved to the Trash."
+            : "Every link pointing at it is repointed to the new path."
+    }
+
     private var applyLabel: String {
         switch proposal.kind {
         case .create: "Create"
@@ -310,6 +324,55 @@ struct StructuralReviewView: View {
         case .move: "Move"
         case .edit: "Apply"
         }
+    }
+}
+
+/// Whether a proposal costs something the reader would not expect from its
+/// summary, and what to say about it.
+///
+/// A value rather than a line of view code, so what raises a warning is
+/// decided in one place and can be asked about without a window.
+enum ReviewWarning {
+    /// A move that takes a note out of the folder the calendar looks in.
+    /// Deleting one is not this: a delete says what it is.
+    static func dailyDeparture(
+        kind: Proposal.Kind, notePath: String, destination: String?, daily: DailyNotes?
+    ) -> String? {
+        guard kind == .move, let daily, let destination,
+              daily.leavesDailyFolder(notePath, movingTo: destination)
+        else { return nil }
+        return daily.departureNote(count: 1)
+    }
+}
+
+/// A consequence worth stopping at, in the ink macOS uses for a caution:
+/// enough to catch the eye above the button that carries it out, without
+/// the alarm of a destructive red.
+private struct WarningBand: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.orange)
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        }
+        // The same inset all round as the footer below it keeps, so the band
+        // sits in the panel rather than against its divider.
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
     }
 }
 

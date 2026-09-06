@@ -193,7 +193,16 @@ while the marker shows. The list only moves when that row is off screen, since
 scrolling the tree under a reader who can see the thing already is what reads
 as losing their place.
 
-Dragging a daily note out of its folder asks first. A daily note is found by
+Dragging a daily note out of its folder asks first, and an agent proposing the
+same move is told while it proposes, with the review sheet repeating it in a
+caution band above the buttons. Not in the description beside the standard
+sentence about repointed links: a consequence written in the same grey as the
+explanation is read as more explanation. Three places, one sentence, on `DailyNotes`. Accepting a
+proposal asks nothing further: a drag is a slip of the hand with no stated
+intent, while a proposal is deliberate, summarised and read as a diff, and a
+question there is the shape that teaches people to click through questions.
+
+A daily note is found by
 its folder and its name, so moving one elsewhere quietly turns it into an
 ordinary note: the calendar stops showing it and ⇧⌘T writes a new one in its
 place. The question is asked once for a drop, and only about the notes

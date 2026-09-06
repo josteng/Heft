@@ -1,5 +1,6 @@
 import AppKit
 @testable import Heft
+@testable import HeftCore
 import Foundation
 import Testing
 
@@ -169,5 +170,52 @@ struct SidebarHighlightTests {
         #expect(SidebarHighlight.litsFolder(
             "Papers copy", highlighted: "Papers copy", selectedFolder: "Ideas"
         ))
+    }
+}
+
+/// What a review sheet stops the reader at. The rule alone: whether the band
+/// is drawn is drawing, and this is the decision behind it.
+@Suite("Warnings in the review sheet")
+struct ReviewWarningTests {
+    private func daily(folder: String = "Daily Notes") -> DailyNotes {
+        var settings = ObsidianSettings()
+        settings.dailyNotesFolder = folder
+        settings.dailyNotesFolderIsConfigured = true
+        return DailyNotes(vaultRoot: URL(fileURLWithPath: "/vault"), settings: settings)
+    }
+
+    @Test("A move out of the daily folder is worth stopping at")
+    func movingOutWarns() {
+        #expect(ReviewWarning.dailyDeparture(
+            kind: .move, notePath: "Daily Notes/2026-09-06.md",
+            destination: "Archive/2026-09-06.md", daily: daily()
+        ) == "This note stops being a daily note. The calendar only looks in Daily Notes.")
+    }
+
+    @Test("A move inside the folder, or of an ordinary note, is not")
+    func ordinaryMovesAreQuiet() {
+        #expect(ReviewWarning.dailyDeparture(
+            kind: .move, notePath: "Daily Notes/2026-09-06.md",
+            destination: "Daily Notes/2026-09-08.md", daily: daily()
+        ) == nil)
+        #expect(ReviewWarning.dailyDeparture(
+            kind: .move, notePath: "Plan.md", destination: "Archive/Plan.md", daily: daily()
+        ) == nil)
+    }
+
+    /// Deleting a daily note says what it is in its own headline, and a
+    /// warning that repeats the obvious is one people learn to skip.
+    @Test("Deleting is not warned about, and neither is a vault with no daily folder")
+    func deletesAndUnconfiguredVaults() {
+        // Asked with somewhere to go, so it is the kind that decides and not
+        // the missing destination a delete happens to have.
+        #expect(ReviewWarning.dailyDeparture(
+            kind: .delete, notePath: "Daily Notes/2026-09-06.md",
+            destination: "Archive/2026-09-06.md", daily: daily()
+        ) == nil)
+        #expect(ReviewWarning.dailyDeparture(
+            kind: .move, notePath: "Daily Notes/2026-09-06.md",
+            destination: "Archive/2026-09-06.md", daily: nil
+        ) == nil)
     }
 }

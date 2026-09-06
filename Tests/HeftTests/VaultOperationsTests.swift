@@ -280,3 +280,37 @@ struct DailyFilingTests {
         #expect(!daily.isFiledAsDaily("2026-09-06.md"))
     }
 }
+
+/// One wording for the window's question, the command line's note and the
+/// review sheet, which is the point of it living on `DailyNotes`.
+extension DailyFilingTests {
+    @Test("Leaving the folder is what counts, not moving within it")
+    func leavingTheFolder() {
+        var settings = ObsidianSettings()
+        settings.dailyNotesFolder = "Daily Notes"
+        settings.dailyNotesFolderIsConfigured = true
+        let daily = DailyNotes(vaultRoot: URL(fileURLWithPath: "/vault"), settings: settings)
+
+        #expect(daily.leavesDailyFolder("Daily Notes/2026-09-06.md", movingTo: "Archive/2026-09-06.md"))
+        // Renamed inside the folder, where the calendar still looks.
+        #expect(!daily.leavesDailyFolder("Daily Notes/2026-09-06.md", movingTo: "Daily Notes/2026-09-08.md"))
+        // Not a daily note to begin with.
+        #expect(!daily.leavesDailyFolder("Plan.md", movingTo: "Archive/Plan.md"))
+    }
+
+    @Test("The sentence names the folder, and counts")
+    func departureWording() {
+        var settings = ObsidianSettings()
+        settings.dailyNotesFolder = "Daily Notes"
+        settings.dailyNotesFolderIsConfigured = true
+        let daily = DailyNotes(vaultRoot: URL(fileURLWithPath: "/vault"), settings: settings)
+
+        #expect(daily.departureNote(count: 1)
+            == "This note stops being a daily note. The calendar only looks in Daily Notes.")
+        #expect(daily.departureNote(count: 3)
+            == "These notes stop being daily notes. The calendar only looks in Daily Notes.")
+        #expect(daily.departureNote(for: "Daily Notes/2026-09-06.md")
+            == "Daily Notes/2026-09-06.md stops being a daily note. "
+            + "The calendar only looks in Daily Notes.")
+    }
+}

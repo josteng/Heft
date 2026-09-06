@@ -77,6 +77,31 @@ public struct DailyNotes: Sendable {
         return (relativePath as NSString).deletingLastPathComponent == folder
     }
 
+    /// Whether moving that note to `destination`, a vault-relative file path,
+    /// takes it out of the folder the calendar looks in.
+    public func leavesDailyFolder(_ relativePath: String, movingTo destination: String) -> Bool {
+        isFiledAsDaily(relativePath)
+            && (destination as NSString).deletingLastPathComponent != folder
+    }
+
+    /// What that costs, said once here so the window's question, the command
+    /// line's note and the review sheet cannot drift apart.
+    public func departureNote(count: Int) -> String {
+        // Named rather than "it": the review sheet puts this under a page of
+        // its own text, where a pronoun has nothing nearby to stand for.
+        let subject = count == 1
+            ? "This note stops being a daily note."
+            : "These notes stop being daily notes."
+        return "\(subject) \(calendarLooksHere)"
+    }
+
+    /// The same, for a place that has room to name the file.
+    public func departureNote(for name: String) -> String {
+        "\(name) stops being a daily note. \(calendarLooksHere)"
+    }
+
+    private var calendarLooksHere: String { "The calendar only looks in \(folder)." }
+
     public func url(for date: Date) -> URL {
         vaultRoot.appendingPathComponent(relativePath(for: date))
     }

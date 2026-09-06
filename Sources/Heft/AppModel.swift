@@ -1607,12 +1607,9 @@ final class AppModel: ObservableObject {
         let subject = leaving.count == 1
             ? (leaving[0].deletingPathExtension().lastPathComponent)
             : "\(leaving.count) daily notes"
-        let becomes = leaving.count == 1
-            ? "It stops being a daily note."
-            : "They stop being daily notes."
         guard host.confirm(
             title: "Move \(subject) out of \(daily.folder)?",
-            message: "\(becomes) The calendar only looks in \(daily.folder).",
+            message: daily.departureNote(count: leaving.count),
             confirm: "Move",
             destructive: false
         ) else {

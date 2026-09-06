@@ -229,6 +229,13 @@ public enum AgentCLI {
                 guard let vacating else { fail("\(cleaned) already exists") }
                 print("note:    \(cleaned) is taken until \(vacating.id) is accepted; accept that move first")
             }
+            // Said here as well as in the review sheet: an agent that hears
+            // it while proposing can pick somewhere else, rather than a
+            // person finding out while deciding.
+            let daily = DailyNotes(vaultRoot: root, settings: ObsidianSettings.load(vaultRoot: root))
+            if daily.leavesDailyFolder(item.relativePath, movingTo: cleaned) {
+                print("note:    \(daily.departureNote(for: item.relativePath))")
+            }
             destination = cleaned
         }
 

@@ -93,6 +93,39 @@ struct AgentCLITests {
 
     // MARK: - read
 
+    /// Said while proposing, so an agent can pick somewhere else rather than
+    /// a person finding out only when they come to accept it.
+    @Test("Proposing a move out of the daily folder says what it costs")
+    func movingADailyNoteIsCalledOut() throws {
+        let root = try vault([
+            ".obsidian/daily-notes.json": #"{"folder": "Daily Notes", "format": "YYYY-MM-DD"}"#,
+            "Daily Notes/2026-09-06.md": "today\n",
+            "Plan.md": "plan\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let leaving = try run([
+            "propose", root.path, "Daily Notes/2026-09-06.md", "--move", "Archive/2026-09-06.md",
+            "--summary", "Archive it",
+        ])
+        #expect(leaving.text.contains(
+            "note:    Daily Notes/2026-09-06.md stops being a daily note."
+        ))
+        #expect(leaving.text.contains("The calendar only looks in Daily Notes."))
+
+        // An ordinary note moved anywhere, and a daily note kept in its own
+        // folder, are nobody's business but the reader's.
+        let ordinary = try run([
+            "propose", root.path, "Plan.md", "--move", "Archive/Plan.md", "--summary", "Archive it",
+        ])
+        #expect(!ordinary.text.contains("daily note"))
+        let renamed = try run([
+            "propose", root.path, "Daily Notes/2026-09-06.md",
+            "--move", "Daily Notes/2026-09-08.md", "--summary", "Shift it",
+        ])
+        #expect(!renamed.text.contains("daily note"))
+    }
+
     @Test("`heft read` hands back the file's bytes and adds nothing")
     func readIsByteExact() throws {
         // Three shapes, because the bug was `print`: a note ending in a
