@@ -172,15 +172,19 @@ row it added.
 Decorating reparsed the whole document per keystroke, which made typing scale
 with the note rather than the edit. `LiveDecorator.decorations(in:reusing:)`
 reuses the previous parse when the edit provably could not have changed
-anything outside one blank-line-bounded paragraph, and reparses that paragraph
-alone. Two guards make it safe: a paragraph containing anything that can open
-a construct across blank lines (a fence, `$$`, a comment, or `---` at the
-start of a line, where a thematic break or frontmatter fence can stand; a
-table's separator row must not count) is never reused, and neither is one that
-any cached decoration crosses the boundary of. That second guard asks about
-ranges, not kinds: a list of block styles missed `$…$`, which pairs across
-blank lines. The reparsed paragraph's decorations are appended as a group,
-which is safe because decorations only overlap within a paragraph.
+anything outside one blank-line-bounded region, and reparses that region
+alone. The region is the paragraph the edit sits in, plus the paragraphs
+either side of any blank line it touches, since an edit on a blank line joins
+them; that is what lets Return, a pasted block and a merged paragraph take the
+fast path, not only a character typed inside a line. Two guards make it safe:
+a region containing anything that can open a construct across blank lines (a
+fence, `$$`, a comment, or `---` at the start of a line, where a thematic
+break or frontmatter fence can stand; a table's separator row must not count)
+is never reused, and neither is one that any cached decoration crosses the
+boundary of. That second guard asks about ranges, not kinds: a list of block
+styles missed `$…$`, which pairs across blank lines. The region's decorations
+are appended as a group, which is safe because decorations only overlap
+within a paragraph.
 `IncrementalDecorationCheck` compares the reusing decorator against a full
 scan directly, since the styling check would let a wrong reuse agree with
 itself.

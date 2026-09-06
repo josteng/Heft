@@ -86,73 +86,62 @@ extension LiveDecorator {
         let edit = SourceEdit.between(old, new)
         guard edit.changed.length > 0 || edit.previous.length > 0 else { return cache.decorations }
 
-        // A newline anywhere in the change moves the line structure the whole
-        // parse is built on. Defence in depth: the blank-line test in
-        // `paragraph(containing:)` already rejects every case the differential
-        // check can construct, so removing this alone breaks nothing today.
-        // It is kept because that is a property of `paragraph`, not of this
-        // guard, and the two are free to drift.
-        guard !new.substring(with: edit.changed).contains("\n"),
-              !old.substring(with: edit.previous).contains("\n")
+        // The region the edit sits in, in both texts: the blank-line-bounded
+        // paragraphs it touches, and any paragraph it joins across a blank
+        // line. A newline in the edit is allowed; Return, a pasted block and
+        // a merged paragraph all stay inside their region.
+        guard let newRegion = region(containing: edit.changed, in: new),
+              let oldRegion = region(containing: edit.previous, in: old)
         else { return nil }
 
-        // The paragraph the edit sits in, in both texts. Blank lines bound it,
-        // which is also where inline spans stop.
-        guard let newParagraph = paragraph(containing: edit.changed, in: new),
-              let oldParagraph = paragraph(containing: edit.previous, in: old)
+        // Outside the regions the two texts are the same text, since the edit
+        // is inside both; the regions must therefore start at the same offset
+        // and leave the same tail, or something else moved.
+        guard oldRegion.location == newRegion.location,
+              old.length - NSMaxRange(oldRegion) == new.length - NSMaxRange(newRegion)
         else { return nil }
 
-        // The edit must be strictly inside, and the paragraph must have grown by
-        // exactly the edit, so the two paragraphs are the same one rather than
-        // one that merged with its neighbour. Also defence in depth, for the
-        // same reason as above.
-        guard edit.changed.location > newParagraph.location,
-              NSMaxRange(edit.changed) < NSMaxRange(newParagraph),
-              edit.previous.location > oldParagraph.location,
-              NSMaxRange(edit.previous) < NSMaxRange(oldParagraph),
-              newParagraph.length - oldParagraph.length == edit.delta
-        else { return nil }
-
-        let newText = new.substring(with: newParagraph)
-        let oldText = old.substring(with: oldParagraph)
-        // Proven load-bearing: without it the differential check disagrees on
-        // 16 edits, because a paragraph that gains a fence or a pipe changes
-        // how text outside it parses.
+        let newText = new.substring(with: newRegion)
+        let oldText = old.substring(with: oldRegion)
+        // Proven load-bearing: without it the differential check disagrees,
+        // because a region that gains a fence changes how text outside it
+        // parses.
         guard !containsMultilineMarker(newText), !containsMultilineMarker(oldText) else { return nil }
 
-        // Nothing may reach into the paragraph from outside it: a fence opened
+        // Nothing may reach into the region from outside it: a fence opened
         // above makes its text code, and a `$…$` can pair across a blank line.
         // Proven load-bearing: without it the differential check disagrees.
         for decoration in cache.decorations {
-            guard !escapes(decoration, paragraph: oldParagraph) else { return nil }
+            guard !escapes(decoration, paragraph: oldRegion) else { return nil }
         }
 
-        // Reparse the paragraph alone. It begins at a line start, so the
+        // Reparse the region alone. It begins at a line start, so the
         // line-anchored patterns see what they would have seen in place.
-        let local = decorations(in: newText).map { $0.shifted(by: newParagraph.location) }
+        let local = decorations(in: newText).map { $0.shifted(by: newRegion.location) }
 
         var result: [MarkdownDecoration] = []
         result.reserveCapacity(cache.decorations.count + local.count)
         for decoration in cache.decorations {
             let range = decoration.range
-            if NSMaxRange(range) <= oldParagraph.location {
+            if NSMaxRange(range) <= oldRegion.location {
                 result.append(decoration)
-            } else if range.location >= NSMaxRange(oldParagraph) {
+            } else if range.location >= NSMaxRange(oldRegion) {
                 result.append(decoration.shifted(by: edit.delta))
             }
-            // Anything inside the paragraph is replaced by the reparse.
+            // Anything inside the region is replaced by the reparse.
         }
-        // The paragraph's own decorations stay together and in the order the
+        // The region's own decorations stay together and in the order the
         // full scan produces them, which is what keeps a heading applied before
-        // the bold inside it. Nothing outside the paragraph overlaps them, so
+        // the bold inside it. Nothing outside the region overlaps them, so
         // where the group sits in the array does not matter.
         result.append(contentsOf: local)
         return result
     }
 
-    /// The blank-line-bounded paragraph containing `range`, or nil when the
-    /// range touches a blank line and so has no single one.
-    static func paragraph(containing range: NSRange, in text: NSString) -> NSRange? {
+    /// The blank-line-bounded region containing `range`: the paragraph it
+    /// sits in, or, when the range touches a blank line, the paragraphs on
+    /// both sides of it, because an edit on a blank line joins them.
+    static func region(containing range: NSRange, in text: NSString) -> NSRange? {
         guard range.location <= text.length else { return nil }
         var start = text.lineRange(for: NSRange(location: range.location, length: 0)).location
         let clampedEnd = min(NSMaxRange(range), text.length)
@@ -161,21 +150,24 @@ extension LiveDecorator {
         func isBlank(_ line: NSRange) -> Bool {
             text.substring(with: line).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-
-        // The edit's own lines must not be blank, or "the paragraph" is
-        // ambiguous and the guards below cannot bound it.
-        guard !isBlank(NSRange(location: start, length: end - start)) else { return nil }
-
-        while start > 0 {
-            let previous = text.lineRange(for: NSRange(location: start - 1, length: 0))
-            if isBlank(previous) { break }
-            start = previous.location
+        func lineBefore(_ offset: Int) -> NSRange? {
+            offset > 0 ? text.lineRange(for: NSRange(location: offset - 1, length: 0)) : nil
         }
-        while end < text.length {
-            let next = text.lineRange(for: NSRange(location: end, length: 0))
-            if isBlank(next) { break }
-            end = NSMaxRange(next)
+        func lineAfter(_ offset: Int) -> NSRange? {
+            offset < text.length ? text.lineRange(for: NSRange(location: offset, length: 0)) : nil
         }
+
+        // A blank line at either edge of the span separates two paragraphs
+        // that the edit may be joining, so cross it and take the neighbour.
+        if isBlank(text.lineRange(for: NSRange(location: start, length: 0))) {
+            while let previous = lineBefore(start), isBlank(previous) { start = previous.location }
+        }
+        if end > start, isBlank(text.lineRange(for: NSRange(location: end - 1, length: 0))) {
+            while let next = lineAfter(end), isBlank(next) { end = NSMaxRange(next) }
+        }
+        // Then out to the paragraph boundaries either side.
+        while let previous = lineBefore(start), !isBlank(previous) { start = previous.location }
+        while let next = lineAfter(end), !isBlank(next) { end = NSMaxRange(next) }
         return NSRange(location: start, length: end - start)
     }
 }
