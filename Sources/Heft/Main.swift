@@ -307,21 +307,7 @@ enum HeftMain {
 
         switch verb {
         case "config":
-            let settings = ObsidianSettings.load(vaultRoot: root)
-            let daily = DailyNotes(vaultRoot: root, settings: settings)
-            let config: [String: Any] = [
-                "vault": root.path,
-                "notes": index.notes.count,
-                "dailyNotesFolder": daily.folder,
-                "dailyNotesFolderIsConfigured": settings.dailyNotesFolderIsConfigured,
-                "dailyNoteFormat": settings.dailyNoteFormat,
-                "dailyNoteTemplate": settings.dailyNoteTemplate as Any,
-                "attachmentFolderPath": settings.attachmentFolderPath,
-                "inboxNote": InboxNotePreference.path(for: root),
-                "templatesFolder": settings.templatesFolder as Any,
-                "useWikilinks": settings.useWikilinks,
-                "strictLineBreaks": settings.strictLineBreaks,
-            ]
+            let config = VaultConfigReport.make(vaultRoot: root, noteCount: index.notes.count)
             if let data = try? JSONSerialization.data(
                 withJSONObject: config, options: [.prettyPrinted, .sortedKeys]
             ), let text = String(data: data, encoding: .utf8) {

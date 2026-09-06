@@ -116,7 +116,7 @@ heft backlinks . "Note"       # what links here, with the line
 heft links . "Note"           # what it links out to, resolved or not
 heft outline . "Note"         # its headings
 heft tags .                   # tags with counts
-heft config .                 # daily-note folder, date format, attachments, inbox note
+heft config .                 # daily-note folder and format, today's note, inbox note, attachments
 heft files . --by-use         # ordered by what you actually open
 ```
 
