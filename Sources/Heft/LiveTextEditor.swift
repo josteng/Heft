@@ -196,8 +196,7 @@ struct LiveTextEditor: NSViewRepresentable {
                     // reader has not moved, the text has.
                     replaceKeepingPosition(with: text, in: textView, nsContext.coordinator)
                 } else {
-                    textView.string = text
-                    nsContext.coordinator.resetStyling()
+                    nsContext.coordinator.load(text, into: textView)
                     textView.setSelectedRange(NSRange(location: 0, length: 0))
                     textView.resetVim()
                     textView.scroll(.zero)
@@ -212,8 +211,7 @@ struct LiveTextEditor: NSViewRepresentable {
             nsContext.coordinator.restyle(textView)
         } else if textView.string != text {
             let selection = textView.selectedRange()
-            textView.string = text
-            nsContext.coordinator.resetStyling()
+            nsContext.coordinator.load(text, into: textView)
             textView.setSelectedRange(NSRange(
                 location: min(selection.location, (text as NSString).length), length: 0
             ))
@@ -232,8 +230,7 @@ struct LiveTextEditor: NSViewRepresentable {
         let scrollOrigin = clip?.bounds.origin
         let caret = textView.selectedRange().location
 
-        textView.string = new
-        coordinator.resetStyling()
+        coordinator.load(new, into: textView)
         textView.setSelectedRange(NSRange(
             location: Self.mapLocation(caret, from: old, to: updated), length: 0
         ))
@@ -304,6 +301,26 @@ struct LiveTextEditor: NSViewRepresentable {
         /// drops every attribute on the floor, so the next pass cannot assume
         /// anything it did not rewrite is still styled.
         func resetStyling() { styled = nil }
+
+        /// Replaces the buffer with another document.
+        ///
+        /// The layout and the pending shift describe the text that is going,
+        /// and they go first: TextKit builds the new document's first
+        /// fragment during the assignment, before any restyle, and the
+        /// delegate would hand it the old document's widget at that offset.
+        /// The restyle that follows invalidates the document range, which
+        /// for an empty note is nothing, so a new note kept a table it never
+        /// had until the first keystroke.
+        func load(_ text: String, into textView: HeftTextKit2View) {
+            layout = LiveLayout()
+            styled = nil
+            textView.liveLayout = layout
+            textView.string = text
+            // The assignment records itself as an edit that deleted the whole
+            // old note, and carried into the next pass that shift would remap
+            // the new document's offsets into the old one.
+            pendingShift = nil
+        }
 
         init(_ parent: LiveTextEditor) { self.parent = parent }
 
