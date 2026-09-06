@@ -12,3 +12,4 @@ Resources/Assets.car
 # backlog, a worktree, and whatever else lives here.
 .claude/
 .vscode/
+dist/
