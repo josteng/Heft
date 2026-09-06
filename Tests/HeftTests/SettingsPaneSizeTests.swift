@@ -354,7 +354,9 @@ struct InboxNamingTests {
         let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }
             .filter { $0.pathExtension == "swift" } ?? []
-        for file in files where file.lastPathComponent != "InboxCapture.swift" {
+        // The capture code and the pane that configures it are the feature.
+        let feature = ["InboxCapture.swift", "CaptureSettings.swift"]
+        for file in files where !feature.contains(file.lastPathComponent) {
             let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
             for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
                 // Only what a person is shown: a literal offered in the UI.

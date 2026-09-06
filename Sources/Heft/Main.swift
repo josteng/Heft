@@ -317,6 +317,7 @@ enum HeftMain {
                 "dailyNoteFormat": settings.dailyNoteFormat,
                 "dailyNoteTemplate": settings.dailyNoteTemplate as Any,
                 "attachmentFolderPath": settings.attachmentFolderPath,
+                "inboxNote": InboxNotePreference.path(for: root),
                 "templatesFolder": settings.templatesFolder as Any,
                 "useWikilinks": settings.useWikilinks,
                 "strictLineBreaks": settings.strictLineBreaks,

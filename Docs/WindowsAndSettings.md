@@ -105,6 +105,20 @@ outranks restoration, or a launch from the Dock would make it do nothing, and
 it is claimed once per process. Only the daily note is created; a path in a
 settings field is not a request to litter the vault with empty files.
 
+## Where captures go
+
+`InboxNotePreference` in HeftCore names the inbox note per vault, stored the
+way `StartupNote` is and for the same reason: it names a note. It lives in
+the pure target because Spotlight and Shortcuts capture with no window open
+and must land in the same file the palette's Open Inbox shows; `InboxCapture`
+reads it when given no path, so every caller agrees without being told. The
+Capture pane in Settings edits it for the vault in front, keeps what was
+typed, and says what that amounts to; a value that cannot be a path inside
+the vault falls back to `Inbox.md` rather than failing a capture. The folder
+is created on the first capture, since the setting is a promise about where
+things go. Daily captures have no setting: the log marker in the template is
+the placement control, and the pane offers it to copy.
+
 ## Settings that are not about one vault
 
 Every pane is a grouped `Form` laid out as System Settings lays out its own:

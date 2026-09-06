@@ -12,7 +12,7 @@ private enum IntentVaultDestination {
 struct CaptureToInboxIntent: AppIntent {
     static let title: LocalizedStringResource = "Capture to Inbox"
     static let description = IntentDescription(
-        "Adds a timestamped note to Inbox.md in your most recently opened Heft vault."
+        "Adds a timestamped note to the inbox note of your most recently opened Heft vault."
     )
     static let supportedModes: IntentModes = .background
 
@@ -94,7 +94,7 @@ struct OpenTodaysNoteIntent: AppIntent {
 struct OpenInboxIntent: AppIntent {
     static let title: LocalizedStringResource = "Open Inbox"
     static let description = IntentDescription(
-        "Opens Inbox.md in your most recently opened Heft vault."
+        "Opens the inbox note of your most recently opened Heft vault."
     )
     static let supportedModes: IntentModes = .foreground(.immediate)
 

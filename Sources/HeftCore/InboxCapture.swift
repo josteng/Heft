@@ -24,7 +24,7 @@ public enum InboxCaptureError: LocalizedError, Sendable {
         case .vaultUnavailable:
             return "The capture vault is no longer available. Open it in Heft and try again."
         case .inboxIsDirectory:
-            return "Inbox.md is a folder. Rename it before capturing a note."
+            return "The inbox note is a folder. Rename it before capturing a note."
         }
     }
 }
@@ -45,24 +45,84 @@ public enum VaultContentChangeNotification {
     }
 }
 
-/// Adds low-friction captures to one ordinary Markdown file at the vault root.
+/// Which note in a vault is its inbox: `Inbox.md` at the root unless the
+/// reader named another in Settings ▸ Capture.
+///
+/// Per vault, keyed by the vault's standardized path the way `StartupSettings`
+/// is, and for the same reason: the setting names a note, and a note is in
+/// one vault. In the pure target because Spotlight and Shortcuts capture with
+/// no window open and have to read the same answer the app does.
+public enum InboxNotePreference {
+    public static let defaultPath = "Inbox.md"
+    private static let prefix = "dev.stenglein.Heft.inboxNote:"
+
+    public static func key(forVaultAt path: String) -> String {
+        prefix + (path as NSString).standardizingPath
+    }
+
+    /// What was typed, or nil when nothing was.
+    public static func stored(for vault: URL) -> String? {
+        HeftDefaults.shared.string(forKey: key(forVaultAt: vault.standardizedFileURL.path))
+    }
+
+    /// The path capture uses: what was typed once it reads as a path inside
+    /// the vault, otherwise the default.
+    public static func path(for vault: URL) -> String {
+        stored(for: vault).flatMap(normalised) ?? defaultPath
+    }
+
+    /// Keeps what was typed, so the field can show it back; empty clears it.
+    public static func set(_ raw: String?, for vault: URL) {
+        let key = key(forVaultAt: vault.standardizedFileURL.path)
+        if let raw, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            HeftDefaults.shared.set(raw, forKey: key)
+        } else {
+            HeftDefaults.shared.removeObject(forKey: key)
+        }
+    }
+
+    /// A path from the top of the vault, `.md` added when no extension was
+    /// typed; nil when it points outside the vault or nowhere.
+    public static func normalised(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.hasPrefix("/") else { return nil }
+        let parts = trimmed
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
+        var path = parts.joined(separator: "/")
+        if (path as NSString).pathExtension.isEmpty { path += ".md" }
+        return path
+    }
+}
+
+/// Adds low-friction captures to one ordinary Markdown file in the vault.
 ///
 /// The newest day and newest item are kept first. The file stays intentionally
 /// unsurprising so it can be edited, moved, or opened by any Markdown app.
 public struct InboxCapture: Sendable {
-    public static let filename = "Inbox.md"
-
     public let vaultRoot: URL
 
-    public init(vaultRoot: URL) {
+    /// From the top of the vault. Left out, it is whatever the reader chose
+    /// for this vault, which is how Spotlight and the app agree on one file.
+    public let relativePath: String
+
+    public init(vaultRoot: URL, relativePath: String? = nil) {
         self.vaultRoot = vaultRoot.standardizedFileURL
+        self.relativePath = relativePath ?? InboxNotePreference.path(for: self.vaultRoot)
     }
 
     public var url: URL {
-        vaultRoot.appendingPathComponent(Self.filename)
+        vaultRoot.appendingPathComponent(relativePath)
     }
 
-    /// Returns Inbox.md, creating a titled empty file when needed.
+    /// The heading a fresh inbox gets, and the line captures are filed under.
+    private var title: String {
+        url.deletingPathExtension().lastPathComponent
+    }
+
+    /// Returns the inbox note, creating a titled empty file when needed.
     @discardableResult
     public func ensureFile() throws -> URL {
         var vaultIsDirectory: ObjCBool = false
@@ -78,9 +138,18 @@ public struct InboxCapture: Sendable {
             return url
         }
 
-        try "# Inbox\n".write(to: url, atomically: true, encoding: .utf8)
+        try makeFolder()
+        try "# \(title)\n".write(to: url, atomically: true, encoding: .utf8)
         VaultContentChangeNotification.post(for: vaultRoot)
         return url
+    }
+
+    /// A note named inside a folder the vault does not have yet gets the
+    /// folder: the setting is a promise about where captures go, not a check.
+    private func makeFolder() throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
     }
 
     /// Coordinates the whole read–modify–write operation. That matters when a
@@ -105,6 +174,7 @@ public struct InboxCapture: Sendable {
             throw InboxCaptureError.inboxIsDirectory
         }
 
+        try makeFolder()
         let coordinator = NSFileCoordinator()
         var coordinationError: NSError?
         var writeError: Error?
@@ -123,7 +193,8 @@ public struct InboxCapture: Sendable {
                     byCapturing: rawText,
                     in: existing,
                     at: date,
-                    calendar: calendar
+                    calendar: calendar,
+                    title: title
                 )
                 try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -142,7 +213,8 @@ public struct InboxCapture: Sendable {
         byCapturing rawText: String,
         in existing: String,
         at date: Date,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        title: String = "Inbox"
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw InboxCaptureError.emptyCapture }
@@ -154,7 +226,7 @@ public struct InboxCapture: Sendable {
         let dayHeading = "## \(day)"
 
         guard !existing.isEmpty else {
-            return "# Inbox\(newline)\(newline)\(dayHeading)\(newline)\(entry)\(newline)"
+            return "# \(title)\(newline)\(newline)\(dayHeading)\(newline)\(entry)\(newline)"
         }
 
         if let heading = lineRange(named: dayHeading, in: existing, newline: newline) {
@@ -162,9 +234,9 @@ public struct InboxCapture: Sendable {
         }
 
         let section = "\(dayHeading)\(newline)\(entry)\(newline)\(newline)"
-        if let title = firstLineRange(in: existing, newline: newline),
-           lineText(title, in: existing) == "# Inbox" {
-            let insertion = insertion(afterHeading: title, in: existing, newline: newline)
+        if let titleLine = firstLineRange(in: existing, newline: newline),
+           lineText(titleLine, in: existing) == "# \(title)" {
+            let insertion = insertion(afterHeading: titleLine, in: existing, newline: newline)
             return inserting(insertion.prefix + section, at: insertion.index, in: existing)
         }
 

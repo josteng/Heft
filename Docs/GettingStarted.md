@@ -63,7 +63,8 @@ configuration. If not, `File ▸ Daily Note Settings…` sets it up and will
 create the folders. **⇧⌘T** opens today's.
 
 Capture lives in Spotlight, on purpose: "Capture to Inbox" files a line into
-`Inbox.md`, "Add to Today's Note" into today's note, and both work from
+`Inbox.md`, or whichever note **Settings ▸ Capture** names for the vault, and
+"Add to Today's Note" into today's note. Both work from
 whatever you are doing, Heft included, without bringing it forward. Spotlight
 on macOS 26 lets you give an action a quick key, so `in` can stand for
 "Capture to Inbox" and `t` for "Add to Today's Note". "Open Inbox" and "Open
@@ -110,7 +111,7 @@ heft backlinks . "Note"       # what links here, with the line
 heft links . "Note"           # what it links out to, resolved or not
 heft outline . "Note"         # its headings
 heft tags .                   # tags with counts
-heft config .                 # daily-note folder, date format, attachments
+heft config .                 # daily-note folder, date format, attachments, inbox note
 heft files . --by-use         # ordered by what you actually open
 ```
 
