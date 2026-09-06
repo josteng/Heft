@@ -17,6 +17,23 @@ struct StartupSettingsView: View {
 
     var body: some View {
         Form {
+            // App-wide, above the per-vault answer: which vault comes up at
+            // all decides which of the answers below applies.
+            Section {
+                LabeledContent {
+                    VaultChoiceMenu(selection: $settings.launchVaultPath)
+                        .alignedWithTitle()
+                } label: {
+                    SettingLabel(
+                        "Open",
+                        detail: "macOS brings back the windows you had. This is for a start "
+                            + "with none, after a crash or with restoration off."
+                    )
+                }
+            } header: {
+                SectionHeading("When there is nothing to restore")
+            }
+
             // The choice on its own. A field in the same group sat directly
             // under the last option and read as belonging to it, however it
             // was labelled: a grouped Form draws one card, and everything in

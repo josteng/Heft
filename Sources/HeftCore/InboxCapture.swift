@@ -6,42 +6,83 @@ import Foundation
 ///
 /// The choice is app-wide, unlike the inbox note, because it answers a
 /// question no single vault can: which of them.
+/// The store is a parameter with the shared one as its default, so a test
+/// can hand in a private suite: these keys are app-wide, and two suites
+/// reading and writing the shared ones at once raced.
 public enum CaptureVaultPreference {
     public static let defaultsKey = "dev.stenglein.Heft.vaultPath"
     public static let chosenKey = "dev.stenglein.Heft.captureVault"
 
-    public static var url: URL? { chosen ?? lastOpened }
+    public static var url: URL? { url(in: HeftDefaults.shared) }
 
-    public static var lastOpened: URL? {
-        existing(HeftDefaults.shared.string(forKey: defaultsKey))
+    public static func url(in defaults: UserDefaults) -> URL? {
+        chosen(in: defaults) ?? lastOpened(in: defaults)
+    }
+
+    public static var lastOpened: URL? { lastOpened(in: HeftDefaults.shared) }
+
+    public static func lastOpened(in defaults: UserDefaults) -> URL? {
+        existing(defaults.string(forKey: defaultsKey))
     }
 
     /// The vault chosen once, or nil when none was or it is not there now.
-    public static var chosen: URL? {
-        existing(HeftDefaults.shared.string(forKey: chosenKey))
+    public static func chosen(in defaults: UserDefaults = HeftDefaults.shared) -> URL? {
+        existing(defaults.string(forKey: chosenKey))
     }
 
     /// What was chosen, whether or not it is there right now, so a pane can
     /// show a vault that is away rather than pretend nothing was chosen.
-    public static var chosenPath: String? {
-        HeftDefaults.shared.string(forKey: chosenKey)
+    public static func chosenPath(in defaults: UserDefaults = HeftDefaults.shared) -> String? {
+        defaults.string(forKey: chosenKey)
     }
 
-    public static func choose(_ vault: URL?) {
+    public static func choose(_ vault: URL?, in defaults: UserDefaults = HeftDefaults.shared) {
         if let vault {
-            HeftDefaults.shared.set(vault.standardizedFileURL.path, forKey: chosenKey)
+            defaults.set(vault.standardizedFileURL.path, forKey: chosenKey)
         } else {
-            HeftDefaults.shared.removeObject(forKey: chosenKey)
+            defaults.removeObject(forKey: chosenKey)
         }
         // Read by the intent, possibly from another process; see the same
         // flush where the last-opened vault is recorded.
-        HeftDefaults.shared.synchronize()
+        defaults.synchronize()
     }
 
-    private static func existing(_ path: String?) -> URL? {
+    static func existing(_ path: String?) -> URL? {
         guard let path else { return nil }
         let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+}
+
+/// Which vault a start with nothing to restore opens: the one chosen in
+/// Settings ▸ Startup while it is there, otherwise the vault opened last.
+///
+/// macOS brings back the windows that were open, so this decides only a cold
+/// start after a crash or with restoration off. Separate from the capture
+/// vault: choosing where a Spotlight capture goes must not change what opens.
+public enum LaunchVaultPreference {
+    public static let chosenKey = "dev.stenglein.Heft.launchVault"
+
+    public static var url: URL? { url(in: HeftDefaults.shared) }
+
+    public static func url(in defaults: UserDefaults) -> URL? {
+        chosen(in: defaults) ?? CaptureVaultPreference.lastOpened(in: defaults)
+    }
+
+    public static func chosen(in defaults: UserDefaults = HeftDefaults.shared) -> URL? {
+        CaptureVaultPreference.existing(defaults.string(forKey: chosenKey))
+    }
+
+    public static func chosenPath(in defaults: UserDefaults = HeftDefaults.shared) -> String? {
+        defaults.string(forKey: chosenKey)
+    }
+
+    public static func choose(_ vault: URL?, in defaults: UserDefaults = HeftDefaults.shared) {
+        if let vault {
+            defaults.set(vault.standardizedFileURL.path, forKey: chosenKey)
+        } else {
+            defaults.removeObject(forKey: chosenKey)
+        }
     }
 }
 

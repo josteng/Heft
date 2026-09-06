@@ -99,6 +99,13 @@ the same thing: the first relies on macOS restoring the window), today's daily
 note, a named note, or a path from the date in moment tokens, which is how a
 weekly note is expressed.
 
+Which vault comes up at all is the one app-wide answer on the same pane:
+`LaunchVaultPreference`, the vault chosen while it is there, else the vault
+opened last. It decides only a start with nothing to restore, since macOS
+brings the open windows back, and it is separate from the capture vault: the
+two were briefly one accessor, and choosing where captures go changed what
+opened.
+
 Three sources decide, in order of how deliberate they are: a note named on the
 command line, then the setting, then a restored window's own note. The setting
 outranks restoration, or a launch from the Dock would make it do nothing, and

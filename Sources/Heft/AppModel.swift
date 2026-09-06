@@ -407,7 +407,7 @@ final class AppModel: ObservableObject {
         } else if let index = arguments.firstIndex(of: "--vault"), index + 1 < arguments.count {
             launchVault = URL(fileURLWithPath: (arguments[index + 1] as NSString).expandingTildeInPath)
         } else {
-            launchVault = registry.lastVaultURL
+            launchVault = registry.launchVaultURL
         }
 
         if let launchVault, FileManager.default.fileExists(atPath: launchVault.path) {

@@ -62,3 +62,36 @@ extension View {
         alignmentGuide(.firstTextBaseline) { $0[.top] + 13 }
     }
 }
+
+/// A menu of the vaults Heft remembers, with "the vault opened last" as the
+/// empty choice, for the two settings that name a vault: where a Spotlight
+/// capture goes, and what a start with nothing to restore opens.
+struct VaultChoiceMenu: View {
+    @EnvironmentObject private var registry: VaultRegistry
+    /// A standardized vault path, or empty for the vault opened last.
+    @Binding var selection: String
+
+    var body: some View {
+        Picker("", selection: $selection) {
+            Text("The vault opened last").tag("")
+            ForEach(choices, id: \.path) { choice in
+                Text("Always \(choice.label)").tag(choice.path)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    /// The remembered vaults, plus the chosen one if it has gone missing from
+    /// them, so the menu still shows what is chosen.
+    private var choices: [(path: String, label: String)] {
+        var choices = registry.recentVaults.map {
+            (path: $0.url.standardizedFileURL.path, label: $0.label)
+        }
+        if !selection.isEmpty, !choices.contains(where: { $0.path == selection }) {
+            choices.append((path: selection, label: (selection as NSString).lastPathComponent))
+        }
+        return choices
+    }
+}

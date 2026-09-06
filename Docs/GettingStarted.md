@@ -86,7 +86,9 @@ already keep theirs, so a vault with `Thesis_Figures` in one corner and
 tried top to bottom and you can reorder them; only *one folder for the whole
 vault* ever creates a folder.
 
-**Settings ▸ Startup** is per vault: open nothing, the note you were last on,
+**Settings ▸ Startup** says which vault opens when there is nothing to
+restore, the one opened last or always the same one, and then, per vault,
+what opens in it: nothing, the note you were last on,
 today's daily note, one named note, or a path worked out from the date —
 `Weeks/{{date:GGGG-[W]WW}}.md` for a weekly note, using the same tokens a
 daily-note template uses. `heft open <note>` still wins over all of it.

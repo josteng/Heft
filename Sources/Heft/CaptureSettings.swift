@@ -26,7 +26,7 @@ final class CaptureSettings: ObservableObject {
 
     /// Empty means the vault opened last.
     var chosenVaultPath: String {
-        get { CaptureVaultPreference.chosenPath ?? "" }
+        get { CaptureVaultPreference.chosenPath() ?? "" }
         set {
             CaptureVaultPreference.choose(newValue.isEmpty ? nil : URL(fileURLWithPath: newValue, isDirectory: true))
             objectWillChange.send()
@@ -43,16 +43,8 @@ struct CaptureSettingsView: View {
         Form {
             Section {
                 LabeledContent {
-                    Picker("", selection: $settings.chosenVaultPath) {
-                        Text("The vault opened last").tag("")
-                        ForEach(vaultChoices, id: \.path) { choice in
-                            Text("Always \(choice.label)").tag(choice.path)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .fixedSize()
-                    .alignedWithTitle()
+                    VaultChoiceMenu(selection: $settings.chosenVaultPath)
+                        .alignedWithTitle()
                 } label: {
                     SettingLabel(
                         "Captures go to",
@@ -140,19 +132,6 @@ struct CaptureSettingsView: View {
     // MARK: - The settings, read and written where they live
 
     private var vault: URL? { registry.frontmostModel?.vaultRoot }
-
-    /// The vaults Heft remembers, plus the chosen one if it has gone missing
-    /// from them, so the menu can still show what is chosen.
-    private var vaultChoices: [(path: String, label: String)] {
-        var choices = registry.recentVaults.map {
-            (path: $0.url.standardizedFileURL.path, label: $0.label)
-        }
-        let chosen = settings.chosenVaultPath
-        if !chosen.isEmpty, !choices.contains(where: { $0.path == chosen }) {
-            choices.append((path: chosen, label: (chosen as NSString).lastPathComponent))
-        }
-        return choices
-    }
 
     private func text(for vault: URL) -> Binding<String> {
         Binding(

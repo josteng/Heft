@@ -36,4 +36,16 @@ final class StartupSettings: ObservableObject {
         HeftDefaults.shared.set(data, forKey: key)
         objectWillChange.send()
     }
+
+    /// App-wide, unlike the rest of this pane: which vault a start with
+    /// nothing to restore opens. Empty means the vault opened last.
+    var launchVaultPath: String {
+        get { LaunchVaultPreference.chosenPath() ?? "" }
+        set {
+            LaunchVaultPreference.choose(
+                newValue.isEmpty ? nil : URL(fileURLWithPath: newValue, isDirectory: true)
+            )
+            objectWillChange.send()
+        }
+    }
 }

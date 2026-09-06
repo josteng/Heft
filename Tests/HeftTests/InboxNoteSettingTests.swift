@@ -59,49 +59,4 @@ struct InboxNoteSettingTests {
         let opened = try InboxCapture(vaultRoot: root).ensureFile()
         #expect(opened == url, "Open Inbox and capture agree on the file")
     }
-
-    @Test("A capture with no window goes to the chosen vault while it is there, else the one opened last")
-    func chosenVaultOutranksTheLastOpened() throws {
-        let opened = try vault()
-        let chosen = try vault()
-        let defaults = HeftDefaults.shared
-        let previousLast = defaults.string(forKey: CaptureVaultPreference.defaultsKey)
-        let previousChosen = defaults.string(forKey: CaptureVaultPreference.chosenKey)
-        defer {
-            defaults.set(previousLast, forKey: CaptureVaultPreference.defaultsKey)
-            defaults.set(previousChosen, forKey: CaptureVaultPreference.chosenKey)
-            try? FileManager.default.removeItem(at: opened)
-            try? FileManager.default.removeItem(at: chosen)
-        }
-        defaults.set(opened.path, forKey: CaptureVaultPreference.defaultsKey)
-        CaptureVaultPreference.choose(nil)
-        #expect(CaptureVaultPreference.url == opened.standardizedFileURL)
-
-        CaptureVaultPreference.choose(chosen)
-        #expect(CaptureVaultPreference.url == chosen.standardizedFileURL)
-        #expect(CaptureVaultPreference.chosenPath == chosen.standardizedFileURL.path)
-
-        try FileManager.default.removeItem(at: chosen)
-        #expect(CaptureVaultPreference.url == opened.standardizedFileURL, "a chosen vault that is away is not captured into")
-        #expect(CaptureVaultPreference.chosenPath != nil, "but the choice is kept for when it is back")
-    }
-
-    @Test("Choosing a capture vault does not change which vault a cold start opens")
-    @MainActor
-    func chosenVaultDoesNotBecomeTheLaunchVault() throws {
-        let opened = try vault()
-        let chosen = try vault()
-        let defaults = HeftDefaults.shared
-        let previousLast = defaults.string(forKey: CaptureVaultPreference.defaultsKey)
-        let previousChosen = defaults.string(forKey: CaptureVaultPreference.chosenKey)
-        defer {
-            defaults.set(previousLast, forKey: CaptureVaultPreference.defaultsKey)
-            defaults.set(previousChosen, forKey: CaptureVaultPreference.chosenKey)
-            try? FileManager.default.removeItem(at: opened)
-            try? FileManager.default.removeItem(at: chosen)
-        }
-        defaults.set(opened.path, forKey: CaptureVaultPreference.defaultsKey)
-        CaptureVaultPreference.choose(chosen)
-        #expect(VaultRegistry().lastVaultURL == opened.standardizedFileURL)
-    }
 }
