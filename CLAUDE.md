@@ -23,6 +23,7 @@ swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headle
     # --text-size N --paper a4|letter|legal|tabloid --landscape --margin narrow|normal|wide --title
 Scripts/perf.sh <vault>                         # what a keystroke, a publish, idle and a save cost; copies the vault
 Scripts/release.sh [--version X] [--notarize]   # signed, notarised zip plus the Homebrew cask, in dist/
+Scripts/publish.sh [--version X]                # the GitHub workflow end to end: run, approve, notes, publish, tap
 ```
 
 ## Architecture
