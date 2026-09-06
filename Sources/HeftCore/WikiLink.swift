@@ -2,7 +2,7 @@ import Foundation
 
 /// A parsed Obsidian-style link: `[[Target#Heading|Alias]]` or an embed
 /// `![[Image.png|300]]`.
-public struct WikiLink: Equatable, Sendable {
+public struct WikiLink: Codable, Equatable, Sendable {
     public var target: String        // "Note", "folder/Note", "Image.png" — may be empty for [[#Heading]]
     public var heading: String?      // after '#'
     public var blockID: String?      // after '#^'

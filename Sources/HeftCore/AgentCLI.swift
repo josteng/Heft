@@ -394,7 +394,7 @@ public enum AgentCLI {
         let options = Options(arguments.dropFirst())
         let filename = arguments.dropFirst().first { !$0.hasPrefix("--") }
 
-        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let index = VaultIndex.open(vaultAt: root)
         let relative = resolveNote(named: name, in: root)
         let noteURL = root.appendingPathComponent(relative)
         let settings = ObsidianSettings.load(vaultRoot: root)
@@ -450,7 +450,7 @@ public enum AgentCLI {
 
     private static func find(root: URL, arguments: [String]) {
         guard !arguments.isEmpty else { fail("usage: heft find <vault> <query>") }
-        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let index = VaultIndex.open(vaultAt: root)
         let result = ContentSearch.run(
             notes: index.notes, query: arguments.joined(separator: " "), limit: 40
         )
@@ -553,7 +553,7 @@ public enum AgentCLI {
     /// resolves: a path, or a bare note name. `read` and `changes` both go
     /// through it so that a name means the same thing to each.
     private static func resolveNote(named name: String, in root: URL) -> String {
-        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let index = VaultIndex.open(vaultAt: root)
         let wanted = normalized(name)
         guard let found = index.notes.first(where: {
             $0.relativePath == wanted || $0.name == name || $0.name == note(name)

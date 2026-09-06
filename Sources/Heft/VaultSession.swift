@@ -40,8 +40,12 @@ final class VaultSession: ObservableObject {
     private var reloadTask: Task<Void, Never>?
     private var contentChangeObserver: NSObjectProtocol?
 
-    init(root: URL) {
+    /// Where the parse cache lives; a test passes its own.
+    private let cache: IndexCache
+
+    init(root: URL, cache: IndexCache = .shared) {
         self.root = root.standardizedFileURL
+        self.cache = cache
         settings = ObsidianSettings.load(vaultRoot: self.root)
         recentPaths = HeftDefaults.shared.stringArray(forKey: recentsKey) ?? []
         reload()
@@ -126,12 +130,18 @@ final class VaultSession: ObservableObject {
         reloadTask?.cancel()
         let root = root
         let previous = latestIndex
+        let cache = cache
         reloadTask = Task { [weak self] in
             if !immediately { try? await Task.sleep(for: .milliseconds(400)) }
             guard !Task.isCancelled else { return }
             let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings) in
                 let tree = VaultScanner.scan(root: root)
-                return (tree, VaultIndex.build(root: tree, reusing: previous), ObsidianSettings.load(vaultRoot: root))
+                // The first build of a process starts from what the last one
+                // left on disk, so a cold start reads only what changed since.
+                let base = previous.notes.isEmpty ? cache.load(vault: root) ?? previous : previous
+                let index = VaultIndex.build(root: tree, reusing: base)
+                if index.notesRead > 0 { cache.save(index, vault: root) }
+                return (tree, index, ObsidianSettings.load(vaultRoot: root))
             }.value
             guard !Task.isCancelled, let self else { return }
             latestIndex = scanned.1

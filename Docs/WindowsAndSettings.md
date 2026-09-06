@@ -64,7 +64,10 @@ one, re-reading only files whose size or date changed; `tree` is assigned
 only when it differs, with `VaultItem`'s equality leaving the fingerprint
 out; and `index` only when `answersMatch` says the files or their links,
 tags and mentions changed. The unpublished build is kept as `latestIndex` and
-the next reload starts from it.
+the next reload starts from it. The first build of a process starts from
+`IndexCache`, the same per-note parses written to Application Support by the
+last build, so a cold start and every `heft` verb read only what changed
+since; a vault under the temporary directory is never written there.
 
 The same rule governs typing. `AppModel.text` is deliberately not
 `@Published`; typing publishes only the counts, through `NoteStats`, which

@@ -8,7 +8,7 @@ import Foundation
 /// iCloud-backed vault that is the difference between a rescan costing a few
 /// milliseconds and one that reads every note, because the daemon touches
 /// files it has not changed all the time.
-public struct FileFingerprint: Hashable, Sendable {
+public struct FileFingerprint: Codable, Hashable, Sendable {
     public let size: Int
     /// Modification time in whole nanoseconds. Kept as an integer rather than
     /// a `Date`: two `Date`s made from one unchanged timestamp have been seen

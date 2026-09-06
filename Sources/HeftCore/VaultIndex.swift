@@ -63,8 +63,8 @@ public struct Backlink: Identifiable, Sendable {
 /// depends on every other file in the vault, so resolution is redone on every
 /// build from these; a note cached before its target existed still gets its
 /// backlink the moment the target appears.
-struct ParsedNote: Sendable {
-    struct Mention: Equatable, Sendable {
+struct ParsedNote: Codable, Sendable {
+    struct Mention: Codable, Equatable, Sendable {
         let line: Int
         let context: String
         let link: WikiLink
@@ -107,6 +107,18 @@ struct ParsedNote: Sendable {
     /// the fingerprint.
     static func unreadable(fingerprint: FileFingerprint?) -> ParsedNote {
         ParsedNote(fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [])
+    }
+}
+
+extension VaultIndex {
+    /// An index holding nothing but the parses `IndexCache` stored, for a
+    /// build to reuse. It answers no query of its own.
+    static func fromCache(parsed: [String: ParsedNote]) -> VaultIndex {
+        VaultIndex(
+            notes: [], allFiles: [], byPath: [:], byName: [:], outgoing: [:], backlinks: [:],
+            notesByTag: [:], tagSpelling: [:], tagsByPath: [:], attachmentUsage: [:],
+            parsed: parsed, notesRead: 0
+        )
     }
 }
 

@@ -45,6 +45,8 @@ struct AgentCLITests {
         // binary, and a test must not leave read snapshots behind in it.
         environment["HEFT_READ_LOG"] = (readLog ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")).path
+        environment["HEFT_INDEX_CACHE"] = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIIndex-\(UUID().uuidString)").path
         process.environment = environment
         let out = Pipe(), err = Pipe(), input = Pipe()
         process.standardOutput = out

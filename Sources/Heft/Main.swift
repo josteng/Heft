@@ -285,7 +285,7 @@ enum HeftMain {
         }
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
             .standardizedFileURL
-        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let index = VaultIndex.open(vaultAt: root)
 
         /// Resolved against **every** file, not only the Markdown ones.
         ///
@@ -394,7 +394,7 @@ enum HeftMain {
         vaultPath: String, note: String, output: String, flags: [String] = []
     ) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
-        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let index = VaultIndex.open(vaultAt: root)
         guard let ref = index.notes.first(where: {
             $0.relativePath == note || $0.name == note
         }) else {
@@ -424,7 +424,7 @@ enum HeftMain {
 
     private static func runRenderProbe(vaultPath: String, note: String, caret: Int?) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
-        let index = VaultIndex.build(root: VaultScanner.scan(root: root))
+        let index = VaultIndex.open(vaultAt: root)
         guard let ref = index.notes.first(where: {
             $0.relativePath == note || $0.name == note
         }) else {
@@ -617,7 +617,7 @@ enum HeftMain {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
             .standardizedFileURL
         let tree = VaultScanner.scan(root: root)
-        let index = VaultIndex.build(root: tree)
+        let index = VaultIndex.open(tree: tree, vaultAt: root)
 
         let wanted = target.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let item = tree.flattened().first(where: {
@@ -693,7 +693,7 @@ enum HeftMain {
         let scanTime = Date().timeIntervalSince(scanStart)
 
         let indexStart = Date()
-        let index = VaultIndex.build(root: tree)
+        let index = VaultIndex.open(tree: tree, vaultAt: root)
         let indexTime = Date().timeIntervalSince(indexStart)
 
         let files = tree.flattened().filter { !$0.isFolder }

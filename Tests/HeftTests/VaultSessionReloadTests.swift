@@ -42,6 +42,34 @@ struct VaultSessionReloadTests {
         #expect(session.index.outgoingLinks(from: "A.md").count == 2)
     }
 
+    /// The first build of a process starts from what the last one left on
+    /// disk, so opening the same vault again reads only what changed since.
+    @Test("A second session over the same vault starts from the cache")
+    func secondSessionStartsFromCache() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-session-cache-\(UUID().uuidString)", isDirectory: true)
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-session-cache-dir-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: cacheDirectory)
+        }
+        try "First [[B]]".write(to: root.appendingPathComponent("A.md"), atomically: true, encoding: .utf8)
+        try "Second".write(to: root.appendingPathComponent("B.md"), atomically: true, encoding: .utf8)
+        let cache = IndexCache(directory: cacheDirectory)
+
+        let first = VaultSession(root: root, cache: cache)
+        await first.awaitReload()
+        #expect(first.latestIndex.notesRead == 2)
+
+        let second = VaultSession(root: root, cache: cache)
+        await second.awaitReload()
+        #expect(second.latestIndex.notesRead == 0, "nothing changed since the first session parsed it")
+        #expect(second.index.backlinks(to: "B.md").count == 1)
+    }
+
     /// Most saves are prose. The note is re-read, and that is where it ends.
     @Test("A save that changes no link, tag or mention publishes nothing")
     func proseSavePublishesNothing() async throws {
