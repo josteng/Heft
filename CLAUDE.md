@@ -28,7 +28,7 @@ Scripts/publish.sh [--version X]                # the GitHub workflow end to end
 
 ## Architecture
 
-Three targets:
+Four targets:
 
 - `HeftCore`: pure logic. Never imports AppKit or SwiftUI. Parsing, the link index,
   the vault scanner, moment.js date formatting, live-mode decorations, the file
@@ -39,6 +39,9 @@ Three targets:
   replaying a macro's keys against a document it does not hold — comes back as
   a `VimHostAction` for the text view to carry out.
 - `Heft`: the macOS shell. SwiftUI chrome around an `NSTextView`.
+- `HeftCapture`: the App Intents extension. The two Spotlight captures run
+  here, in a sandboxed process of their own, so that filing a line never
+  launches or activates the app. Foundation and `HeftCore` only.
 
 The dependencies are Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and
 swift-markdown-engine for its syntax-highlighting grammars.
@@ -53,9 +56,13 @@ therefore show different parts of one vault without duplicate watchers or indexe
 
 Break one of these and something goes quietly wrong rather than failing.
 
-- **`HeftCore` and `HeftVimCore` never import AppKit or SwiftUI.** That
-  boundary is what lets the whole command line run without a window, and it is
-  enforced by the fact that they do not link them.
+- **`HeftCore`, `HeftVimCore` and `HeftCapture` never import AppKit or
+  SwiftUI.** That boundary is what lets the whole command line run without a
+  window, and it is enforced by the fact that they do not link them.
+- **A capture intent lives in `HeftCapture` and nowhere else.** A background
+  intent declared in the app runs *in* the app, and macOS activates the app to
+  run it; one declared in both is run by whichever is already running, which
+  is the app. A test fails on a copy in the app target.
 - **The buffer *is* the file.** Markup is hidden by collapsing it — the
   characters keep their place in every offset and get a hairline font — so the
   text storage always equals the file byte for byte. Nothing is ever rewritten

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- macOS launches no extension that is not sandboxed. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <!-- A vault is wherever the reader keeps it; the sandbox is opened to
+         the whole disk rather than to a guess. Direct distribution allows
+         this, and Apple's own Wallpaper extension does the same. -->
+    <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+    <array>
+        <string>/</string>
+    </array>
+    <!-- Which vault, and which note in it, are the app's preferences. -->
+    <key>com.apple.security.temporary-exception.shared-preference.read-write</key>
+    <array>
+        <string>dev.stenglein.Heft</string>
+    </array>
+</dict>
+</plist>

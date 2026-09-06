@@ -17,6 +17,9 @@
 		010000000000000000000008 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
 		010000000000000000000009 /* libHeftVimCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000006 /* libHeftVimCore.a */; };
 		010000000000000000000010 /* libHeftVimCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000006 /* libHeftVimCore.a */; };
+		010000000000000000000011 /* libHeftCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* libHeftCore.a */; };
+		010000000000000000000012 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
+		010000000000000000000013 /* HeftCapture.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 020000000000000000000008 /* HeftCapture.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -41,7 +44,28 @@
 			remoteGlobalIDString = 090000000000000000000004;
 			remoteInfo = HeftVimCore;
 		};
+		030000000000000000000004 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 080000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 090000000000000000000005;
+			remoteInfo = HeftCapture;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		110000000000000000000001 /* Embed ExtensionKit Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				010000000000000000000013 /* HeftCapture.appex in Embed ExtensionKit Extensions */,
+			);
+			name = "Embed ExtensionKit Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		020000000000000000000001 /* Heft.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Heft.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -51,6 +75,9 @@
 		020000000000000000000005 /* Heft-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Heft-Info.plist"; sourceTree = "<group>"; };
 		020000000000000000000007 /* Heft.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Heft.xcconfig; sourceTree = "<group>"; };
 		020000000000000000000006 /* libHeftVimCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libHeftVimCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		020000000000000000000008 /* HeftCapture.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = HeftCapture.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		020000000000000000000009 /* HeftCapture-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "HeftCapture-Info.plist"; sourceTree = "<group>"; };
+		020000000000000000000010 /* HeftCapture.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HeftCapture.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -58,6 +85,7 @@
 		040000000000000000000002 /* HeftCore */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftCore; sourceTree = "<group>"; };
 		040000000000000000000003 /* HeftTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Tests/HeftTests; sourceTree = "<group>"; };
 		040000000000000000000004 /* HeftVimCore */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftVimCore; sourceTree = "<group>"; };
+		040000000000000000000005 /* HeftCapture */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftCapture; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,6 +119,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		050000000000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				010000000000000000000011 /* libHeftCore.a in Frameworks */,
+				010000000000000000000012 /* Markdown in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -101,6 +138,7 @@
 				040000000000000000000002 /* HeftCore */,
 				040000000000000000000003 /* HeftTests */,
 				040000000000000000000004 /* HeftVimCore */,
+				040000000000000000000005 /* HeftCapture */,
 				060000000000000000000003 /* Resources */,
 				060000000000000000000004 /* Config */,
 				060000000000000000000002 /* Products */,
@@ -114,6 +152,7 @@
 				020000000000000000000002 /* libHeftCore.a */,
 				020000000000000000000004 /* HeftTests.xctest */,
 				020000000000000000000006 /* libHeftVimCore.a */,
+				020000000000000000000008 /* HeftCapture.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -131,6 +170,8 @@
 			children = (
 				020000000000000000000007 /* Heft.xcconfig */,
 				020000000000000000000005 /* Heft-Info.plist */,
+				020000000000000000000009 /* HeftCapture-Info.plist */,
+				020000000000000000000010 /* HeftCapture.entitlements */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -145,12 +186,14 @@
 				0F0000000000000000000001 /* Sources */,
 				050000000000000000000001 /* Frameworks */,
 				0E0000000000000000000001 /* Resources */,
+				110000000000000000000001 /* Embed ExtensionKit Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				0B0000000000000000000001 /* PBXTargetDependency */,
 				0B0000000000000000000004 /* PBXTargetDependency */,
+				0B0000000000000000000006 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				040000000000000000000001 /* Heft */,
@@ -233,6 +276,29 @@
 			productReference = 020000000000000000000006 /* libHeftVimCore.a */;
 			productType = "com.apple.product-type.library.static";
 		};
+		090000000000000000000005 /* HeftCapture */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A0000000000000000000006 /* Build configuration list for PBXNativeTarget "HeftCapture" */;
+			buildPhases = (
+				0F0000000000000000000005 /* Sources */,
+				050000000000000000000004 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0B0000000000000000000007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				040000000000000000000005 /* HeftCapture */,
+			);
+			name = HeftCapture;
+			packageProductDependencies = (
+				0D0000000000000000000001 /* Markdown */,
+			);
+			productName = HeftCapture;
+			productReference = 020000000000000000000008 /* HeftCapture.appex */;
+			productType = "com.apple.product-type.extensionkit-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -246,6 +312,7 @@
 					090000000000000000000001 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000002 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000004 = { CreatedOnToolsVersion = 26.0; };
+					090000000000000000000005 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000003 = {
 						CreatedOnToolsVersion = 26.0;
 						TestTargetID = 090000000000000000000001;
@@ -275,6 +342,7 @@
 				090000000000000000000002 /* HeftCore */,
 				090000000000000000000003 /* HeftTests */,
 				090000000000000000000004 /* HeftVimCore */,
+				090000000000000000000005 /* HeftCapture */,
 			);
 		};
 /* End PBXProject section */
@@ -302,6 +370,7 @@
 		0F0000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000003 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0F0000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -310,6 +379,8 @@
 		0B0000000000000000000003 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000002 /* HeftCore */; targetProxy = 030000000000000000000001 /* PBXContainerItemProxy */; };
 		0B0000000000000000000004 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000004 /* HeftVimCore */; targetProxy = 030000000000000000000003 /* PBXContainerItemProxy */; };
 		0B0000000000000000000005 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000004 /* HeftVimCore */; targetProxy = 030000000000000000000003 /* PBXContainerItemProxy */; };
+		0B0000000000000000000006 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000005 /* HeftCapture */; targetProxy = 030000000000000000000004 /* PBXContainerItemProxy */; };
+		0B0000000000000000000007 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000002 /* HeftCore */; targetProxy = 030000000000000000000001 /* PBXContainerItemProxy */; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -435,6 +506,46 @@
 			};
 			name = Release;
 		};
+		100000000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/HeftCapture.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/HeftCapture-Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Capture;
+				PRODUCT_NAME = HeftCapture;
+				SKIP_INSTALL = YES;
+				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
+			};
+			name = Debug;
+		};
+		100000000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/HeftCapture.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/HeftCapture-Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Capture;
+				PRODUCT_NAME = HeftCapture;
+				SKIP_INSTALL = YES;
+				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -443,6 +554,7 @@
 		0A0000000000000000000003 /* Build configuration list for PBXNativeTarget "HeftCore" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000005 /* Debug */, 100000000000000000000006 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0A0000000000000000000004 /* Build configuration list for PBXNativeTarget "HeftTests" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000007 /* Debug */, 100000000000000000000008 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0A0000000000000000000005 /* Build configuration list for PBXNativeTarget "HeftVimCore" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000009 /* Debug */, 100000000000000000000010 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0A0000000000000000000006 /* Build configuration list for PBXNativeTarget "HeftCapture" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000011 /* Debug */, 100000000000000000000012 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */

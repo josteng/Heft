@@ -2446,7 +2446,7 @@ struct HeftDefaultsTests {
             .deletingLastPathComponent()
 
         var offenders: [String] = []
-        for directory in ["Sources/Heft", "Sources/HeftCore", "Sources/Heft/Views"] {
+        for directory in ["Sources/Heft", "Sources/HeftCore", "Sources/Heft/Views", "Sources/HeftCapture"] {
             let url = root.appendingPathComponent(directory)
             let names = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
             for name in names where name.hasSuffix(".swift") {

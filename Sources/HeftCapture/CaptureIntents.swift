@@ -4,10 +4,16 @@ import HeftCore
 
 /// One destination rather than a vault picker on every quick run: the vault
 /// chosen in Settings ▸ Capture, or failing that the one opened last.
-private enum IntentVaultDestination {
+///
+/// Read from the app's own preference domain, which the extension's
+/// Info.plist names for `HeftDefaults`; its own domain would be empty.
+private enum CaptureDestination {
     static var url: URL? { CaptureVaultPreference.url }
 }
 
+/// The two captures, and only these: anything that has to show a window
+/// stays in the app, which is the process that has windows. `OpenIntents`
+/// there is the other half.
 struct CaptureToInboxIntent: AppIntent {
     static let title: LocalizedStringResource = "Capture to Inbox"
     static let description = IntentDescription(
@@ -26,14 +32,10 @@ struct CaptureToInboxIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let vault = IntentVaultDestination.url else {
+        guard let vault = CaptureDestination.url else {
             throw InboxCaptureError.vaultUnavailable
         }
-        _ = try await MainActor.run {
-            try IntentPresentation.preservingVisibility {
-                try InboxCapture(vaultRoot: vault).capture(note)
-            }
-        }
+        try InboxCapture(vaultRoot: vault).capture(note)
         return .result(dialog: "Added to Inbox in \(vault.lastPathComponent).")
     }
 }
@@ -56,60 +58,19 @@ struct AddToTodaysNoteIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let vault = IntentVaultDestination.url else {
+        guard let vault = CaptureDestination.url else {
             throw DailyNoteCaptureError.vaultUnavailable
         }
         let settings = ObsidianSettings.load(vaultRoot: vault)
-        try await MainActor.run {
-            _ = try IntentPresentation.preservingVisibility {
-                try DailyNoteCapture(vaultRoot: vault, settings: settings).capture(note)
-            }
-        }
+        try DailyNoteCapture(vaultRoot: vault, settings: settings).capture(note)
         return .result(dialog: "Added to today's note in \(vault.lastPathComponent).")
     }
 }
 
-struct OpenTodaysNoteIntent: AppIntent {
-    static let title: LocalizedStringResource = "Open Today's Note"
-    static let description = IntentDescription(
-        "Creates today's daily note from its template when needed, then opens it in Heft."
-    )
-    static let supportedModes: IntentModes = .foreground(.immediate)
-
-    func perform() async throws -> some IntentResult {
-        guard let vault = IntentVaultDestination.url else {
-            throw DailyNoteCaptureError.vaultUnavailable
-        }
-        let settings = ObsidianSettings.load(vaultRoot: vault)
-        let url = try DailyNotes(vaultRoot: vault, settings: settings).ensureNote(for: Date())
-        VaultContentChangeNotification.post(for: vault)
-        await MainActor.run {
-            IntentNavigation.shared.open(url, in: vault)
-        }
-        return .result()
-    }
-}
-
-struct OpenInboxIntent: AppIntent {
-    static let title: LocalizedStringResource = "Open Inbox"
-    static let description = IntentDescription(
-        "Opens the inbox note of your most recently opened Heft vault."
-    )
-    static let supportedModes: IntentModes = .foreground(.immediate)
-
-    func perform() async throws -> some IntentResult {
-        guard let vault = IntentVaultDestination.url else {
-            throw InboxCaptureError.vaultUnavailable
-        }
-        let url = try InboxCapture(vaultRoot: vault).ensureFile()
-        await MainActor.run {
-            IntentNavigation.shared.open(url, in: vault)
-        }
-        return .result()
-    }
-}
-
-struct HeftAppShortcuts: AppShortcutsProvider {
+/// The Spotlight rows for the captures. Declared here rather than in the
+/// app so that running one never has to launch the app: a provider names
+/// only intents compiled into its own target.
+struct HeftCaptureShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: CaptureToInboxIntent(),
@@ -119,23 +80,6 @@ struct HeftAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Capture to Inbox",
             systemImageName: "tray.and.arrow.down"
-        )
-        AppShortcut(
-            intent: OpenTodaysNoteIntent(),
-            phrases: [
-                "Open today's note in \(.applicationName)",
-                "Open my \(.applicationName) daily note",
-            ],
-            shortTitle: "Open Today's Note",
-            systemImageName: "calendar"
-        )
-        AppShortcut(
-            intent: OpenInboxIntent(),
-            phrases: [
-                "Open \(.applicationName) Inbox",
-            ],
-            shortTitle: "Open Inbox",
-            systemImageName: "tray.full"
         )
         AppShortcut(
             intent: AddToTodaysNoteIntent(),

@@ -35,6 +35,16 @@ preferences or the icon.
   launch cannot rewrite `vaultPath`, Open Recent or the rankings; one call site
   reaching for the standard domain is enough to lose that, and a test fails on
   any that does.
+- **An App Intents extension that is not sandboxed is never launched, and
+  nothing says so.** Shortcuts reports that it "couldn't communicate with the
+  app"; no process starts and no log line mentions the extension. The
+  sandbox entitlement is what registers it. Related traps: a static library
+  cannot carry an `AppIntentsPackage` (every shortcut vanished), and
+  `Contents/PlugIns` is the wrong folder for an ExtensionKit extension.
+- **`HeftCapture` reads the real preferences whatever the app was launched
+  with.** The system starts it, so `HEFT_DEFAULTS_SUITE` never reaches it; a
+  capture during a `--sandbox` session still lands in the vault the installed
+  app last opened.
 - **Without `--sandbox`, launching the GUI repoints Spotlight capture.**
   Opening a vault writes `dev.stenglein.Heft.vaultPath`, which is where the App
   Intents file things. Put it back afterwards:

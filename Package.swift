@@ -33,6 +33,14 @@ let package = Package(
             path: "Sources/HeftCore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // The capture extension, built here only so that `swift build` type
+        // checks it; the bundle that macOS runs is the Xcode target.
+        .executableTarget(
+            name: "HeftCapture",
+            dependencies: ["HeftCore"],
+            path: "Sources/HeftCapture",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "Heft",
             dependencies: [

@@ -118,7 +118,20 @@ settings field is not a request to litter the vault with empty files.
 way `StartupNote` is and for the same reason: it names a note. It lives in
 the pure target because Spotlight and Shortcuts capture with no window open
 and must land in the same file the palette's Open Inbox shows; `InboxCapture`
-reads it when given no path, so every caller agrees without being told. The
+reads it when given no path, so every caller agrees without being told.
+
+The captures themselves run in `HeftCapture`, an App Intents extension, and
+their App Shortcuts are declared there beside them. An intent compiled into
+the app runs in the app process, and macOS activates the app to run it, so a
+minimized Heft came out of the Dock every time a line was filed from
+Spotlight; putting the window back afterwards was tried and could not beat
+the activation to the screen. The extension is a process with no windows,
+so there is nothing to put back. It is sandboxed, because macOS launches no
+extension that is not, and reads the app's preference domain and the vault
+through exception entitlements rather than an app group: the app is not
+sandboxed and its settings already live in one domain. The two intents that
+open a note stay in the app, which is where the windows are; a provider can
+only name intents in its own target, so there is one in each. The
 Capture pane in Settings edits it for the vault in front, keeps what was
 typed, and says what that amounts to; a value that cannot be a path inside
 the vault falls back to `Inbox.md` rather than failing a capture. The folder
