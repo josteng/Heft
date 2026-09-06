@@ -149,6 +149,10 @@ struct SidebarView: View {
         }
     }
 
+    /// One height for the filter field and the button beside it, so the two
+    /// fills read as a pair.
+    private static let filterHeight: CGFloat = 28
+
     private var header: some View {
         VStack(spacing: 8) {
             // The picker comes first: it decides what the field below filters,
@@ -172,7 +176,7 @@ struct SidebarView: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .frame(height: Self.filterHeight)
                 .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
 
                 if mode == .files, model.scopeRoot != nil {
@@ -180,13 +184,24 @@ struct SidebarView: View {
                         Button("New Note") { createNoteAtCreationTarget() }
                         Button("New Folder") { createFolderAtCreationTarget() }
                     } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 22, height: 22)
+                        // A plus, not the pencil: the pencil's box centres
+                        // but its square does not, which shows in a 28-point
+                        // fill where Notes' larger circle hides it, and the
+                        // menu makes folders as well as notes.
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .semibold))
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
-                    .fixedSize()
+                    // The same fill as the filter field beside it and the
+                    // mode tabs above, at the field's height and square: a
+                    // bare glyph between three filled shapes read as
+                    // something that had fallen off. The frame is pinned
+                    // here, on the menu, because the menu style discards a
+                    // background put on its label and pads a frame put
+                    // inside it, so both left the fill smaller than the field.
+                    .frame(width: Self.filterHeight, height: Self.filterHeight)
+                    .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
                     .help("Create in \(creationTargetName)")
                 }
             }

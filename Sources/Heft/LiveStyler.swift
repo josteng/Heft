@@ -960,8 +960,14 @@ enum LiveStyler {
             // whitespace has no width to widen.
             func kern(at location: Int) {
                 guard location >= 0, location < storage.length else { return }
+                // Two tags with one space between them both claim that
+                // space: the first opens its gap on its last character,
+                // and the second, looking back past the space, lands on
+                // the same character. One padding there left the two pills
+                // touching, so a character kerned twice carries both.
+                let already = storage.attribute(.kern, at: location, effectiveRange: nil) as? CGFloat ?? 0
                 storage.addAttribute(
-                    .kern, value: HeftLayoutFragment.tagPadding,
+                    .kern, value: already + HeftLayoutFragment.tagPadding,
                     range: NSRange(location: location, length: 1)
                 )
             }
