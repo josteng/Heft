@@ -100,7 +100,9 @@ echo "Building Heft $VERSION ($BUILD_NUMBER)"
 # Hardened runtime is what notarisation requires; the app needs no
 # entitlements beyond it. Both configurations build fine with it on, so it is
 # set here rather than in the project, where it would make a plain debug
-# build depend on a certificate.
+# build depend on a certificate. The build action, unlike archive, injects a
+# get-task-allow entitlement so a debugger can attach; the notary service
+# rejects a binary carrying it.
 xcodebuild \
     -quiet \
     -project "$ROOT/Heft.xcodeproj" \
@@ -112,6 +114,7 @@ xcodebuild \
     "MARKETING_VERSION=$VERSION" \
     "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" \
     ENABLE_HARDENED_RUNTIME=YES \
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
     "${SIGNING_ARGS[@]}" \
     build
 
