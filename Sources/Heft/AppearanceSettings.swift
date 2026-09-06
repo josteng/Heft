@@ -486,13 +486,3 @@ struct AppearanceSettingsView: View {
         }
     }
 }
-
-private extension View {
-    /// A control with no text of its own has no baseline, so a form row
-    /// aligns its bottom edge with the label's first baseline and it rides
-    /// high above a two-line label. This lends it one, placed so that the
-    /// control's top edge meets the top of the title's letters.
-    func alignedWithTitle() -> some View {
-        alignmentGuide(.firstTextBaseline) { $0[.top] + 13 }
-    }
-}

@@ -116,8 +116,12 @@ Capture pane in Settings edits it for the vault in front, keeps what was
 typed, and says what that amounts to; a value that cannot be a path inside
 the vault falls back to `Inbox.md` rather than failing a capture. The folder
 is created on the first capture, since the setting is a promise about where
-things go. Daily captures have no setting: the log marker in the template is
-the placement control, and the pane offers it to copy.
+things go. Which *vault* a windowless capture lands in is the other half,
+and app-wide because it answers which of them: `CaptureVaultPreference` is
+the vault chosen once in the pane while it exists, otherwise the vault opened
+last, which is what it always was. Daily captures have no setting: the log
+marker in the template is the placement control, and the pane offers it to
+copy.
 
 ## Settings that are not about one vault
 

@@ -2,9 +2,8 @@ import AppIntents
 import Foundation
 import HeftCore
 
-/// Spotlight actions intentionally have one implicit destination for now. Once
-/// Heft persists multiple known vaults, this should become an explicit default
-/// Inbox/daily-note vault setting rather than a picker added to every quick run.
+/// One destination rather than a vault picker on every quick run: the vault
+/// chosen in Settings ▸ Capture, or failing that the one opened last.
 private enum IntentVaultDestination {
     static var url: URL? { CaptureVaultPreference.url }
 }

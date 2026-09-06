@@ -2,12 +2,13 @@ import AppKit
 import HeftCore
 import SwiftUI
 
-/// Which note a vault's captures land in, for the vault in front.
+/// Where captures go: which vault, when Spotlight has no window to ask, and
+/// which note in the vault in front.
 ///
-/// Per vault like `StartupSettings`, for the same reason: the setting names a
-/// note, and a note is in one vault. The value itself lives in
-/// `InboxNotePreference` in the pure target, because Spotlight captures with
-/// no window open; this object only lets the pane observe it.
+/// The note is per vault like `StartupSettings`, for the same reason: it
+/// names a note, and a note is in one vault. The vault is app-wide because
+/// it answers which vault. Both values live in HeftCore, because Spotlight
+/// captures with no window open; this object only lets the pane observe them.
 @MainActor
 final class CaptureSettings: ObservableObject {
     static let shared = CaptureSettings()
@@ -22,6 +23,15 @@ final class CaptureSettings: ObservableObject {
         InboxNotePreference.set(raw, for: vault)
         objectWillChange.send()
     }
+
+    /// Empty means the vault opened last.
+    var chosenVaultPath: String {
+        get { CaptureVaultPreference.chosenPath ?? "" }
+        set {
+            CaptureVaultPreference.choose(newValue.isEmpty ? nil : URL(fileURLWithPath: newValue, isDirectory: true))
+            objectWillChange.send()
+        }
+    }
 }
 
 struct CaptureSettingsView: View {
@@ -31,6 +41,37 @@ struct CaptureSettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                LabeledContent {
+                    Picker("", selection: $settings.chosenVaultPath) {
+                        Text("The vault opened last").tag("")
+                        ForEach(vaultChoices, id: \.path) { choice in
+                            Text("Always \(choice.label)").tag(choice.path)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+                    .alignedWithTitle()
+                } label: {
+                    SettingLabel(
+                        "Captures go to",
+                        detail: "With one vault this makes no difference. With more, "
+                            + "a capture goes to the vault opened last unless one is "
+                            + "chosen here. Open Inbox and Open Today's Note use the "
+                            + "same vault."
+                    )
+                }
+            } header: {
+                SectionHeading(
+                    "Spotlight and Shortcuts",
+                    detail: "Capture to Inbox and Add to Today's Note are App Shortcuts: "
+                        + "actions in Spotlight, and shortcuts in the Shortcuts app and Siri. "
+                        + "They file a line without bringing Heft forward. Spotlight lets "
+                        + "you give an action a quick key, such as \"in\" for Capture to Inbox."
+                )
+            }
+
             Section {
                 if let vault {
                     LabeledContent {
@@ -43,6 +84,7 @@ struct CaptureSettingsView: View {
                             .labelsHidden()
                             Button("Choose…") { chooseNote(in: vault) }
                         }
+                        .alignedWithTitle()
                     } label: {
                         SettingLabel("Inbox note", detail: detail(for: vault))
                     }
@@ -52,18 +94,33 @@ struct CaptureSettingsView: View {
                 }
             } header: {
                 SectionHeading(
-                    "Capture in \(vault?.lastPathComponent ?? "a vault")",
-                    detail: "Capture to Inbox in Spotlight files a line into this note, "
-                        + "newest first, grouped by day, and Open Inbox shows it; both work "
-                        + "while Heft is in front and go to the vault opened last. Spotlight "
-                        + "on macOS 26 can give an action a quick key."
+                    "Inbox\(vault.map { " in \($0.lastPathComponent)" } ?? "")",
+                    detail: "Capture to Inbox files a line into this note, newest first, "
+                        + "grouped by day, and Open Inbox shows it. Each vault has its own."
                 )
             }
 
             Section {
+                // The same row the Calendar pane has, for the same reason: the
+                // folder, format and template belong to the vault and live
+                // with it, but this is where the marker sends you.
+                LabeledContent {
+                    Button("Open Daily Note Settings…") {
+                        registry.frontmostModel?.presentDailyNotesSettings()
+                    }
+                    .disabled(vault == nil)
+                    .alignedWithTitle()
+                } label: {
+                    SettingLabel(
+                        "Folder, filename format and template",
+                        detail: "These belong to the vault, so they live with it. "
+                            + "Put the marker below in the template where captures should go."
+                    )
+                }
                 LabeledContent {
                     Button(copiedMarker ? "Copied" : "Copy") { copyMarker() }
                         .frame(width: 70)
+                        .alignedWithTitle()
                 } label: {
                     SettingLabel("Log marker", detail: DailyNoteCapture.insertionMarker)
                 }
@@ -71,18 +128,31 @@ struct CaptureSettingsView: View {
                 SectionHeading(
                     "Daily note",
                     detail: "Add to Today's Note appends to today's daily note in the order "
-                        + "it happened: above this marker when the template has it, "
-                        + "otherwise at the end. The folder, filename format and template "
-                        + "are under File ▸ Daily Note Settings…"
+                        + "it happened: above the marker when the template has it, "
+                        + "otherwise at the end. Today's note is created from the "
+                        + "template when it is not there yet."
                 )
             }
         }
         .formStyle(.grouped)
     }
 
-    // MARK: - The setting, read and written where it lives
+    // MARK: - The settings, read and written where they live
 
     private var vault: URL? { registry.frontmostModel?.vaultRoot }
+
+    /// The vaults Heft remembers, plus the chosen one if it has gone missing
+    /// from them, so the menu can still show what is chosen.
+    private var vaultChoices: [(path: String, label: String)] {
+        var choices = registry.recentVaults.map {
+            (path: $0.url.standardizedFileURL.path, label: $0.label)
+        }
+        let chosen = settings.chosenVaultPath
+        if !chosen.isEmpty, !choices.contains(where: { $0.path == chosen }) {
+            choices.append((path: chosen, label: (chosen as NSString).lastPathComponent))
+        }
+        return choices
+    }
 
     private func text(for vault: URL) -> Binding<String> {
         Binding(

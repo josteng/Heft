@@ -1,13 +1,46 @@
 import Foundation
 
-/// The last vault opened in Heft is the capture destination used when no
-/// window exists to supply one, as with Spotlight and Shortcuts.
+/// Where a capture with no window to supply a vault goes, as from Spotlight
+/// and Shortcuts: the vault chosen in Settings ▸ Capture while it is there,
+/// otherwise the vault opened last.
+///
+/// The choice is app-wide, unlike the inbox note, because it answers a
+/// question no single vault can: which of them.
 public enum CaptureVaultPreference {
     public static let defaultsKey = "dev.stenglein.Heft.vaultPath"
+    public static let chosenKey = "dev.stenglein.Heft.captureVault"
 
-    public static var url: URL? {
-        guard let path = HeftDefaults.shared.string(forKey: defaultsKey) else { return nil }
-        let url = URL(fileURLWithPath: path).standardizedFileURL
+    public static var url: URL? { chosen ?? lastOpened }
+
+    public static var lastOpened: URL? {
+        existing(HeftDefaults.shared.string(forKey: defaultsKey))
+    }
+
+    /// The vault chosen once, or nil when none was or it is not there now.
+    public static var chosen: URL? {
+        existing(HeftDefaults.shared.string(forKey: chosenKey))
+    }
+
+    /// What was chosen, whether or not it is there right now, so a pane can
+    /// show a vault that is away rather than pretend nothing was chosen.
+    public static var chosenPath: String? {
+        HeftDefaults.shared.string(forKey: chosenKey)
+    }
+
+    public static func choose(_ vault: URL?) {
+        if let vault {
+            HeftDefaults.shared.set(vault.standardizedFileURL.path, forKey: chosenKey)
+        } else {
+            HeftDefaults.shared.removeObject(forKey: chosenKey)
+        }
+        // Read by the intent, possibly from another process; see the same
+        // flush where the last-opened vault is recorded.
+        HeftDefaults.shared.synchronize()
+    }
+
+    private static func existing(_ path: String?) -> URL? {
+        guard let path else { return nil }
+        let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }

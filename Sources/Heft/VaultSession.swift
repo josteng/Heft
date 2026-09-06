@@ -192,8 +192,11 @@ final class VaultRegistry: ObservableObject {
     private var workspaceWindows: [UUID: WeakWindow] = [:]
     private var workspaceModels: [UUID: WeakModel] = [:]
     private var windowOpeners: [UUID: (WorkspaceDescriptor) -> Void] = [:]
+    /// The vault opened last, for a launch with nothing to restore. Not the
+    /// vault chosen for captures: that setting answers where a Spotlight
+    /// capture goes, and choosing it must not also change what opens.
     var lastVaultURL: URL? {
-        CaptureVaultPreference.url
+        CaptureVaultPreference.lastOpened
     }
 
     static let recentVaultsKey = "dev.stenglein.Heft.recentVaults"

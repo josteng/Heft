@@ -52,3 +52,13 @@ struct SectionHeading: View {
         }
     }
 }
+
+extension View {
+    /// A control beside a two-line `SettingLabel` rides high: a form row
+    /// aligns it on the label's first baseline, and a control with no text
+    /// has none, while one with text sits centred on the title. This places
+    /// it so that the control's top edge meets the top of the title's letters.
+    func alignedWithTitle() -> some View {
+        alignmentGuide(.firstTextBaseline) { $0[.top] + 13 }
+    }
+}
