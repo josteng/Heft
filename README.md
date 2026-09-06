@@ -43,8 +43,8 @@ brew install --cask josteng/tap/heft
 ```
 
 Requires macOS 26 on Apple Silicon. That installs `Heft.app` and a `heft`
-command, signed and notarised, and `brew upgrade` follows new releases. To
-build it yourself instead, with Xcode installed:
+command, signed and notarised, and `brew update && brew upgrade` follows new
+releases. To build it yourself instead, with Xcode installed:
 
 ```bash
 git clone https://github.com/josteng/Heft.git

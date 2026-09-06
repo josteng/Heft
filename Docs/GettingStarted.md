@@ -10,8 +10,11 @@ brew install --cask josteng/tap/heft
 ```
 
 Needs **macOS 26** on Apple Silicon. That puts `Heft.app` in `/Applications`
-and a `heft` command on your `PATH`, signed and notarised; `brew upgrade`
-follows new releases.
+and a `heft` command on your `PATH`, signed and notarised. `brew update &&
+brew upgrade` follows new releases. The update matters: `brew upgrade`
+compares against your Mac's own copy of the tap, which Homebrew refreshes by
+itself only once a day, so a release from later the same day is invisible
+until you refresh it.
 
 To build it yourself instead, with **Xcode** installed (not just the Command
 Line Tools; the build uses `xcodebuild` and `actool`):
