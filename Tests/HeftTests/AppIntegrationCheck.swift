@@ -933,8 +933,11 @@ enum AppIntegrationCheck {
         return result
     }
 
+    /// The default is generous because the window harnesses in the suite hold
+    /// the main thread for seconds at a time, and everything awaited here runs
+    /// on the main actor behind them. A timeout is only ever spent on failure.
     private static func waitUntil(
-        timeout: Duration = .seconds(3),
+        timeout: Duration = .seconds(20),
         _ condition: @escaping @MainActor () -> Bool
     ) async -> Bool {
         let clock = ContinuousClock()

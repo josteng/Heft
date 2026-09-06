@@ -8,60 +8,8 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var windowTopChromeHeight: CGFloat = 0
     var body: some View {
-        NavigationSplitView(columnVisibility: $model.columnVisibility) {
-            SidebarView()
-                // The minimum has to clear the traffic lights and sidebar
-                // toggle, or the toolbar starts dropping items into overflow.
-                .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 380)
-                // A toolbar contributed by the sidebar lands in the title-bar
-                // region above that column, not in the detail pane.
-                .toolbar { sidebarToolbar }
-        } detail: {
-            Group {
-                if model.vaultRoot == nil {
-                    WelcomeView()
-                } else if model.current == nil {
-                    // The offer belongs here above all: opening a folder that
-                    // has never been set up is exactly the moment there is no
-                    // note open yet, so hanging it only over the editor meant
-                    // it appeared everywhere except where it was needed.
-                    VStack(spacing: 0) {
-                        if model.shouldOfferAgentSetup {
-                            // The unified toolbar draws over the top of this
-                            // column, so a banner placed flush with it is
-                            // hidden behind the title. `EditorPane` reserves
-                            // the same height for the same reason.
-                            Color.clear.frame(height: windowTopChromeHeight)
-                            AgentSetupBanner()
-                        }
-                        EmptySelectionView()
-                            .frame(maxHeight: .infinity)
-                    }
-                } else {
-                    EditorPane(topChromeHeight: windowTopChromeHeight)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .textBackgroundColor))
-            // This has to live on the detail column's root. Applying it only
-            // to EditorPane is too late: NavigationSplitView has already
-            // clipped that child to the title-bar safe area.
-            .ignoresSafeArea(.container, edges: .top)
-            // Let macOS choose the native transition between scrolling content
-            // and the floating window controls for the current toolbar state.
-            .scrollEdgeEffectStyle(.automatic, for: .top)
-            // The note's name belongs in the toolbar, the way every document
-            // app puts it there. It used to sit in a row of its own below,
-            // which cost a strip of height and left the toolbar looking empty.
-            .navigationTitle(model.current?.name ?? "Heft")
-            .navigationSubtitle(model.windowSubtitle)
-        }
-        .inspector(isPresented: $model.isInspectorVisible) {
-            BacklinksPanel()
-                .inspectorColumnWidth(min: 220, ideal: 280, max: 420)
-        }
-        .toolbar { toolbarContent }
-        .background(WindowToolbarConfiguration(
+        WorkspaceSplit(model: model, topChromeHeight: windowTopChromeHeight)
+            .background(WindowToolbarConfiguration(
             registry: registry,
             workspaceID: model.workspaceID,
             topChromeHeight: $windowTopChromeHeight
@@ -172,6 +120,47 @@ struct ContentView: View {
         }
     }
 
+}
+
+/// The split view and both of its toolbars, on a view that observes only
+/// `WindowChrome`.
+///
+/// Not `ContentView`, which observes the model: a toolbar's builder runs
+/// whenever the view declaring it re-renders, and rebuilding these two on
+/// every publish leaked, so a window grew slower with every index change and
+/// note switch for as long as it stayed open. The model is held here
+/// unobserved, for the actions only; what the toolbars display comes from
+/// `chrome`, and the columns' contents observe the model themselves.
+struct WorkspaceSplit: View {
+    let model: AppModel
+    @ObservedObject private var chrome: WindowChrome
+    let topChromeHeight: CGFloat
+
+    init(model: AppModel, topChromeHeight: CGFloat) {
+        self.model = model
+        _chrome = ObservedObject(wrappedValue: model.chrome)
+        self.topChromeHeight = topChromeHeight
+    }
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $chrome.columnVisibility) {
+            SidebarView()
+                // The minimum has to clear the traffic lights and sidebar
+                // toggle, or the toolbar starts dropping items into overflow.
+                .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 380)
+                // A toolbar contributed by the sidebar lands in the title-bar
+                // region above that column, not in the detail pane.
+                .toolbar { sidebarToolbar }
+        } detail: {
+            DetailColumn(topChromeHeight: topChromeHeight)
+        }
+        .inspector(isPresented: $chrome.isInspectorVisible) {
+            BacklinksPanel()
+                .inspectorColumnWidth(min: 220, ideal: 280, max: 420)
+        }
+        .toolbar { toolbarContent }
+    }
+
     /// The scope picker, centred over the sidebar column.
     ///
     /// Contributed only while that column exists. An item's *slot* costs title
@@ -187,7 +176,7 @@ struct ContentView: View {
     /// stable `id`, not an invisible item holding the door.
     @ToolbarContentBuilder
     private var sidebarToolbar: some ToolbarContent {
-        if model.columnVisibility != .detailOnly {
+        if chrome.columnVisibility != .detailOnly {
             ToolbarSpacer(.flexible, placement: .status)
             ToolbarItem(placement: .status) { WorkspaceScopePicker() }
             ToolbarSpacer(.flexible, placement: .status)
@@ -205,14 +194,14 @@ struct ContentView: View {
                 Button { model.navigateBack() } label: {
                     Image(systemName: "chevron.left")
                 }
-                .disabled(!model.canNavigateBack)
+                .disabled(!chrome.canNavigateBack)
                 .help("Back (⌘[)")
                 .keyboardShortcut("[", modifiers: .command)
 
                 Button { model.navigateForward() } label: {
                     Image(systemName: "chevron.right")
                 }
-                .disabled(!model.canNavigateForward)
+                .disabled(!chrome.canNavigateForward)
                 .help("Forward (⌘])")
                 .keyboardShortcut("]", modifiers: .command)
             }
@@ -220,11 +209,58 @@ struct ContentView: View {
         }
 
         ToolbarItem(placement: .primaryAction) {
-            Button { model.isInspectorVisible.toggle() } label: {
+            Button { chrome.isInspectorVisible.toggle() } label: {
                 Image(systemName: "link")
             }
             .help("Toggle backlinks (⌥⌘B)")
         }
+    }
+}
+
+/// The detail column: the welcome screen, the empty state, or the editor.
+private struct DetailColumn: View {
+    @EnvironmentObject private var model: AppModel
+    let topChromeHeight: CGFloat
+
+    var body: some View {
+            Group {
+                if model.vaultRoot == nil {
+                    WelcomeView()
+                } else if model.current == nil {
+                    // The offer belongs here above all: opening a folder that
+                    // has never been set up is exactly the moment there is no
+                    // note open yet, so hanging it only over the editor meant
+                    // it appeared everywhere except where it was needed.
+                    VStack(spacing: 0) {
+                        if model.shouldOfferAgentSetup {
+                            // The unified toolbar draws over the top of this
+                            // column, so a banner placed flush with it is
+                            // hidden behind the title. `EditorPane` reserves
+                            // the same height for the same reason.
+                            Color.clear.frame(height: topChromeHeight)
+                            AgentSetupBanner()
+                        }
+                        EmptySelectionView()
+                            .frame(maxHeight: .infinity)
+                    }
+                } else {
+                    EditorPane(topChromeHeight: topChromeHeight)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .textBackgroundColor))
+            // This has to live on the detail column's root. Applying it only
+            // to EditorPane is too late: NavigationSplitView has already
+            // clipped that child to the title-bar safe area.
+            .ignoresSafeArea(.container, edges: .top)
+            // Let macOS choose the native transition between scrolling content
+            // and the floating window controls for the current toolbar state.
+            .scrollEdgeEffectStyle(.automatic, for: .top)
+            // The note's name belongs in the toolbar, the way every document
+            // app puts it there. It used to sit in a row of its own below,
+            // which cost a strip of height and left the toolbar looking empty.
+            .navigationTitle(model.current?.name ?? "Heft")
+            .navigationSubtitle(model.windowSubtitle)
     }
 }
 

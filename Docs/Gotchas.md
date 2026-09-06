@@ -101,6 +101,12 @@ preferences or the icon.
   window observes the model, so each publish redraws the sidebar, calendar,
   status bar and toolbar. `text` is a plain property; typing publishes only
   the counts, to `NoteStats`, which the status bar alone observes.
+- **The split view's toolbars must live on a view that does not observe the
+  model.** A toolbar builder runs whenever its view re-renders, and rebuilding
+  the window's two toolbars leaks AppKit key-value dependencies every time, so
+  a window grew slower and larger with each publish for as long as it stayed
+  open. `WorkspaceSplit` declares them and observes `WindowChrome` alone;
+  `ContentView` observes the model and keeps the sheets and alerts.
 - **A toolbar item costs title bar whether or not it draws anything.** A
   zero-width, clipped, transparent item still pushed the sidebar toggle away
   from the traffic lights; the cost is the item's slot, which no hosting

@@ -226,7 +226,17 @@ final class AppModel: ObservableObject {
     /// collapsed sidebar is restored on the next launch and the app reopens
     /// with no visible file tree. Lives here rather than as view state so the
     /// View menu can toggle it too.
-    @Published var columnVisibility: NavigationSplitViewVisibility = .all
+    ///
+    /// Stored on `chrome`, which `WorkspaceSplit` observes; this is the same
+    /// value for everything else that reads or sets it.
+    var columnVisibility: NavigationSplitViewVisibility {
+        get { chrome.columnVisibility }
+        set { chrome.columnVisibility = newValue }
+    }
+
+    /// The window's frame state, observed by the view that owns the split
+    /// view and its toolbars, and by nothing else. See `WindowChrome`.
+    let chrome = WindowChrome()
 
     /// A note ⌘N wants created and named in the sidebar.
     ///
@@ -241,7 +251,10 @@ final class AppModel: ObservableObject {
 
     @Published var inlineNoteRequest: InlineNoteRequest?
     private var inlineNoteSequence = 0
-    @Published var isInspectorVisible = false
+    var isInspectorVisible: Bool {
+        get { chrome.isInspectorVisible }
+        set { chrome.isInspectorVisible = newValue }
+    }
     /// Three narrow pickers rather than one that does everything. A combined
     /// palette was tried and removed: mixing content hits into a note switcher
     /// made the common case — jump to a note by name — slower and noisier,
@@ -277,8 +290,12 @@ final class AppModel: ObservableObject {
     /// offers to open it as its own vault instead of failing silently.
     @Published var pendingOutsideVaultFolder: URL?
 
-    @Published private var navigationHistory: [String] = []
-    @Published private var navigationIndex = -1
+    @Published private var navigationHistory: [String] = [] {
+        didSet { chrome.updateNavigation(back: canNavigateBack, forward: canNavigateForward) }
+    }
+    @Published private var navigationIndex = -1 {
+        didSet { chrome.updateNavigation(back: canNavigateBack, forward: canNavigateForward) }
+    }
     /// Line the editor should jump to once the note is open, 1-based. Consumed
     /// by the editor, which clears it.
     @Published var pendingLineReveal: Int?

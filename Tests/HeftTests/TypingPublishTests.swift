@@ -53,7 +53,9 @@ struct TypingPublishTests {
 
         // Then the word count, once the interval has passed. Polled rather
         // than slept for, since other suites can hold the main thread.
-        let deadline = Date(timeIntervalSinceNow: 3)
+        // Generous: the window harnesses hold the main thread for seconds at
+        // a time, and this timer fires only once they let go.
+        let deadline = Date(timeIntervalSinceNow: 20)
         while statsPublished < 1, Date() < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
