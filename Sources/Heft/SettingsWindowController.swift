@@ -97,7 +97,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .typing: "Typing"
         case .calendar: "Calendar"
         case .attachments: "Attachments"
-        case .vim: "Vim (Experimental)"
+        case .vim: "Vim"
         }
     }
 

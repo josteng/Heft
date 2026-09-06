@@ -123,8 +123,13 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Picker("New notes go", selection: choice) {
+                Picker(selection: choice) {
                     ForEach(Choice.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "New notes go",
+                        detail: "Where ⌘N puts a note. Picking a folder in the sidebar first still wins."
+                    )
                 }
                 if choice.wrappedValue == .folder {
                     // Bordered and with its label hidden, the way the Startup
@@ -132,62 +137,55 @@ struct GeneralSettingsView: View {
                     // Form draws as right-aligned text with no edge to it, so
                     // it reads as a value someone else set rather than as
                     // something to type in.
-                    LabeledContent("Folder") {
+                    LabeledContent {
                         TextField("", text: folder, prompt: Text("Projects/Notes"))
                             .textFieldStyle(.roundedBorder)
                             .labelsHidden()
+                    } label: {
+                        SettingLabel(
+                            "Folder",
+                            detail: "Made when the first note goes in it, if it is not there yet."
+                        )
                     }
-                    Text("Made when the first note goes in it, if it is not there yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
-            } footer: {
-                Text("Where ⌘N puts a note. Picking a folder in the sidebar first still wins.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section {
-                Picker("Show the calendar", selection: Binding(
+                Picker(selection: Binding(
                     get: { settings.calendarVisibility },
                     set: { settings.calendarVisibility = $0 }
                 )) {
                     ForEach(CalendarVisibility.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    // What the setting decides is how a window *opens*. Saying
+                    // so matters because ⇧⌘D still works either way, and a
+                    // setting that looked absolute would read as broken the
+                    // first time it was overridden by hand.
+                    SettingLabel(
+                        "Show the calendar",
+                        detail: settings.calendarVisibility == .whenDailyNotesAreInScope
+                            ? "How a window opens: without the calendar when it is showing a folder "
+                                + "that holds no daily notes. ⇧⌘D shows and hides it at any time."
+                            : "How every window opens. ⇧⌘D shows and hides it at any time."
+                    )
                 }
-            } footer: {
-                // What the setting decides is how a window *opens*. Saying so
-                // matters because ⇧⌘D still works either way, and a setting
-                // that looked absolute would read as broken the first time it
-                // was overridden by hand.
-                Text(settings.calendarVisibility == .whenDailyNotesAreInScope
-                    ? "How a window opens: without the calendar when it is showing a folder "
-                        + "that holds no daily notes. ⇧⌘D shows and hides it at any time."
-                    : "How every window opens. ⇧⌘D shows and hides it at any time.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section {
-                Toggle("Offer agent setup for new vaults", isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { settings.offersAgentSetup },
                     set: { settings.offersAgentSetup = $0 }
-                ))
-            } footer: {
-                Text(settings.offersAgentSetup
-                    ? "A vault without agent instructions is asked once whether to add them. "
-                        + "Not Now is remembered for that vault."
-                    : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                )) {
+                    SettingLabel(
+                        "Offer agent setup for new vaults",
+                        detail: settings.offersAgentSetup
+                            ? "A vault without agent instructions is asked once whether to add them. "
+                                + "Not Now is remembered for that vault."
+                            : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them."
+                    )
+                }
             }
         }
         .formStyle(.grouped)
-        // Scrolling stays on. It was turned off to stop a scroll bar the
-        // hand measurement caused by under-reporting this pane's height;
-        // `preferredContentSize` reports the Form's full content height,
-        // so the window is tall enough and no bar appears — and on a short
-        // display, where the pane is capped, scrolling is what should
-        // happen rather than the bottom being unreachable.
-        .frame(width: 560)
     }
 }

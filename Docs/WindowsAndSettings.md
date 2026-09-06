@@ -107,6 +107,13 @@ settings field is not a request to litter the vault with empty files.
 
 ## Settings that are not about one vault
 
+Every pane is a grouped `Form` laid out as System Settings lays out its own:
+a card holds controls and nothing else, what one control does is written
+under its name inside its row (`SettingLabel`), what a group is for is
+written above its card (`SectionHeading`), and nothing goes in a footer.
+The panes were built one at a time in three different styles, and the
+difference only showed when someone clicked through the tabs in a row.
+
 `GeneralSettings` holds where a new note goes and when a window opens its
 calendar. `NewNoteLocation` is pure and takes every fallback as an argument.
 A folder chosen in the sidebar still wins over the setting: a gesture outranks

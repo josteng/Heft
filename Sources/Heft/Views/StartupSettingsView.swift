@@ -35,12 +35,10 @@ struct StartupSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                Text("When Heft opens\(vault.map { " \($0.lastPathComponent)" } ?? "")")
-            } footer: {
-                if vault != nil {
-                    Text(explanation)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                SectionHeading(
+                    "When Heft opens\(vault.map { " \($0.lastPathComponent)" } ?? "")",
+                    detail: vault == nil ? nil : explanation
+                )
             }
 
             if vault != nil, current.choice.needsText {
@@ -81,7 +79,6 @@ struct StartupSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560)
     }
 
     // MARK: - The setting, read and written where it lives

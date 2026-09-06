@@ -49,21 +49,22 @@ struct AttachmentSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
-                HStack(alignment: .firstTextBaseline) {
-                    Text(
-                        "Tried from the top; the first that finds a folder wins. "
-                            + "Drag a rule, or use its arrows, to reorder. If none "
-                            + "finds a folder, the file goes to the top of the vault."
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 12)
+            } header: {
+                SectionHeading(
+                    "Where attachments go",
+                    detail: "Tried from the top; the first that finds a folder wins. "
+                        + "Drag a rule, or use its arrows, to reorder. If none "
+                        + "finds a folder, the file goes to the top of the vault."
+                )
+            } footer: {
+                // The one footer in Settings, and it holds no text: a button
+                // that acts on the whole card sits under it, right-aligned,
+                // which is where System Settings puts "Add Focus…".
+                HStack {
+                    Spacer()
                     Button("Reset") { settings.reset() }
                         .disabled(settings.plan == .standard)
                 }
-            } header: {
-                Text("Where attachments go")
             }
 
             Section("What that means for the note you have open") {
@@ -76,7 +77,6 @@ struct AttachmentSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 620)
         // Which window is in front is not something SwiftUI publishes, and
         // `frontmostModel` is a lookup rather than a binding, so without this
         // the pane keeps answering for whichever window was in front when it

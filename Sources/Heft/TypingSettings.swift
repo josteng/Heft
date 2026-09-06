@@ -190,186 +190,160 @@ struct TypingSettingsView: View {
     /// A scroll view is the only thing here that will give up height when it
     /// is squeezed, so an inner one around the rules meant the rules — and
     /// nothing else — vanished whenever the Settings window came up shorter
-    /// than the tab wanted. Scrolling the whole pane puts the rows at their
-    /// natural height inside the scrolled content, where nothing can collapse
-    /// them.
+    /// than the tab wanted. A grouped Form scrolls as a whole and keeps every
+    /// row at its natural height inside the scrolled content.
     var body: some View {
-        ScrollView(.vertical) {
-            content
-        }
-        .frame(width: 630)
-        .frame(minHeight: Self.minPaneHeight, maxHeight: Self.maxPaneHeight)
-    }
-
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        Form {
             // Outside the substitutions group on purpose: pairing happens as
             // the key lands rather than after it, and switching substitutions
             // off is no reason to stop closing a bracket.
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Auto-Pairing").font(.headline)
+            Section {
                 Toggle(isOn: $settings.pairsBrackets) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Brackets")
-                        Text("Typing ( [ or { writes the closing half and leaves the caret "
-                             + "between them. With text selected, it wraps the selection.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    SettingLabel(
+                        "Brackets",
+                        detail: "Typing ( [ or { writes the closing half and leaves the caret "
+                            + "between them. With text selected, it wraps the selection."
+                    )
                 }
-                .toggleStyle(.checkbox)
-
                 Toggle(isOn: $settings.pairsMarkdown) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Markdown Syntax")
-                        Text("The same for * _ and `, at the start of a word. Typing the "
-                             + "closing half yourself steps over the one already there.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    SettingLabel(
+                        "Markdown Syntax",
+                        detail: "The same for * _ and `, at the start of a word. Typing the "
+                            + "closing half yourself steps over the one already there."
+                    )
                 }
-                .toggleStyle(.checkbox)
+            } header: {
+                SectionHeading("Auto-Pairing")
             }
 
-            Divider()
-
-            Toggle(isOn: $settings.substitutionsEnabled) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Text Substitutions").font(.headline)
-                    Text("Replaces what you type as you type it. One backspace undoes a "
-                         + "replacement and leaves what you typed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            // One header, three cards: the switch that governs everything,
+            // the built-in groups, and the user's own rules. The second and
+            // third carry no header of their own, which is what makes them
+            // read as part of the first; on its own the master switch sat
+            // under the Auto-Pairing header and read as a third pairing
+            // option.
+            Section {
+                // Substitutions never fire inside code, math, frontmatter,
+                // links, tags or URLs. Saying so here saves the "why did it
+                // not work in my code block" question, and the "why did it
+                // wreck my code block" one.
+                Toggle(isOn: $settings.substitutionsEnabled) {
+                    SettingLabel(
+                        "Replace as you type",
+                        detail: "One backspace undoes a replacement and leaves what you typed. "
+                            + "Nothing is replaced inside code, math, frontmatter, links, tags, or URLs."
+                    )
                 }
+            } header: {
+                SectionHeading("Text Substitutions")
             }
-            .toggleStyle(.checkbox)
 
-            Group {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(SmartTypographyGroup.allCases, id: \.self) { group in
-                        Toggle(isOn: settings.binding(for: group)) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(group.title)
-                                Text(group.detail)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+            Section {
+                SettingLabel(
+                    "Built-in replacements",
+                    detail: "Each group on its own. Switch one off to keep typing its characters as they are."
+                )
+                // The example beside the name rather than under it: eight
+                // two-line rows put the rule table below the fold of a
+                // laptop screen, and an example is short enough to share
+                // the line.
+                ForEach(SmartTypographyGroup.allCases, id: \.self) { group in
+                    Toggle(isOn: settings.binding(for: group)) {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(group.title)
+                            Text(group.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        .toggleStyle(.checkbox)
                     }
                 }
-
-                Divider()
-
-                customRulesSection
             }
             .disabled(!settings.substitutionsEnabled)
-            .opacity(settings.substitutionsEnabled ? 1 : 0.4)
 
-            // Substitutions never fire inside code, math, frontmatter, links,
-            // tags or URLs. Saying so here saves the "why did it not work in
-            // my code block" question, and the "why did it wreck my code
-            // block" one.
-            Text("Nothing is replaced inside code, math, frontmatter, links, tags, or URLs.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Section {
+                // The name is a row of the card, not a header: anything in a
+                // header slot is drawn at the level of "Text Substitutions",
+                // and this is one level down. A label row followed by its
+                // items is how System Settings nests a group inside a card.
+                SettingLabel(
+                    "Your replacements",
+                    detail: "A trigger that starts with a letter or digit only fires at the start of a "
+                        + "word. \"Immediately\" replaces as soon as the trigger is complete; "
+                        + "\"After a space\" waits for a space, a punctuation mark, or Return, the way "
+                        + "macOS text replacement does, which is what longer snippets want."
+                )
+                customRules
+            }
+            .disabled(!settings.substitutionsEnabled)
         }
-        .padding(20)
-        // Room on the right for the pane's own overlay scroller, which would
-        // otherwise sit on top of the remove buttons.
-        .padding(.trailing, 8)
-        .frame(width: 630, alignment: .leading)
+        .formStyle(.grouped)
+        .frame(minHeight: Self.minPaneHeight, maxHeight: Self.maxPaneHeight)
     }
 
     @ViewBuilder
-    private var customRulesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Your Replacements").font(.headline)
-                Spacer(minLength: 12)
-                // A popover, exactly as the daily-note sheet documents the
-                // same tokens: the list is long enough to push the rules
-                // themselves off the pane, and it is reference material read
-                // once, not a control.
-                // A real bordered button, not the daily-note sheet's plain
-                // grey label: there it sits directly under the template field
-                // it documents, while here it competes with eight toggles and
-                // a table, and read as decoration until it had a border.
-                Button { isPlaceholderHelpPresented.toggle() } label: {
-                    Label("Placeholders", systemImage: "questionmark.circle")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $isPlaceholderHelpPresented, arrowEdge: .bottom) {
-                    PlaceholderReference(
-                        title: "Placeholders",
-                        tokens: Self.placeholders,
-                        footnote: PlaceholderReference.momentTokenFootnote
-                    )
-                    .frame(width: 470, alignment: .leading)
-                    .padding(14)
-                }
+    private var customRules: some View {
+        if settings.customRules.isEmpty {
+            Text("No replacements yet.")
+                .foregroundStyle(.tertiary)
+        } else {
+            // Every row at its natural height: the pane around them is
+            // what scrolls.
+            ForEach($settings.customRules) { $rule in
+                customRuleRow($rule)
             }
-            Text("A trigger that starts with a letter or digit only fires at the start of a "
-                 + "word. \"Immediately\" replaces as soon as the trigger is complete; "
-                 + "\"After a space\" waits for a space, a punctuation mark, or Return, the way "
-                 + "macOS text replacement does, which is what longer snippets want.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        }
 
-            if settings.customRules.isEmpty {
-                Text("No replacements yet.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.vertical, 8)
-            } else {
-                // Every row at its natural height: the pane around them is
-                // what scrolls.
-                VStack(spacing: 4) {
-                    ForEach($settings.customRules) { $rule in
-                        customRuleRow($rule)
-                    }
-                }
+        HStack(spacing: 10) {
+            Button {
+                // New rules wait for a space, which is both what macOS
+                // does and the safe default: a word-shaped trigger that
+                // fires the instant it is complete goes off inside longer
+                // words.
+                let rule = CustomSubstitution(firing: .afterWord)
+                settings.customRules.append(rule)
+                focusedTrigger = rule.id
+            } label: {
+                Label("Add Replacement", systemImage: "plus")
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    // New rules wait for a space, which is both what macOS
-                    // does and the safe default: a word-shaped trigger that
-                    // fires the instant it is complete goes off inside longer
-                    // words.
-                    let rule = CustomSubstitution(firing: .afterWord)
-                    settings.customRules.append(rule)
-                    focusedTrigger = rule.id
-                } label: {
-                    Label("Add Replacement", systemImage: "plus")
-                }
-
-                // Ready-made rules, added as ordinary editable rows rather
-                // than as a separate kind of thing: the fastest way to learn
-                // what a replacement can do is to have a working one to
-                // change.
-                Menu {
-                    ForEach(SmartTypography.library) { example in
-                        Button {
-                            let rule = example.rule()
-                            settings.customRules.append(rule)
-                            focusedTrigger = rule.id
-                        } label: {
-                            Text("\(example.title)   \(example.trigger)")
-                        }
-                        .disabled(settings.customRules.contains { $0.trigger == example.trigger })
+            // Ready-made rules, added as ordinary editable rows rather
+            // than as a separate kind of thing: the fastest way to learn
+            // what a replacement can do is to have a working one to
+            // change.
+            Menu {
+                ForEach(SmartTypography.library) { example in
+                    Button {
+                        let rule = example.rule()
+                        settings.customRules.append(rule)
+                        focusedTrigger = rule.id
+                    } label: {
+                        Text("\(example.title)   \(example.trigger)")
                     }
-                } label: {
-                    Label("Add from Library", systemImage: "books.vertical")
+                    .disabled(settings.customRules.contains { $0.trigger == example.trigger })
                 }
-                .menuStyle(.button)
-                .fixedSize()
+            } label: {
+                Label("Add from Library", systemImage: "books.vertical")
+            }
+            .menuStyle(.button)
+            .fixedSize()
+
+            Spacer(minLength: 12)
+
+            // A popover, exactly as the daily-note sheet documents the
+            // same tokens: the list is long enough to push the rules
+            // themselves off the pane, and it is reference material read
+            // once, not a control.
+            Button { isPlaceholderHelpPresented.toggle() } label: {
+                Label("Placeholders", systemImage: "questionmark.circle")
+            }
+            .popover(isPresented: $isPlaceholderHelpPresented, arrowEdge: .bottom) {
+                PlaceholderReference(
+                    title: "Placeholders",
+                    tokens: Self.placeholders,
+                    footnote: PlaceholderReference.momentTokenFootnote
+                )
+                .frame(width: 470, alignment: .leading)
+                .padding(14)
             }
         }
     }

@@ -214,109 +214,93 @@ struct AppearanceSettingsView: View {
     @ObservedObject private var appearance = AppearanceSettings.shared
 
     var body: some View {
-        // `Form`/`LabeledContent` computed each row's label and control
-        // column width independently here, so the first row visibly drifted
-        // from the other two. A `Grid` shares one column width across every
-        // `GridRow`, and the fixed frames below keep every swatch and every
-        // Reset button the same size regardless of its row's text length.
-        // One `Grid` for every row, not two, so the label column — and
-        // therefore where every swatch starts — is sized from all six rows
-        // together. Two separate `Grid`s here previously sized their label
-        // columns independently, so Bold/Italic/Heading (short labels)
-        // drifted away from Reset compared to Accent/Link/Code (long ones).
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
-            colorRow(
-                "Accent Color",
-                detail: "The caret and checkboxes. Follows your macOS accent colour, "
-                    + "not a fixed colour, unless set here.",
-                color: settableBinding(current: appearance.accentColor) { appearance.customAccentColor = $0 },
-                isCustom: appearance.customAccentColor != nil,
-                reset: { appearance.customAccentColor = nil },
-                resetHelp: "Follow your macOS accent colour again"
-            )
-            colorRow(
-                "Link Color",
-                detail: "Defaults to Accent Color above; set here to use a different "
-                    + "colour just for links.",
-                color: settableBinding(current: appearance.linkColor) { appearance.customLinkColor = $0 },
-                isCustom: appearance.customLinkColor != nil,
-                reset: { appearance.customLinkColor = nil },
-                resetHelp: "Follow Accent Color again"
-            )
-            colorRow(
-                "Tag Color",
-                detail: "For #tags and the pill behind them. Defaults to Accent Color above.",
-                color: settableBinding(current: appearance.tagColor) { appearance.customTagColor = $0 },
-                isCustom: appearance.customTagColor != nil,
-                reset: { appearance.customTagColor = nil },
-                resetHelp: "Follow Accent Color again"
-            )
-            colorRow(
-                "Code Color",
-                detail: "For inline `code` spans.",
-                color: settableBinding(current: appearance.codeColor) { appearance.customCodeColor = $0 },
-                isCustom: appearance.customCodeColor != nil,
-                reset: { appearance.customCodeColor = nil },
-                resetHelp: "Reset to pink"
-            )
-
-            // A view given directly to `Grid`, not wrapped in `GridRow`,
-            // spans every column automatically.
-            Divider()
-
-            Toggle(isOn: $appearance.colorfulFormattingEnabled) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Colourful Formatting").font(.headline)
-                    Text("Gives bold, italic, and headings each their own colour.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.checkbox)
-
-            Group {
+        Form {
+            Section {
                 colorRow(
-                    "Bold Color",
-                    detail: "For **bold** text.",
-                    color: settableBinding(current: appearance.boldColor) {
-                        appearance.customBoldColor = $0
-                    },
-                    isCustom: appearance.customBoldColor != nil,
-                    reset: { appearance.customBoldColor = nil },
-                    resetHelp: "Reset to red"
+                    "Accent Color",
+                    detail: "The caret and checkboxes. Follows your macOS accent colour, "
+                        + "not a fixed colour, unless set here.",
+                    color: settableBinding(current: appearance.accentColor) { appearance.customAccentColor = $0 },
+                    isCustom: appearance.customAccentColor != nil,
+                    reset: { appearance.customAccentColor = nil },
+                    resetHelp: "Follow your macOS accent colour again"
+                )
+            }
+
+            // Its own card above the rest: Link and Tag default to it, so it
+            // is one level up from them, not one of them.
+            Section {
+                colorRow(
+                    "Link Color",
+                    detail: "Defaults to Accent Color above; set here to use a different "
+                        + "colour just for links.",
+                    color: settableBinding(current: appearance.linkColor) { appearance.customLinkColor = $0 },
+                    isCustom: appearance.customLinkColor != nil,
+                    reset: { appearance.customLinkColor = nil },
+                    resetHelp: "Follow Accent Color again"
                 )
                 colorRow(
-                    "Italic Color",
-                    detail: "For *italic* text.",
-                    color: settableBinding(current: appearance.italicColor) {
-                        appearance.customItalicColor = $0
-                    },
-                    isCustom: appearance.customItalicColor != nil,
-                    reset: { appearance.customItalicColor = nil },
-                    resetHelp: "Reset to orange"
+                    "Tag Color",
+                    detail: "For #tags and the pill behind them. Defaults to Accent Color above.",
+                    color: settableBinding(current: appearance.tagColor) { appearance.customTagColor = $0 },
+                    isCustom: appearance.customTagColor != nil,
+                    reset: { appearance.customTagColor = nil },
+                    resetHelp: "Follow Accent Color again"
                 )
-                headingColorsRow()
+                colorRow(
+                    "Code Color",
+                    detail: "For inline `code` spans.",
+                    color: settableBinding(current: appearance.codeColor) { appearance.customCodeColor = $0 },
+                    isCustom: appearance.customCodeColor != nil,
+                    reset: { appearance.customCodeColor = nil },
+                    resetHelp: "Reset to pink"
+                )
             }
-            .disabled(!appearance.colorfulFormattingEnabled)
-            .opacity(appearance.colorfulFormattingEnabled ? 1 : 0.4)
 
-            Divider()
+            Section {
+                Toggle(isOn: $appearance.colorfulFormattingEnabled) {
+                    SettingLabel(
+                        "Colourful Formatting",
+                        detail: "Gives bold, italic, and headings each their own colour."
+                    )
+                }
+                Group {
+                    colorRow(
+                        "Bold Color",
+                        detail: "For **bold** text.",
+                        color: settableBinding(current: appearance.boldColor) {
+                            appearance.customBoldColor = $0
+                        },
+                        isCustom: appearance.customBoldColor != nil,
+                        reset: { appearance.customBoldColor = nil },
+                        resetHelp: "Reset to red"
+                    )
+                    colorRow(
+                        "Italic Color",
+                        detail: "For *italic* text.",
+                        color: settableBinding(current: appearance.italicColor) {
+                            appearance.customItalicColor = $0
+                        },
+                        isCustom: appearance.customItalicColor != nil,
+                        reset: { appearance.customItalicColor = nil },
+                        resetHelp: "Reset to orange"
+                    )
+                    headingColorsRow()
+                }
+                .disabled(!appearance.colorfulFormattingEnabled)
+            }
 
-
-            Toggle(isOn: $appearance.showsFolderArrows) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Folder Arrows in the Sidebar").font(.headline)
-                    Text("Adds a chevron beside each folder in the file tree.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            Section {
+                Toggle(isOn: $appearance.showsFolderArrows) {
+                    SettingLabel(
+                        "Folder Arrows in the Sidebar",
+                        detail: "Adds a chevron beside each folder in the file tree."
+                    )
                 }
             }
-            .toggleStyle(.checkbox)
         }
-        .padding(20)
-        .frame(width: 630, alignment: .leading)
+        .formStyle(.grouped)
     }
-
 
     /// `ColorPicker` can round-trip a dynamic system colour to a concrete
     /// one on its first layout pass and report that back through `set` as if
@@ -340,54 +324,37 @@ struct AppearanceSettingsView: View {
         )
     }
 
+    /// A row of the form: the control column is right-aligned by the form,
+    /// so every swatch sits at the same distance from its Reset button and
+    /// the label takes whatever is left. Reset keeps one width so the
+    /// swatches line up whether or not a row's button is enabled.
     @ViewBuilder
     private func colorRow(
         _ title: String, detail: String, color: Binding<Color>, isCustom: Bool,
         reset: @escaping () -> Void, resetHelp: String
     ) -> some View {
-        GridRow {
-            // A fixed width, not `maxWidth: .infinity`: an infinitely
-            // flexible column makes the whole `Grid` stretch to fill this
-            // pane's outer frame, and since the text itself does not need
-            // that much room, the swatch column it pushed the label column's
-            // *allocated* width to be far wider than the *visible* text,
-            // leaving a dead gap before the swatch that had nothing to do
-            // with wrapping.
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        LabeledContent {
+            HStack(spacing: 12) {
+                ColorPicker("", selection: color, supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 44, height: 22)
+                    .alignedWithTitle()
+                Button("Reset", action: reset)
+                    .disabled(!isCustom)
+                    .help(resetHelp)
+                    .frame(width: Self.resetWidth)
             }
-            .frame(width: Self.labelColumnWidth, alignment: .leading)
-
-            // Right-anchored rather than a plain fixed frame: the shared
-            // swatch column is as wide as the heading-colour pill, which is
-            // wider than one swatch, and it should still sit next to Reset
-            // rather than float at the column's left edge.
-            ColorPicker("", selection: color, supportsOpacity: false)
-                .labelsHidden()
-                .frame(width: 44, height: 22)
-                .frame(width: Self.swatchColumnWidth, alignment: .trailing)
-
-            Button("Reset", action: reset)
-                .disabled(!isCustom)
-                .help(resetHelp)
-                .frame(width: 60)
+        } label: {
+            SettingLabel(title, detail: detail)
         }
     }
 
-    /// Fixed widths for both non-Reset columns, shared by `colorRow` and
-    /// `headingColorsRow`: see the comment in `colorRow` for why these are
-    /// not `maxWidth: .infinity`. `swatchColumnWidth` fits the six-segment
-    /// heading pill (6 × 30pt segments + 5 × 1pt gaps) with a little slack.
-    private static let labelColumnWidth: CGFloat = 300
-    private static let swatchColumnWidth: CGFloat = 190
+    private static let resetWidth: CGFloat = 60
 
     /// A heading segment, plus the border around the whole pill, comes to
     /// the same 18pt of colour inside a 3pt band that a single swatch above
     /// draws, so the pill reads as one more control in the same column
-    /// rather than a differently built thing of its own kind. Six segments
-    /// and their border stay inside `swatchColumnWidth`.
+    /// rather than a differently built thing of its own kind.
     private static let headingSegmentWidth: CGFloat = 29
     private static let headingSegmentHeight: CGFloat = 18
     private static let headingBorderWidth: CGFloat = 3
@@ -405,15 +372,8 @@ struct AppearanceSettingsView: View {
     /// clears all six back to the built-in rainbow at once.
     @ViewBuilder
     private func headingColorsRow() -> some View {
-        GridRow {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Heading Colors")
-                Text("The stripe beside h1–h6 headings.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(width: Self.labelColumnWidth, alignment: .leading)
-
+        LabeledContent {
+          HStack(spacing: 12) {
             // One connected pill — rounded at the two outer ends, square
             // where segments meet — rather than six independent swatches,
             // since h1–h6 read as one sequence, not six unrelated choices.
@@ -514,12 +474,25 @@ struct AppearanceSettingsView: View {
             // band entirely, leaving no gap the single swatches don't have.
             .padding(Self.headingBorderWidth)
             .overlay(Capsule().strokeBorder(.separator, lineWidth: Self.headingBorderWidth))
-            .frame(width: Self.swatchColumnWidth, alignment: .trailing)
+            .alignedWithTitle()
 
             Button("Reset", action: appearance.resetHeadingColors)
                 .disabled(!appearance.hasCustomHeadingColor)
                 .help("Reset all six to their default colours")
-                .frame(width: 60)
+                .frame(width: Self.resetWidth)
+          }
+        } label: {
+            SettingLabel("Heading Colors", detail: "The stripe beside h1–h6 headings.")
         }
+    }
+}
+
+private extension View {
+    /// A control with no text of its own has no baseline, so a form row
+    /// aligns its bottom edge with the label's first baseline and it rides
+    /// high above a two-line label. This lends it one, placed so that the
+    /// control's top edge meets the top of the title's letters.
+    func alignedWithTitle() -> some View {
+        alignmentGuide(.firstTextBaseline) { $0[.top] + 13 }
     }
 }

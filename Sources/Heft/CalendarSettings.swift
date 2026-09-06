@@ -47,24 +47,26 @@ struct CalendarSettingsView: View {
 
     var body: some View {
         Form {
-            Picker("Week starts on", selection: $settings.firstWeekday) {
-                ForEach(FirstWeekday.allCases) { option in
-                    if option == .system {
-                        Text("\(option.label) (\(systemDayName))").tag(option)
-                    } else {
-                        Text(option.label).tag(option)
+            Section {
+                Picker("Week starts on", selection: $settings.firstWeekday) {
+                    ForEach(FirstWeekday.allCases) { option in
+                        if option == .system {
+                            Text("\(option.label) (\(systemDayName))").tag(option)
+                        } else {
+                            Text(option.label).tag(option)
+                        }
                     }
                 }
-            }
-            .pickerStyle(.menu)
-            .frame(maxWidth: 320)
+                .pickerStyle(.menu)
 
-            Toggle("Mark today when its note does not exist", isOn: $settings.marksMissingToday)
-            Text("Today is always outlined. With this on, a hollow dot also shows "
-                 + "that its daily note has not been created yet.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Toggle(isOn: $settings.marksMissingToday) {
+                    SettingLabel(
+                        "Mark today when its note does not exist",
+                        detail: "Today is always outlined. With this on, a hollow dot also shows "
+                            + "that its daily note has not been created yet."
+                    )
+                }
+            }
 
             // Where the daily-note folder, filename format and template live.
             //
@@ -79,9 +81,9 @@ struct CalendarSettingsView: View {
                     }
                     .disabled(registry.frontmostModel?.vaultRoot == nil)
                 } label: {
-                    Text("Folder, filename format and template")
-                    Text(
-                        "These belong to the vault rather than to you, so they "
+                    SettingLabel(
+                        "Folder, filename format and template",
+                        detail: "These belong to the vault rather than to you, so they "
                             + "live with the vault. Also on the calendar's own "
                             + "menu, and in the command palette."
                     )
@@ -89,8 +91,6 @@ struct CalendarSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
     }
 
     private var systemDayName: String {
