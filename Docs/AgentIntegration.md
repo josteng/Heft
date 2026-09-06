@@ -156,7 +156,7 @@ latency — no polling, no extra watcher.
 - Accepting one hunk applies it and rewrites the proposal to hold only what is
   still undecided. Rejecting one removes it from the proposal for good. So a
   half-reviewed proposal is a smaller proposal, never a lost one.
-- ⌘K → "Review agent proposals" reaches them from any note.
+- ⌘P → "Review agent proposals" reaches them from any note.
 
 Two details that matter in practice:
 
@@ -267,7 +267,7 @@ change and then "helpfully" write the file as well.
 ## Demo, in one screen
 
 ```bash
-Scripts/bundle.sh debug && open .build/Heft.app --args ~/Vaults/Demo
+Scripts/run.sh --sandbox ~/Vaults/Demo
 # then, in a terminal next to it:
 claude "tighten the opening of Projects/Heft.md and add a Next section"
 ```

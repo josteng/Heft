@@ -53,7 +53,7 @@ Scripts/install.sh
 ```
 
 **New here? [`Docs/GettingStarted.md`](Docs/GettingStarted.md)** covers opening
-a vault, the five things worth trying first, daily notes and capture.
+a vault, the six things worth trying first, daily notes and capture.
 
 ---
 
@@ -270,17 +270,22 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 
 ## Not built yet
 
+Roughly in the order they are likely to land.
+
+- **Some CommonMark**: reference-style links, indented code blocks, raw HTML
+  and entity references. [`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the list.
+- **Performance** is where it should be for idle and for typing. What remains:
+  a keystroke inside a fenced block, display maths or a comment still reparses
+  the whole note, because those can span blank lines. The once-a-second check
+  of the open note is deliberate and close to free.
+- **Rough edges in the editing surface** that
+  [`Docs/Gotchas.md`](Docs/Gotchas.md) lists, and advanced Vim: Ex commands,
+  registers beyond the basics, mappings.
+- **Graph view and themes.**
 - **No iOS or iPadOS app.** Obsidian opens the same vault on a phone today,
   which takes the urgency out of it. The core is UI-free on purpose, so a
   second shell is a matter of views; the editing surface is what would need
   rethinking for touch.
-- **Performance** is where it should be for idle and for typing. What remains:
-  the open note is polled once a second, and a keystroke in a very long note
-  rescans more than it needs to.
-- Graph view and themes; advanced Vim (Ex commands, registers beyond the
-  basics, mappings); and some rough edges in the editing surface that
-  [`Docs/Gotchas.md`](Docs/Gotchas.md) lists.
-
 ## Contributing
 
 Bug reports and ideas go in

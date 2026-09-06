@@ -37,12 +37,15 @@ Four files carry it:
 ## Emphasis while it is still being typed
 
 `.pendingEmphasis` styles from the opening delimiter, the way Obsidian does,
-rather than waiting for the closing pair. Three things keep it in check: it
+rather than waiting for the closing pair. Four things keep it in check: it
 carries no `syntax`, so an unclosed `**` stays literal text rather than being
 hidden; it is applied on the caret's line rather than undone there, which is
 what stops an unclosed `*` left in a note years ago from italicising the rest
-of its line; and a delimiter a closed span already starts on is skipped, or
-`**bold**` would open a second, unending span at the same offset. It is
+of its line; both delimiter runs of a closed span are skipped, or `**bold**`
+would open a second, unending span at its closer; and a run CommonMark would
+not let open is passed over: one followed by punctuation with a letter before
+it, or a single `*` or `_` right after a word character, the last stricter
+than the spec but the rule the closed-italic pattern already applies. It is
 scanned by hand because the pattern has to reach the end of the line, and
 `matches(_:excluding:)` rejects any candidate touching a protected range.
 

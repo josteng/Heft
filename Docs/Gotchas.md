@@ -12,11 +12,10 @@ preferences or the icon.
   `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` is set, which
   `Scripts/bundle.sh` does for itself rather than changing the machine.
 - **Every Heft.app on the machine claims one bundle identifier**, one per
-  build product and per git worktree. LaunchServices registers each, and
-  Spotlight's App Shortcut rows are drawn from whichever registration is
-  current, so the Dock shows the new icon while "Add to Today's Note" shows an
-  old one. `Scripts/install.sh` unregisters every other copy on every install.
-  Same root cause as the icon-preview trap in `Resources/Heft.icon/README.md`.
+  build product and worktree, and Spotlight's App Shortcut rows come from
+  whichever LaunchServices registration is current, so the Dock showed a new
+  icon while "Add to Today's Note" showed an old one. `Scripts/install.sh`
+  unregisters every other copy; see `Resources/Heft.icon/README.md` too.
 - **`Scripts/smoke.sh` is the only thing that checks the app starts, and it
   must launch with no arguments.** `swift test` cannot launch a bundle, and an
   app that exits at once when started the way the Dock starts it is exactly
@@ -24,12 +23,10 @@ preferences or the icon.
 - **`NSApp` is nil until an application instance exists.** A snapshot harness
   or a test crashes on it; `NSApplication.shared` makes one.
 - **Checking the GUI without a screen.** `ImageRenderer` sees layout, text and
-  custom drawing and is what the suite uses; it cannot draw AppKit-backed
-  controls, which come out as placeholders. `cacheDisplay` on an
-  `NSHostingView` is blank, `CGWindowListCreateImage` is gone, and
-  `screencapture -l` needs Screen Recording and a window the server is
-  compositing. So: `ImageRenderer` for custom drawing, `heft export` for the
-  editing surface, structural tests for menus.
+  custom drawing, nothing AppKit-backed, and a grouped `Form` comes out blank.
+  An `NSHostingView` in an `NSWindow` ordered front, then `cacheDisplay`,
+  draws everything including the controls, which is how the settings panes
+  are checked; `heft export` covers the editing surface.
 
 ## Preferences and processes
 
@@ -73,15 +70,16 @@ preferences or the icon.
   below the precision either prints at. Compare modification dates with a
   tolerance, or as integer nanoseconds, never with `==`.
 - **An iCloud vault is never quiet after a save.** `IgnoreSelf` hides Heft's
-  own write, but the sync daemon then clones the file and rewrites its
-  attributes from another process, and those events pass every path filter.
-  Filtering by event flag would be guessing at the daemon; instead the index
-  reuses the previous parse of any file whose size and date are unchanged,
-  and the session publishes only when the tree or the answers differ.
+  own write, but the sync daemon then clones the file from another process,
+  and those events pass every path filter. Rather than guess at the daemon,
+  the index reuses the previous parse of any file whose size and date are
+  unchanged, and the session publishes only when the tree or answers differ.
 - **The open note is polled once a second, and that tick stays at one
   second.** It is the only thing that catches a same-process write, which the
   watcher ignores on purpose. The cost was never the tick but reading the
-  whole note on each one; a modification-date gate fixes that.
+  whole note on each one; a modification-date gate fixes that. Anything else
+  Heft writes into the vault itself, such as Set Up's guides, must ask for a
+  rescan, since the watcher never will.
 - **Autosave has two states where it writes nothing.** An unresolved conflict
   pauses it, and a failed write leaves the buffer dirty to retry. `DraftStore`
   mirrors the buffer to Application Support in both, on the save debounce, so
@@ -102,11 +100,10 @@ preferences or the icon.
   status bar and toolbar. `text` is a plain property; typing publishes only
   the counts, to `NoteStats`, which the status bar alone observes.
 - **The split view's toolbars must live on a view that does not observe the
-  model.** A toolbar builder runs whenever its view re-renders, and rebuilding
-  the window's two toolbars leaks AppKit key-value dependencies every time, so
-  a window grew slower and larger with each publish for as long as it stayed
-  open. `WorkspaceSplit` declares them and observes `WindowChrome` alone;
-  `ContentView` observes the model and keeps the sheets and alerts.
+  model.** A toolbar builder runs whenever its view re-renders, and each
+  rebuild leaks AppKit key-value dependencies, so a window grew slower with
+  every publish. `WorkspaceSplit` declares them and observes `WindowChrome`
+  alone; `ContentView` observes the model and keeps the sheets and alerts.
 - **A toolbar item costs title bar whether or not it draws anything.** A
   zero-width, clipped, transparent item still pushed the sidebar toggle away
   from the traffic lights; the cost is the item's slot, which no hosting

@@ -6,23 +6,28 @@ that is the folder — Heft reads its `.obsidian/` config and changes nothing.
 ## Install
 
 ```bash
+brew install --cask josteng/tap/heft
+```
+
+Needs **macOS 26** on Apple Silicon. That puts `Heft.app` in `/Applications`
+and a `heft` command on your `PATH`, signed and notarised; `brew upgrade`
+follows new releases.
+
+To build it yourself instead, with **Xcode** installed (not just the Command
+Line Tools; the build uses `xcodebuild` and `actool`):
+
+```bash
 git clone https://github.com/josteng/Heft.git
 cd Heft
 Scripts/install.sh
 ```
 
-Needs **macOS 26** and **Xcode** (not just the Command Line Tools; the build
-uses `xcodebuild` and `actool`). It puts `Heft.app` in `/Applications` and a
-`heft` command in `~/.local/bin`.
-
-If `heft` is not found afterwards, `~/.local/bin` is not on your `PATH`:
+That puts the `heft` command in `~/.local/bin`; if it is not found afterwards,
+that folder is not on your `PATH`:
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```
-
-There is no signed release yet, so this is a build-it-yourself install. On a
-Mac that did not build it, Gatekeeper will refuse to open the app.
 
 ## Open your vault
 
@@ -105,8 +110,9 @@ One command teaches an agent in that vault how:
 heft agent-setup ~/Notes      # or File ▸ Set Up Agent Access
 ```
 
-That writes the vault's `CLAUDE.md` between markers — your own notes in that
-file are left alone. From then on a session started in the folder knows to run
+That writes `CLAUDE.md` and `AGENTS.md` between markers, your own notes in
+those files left alone, and a `.claude/settings.json` that holds Claude Code
+to the rule. From then on a session started in the folder knows to run
 `heft propose` instead of writing the file, and knows the read-only verbs for
 asking the vault about itself:
 
@@ -134,8 +140,9 @@ half-reviewed proposal is a smaller proposal rather than a lost one.
 
 ## If something goes wrong
 
-- **The app will not open.** It is unsigned, so on a Mac that did not build it
-  Gatekeeper blocks it. Right-click ▸ Open, once.
+- **A build you made yourself will not open on another Mac.** It is unsigned,
+  so Gatekeeper blocks it there. Right-click ▸ Open, once. The tap's build is
+  signed and notarised and opens like any other app.
 - **A note says its save is paused.** Something else changed the file —
   Obsidian, iCloud, an agent. Heft never overwrites in that case; it offers
   both versions and a hunk-by-hunk merge.

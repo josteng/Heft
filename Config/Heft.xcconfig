@@ -6,4 +6,4 @@
 
 // The version a release carries. Bump it here; the build number is the
 // commit count and looks after itself.
-MARKETING_VERSION = 0.1.0
+MARKETING_VERSION = 0.2.0
