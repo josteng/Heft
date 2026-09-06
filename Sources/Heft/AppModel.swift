@@ -659,7 +659,7 @@ final class AppModel: ObservableObject {
         externalChangePollTask?.cancel()
         externalChangePollTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(1), tolerance: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 self?.reloadCurrentIfChangedExternally()
             }

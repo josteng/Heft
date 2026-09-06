@@ -2226,7 +2226,7 @@ final class HeftTextKit2View: NSTextView {
         let selection = selectedRange()
         guard selection.length == 0 else { return false }
         guard let substitution = SmartTypography.substitution(
-            in: string, caret: selection.location, config: TypingSettings.shared.config,
+            in: string, caret: selection.location, rules: TypingSettings.shared.rules,
             expansion: SubstitutionExpansion(noteTitle: noteTitle), endingWord: endingWord
         ) else { return false }
 

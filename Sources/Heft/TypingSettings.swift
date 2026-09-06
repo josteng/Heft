@@ -52,6 +52,18 @@ final class TypingSettings: ObservableObject {
         )
     }
 
+    /// The rule table for `config`, built once per configuration rather than
+    /// on every keystroke, which is how often the editor asks.
+    var rules: [SmartTypographyRule] {
+        let config = self.config
+        if let cached = cachedRules, cached.config == config { return cached.rules }
+        let rules = SmartTypography.rules(for: config)
+        cachedRules = (config, rules)
+        return rules
+    }
+
+    private var cachedRules: (config: SmartTypographyConfig, rules: [SmartTypographyRule])?
+
     func binding(for group: SmartTypographyGroup) -> Binding<Bool> {
         Binding(
             get: { self.enabledGroups.contains(group) },
