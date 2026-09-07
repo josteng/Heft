@@ -93,7 +93,7 @@ public enum KeyboardShortcuts {
         .init(id: "link", title: "Link", key: "k", modifiers: [.command], group: .format),
         // ⌘L, as Obsidian binds "Toggle checkbox status", since a reader with
         // both open should not have to hold two keys for one habit.
-        .init(id: "toggleCheckbox", title: "Toggle checkbox", key: "l", modifiers: [.command], group: .format),
+        .init(id: "toggleCheckbox", title: "Toggle checkbox", key: "l", modifiers: [.command], group: .format, isNotable: true),
         // One Undo, which decides for itself whether the tree or the text is
         // what ⌘Z means right now. Two menu items cannot share the key: a
         // disabled one swallows it, and the other never sees it.

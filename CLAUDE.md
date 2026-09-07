@@ -132,14 +132,8 @@ pre-build phase a shared module needs cost more than the slice is worth.
 
 A web-based renderer was rejected outright. This is a native app.
 
-Embedding real Neovim (via VimR's `NvimView`) was the earlier plan for Vim mode
-and was reversed. An embedded editor wants to own its own buffer, which would
-have forked the one thing this app is built around: TextKit 2 is the single
-buffer, and with it autosave, live styling, undo, and input methods. It also
-keeps a GPL program out of the shipping binary. `HeftVimCore` is instead an
-original Foundation-only state machine that returns transactions for the
-existing `NSTextView` to apply, and is portable to a future iPadOS shell.
-Neovim still earns its keep as a *test* oracle: the suite drives
-`nvim --clean --headless` as a separate process when it is installed, and every
-disagreement it has found is preserved as a local regression that runs without
-it. See `Docs/VimMode.md`, which also records the licensing boundary.
+Embedding real Neovim was the earlier plan for Vim mode and was reversed: an
+embedded editor wants to own its own buffer, and TextKit 2 being the single
+buffer is what this app is built around. `HeftVimCore` is an original
+Foundation-only state machine instead. `Docs/VimMode.md` has the rest,
+including the test oracle and the licensing boundary.

@@ -372,6 +372,32 @@ the Edit menu's Copy to stay enabled: a text view disables it while nothing
 is selected, and a disabled item swallows its own key equivalent, so ⌘C beeped
 instead of ever reaching the view.
 
+## Why the tree is not a `List` or an `NSOutlineView`
+
+The tree is four `LazyVStack`s over one row view, and the selection, the
+three click types and the undo above are hand-written. Both frameworks offer
+some of that.
+
+`List` with a `Set` selection binding gives command-click, shift-click,
+arrow-key extension and a context menu that knows what is selected. It cannot
+give the one thing this sidebar also needs: a list built with `children:`
+cannot drag its selection, since `onMove` works only on a flat `ForEach` and
+`.onDrag` on a row cancels the selection gesture. Dragging several files onto
+a folder is the whole point here, so the drag would have been hand-written
+anyway.
+
+`NSOutlineView` gives all of it, drag and drop and undo included. It is
+rejected for what it would take rather than what it costs to write: it holds
+first responder, and the paragraph above is the reason that is unwanted.
+Clicking a note in the tree has to leave the keyboard with the editor so
+typing can start; a tree that owned its keys would mean clicking the row and
+then clicking the text, as Finder and Xcode do, which is right for a file
+browser and wrong for a notes app.
+
+Revisit it only for keyboard navigation of the tree itself, arrow keys and
+type-to-select, which is a lot of fiddly work by hand and free in the
+control. The destination then is `NSOutlineView`, not `List`.
+
 Naming in place writes the file first, so backing out used to leave an
 `Untitled.md` behind. `discardUnnamedNote` takes it back, and every guard on
 it is about being certain it is that file: still called `Untitled`, still

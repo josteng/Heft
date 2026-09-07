@@ -65,8 +65,9 @@ a vault, the six things worth trying first, daily notes and capture.
   Pictures land on the bullet you paste them onto. `->` becomes an arrow as
   you type.
 - **It behaves like a Mac program.** `heft .` opens a folder the way `code .`
-  does. Spotlight files a line into today's note or your inbox without you
-  leaving what you were doing. Dragging a note into Mail attaches the file
+  does. Spotlight files a line into today's note or your inbox without
+  launching the app or moving a window you had put away, because the capture
+  runs in an extension of its own. Dragging a note into Mail attaches the file
   itself, because the path resolves and keeps resolving.
 - **Agents read a resolved index, and write only by asking.** A text search
   finds the words in a link; it does not know what the link points at.
@@ -113,10 +114,10 @@ What renders in the editor: headings both ways (`# x` and an underlined
 line), emphasis, `==highlights==`, code spans and syntax-highlighted fences,
 block quotes, Obsidian callouts, task lists, nested bullets that change shape
 by level, tables, images, LaTeX, note transclusion, footnotes, wikilinks with
-aliases, headings and blocks, and YAML frontmatter as a properties card. What
-is missing is narrow: reference-style links, four-space indented code, raw
-HTML and entity references; [`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the
-list.
+aliases, headings and blocks, reference-style links in all four CommonMark
+forms, and YAML frontmatter as a properties card. What is missing is narrow:
+four-space indented code, raw HTML and entity references;
+[`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the list.
 
 - **Tables are edited in place.** A table stays a drawn grid while the caret
   is in it; only the cell being typed into shows its Markdown. Tab walks the
@@ -130,7 +131,9 @@ list.
   not as quoted prose.
 - **Task states** beyond `[ ]` and `[x]`: `[/]`, `[-]`, `[>]`, `[?]`, drawn
   inside their box. Only `[x]` is struck through, because only `[x]` means
-  finished.
+  finished. **⌘L** advances the selected lines a step, the way Obsidian's
+  "Toggle checkbox status" does: a plain line gains an empty box, an empty
+  box is ticked, a ticked one is cleared.
 - **Completion** for `[[` (filenames) and `> [!` (the callout kinds, by any of
   their Obsidian spellings).
 - **Auto-pairing** of `(` `[` `{` and `*` `_`, with two switches matching
@@ -149,10 +152,17 @@ list.
 - **File tree** with inline creation and renaming. Renaming or moving a note
   or a folder repoints the wikilinks that pointed into it and leaves bare
   links that still resolve exactly as written. `heft rename` is the same
-  operation from a terminal.
+  operation from a terminal. Rows select the way a file manager's do,
+  command-click to add and shift-click for a range, and copy, paste, drag and
+  Move to Trash all act on the whole selection. **⌘Z** puts back the last
+  move, rename, paste or delete, and still undoes typing when the caret is in
+  a note.
 - **Quick open** (⌘O) and the **command palette** (⌘P) rank by how often you
   use something, discounted by how long ago, so with nothing typed they open
-  on what you actually work in. **Content search** is ⇧⌘F.
+  on what you actually work in; a command that cannot run right now sinks to
+  the bottom rather than disappearing. The palette carries the file tree's
+  own verbs too, so a note's path or wikilink is a search away without
+  finding its row first. **Content search** is ⇧⌘F.
 - **Calendar** with a dot per daily note; clicking a day creates it from the
   vault's template. **Backlinks** panel with the referencing line as context.
 - **PDF export** (⇧⌘E) of the rendered note, tables, callouts and typeset
@@ -263,6 +273,7 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | ⇧⌘F | Search the vault |
 | ⌘O | Quick open |
 | ⌘P | Command palette |
+| ⌘L | Toggle checkbox |
 | ⇧⌘J | Show this note in the file tree |
 | ⇧⌘S | Toggle sidebar |
 | ⇧⌘D | Toggle calendar |
@@ -272,8 +283,8 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 
 Roughly in the order they are likely to land.
 
-- **Some CommonMark**: reference-style links, indented code blocks, raw HTML
-  and entity references. [`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the list.
+- **Some CommonMark**: indented code blocks, raw HTML and entity references.
+  [`Docs/Gotchas.md`](Docs/Gotchas.md) keeps the list.
 - **Performance** is where it should be for idle and for typing. What remains:
   a keystroke inside a fenced block, display maths or a comment still reparses
   the whole note, because those can span blank lines. The once-a-second check
@@ -286,14 +297,16 @@ Roughly in the order they are likely to land.
   which takes the urgency out of it. The core is UI-free on purpose, so a
   second shell is a matter of views; the editing surface is what would need
   rethinking for touch.
+
 ## Contributing
 
 Bug reports and ideas go in
 [GitHub issues](https://github.com/josteng/Heft/issues);
 [`CONTRIBUTING.md`](CONTRIBUTING.md) has what to include and how the licence
 applies to pull requests. [`CLAUDE.md`](CLAUDE.md) is the map of the code: the
-three targets (`HeftCore` and `HeftVimCore` are pure Swift with no AppKit,
-`Heft` is the macOS shell), the build and test commands, the rules that are
+four targets (`HeftCore` and `HeftVimCore` are pure Swift with no AppKit,
+`Heft` is the macOS shell, `HeftCapture` is the App Intents extension the
+Spotlight captures run in), the build and test commands, the rules that are
 easy to break quietly, and where the reasoning behind each area lives.
 
 ## Licence

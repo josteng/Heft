@@ -260,8 +260,6 @@ preferences or the icon.
 
 Markdown Heft does not read, found by auditing the decorator against CommonMark:
 
-- **Reference links**, all four forms. Nothing renders, and the definition
-  line sits in the note as a paragraph. The only construct needing two passes.
 - **Indented code blocks.** Deferred on purpose: telling one from a list
   continuation line is ambiguous, and getting it wrong turns a nested list
   into code. Fenced blocks won.
