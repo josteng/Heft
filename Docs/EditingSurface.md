@@ -284,6 +284,24 @@ divergences from CommonMark: a single `-` is not an underline, or the line
 above would become a heading the instant a list item was started under it;
 and only the single line above is the heading, not the whole paragraph.
 
+## A line written under a list item
+
+An unindented line straight after a list item is drawn at the item's text
+indent, because in CommonMark that is a *lazy continuation*: the line belongs
+to the item's paragraph. `listContinuations` finds those lines and
+`.listContinuation` carries the item's indent onto them.
+
+The indent is drawn, not typed, and saying it is "what the file says" gets it
+backwards: no character in the file moves and none is added. It is the same
+kind of thing as a bullet glyph standing in for `- `. What the file *means* is
+that the line belongs to the item, and the indent is how that is shown. Heft's
+own PDF export puts the line in the same place, so the two agree.
+
+Obsidian is the reason this looks wrong: its live preview draws such a line
+flush at the margin while its reading view indents it, so the divergence is
+inside Obsidian rather than between Obsidian and Heft. A blank line before the
+text ends the item, and the paragraph then starts at the margin.
+
 ## Auto-pairing
 
 Obsidian splits this into "Auto pair brackets" and "Auto pair Markdown
