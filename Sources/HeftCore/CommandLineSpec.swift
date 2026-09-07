@@ -66,6 +66,7 @@ public enum CommandLineSpec {
         Verb("open", "<path>", "Open a vault, folder or note. The default for a bare path.",
              isReadOnly: false),
         Verb("help", "[--json]", "This list. `--json` is the machine-readable form."),
+        Verb("version", "", "Which Heft this is. Also `--version` and `-v`."),
         Verb("keys", "", "The app's keyboard shortcuts, so an agent can answer for them.",
              flags: [Flag("--all", "Every one, not just the ones worth memorising.")]),
 
@@ -146,6 +147,27 @@ public enum CommandLineSpec {
     public static func wantsHelp(_ arguments: [String]) -> Bool {
         guard let first = arguments.first else { return false }
         return first == "help" || first == "--help" || first == "-h"
+    }
+
+    /// Whether the arguments ask which Heft this is.
+    ///
+    /// A flag as well as a verb, because every other command line answers
+    /// `--version` and someone checking what they have installed should not
+    /// have to guess which spelling this one wanted.
+    public static func wantsVersion(_ arguments: [String]) -> Bool {
+        guard let first = arguments.first else { return false }
+        return first == "version" || first == "--version" || first == "-v"
+    }
+
+    /// The line `heft version` prints.
+    ///
+    /// Takes the numbers rather than reading `Bundle.main`, so that the shape
+    /// of the line can be tested without the test bundle's own version
+    /// standing in for the app's.
+    public static func versionText(marketing: String?, build: String?) -> String {
+        guard let marketing, !marketing.isEmpty else { return "heft (version unknown)" }
+        guard let build, !build.isEmpty else { return "heft \(marketing)" }
+        return "heft \(marketing) (build \(build))"
     }
 
     /// Newline-separated verb names. What `install.sh` bakes into the wrapper,

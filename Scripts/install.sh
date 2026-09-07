@@ -83,8 +83,12 @@ cat > "$CLI_DIR/heft" <<EOF
 # The verbs below were read from the binary at install time; see
 # CommandLineSpec.swift, which is the one place they are declared.
 BIN="$TARGET/Contents/MacOS/Heft"
+# The flag spellings are listed beside the verbs because they are not verbs
+# and so are not in the list the binary printed. Without them \`heft --version\`
+# and \`heft --help\` fall to the bare-path branch and go looking for a vault
+# by that name.
 case "\${1:-}" in
-    $VERBS)
+    $VERBS|--version|-v|--help|-h)
         exec "\$BIN" "\$@" ;;
     *)
         exec "\$BIN" open "\$@" ;;

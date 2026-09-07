@@ -24,6 +24,18 @@ enum HeftMain {
             exit(0)
         }
 
+        // Before anything that wants a vault, and answering the flag
+        // spellings too: `heft --version` reaching the window would be a
+        // Dock bounce and no answer.
+        if CommandLineSpec.wantsVersion(arguments) {
+            let info = Bundle.main.infoDictionary
+            print(CommandLineSpec.versionText(
+                marketing: info?["CFBundleShortVersionString"] as? String,
+                build: info?["CFBundleVersion"] as? String
+            ))
+            exit(0)
+        }
+
         // Needs no vault: the keys are the app's, not a vault's. That is also
         // why it answers when Heft has never been pointed anywhere.
         if arguments.first == "keys" {
