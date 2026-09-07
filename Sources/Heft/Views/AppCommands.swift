@@ -40,6 +40,8 @@ struct AppCommandShortcut {
     static let code = Self("code")
     static let link = Self("link")
     static let toggleCheckbox = Self("toggleCheckbox")
+    static let undo = Self("undo")
+    static let redo = Self("redo")
     static let find = Self("find")
     static let findNext = Self("findNext")
     static let findPrevious = Self("findPrevious")

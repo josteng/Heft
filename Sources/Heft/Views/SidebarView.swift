@@ -691,7 +691,7 @@ private struct TreeRow: View {
     /// acts on all of it and right-clicking outside acts on the row alone,
     /// and both of those are decided by `target(clicking:)` rather than here.
     private func aimKeyboard() {
-        model.sidebarKeyboardTarget = item.url
+        if model.sidebarKeyboardTarget != item.url { model.sidebarKeyboardTarget = item.url }
     }
 
     /// What a drag starting on this row carries: the whole selection when
@@ -780,7 +780,10 @@ private struct TreeRow: View {
             // only fires once the pointer has actually travelled.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 6)
-                    .onChanged { _ in beginFileDrag(for: draggedURLs) }
+                    .onChanged { _ in
+                        aimKeyboard()
+                        beginFileDrag(for: draggedURLs)
+                    }
             )
             .dropDestination(for: URL.self) { urls, _ in
                 dropTarget = nil
@@ -852,7 +855,10 @@ private struct TreeRow: View {
             // only fires once the pointer has actually travelled.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 6)
-                    .onChanged { _ in beginFileDrag(for: draggedURLs) }
+                    .onChanged { _ in
+                        aimKeyboard()
+                        beginFileDrag(for: draggedURLs)
+                    }
             )
             // Dropping onto a file means "put it here, beside this" — the row
             // itself is not the destination, its folder is. So the drop is

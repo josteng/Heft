@@ -94,8 +94,17 @@ drag out of the Finder always could.
 The editor has had undo since the first day because `NSTextView` brings its
 own. The tree had none: a note dragged into the wrong folder could only be
 put back by hand, and the reader had to work out where it came from.
-`SidebarUndo` closes that, on ⌘Z, offered only while a row is what the keys
-act on so the editor's own undo still wins with the caret in a note.
+`SidebarUndo` closes that, on ⌘Z, taken only while a row is what the keys act
+on so the editor's own undo still wins with the caret in a note.
+
+⌘Z is one menu item, replacing the system's Undo rather than sitting beside
+it. Two items cannot share a key equivalent: a disabled one swallows its own,
+so a second Undo that was disabled most of the time took ⌘Z away from the
+editor's and undoing text stopped working at all. The one item asks
+`UndoRouting` where the key belongs and forwards to the responder chain when
+the answer is the text. Anything that touches a row aims the keys at it,
+including starting a drag, or a move made by dragging would have nothing
+pointed at it to undo.
 
 One step deep, on purpose. A deeper stack has to answer what happens when a
 step's files have been changed since by hand or by an agent, and the honest

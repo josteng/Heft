@@ -112,6 +112,13 @@ struct HeftCommands: Commands {
     /// Watched, not merely read: see `AppModel.sidebarKeys`. Without this the
     /// Trash item below keeps the enabled state it was built with.
     @FocusedObject private var sidebarKeys: SidebarKeyTarget?
+
+    /// Named after what it would put back, so the menu says whether ⌘Z is
+    /// about to touch the tree or the text.
+    private var undoTitle: String {
+        guard sidebarKeys?.url != nil, let name = model?.sidebarUndoName else { return "Undo" }
+        return "Undo \(name)"
+    }
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var appearance = AppearanceSettings.shared
 
@@ -207,6 +214,28 @@ struct HeftCommands: Commands {
                 // "No note to export", and a shortcut that reports why it did
                 // nothing beats one that silently does nothing.
                 .disabled(model == nil)
+        }
+        // One Undo, replacing the system pair rather than sitting beside it.
+        //
+        // Two items cannot share ⌘Z. A disabled menu item swallows its own
+        // key equivalent, so a second Undo that was disabled most of the time
+        // took the key away from the editor's and undoing text stopped
+        // working at all. This one is always enabled and decides where the
+        // key goes; when it goes to the text it is forwarded down the
+        // responder chain, which is where the text view's own undo lives.
+        CommandGroup(replacing: .undoRedo) {
+            Button(undoTitle) {
+                switch UndoRouting.target(
+                    sidebarOwnsKeys: sidebarKeys?.url != nil,
+                    sidebarHasStep: model?.sidebarUndoName != nil
+                ) {
+                case .sidebar: model?.undoSidebarOperation()
+                case .text: NSApp.sendAction(Selector(("undo:")), to: nil, from: nil)
+                }
+            }
+            .keyboardShortcut(.undo)
+            Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
+                .keyboardShortcut(.redo)
         }
         CommandGroup(after: .textEditing) {
             Menu("Format") {
