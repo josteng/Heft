@@ -912,13 +912,20 @@ enum AppIntegrationCheck {
     /// The default is generous because the window harnesses in the suite hold
     /// the main thread for seconds at a time, and everything awaited here runs
     /// on the main actor behind them. A timeout is only ever spent on failure.
+    /// Polls until `condition` holds, counting attempts rather than seconds.
+    ///
+    /// `timeout` is what the wait is worth on an idle machine, not a deadline
+    /// on the clock. A clock deadline flakes here: the suite runs in parallel,
+    /// every `@MainActor` test shares one actor, and a loaded machine can
+    /// spend the whole deadline without giving this one a turn, so the wait
+    /// reports that some async work never finished when nothing here ever ran.
     private static func waitUntil(
         timeout: Duration = .seconds(20),
         _ condition: @escaping @MainActor () -> Bool
     ) async -> Bool {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        while clock.now < deadline {
+        let milliseconds = timeout.components.seconds * 1000
+            + timeout.components.attoseconds / 1_000_000_000_000_000
+        for _ in 0..<max(1, Int(milliseconds / 25)) {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(25))
         }

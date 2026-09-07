@@ -505,9 +505,12 @@ struct ProposalTests {
         // Wait for the exact precondition rather than for a note count: the
         // repointing comes from the link index, and the open note is rewritten
         // from its buffer, so both have to have arrived.
-        #expect(await waitUntil({
-            !model.index.backlinks(to: "Old/Target.md").isEmpty && !model.text.isEmpty
-        }, within: 20))
+        #expect(
+            await waitUntil({
+                !model.index.backlinks(to: "Old/Target.md").isEmpty && !model.text.isEmpty
+            }, within: 20),
+            "waited for the scan and the note, and got \(model.index.backlinks(to: "Old/Target.md").count) backlinks with \(model.text.count) characters of text"
+        )
         model.refreshProposals()
 
         // Structural changes are not the banner's business: a banner over the
@@ -578,9 +581,12 @@ struct ProposalTests {
         // Generous, because it waits on a real vault scan and a real note
         // load: any deadline tight enough to be quick is a flaky test under a
         // loaded parallel run, and the thing being measured is not the timing.
-        #expect(await waitUntil(
-            { model.index.notes.count == 2 && !model.text.isEmpty }, within: 20
-        ))
+        #expect(
+            await waitUntil(
+                { model.index.notes.count == 2 && !model.text.isEmpty }, within: 20
+            ),
+            "waited for the scan and the note, and got \(model.index.notes.count) notes with \(model.text.count) characters of text"
+        )
         model.refreshProposals()
 
         let waiting = try #require(model.pendingProposals.groups.first)
@@ -606,14 +612,24 @@ struct ProposalTests {
         #expect(model.proposals.isEmpty)
     }
 
+    /// Polls until `condition` holds, counting attempts rather than seconds.
+    ///
+    /// `seconds` is what the wait is worth on an idle machine, not a deadline
+    /// on the clock. A clock deadline is what made these flaky: the suite runs
+    /// in parallel, every `@MainActor` test shares one actor, and a loaded
+    /// machine can spend the whole deadline without giving this test a turn.
+    /// The wait then reported that a vault scan had not finished when what had
+    /// really happened is that nothing here had run. Counting attempts gives
+    /// the work being waited on the same number of chances however busy the
+    /// machine is, and each attempt yields so that work can take them.
     @MainActor
     private func waitUntil(
         _ condition: () -> Bool, within seconds: Double = 5
     ) async -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
-        while Date() < deadline {
+        let interval = Duration.milliseconds(50)
+        for _ in 0..<max(1, Int(seconds * 1000 / 50)) {
             if condition() { return true }
-            try? await Task.sleep(for: .milliseconds(50))
+            try? await Task.sleep(for: interval)
         }
         return condition()
     }
