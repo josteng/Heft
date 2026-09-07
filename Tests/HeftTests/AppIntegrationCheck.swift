@@ -158,7 +158,7 @@ enum AppIntegrationCheck {
         let blankSeparator = paragraphStyle("first\n\nsecond", at: 6)
         expect(
             blankSeparator?.lineSpacing == 0
-                && blankSeparator?.paragraphSpacing == Theme.lineSpacing,
+                && blankSeparator?.paragraphSpacingBefore == Theme.lineSpacing,
             "one empty source line supplies one compact paragraph separator"
         )
         let headingSpacing = paragraphStyle("# Heading", at: 0)

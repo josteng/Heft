@@ -172,6 +172,26 @@ enum LiveStyler {
             }
         }
 
+        // A blank line outside a block construct is plain body, whatever the
+        // paragraph above it happens to be. Run *after* the decorations, and
+        // not only inside the base pass above, because a heading's styling
+        // reaches the line under it whenever an edit leaves that line out of
+        // the restyle scope: pressing Return at the end of a heading left the
+        // new line carrying the heading's font and spacing, and a caret
+        // standing on a line styled as a heading is drawn the height of one.
+        // The caret's own line as well as the scope. An edit can leave the
+        // line it just made outside the dirty range, and that is exactly the
+        // line a wrong caret is standing on.
+        var plainable = scope
+        if reveal.line.location != NSNotFound, NSMaxRange(reveal.line) <= text.length {
+            plainable.append(reveal.line)
+        }
+        for range in plainable {
+            plainBlankLines(
+                in: storage, text: text, within: range, blocks: layout.blocks, base: baseFont
+            )
+        }
+
         guard drawsWidgets else { return layout }
 
         // Third pass: constructs the editor draws instead of showing. They are
@@ -261,6 +281,58 @@ enum LiveStyler {
         body.lineSpacing = compactEmptyLine ? 0 : Theme.lineSpacing
         body.paragraphSpacing = compactEmptyLine ? Theme.lineSpacing : 0
         return body
+    }
+
+    /// A blank line laid out exactly like a line with text on it.
+    ///
+    /// Same `lineSpacing`, so its box sits at the same offset inside the
+    /// fragment and the caret stands where the first character will land. An
+    /// empty line carrying its spacing below instead put the caret a
+    /// line-space above the text, and the first keystroke appeared to drop it.
+    ///
+    /// The line height is pinned because that spacing is otherwise drawn into
+    /// the insertion point: TextKit 2 gives an empty paragraph a box as tall
+    /// as the font *and* its spacing, and AppKit draws the caret the height of
+    /// the box. Pinning it to the font's own height costs nothing, since the
+    /// total is the same either way.
+    static func blankLineParagraphStyle() -> NSMutableParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        let font = Theme.liveFont
+        let height = ceil(font.ascender - font.descender + font.leading)
+        style.lineSpacing = 0
+        style.paragraphSpacingBefore = Theme.lineSpacing
+        style.minimumLineHeight = height
+        style.maximumLineHeight = height
+        return style
+    }
+
+    /// Puts a blank line back to plain body text.
+    ///
+    /// Only where nothing is drawn on the line: a blank line inside a quote,
+    /// a callout or a code block belongs to that block and keeps its
+    /// styling, which is what leaves room for the bar or the fill.
+    private static func plainBlankLines(
+        in storage: NSTextStorage, text: NSString, within: NSRange,
+        blocks: [Int: BlockWidget], base: NSFont
+    ) {
+        guard text.length > 0, within.length > 0 else { return }
+        let compact = blankLineParagraphStyle()
+        var location = within.location
+        while location < NSMaxRange(within) {
+            let line = text.lineRange(for: NSRange(location: location, length: 0))
+            let contents = text.substring(with: line)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if contents.isEmpty, blocks[line.location] == nil, line.length > 0 {
+                storage.addAttributes([
+                    .font: base,
+                    .foregroundColor: NSColor.labelColor,
+                    .paragraphStyle: compact,
+                ], range: line)
+            }
+            let next = NSMaxRange(line)
+            guard next > location else { break }
+            location = next
+        }
     }
 
     private static func styleEmptyBodyLines(

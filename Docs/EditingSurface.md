@@ -284,6 +284,39 @@ divergences from CommonMark: a single `-` is not an underline, or the line
 above would become a heading the instant a list item was started under it;
 and only the single line above is the heading, not the whole paragraph.
 
+## Where a blank line's caret stands
+
+The caret on a blank line has to be the height of the font and stand where the
+first character will land. Neither was true, and both were visible: a caret
+among a run of blank lines came out 28pt against the font's 18, and a caret on
+any blank line stood a line-space above the text, so the first keystroke
+appeared to drop the line.
+
+Three things together, and each is load bearing:
+
+- A blank line takes its spacing as `paragraphSpacingBefore`, not below the
+  text. A line with text wears its `lineSpacing` above, so a blank line has to
+  wear the same amount above or its caret is a line-space high. The fragment
+  is the same height either way and the next baseline does not move.
+- Its box is pinned with `minimum`/`maximumLineHeight`. AppKit draws the caret
+  the height of the line box, and an empty paragraph's box otherwise grows by
+  whatever spacing it carries.
+- `plainBlankLines` runs *after* the decorations, over the restyle scope and
+  the caret's own line. A heading's font and spacing otherwise survive onto
+  the line under it whenever an edit leaves that line out of the scope, which
+  is what Return at the end of a heading did: the new line was styled as a
+  heading and its caret drawn the height of one.
+
+A blank line inside a quote, a callout or a code block is left to that block,
+which is what leaves room for the bar or the fill to be drawn.
+
+**None of this can be checked from a paragraph style or a headless view.** The
+caret is an `NSTextInsertionIndicator` subview; `drawInsertionPoint` is never
+called on macOS 26, and `enumerateTextSegments` reports the text segment
+rather than what is painted, so both read as correct while the caret is
+visibly wrong. It was settled by pressing Return in a key window and counting
+the caret's pixels, before and after typing a character into the same line.
+
 ## A line written under a list item
 
 An unindented line straight after a list item is drawn at the item's text

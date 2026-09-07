@@ -145,6 +145,14 @@ preferences or the icon.
 
 ## TextKit and the editing surface
 
+- **AppKit draws the caret the height of the empty paragraph's line box, so
+  `lineSpacing` on one lands in the caret.** A blank line therefore takes its
+  spacing as `paragraphSpacingBefore` and pins `minimum`/`maximumLineHeight`
+  to the font. None of this shows in a headless harness or in
+  `enumerateTextSegments`: the caret comes from an `NSTextInsertionIndicator`
+  subview, `drawInsertionPoint` is never called on macOS 26, and the only way
+  to check it is to measure pixels in a key window.
+
 - **Writing an attribute discards TextKit's layout for that range, even when
   the value written is the one already there.** The whole reason restyling is
   scoped, and the trap before adding a "just set it again" write to

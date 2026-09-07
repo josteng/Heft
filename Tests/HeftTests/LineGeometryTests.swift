@@ -477,3 +477,80 @@ struct TableLineHeightTests {
         )
     }
 }
+
+/// A blank line outside a block construct, which is where the caret stands
+/// after Return and is the only line the reader ever sees a caret alone on.
+///
+/// The caret itself cannot be checked here. AppKit draws it from an
+/// `NSTextInsertionIndicator` subview whose frame follows this style, and
+/// neither a headless harness nor `enumerateTextSegments` reports what is
+/// painted; it was measured in pixels in a key window instead. What these
+/// hold is the style the indicator is derived from.
+@Suite("A blank line's style")
+@MainActor
+struct BlankLineStyleTests {
+
+    private func style(_ source: String, at offset: Int) -> NSParagraphStyle? {
+        let storage = NSTextStorage(string: source)
+        _ = LiveStyler.apply(
+            to: storage, reveal: .none,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 600
+        )
+        return storage.attribute(.paragraphStyle, at: offset, effectiveRange: nil)
+            as? NSParagraphStyle
+    }
+
+    private func font(_ source: String, at offset: Int) -> NSFont? {
+        let storage = NSTextStorage(string: source)
+        _ = LiveStyler.apply(
+            to: storage, reveal: .none,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 600
+        )
+        return storage.attribute(.font, at: offset, effectiveRange: nil) as? NSFont
+    }
+
+    /// It wears its spacing *above* the text, exactly as a line with text on
+    /// it wears its `lineSpacing`, so the caret stands where the first
+    /// character will land instead of a line-space above it.
+    @Test("A blank line reserves its space above, not below")
+    func spacingSitsAbove() {
+        let blank = style("Alpha\n\nCharlie\n", at: 6)
+        #expect(blank?.paragraphSpacingBefore == Theme.lineSpacing)
+        #expect(blank?.paragraphSpacing == 0)
+        // Not as `lineSpacing`, which AppKit draws into the caret: with it the
+        // caret came out a line-space taller than the font.
+        #expect(blank?.lineSpacing == 0)
+    }
+
+    /// ...and its box is pinned to the font's height for the same reason.
+    @Test("A blank line's box is the height of the font")
+    func boxIsPinned() {
+        let expected = ceil(
+            Theme.liveFont.ascender - Theme.liveFont.descender + Theme.liveFont.leading
+        )
+        let blank = style("Alpha\n\nCharlie\n", at: 6)
+        #expect(blank?.minimumLineHeight == expected)
+        #expect(blank?.maximumLineHeight == expected)
+    }
+
+    /// The line Return makes at the end of a heading is the case this was
+    /// found on. It has to come out plain body: carrying the heading's font
+    /// and spacing gave it a 28pt caret against the font's 18pt.
+    @Test("A blank line under a heading is plain body")
+    func blankLineUnderAHeadingIsPlain() {
+        #expect(font("## Head\n\n\n\nplain\n", at: 8)?.pointSize == Theme.liveFont.pointSize)
+        #expect(style("## Head\n\n\n\nplain\n", at: 8)?.paragraphSpacingBefore == Theme.lineSpacing)
+        // The heading keeps its own room above, which is not the blank line's.
+        #expect((style("## Head\n\n\n\nplain\n", at: 0)?.paragraphSpacingBefore ?? 0) > 0)
+    }
+
+    /// A blank line inside a block belongs to the block and keeps its
+    /// styling, which is what leaves room for a quote's bar to be drawn.
+    @Test("A blank line inside a quote is left to the quote")
+    func blankQuoteLineIsLeftAlone() {
+        let quoted = style("> quote\n> \n\nafter\n", at: 8)
+        #expect(quoted?.paragraphSpacingBefore != Theme.lineSpacing)
+    }
+}
