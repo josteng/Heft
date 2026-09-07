@@ -119,6 +119,31 @@ public enum VaultContentChangeNotification {
     }
 }
 
+/// Whether a captured line carries the time it arrived.
+///
+/// App-wide, because it is about the shape of a capture rather than about
+/// one vault, and because both captures write the same kind of line: a
+/// setting that applied to the inbox but not to the daily note would be a
+/// setting nobody could describe. On by default, which is what every capture
+/// has done until now.
+public enum CaptureTimestampPreference {
+    public static let key = "dev.stenglein.Heft.captureTimestamps"
+
+    public static var isOn: Bool { isOn(in: HeftDefaults.shared) }
+
+    /// Absent means on: the default has to survive a store that has never
+    /// been written to, which is every store until somebody opens the pane.
+    public static func isOn(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? true
+    }
+
+    public static func set(_ on: Bool, in defaults: UserDefaults = HeftDefaults.shared) {
+        defaults.set(on, forKey: key)
+        // Read by the capture extension, which is another process.
+        defaults.synchronize()
+    }
+}
+
 /// Which note in a vault is its inbox: `Inbox.md` at the root unless the
 /// reader named another in Settings ▸ Capture.
 ///
@@ -268,7 +293,8 @@ public struct InboxCapture: Sendable {
                     in: existing,
                     at: date,
                     calendar: calendar,
-                    title: title
+                    title: title,
+                    timestamped: CaptureTimestampPreference.isOn
                 )
                 try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -288,14 +314,15 @@ public struct InboxCapture: Sendable {
         in existing: String,
         at date: Date,
         calendar: Calendar = .current,
-        title: String = "Inbox"
+        title: String = "Inbox",
+        timestamped: Bool = true
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw InboxCaptureError.emptyCapture }
 
         let newline = existing.contains("\r\n") ? "\r\n" : "\n"
         let day = formatted(date, pattern: "yyyy-MM-dd", calendar: calendar)
-        let time = formatted(date, pattern: "HH:mm", calendar: calendar)
+        let time = timestamped ? formatted(date, pattern: "HH:mm", calendar: calendar) : ""
         let entry = markdownEntry(text, time: time, newline: newline)
         let dayHeading = "## \(day)"
 
@@ -330,7 +357,12 @@ public struct InboxCapture: Sendable {
         return formatter.string(from: date)
     }
 
-    private static func markdownEntry(
+    /// One captured item as a list line.
+    ///
+    /// `time` is empty when timestamps are off, and the space that would
+    /// have followed it goes with it: `- thought`, not `-  thought`, which
+    /// is a different thing to a Markdown parser reading indentation.
+    static func markdownEntry(
         _ text: String, time: String, newline: String
     ) -> String {
         let normalised = text
@@ -339,9 +371,8 @@ public struct InboxCapture: Sendable {
         let lines = normalised.split(separator: "\n", omittingEmptySubsequences: false)
         let first = lines.first.map(String.init) ?? ""
         let continuation = lines.dropFirst().map { "  \($0)" }.joined(separator: newline)
-        return continuation.isEmpty
-            ? "- \(time) \(first)"
-            : "- \(time) \(first)\(newline)\(continuation)"
+        let opening = time.isEmpty ? "- \(first)" : "- \(time) \(first)"
+        return continuation.isEmpty ? opening : "\(opening)\(newline)\(continuation)"
     }
 
     private static func lineRange(

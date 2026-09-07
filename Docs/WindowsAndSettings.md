@@ -190,7 +190,15 @@ is created on the first capture, since the setting is a promise about where
 things go. Which *vault* a windowless capture lands in is the other half,
 and app-wide because it answers which of them: `CaptureVaultPreference` is
 the vault chosen once in the pane while it exists, otherwise the vault opened
-last, which is what it always was. Daily captures have no setting: the log
+last, which is what it always was. Whether a captured line starts with the time is one app-wide answer,
+`CaptureTimestampPreference`, shown in the same card. Both captures write the
+same kind of line, so a setting that reached the inbox but not today's note
+would be one nobody could describe. Off, the time and the space after it go
+together: `-  thought` with two spaces is indentation to a Markdown parser,
+which is a different list. The day heading in the inbox stays either way,
+since that is what keeps the file readable.
+
+Daily captures have no setting: the log
 marker in the template is the placement control, and the pane offers it to
 copy.
 

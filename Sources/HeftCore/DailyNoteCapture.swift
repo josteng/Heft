@@ -60,7 +60,8 @@ public struct DailyNoteCapture: Sendable {
                     in: existing,
                     at: date,
                     calendar: calendar,
-                    title: dailyNotes.stem(for: date)
+                    title: dailyNotes.stem(for: date),
+                    timestamped: CaptureTimestampPreference.isOn
                 )
                 try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -81,7 +82,8 @@ public struct DailyNoteCapture: Sendable {
         in existing: String,
         at date: Date,
         calendar: Calendar = .current,
-        title: String? = nil
+        title: String? = nil,
+        timestamped: Bool = true
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw DailyNoteCaptureError.emptyCapture }
@@ -92,7 +94,7 @@ public struct DailyNoteCapture: Sendable {
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "HH:mm"
-        let time = formatter.string(from: date)
+        let time = timestamped ? formatter.string(from: date) : ""
 
         let normalised = text
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -100,9 +102,10 @@ public struct DailyNoteCapture: Sendable {
         let lines = normalised.split(separator: "\n", omittingEmptySubsequences: false)
         let first = lines.first.map(String.init) ?? ""
         let continuation = lines.dropFirst().map { "  \($0)" }.joined(separator: newline)
-        let entry = continuation.isEmpty
-            ? "- \(time) \(first)"
-            : "- \(time) \(first)\(newline)\(continuation)"
+        // The space after the time goes with the time when it is off, or the
+        // line starts `-  ` and the extra column reads as indentation.
+        let opening = time.isEmpty ? "- \(first)" : "- \(time) \(first)"
+        let entry = continuation.isEmpty ? opening : "\(opening)\(newline)\(continuation)"
 
         if let marker = markerLine(in: existing, newline: newline) {
             var result = existing

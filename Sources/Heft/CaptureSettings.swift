@@ -24,6 +24,16 @@ final class CaptureSettings: ObservableObject {
         objectWillChange.send()
     }
 
+    /// Whether a captured line carries the time it arrived. Both captures
+    /// write the same kind of line, so one answer covers both.
+    var timestamps: Bool {
+        get { CaptureTimestampPreference.isOn }
+        set {
+            CaptureTimestampPreference.set(newValue)
+            objectWillChange.send()
+        }
+    }
+
     /// Empty means the vault opened last.
     var chosenVaultPath: String {
         get { CaptureVaultPreference.chosenPath() ?? "" }
@@ -52,6 +62,19 @@ struct CaptureSettingsView: View {
                             + "a capture goes to the vault opened last unless one is "
                             + "chosen here. Open Inbox and Open Today's Note use the "
                             + "same vault."
+                    )
+                }
+                LabeledContent {
+                    Toggle("", isOn: $settings.timestamps)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .alignedWithTitle()
+                } label: {
+                    SettingLabel(
+                        "Stamp the time",
+                        detail: "Captured lines start with the time they arrived, "
+                            + "as \u{201C}- 14:32 the thought\u{201D}. Turned off they are "
+                            + "plain list items. Applies to the inbox and to today's note."
                     )
                 }
             } header: {
