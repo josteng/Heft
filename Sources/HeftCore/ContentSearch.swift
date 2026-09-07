@@ -25,6 +25,26 @@ public struct ContentSearchResult: Sendable {
     public let totalOccurrences: Int
     public let matchedNotes: Int
 
+    /// One note's share of the answer.
+    ///
+    /// Counted during the scan, so it is the whole vault's tally rather than
+    /// the visible page's: the caller asking which notes to open needs the
+    /// notes it is not being shown.
+    public struct NoteTally: Sendable, Equatable {
+        public let path: String
+        public let lines: Int
+        public let occurrences: Int
+
+        public init(path: String, lines: Int, occurrences: Int) {
+            self.path = path
+            self.lines = lines
+            self.occurrences = occurrences
+        }
+    }
+
+    /// Every note that matched, most matches first.
+    public let tallies: [NoteTally]
+
     /// How many lines matched before the limit was applied.
     ///
     /// Carried separately from `totalOccurrences`, which counts hits and can
@@ -43,13 +63,14 @@ public struct ContentSearchResult: Sendable {
 
     public init(
         query: String, matches: [ContentMatch], totalOccurrences: Int, matchedNotes: Int,
-        totalMatches: Int? = nil
+        totalMatches: Int? = nil, tallies: [NoteTally] = []
     ) {
         self.query = query
         self.matches = matches
         self.totalOccurrences = totalOccurrences
         self.matchedNotes = matchedNotes
         self.totalMatches = totalMatches ?? matches.count
+        self.tallies = tallies
     }
 }
 
@@ -70,6 +91,7 @@ public enum ContentSearch {
         var matches: [ContentMatch] = []
         var totalOccurrences = 0
         var matchedNotes = Set<String>()
+        var perNote: [String: (lines: Int, occurrences: Int)] = [:]
 
         for note in notes {
             guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { continue }
@@ -78,6 +100,8 @@ public enum ContentSearch {
                 guard occurrences > 0 else { continue }
                 totalOccurrences += occurrences
                 matchedNotes.insert(note.relativePath)
+                let running = perNote[note.relativePath] ?? (0, 0)
+                perNote[note.relativePath] = (running.lines + 1, running.occurrences + occurrences)
                 let preview = contextPreview(in: rawLine, query: term)
                 matches.append(ContentMatch(
                     note: note, line: offset + 1,
@@ -100,12 +124,24 @@ public enum ContentSearch {
             return left.line < right.line
         }
 
+        let tallies = perNote
+            .map {
+                ContentSearchResult.NoteTally(
+                    path: $0.key, lines: $0.value.lines, occurrences: $0.value.occurrences
+                )
+            }
+            .sorted {
+                if $0.lines != $1.lines { return $0.lines > $1.lines }
+                return $0.path.localizedStandardCompare($1.path) == .orderedAscending
+            }
+
         return ContentSearchResult(
             query: query,
             matches: Array(matches.prefix(limit)),
             totalOccurrences: totalOccurrences,
             matchedNotes: matchedNotes.count,
-            totalMatches: matches.count
+            totalMatches: matches.count,
+            tallies: tallies
         )
     }
 

@@ -462,6 +462,274 @@ struct AgentCLITests {
         #expect(switches.flags == ["--force"])
     }
 
+    /// The scan already counted this for the truncation notice. The flag is
+    /// only a way to ask for the number it had.
+    @Test("--files answers which notes matched, not which lines")
+    func findFilesListsNotes() throws {
+        let root = try vault([
+            "Many.md": (1...5).map { "needle \($0)" }.joined(separator: "\n") + "\n",
+            "Few.md": "one needle here\nnothing\n",
+            "None.md": "nothing at all\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["find", root.path, "needle", "--files"])
+        #expect(output.status == 0)
+        let lines = output.text.split(separator: "\n").map(String.init)
+        #expect(lines.count == 2, "\(lines)")
+        // Most matches first.
+        #expect(lines[0].contains("Many.md"))
+        #expect(lines[0].hasPrefix("5\t5\t"))
+        #expect(lines[1].contains("Few.md"))
+        #expect(!output.text.contains("None.md"))
+    }
+
+    /// Counted across the whole vault, not across the page of lines shown.
+    /// The tally is what tells you about the notes you are not being shown,
+    /// so taking it from the truncated list would defeat the flag.
+    @Test("--files counts past the line limit")
+    func findFilesCountsPastTheLimit() throws {
+        let big = (1...100).map { "needle \($0)" }.joined(separator: "\n") + "\n"
+        let root = try vault(["Big.md": big, "Small.md": "needle\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["find", root.path, "needle", "--files"])
+        #expect(output.status == 0)
+        #expect(output.text.contains("100\t100\tBig.md"))
+        #expect(output.text.contains("Small.md"))
+    }
+
+    @Test("--files and --json together")
+    func findFilesAsJSON() throws {
+        let root = try vault(["A.md": "needle\nneedle\n", "B.md": "needle\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["find", root.path, "needle", "--files", "--json"])
+        #expect(output.status == 0)
+        let listed = try #require(
+            try? JSONSerialization.jsonObject(with: Data(output.text.utf8)) as? [[String: Any]])
+        #expect(listed.count == 2)
+        #expect(listed.first?["path"] as? String == "A.md")
+        #expect(listed.first?["lines"] as? Int == 2)
+    }
+
+    @Test("--limit caps the notes as well, and says so")
+    func findFilesRespectsTheLimit() throws {
+        let root = try vault([
+            "A.md": "needle\n", "B.md": "needle\n", "C.md": "needle\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["find", root.path, "needle", "--files", "--limit", "2"])
+        #expect(output.status == 0)
+        #expect(output.text.contains("showing 2 of 3 notes"))
+    }
+
+    /// `outline <vault> --json "Inbox"` looked up a note called `--json`,
+    /// which is a confusing way to say "put the flag last". Every other
+    /// command line takes flags anywhere, so an agent writes them anywhere.
+    @Test("The read verbs take their flags before the note too")
+    func readVerbsTakeLeadingFlags() throws {
+        let root = try vault([
+            "Folder/Note.md": "# Heading\n\nneedle here\n\nsee [[Other]]\n",
+            "Other.md": "# Other\n\nsee [[Folder/Note]]\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for verb in ["outline", "links", "backlinks"] {
+            let leading = try run([verb, root.path, "--json", "Folder/Note"])
+            #expect(leading.status == 0, "`\(verb) --json <note>`: \(leading.error)")
+            #expect(!leading.error.contains("no such"))
+            let trailing = try run([verb, root.path, "Folder/Note", "--json"])
+            #expect(leading.text == trailing.text, "\(verb) disagreed on flag position")
+        }
+
+        let tags = try run(["tags", root.path, "--json"])
+        #expect(tags.status == 0)
+    }
+
+    @Test("read and find take a leading flag as a flag, not as the subject")
+    func readAndFindTakeLeadingFlags() throws {
+        let root = try vault(["Long.md": (1...20).map { "needle \($0)" }
+            .joined(separator: "\n") + "\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let read = try run(["read", root.path, "--lines", "2-4", "Long.md"])
+        #expect(read.status == 0, "\(read.error)")
+        #expect(read.text.contains("needle 2"))
+        #expect(!read.text.contains("needle 5\n"))
+
+        let find = try run(["find", root.path, "--limit", "3", "needle"])
+        #expect(find.status == 0, "\(find.error)")
+        #expect(find.text.contains("showing 3 of 20"))
+
+        let captured = try run(["capture", root.path, "--to", "Long.md", "a leading flag"])
+        #expect(captured.status == 0, "\(captured.error)")
+        let note = try String(
+            contentsOf: root.appendingPathComponent("Long.md"), encoding: .utf8)
+        #expect(note.contains("a leading flag"))
+        // The flag's value must not have become part of the captured text.
+        #expect(!note.contains("--to"))
+        #expect(!note.contains("Long.md a leading flag"))
+    }
+
+    /// No ownership check, deliberately: the queue is the reader's and
+    /// clearing it is a fair thing to ask. But two agents can share a vault,
+    /// and one discarding what the other left for review should be legible
+    /// rather than look like it was tidying up after itself.
+    @Test("drop names who left the proposal it discarded")
+    func dropNamesTheAuthor() throws {
+        let root = try vault(["Note.md": "one\ntwo\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = try readLog(having: ["Note.md"], in: root)
+
+        #expect(try run(
+            ["propose", root.path, "Note.md", "--summary", "tighten it",
+             "--agent", "some-other-agent"],
+            stdin: "one\n", readLog: log
+        ).status == 0)
+
+        let dropped = try run(["drop", root.path, "tighten-it"])
+        #expect(dropped.status == 0)
+        #expect(dropped.text.contains("some-other-agent"))
+        #expect(ProposalStore.all(in: root).isEmpty)
+    }
+
+    // MARK: - capture
+
+    /// The write is the one the Spotlight extension already makes. What is
+    /// new is only that the command line can make it.
+    @Test("capture appends a timestamped line to the inbox note")
+    func captureAppendsToInbox() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n\n- 09:00 an earlier line\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["capture", root.path, "a thought worth keeping"])
+        #expect(output.status == 0, "\(output.error)")
+        #expect(output.text.contains("Inbox.md"))
+
+        let inbox = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        #expect(inbox.contains("a thought worth keeping"))
+        // What was there is still there. The new line goes in under the
+        // heading rather than at the end, which is the inbox's own order and
+        // the same one Spotlight capture writes in.
+        #expect(inbox.contains("an earlier line"))
+        #expect(inbox.range(of: "a thought worth keeping")!.lowerBound
+            < inbox.range(of: "an earlier line")!.lowerBound)
+        #expect(inbox.hasPrefix("# Inbox"))
+    }
+
+    @Test("--to picks a different note")
+    func captureToANamedNote() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n", "Log.md": "# Log\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["capture", root.path, "into the log", "--to", "Log.md"]).status == 0)
+        let log = try String(contentsOf: root.appendingPathComponent("Log.md"), encoding: .utf8)
+        #expect(log.contains("into the log"))
+        let inbox = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        #expect(!inbox.contains("into the log"))
+    }
+
+    /// The marker is the insertion cursor, so the next line lands above it and
+    /// the ones after stay below.
+    @Test("--daily writes to today's daily note")
+    func captureDailyUsesTheMarker() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["capture", root.path, "logged from the shell", "--daily"])
+        #expect(output.status == 0, "\(output.error)")
+        // Vault-relative, the way the inbox one reports. /tmp against
+        // /private/tmp made these two disagree for the same vault.
+        #expect(!output.text.contains(root.path), "the path came back absolute")
+        let path = output.text.replacingOccurrences(of: "captured to ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let note = try String(
+            contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        #expect(note.contains("logged from the shell"))
+    }
+
+    /// `--to` names a note, and a note is inside the vault. Without this the
+    /// argument went straight to the capture, so `--to "../file"` prepended a
+    /// heading and a bullet to a file outside it. "It only adds" is a safety
+    /// property of adding to a note; Markdown at the top of a shell profile
+    /// breaks it as thoroughly as overwriting would.
+    @Test("--to cannot leave the vault")
+    func captureCannotEscapeTheVault() throws {
+        let enclosing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftEscape-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: enclosing, withIntermediateDirectories: true)
+        let root = enclosing.appendingPathComponent("Vault")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: enclosing) }
+
+        let outsider = enclosing.appendingPathComponent("victimrc")
+        let precious = "export PATH=/usr/bin\n"
+        try Data(precious.utf8).write(to: outsider)
+
+        for escape in [
+            "../victimrc", "../../victimrc", "Folder/../../victimrc",
+            "./victimrc", "/etc/hosts", "//victimrc",
+        ] {
+            let refused = try run(["capture", root.path, "injected", "--to", escape])
+            #expect(refused.status != 0, "`--to \(escape)` was accepted")
+            #expect(refused.error.contains("inside the vault"))
+        }
+        // Untouched, byte for byte.
+        #expect(try String(contentsOf: outsider, encoding: .utf8) == precious)
+        // And nothing was created inside the vault under a mangled name.
+        let inside = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        #expect(inside.isEmpty, "\(inside)")
+    }
+
+    @Test("A path inside the vault still works, extension or not")
+    func captureToNestedPaths() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["capture", root.path, "one", "--to", "Logs/Deep.md"]).status == 0)
+        #expect(try run(["capture", root.path, "two", "--to", "Logs/NoExtension"]).status == 0)
+        let deep = try String(
+            contentsOf: root.appendingPathComponent("Logs/Deep.md"), encoding: .utf8)
+        #expect(deep.contains("one"))
+        // The normaliser adds the extension a note has.
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Logs/NoExtension.md").path))
+    }
+
+    @Test("Nothing to capture is refused, and the two targets cannot be combined")
+    func captureRefusesNonsense() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let empty = try run(["capture", root.path])
+        #expect(empty.status != 0)
+        #expect(empty.error.contains("usage"))
+
+        let both = try run(["capture", root.path, "text", "--daily", "--to", "Log.md"])
+        #expect(both.status != 0)
+        #expect(both.error.contains("pick one"))
+
+        let unchanged = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        #expect(unchanged == "# Inbox\n")
+    }
+
+    @Test("Several words are one line, not one capture each")
+    func captureJoinsItsWords() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["capture", root.path, "one", "two", "three"]).status == 0)
+        let inbox = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        #expect(inbox.contains("one two three"))
+        #expect(inbox.components(separatedBy: "\n- ").count == 2)
+    }
+
     // MARK: - Machine-readable answers
 
     /// The tab-separated columns are fine to read and wrong to parse: a path

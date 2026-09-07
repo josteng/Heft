@@ -15,6 +15,7 @@ public enum AgentCLI {
 
     public static let verbs: Set<String> = [
         "propose", "proposals", "diff", "drop", "read", "find", "changes", "attachment",
+        "capture",
     ]
 
     /// Returns true when it handled the arguments (and has exited).
@@ -36,6 +37,7 @@ public enum AgentCLI {
         case "find": find(root: root, arguments: rest)
         case "changes": changes(root: root, arguments: rest)
         case "attachment": attachment(root: root, arguments: rest)
+        case "capture": capture(root: root, arguments: rest)
         default: return false
         }
         return true
@@ -350,17 +352,23 @@ public enum AgentCLI {
         // undone, and `heft proposals` prints the id ready to copy.
         let proposal = resolve(arguments.first, in: root, verb: "drop", exactly: true)
         ProposalStore.remove(proposal.id, in: root)
-        print("dropped \(proposal.id)")
+        // Who left it, not only which one went. There is no ownership check
+        // and there should not be: the queue is the reader's, and clearing
+        // it is a fair thing to ask. But two agents can share a vault, and
+        // one discarding what the other left for review should be legible in
+        // the transcript rather than indistinguishable from tidying its own.
+        print("dropped \(proposal.id), proposed by \(proposal.agent)")
         exit(0)
     }
 
     /// Reading a note by name rather than by path, the way a wikilink does, so
     /// an agent can work from what the vault calls things.
     private static func read(root: URL, arguments: [String]) {
-        guard let name = arguments.first, !name.hasPrefix("--") else {
+        let options = Options(arguments[...])
+        // The note, wherever it was written relative to the flags.
+        guard let name = CommandLineSpec.split(arguments, forVerb: "read").positional.first else {
             fail("usage: heft read <vault> <note> [--lines N-M]")
         }
-        let options = Options(arguments.dropFirst())
         let relative = resolveNote(named: name, in: root)
         let noteURL = root.appendingPathComponent(relative)
         guard let text = try? String(contentsOf: noteURL, encoding: .utf8) else {
@@ -525,7 +533,7 @@ public enum AgentCLI {
 
     private static func find(root: URL, arguments: [String]) {
         let options = Options(arguments[...])
-        let words = arguments.prefix { !$0.hasPrefix("--") }
+        let words = CommandLineSpec.split(arguments, forVerb: "find").positional
         guard !words.isEmpty else { fail("usage: heft find <vault> <query> [--limit N]") }
 
         var limit = findLimit
@@ -544,6 +552,29 @@ public enum AgentCLI {
             print("no matches")
             exit(0)
         }
+        // Which notes, rather than which lines. The scan already counted this
+        // for the truncation notice; without the flag it knows the answer and
+        // has no way to say it, so choosing what to open meant paging through
+        // matched lines and inferring.
+        if options.flag("files") {
+            let listed = Array(result.tallies.prefix(limit))
+            if options.flag("json") {
+                JSONOutput.emit(listed.map {
+                    ["path": $0.path, "lines": $0.lines, "occurrences": $0.occurrences]
+                })
+            }
+            for tally in listed {
+                print("\(tally.lines)\t\(tally.occurrences)\t\(tally.path)")
+            }
+            if result.tallies.count > listed.count {
+                print("""
+                    — showing \(listed.count) of \(result.tallies.count) notes. \
+                    Pass --limit \(result.tallies.count) for all of them.
+                    """)
+            }
+            exit(0)
+        }
+
         if options.flag("json") {
             JSONOutput.emit([
                 "matches": result.matches.map {
@@ -573,6 +604,70 @@ public enum AgentCLI {
                 """)
         }
         exit(0)
+    }
+
+    /// Appends one line to the inbox note, or to today's daily note.
+    ///
+    /// The only verb here that writes to the vault without a proposal, and it
+    /// is the same write the Spotlight extension has always made: the app's
+    /// own capture calls exactly this. Adding a line at a marker touches
+    /// nothing that was already there, which is the test `daily` passes and
+    /// `rename` did not.
+    ///
+    /// It is here because it is the most frequent thing an agent has to do
+    /// and was the most expensive: logging one line meant reading the whole
+    /// note and proposing a whole body back, and since the read guard, having
+    /// read it first as well.
+    private static func capture(root: URL, arguments: [String]) {
+        let options = Options(arguments[...])
+        let words = CommandLineSpec.split(arguments, forVerb: "capture").positional
+        let text = words.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            fail("usage: heft capture <vault> <text> [--daily] [--to <note>]")
+        }
+        guard !(options.flag("daily") && options["to"] != nil) else {
+            fail("--daily and --to name two different notes; pick one")
+        }
+
+        // Through the same normaliser the stored inbox note goes through,
+        // which already refuses `..`, `.`, an empty segment and an absolute
+        // path. Passing the argument straight to `InboxCapture` skipped all
+        // of that, and `--to "../file"` appended a heading and a bullet to a
+        // file outside the vault. "It only adds" is a safety property of
+        // adding to a *note*; prepending Markdown to a shell profile breaks
+        // it as thoroughly as overwriting would.
+        var target: String?
+        if let asked = options["to"] {
+            guard let cleaned = InboxNotePreference.normalised(asked) else {
+                fail("""
+                    --to takes a path inside the vault: \(asked)
+                    No leading /, and no `.` or `..` segments.
+                    """)
+            }
+            target = cleaned
+        }
+
+        do {
+            let written: URL
+            if options.flag("daily") {
+                let settings = ObsidianSettings.load(vaultRoot: root)
+                written = try DailyNoteCapture(vaultRoot: root, settings: settings).capture(text)
+            } else {
+                written = try InboxCapture(vaultRoot: root, relativePath: target).capture(text)
+            }
+            // Both sides standardised, or /tmp against /private/tmp made the
+            // daily note print an absolute path where the inbox printed a
+            // relative one, for the same vault.
+            let base = root.standardizedFileURL.path
+            let full = written.standardizedFileURL.path
+            let relative = full.hasPrefix(base + "/")
+                ? String(full.dropFirst(base.count + 1))
+                : full
+            print("captured to \(relative)")
+            exit(0)
+        } catch {
+            fail(error.localizedDescription)
+        }
     }
 
     // MARK: - Helpers

@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 17
+    public static let version = 21
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -210,6 +210,21 @@ public enum AgentGuide {
         Then read it again and rebuild your version on top. `--replace` below
         is exempt, because its anchors are checked against the current note.
 
+        ## Adding a line
+
+        ```bash
+        heft capture . "the thing worth keeping"
+        heft capture . "what happened" --daily
+        ```
+
+        The one write here that is not a proposal, and the same one Spotlight
+        capture makes: a line at the inbox note, or at today's daily log
+        marker. Nothing already written is touched, which is why it needs no
+        review. Use it instead of proposing a whole note back to add a line.
+
+        `--to "Folder/Note.md"` picks another note, and takes a plain path
+        inside the vault: no leading `/`, and no `.` or `..` segments.
+
         ## Reading part of a long note
 
         ```bash
@@ -328,6 +343,10 @@ public enum AgentGuide {
         Add `--json` to `find`, `files`, `outline`, `links`, `backlinks` and
         `tags` when you are parsing rather than reading: a path can hold a
         quote or a colon, and the column form cannot say which.
+
+        `heft find . "word" --files` answers which notes matched and how
+        often, counted across the whole vault rather than the page of lines
+        shown. That is the question to ask when choosing what to read.
         heft attachment . "Note" shot.png   # where that file goes, and the link
         ```
 

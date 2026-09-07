@@ -82,6 +82,7 @@ public enum CommandLineSpec {
         Verb("find", "<vault> <query>", "Full-text search across the vault.", flags: [
             Flag("--limit", value: "N",
                  "How many lines to show. 40 by default, and it says when it withheld any."),
+            Flag("--files", "Which notes matched and how often, rather than which lines."),
             Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
         ]),
         Verb("read", "<vault> <note>", "A note's source.", flags: [
@@ -134,6 +135,11 @@ public enum CommandLineSpec {
             Flag("--margin", value: "narrow|normal|wide", "White space around the text."),
             Flag("--title", "Put the note's name at the top."),
             Flag("--force", "Overwrite the output file if it is already there."),
+        ], isReadOnly: false),
+        Verb("capture", "<vault> <text>",
+             "Append one timestamped line, the way Spotlight capture does.", flags: [
+            Flag("--daily", "Today's daily note, at its log marker, rather than the inbox."),
+            Flag("--to", value: "<note>", "That note instead of the inbox one."),
         ], isReadOnly: false),
         Verb("daily", "<vault> [YYYY-MM-DD]", "Create a daily note from the template.",
              isReadOnly: false),

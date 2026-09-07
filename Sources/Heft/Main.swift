@@ -376,6 +376,11 @@ enum HeftMain {
             .standardizedFileURL
         let index = VaultIndex.open(vaultAt: root)
         let asJSON = arguments.contains("--json")
+        // Flags in any position. Reading the note by index made `outline
+        // <vault> --json "Inbox"` look up a note called `--json`, which is a
+        // confusing way to say "put the flag last". These verbs' flags are
+        // all switches, so the split cannot take a value with it.
+        let arguments = CommandLineSpec.split(arguments, forVerb: verb).positional
 
         /// Resolved against **every** file, not only the Markdown ones.
         ///
