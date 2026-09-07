@@ -223,6 +223,9 @@ struct HeftCommands: Commands {
                 Divider()
                 Button("Link") { NSApp.sendAction(#selector(HeftTextKit2View.formatLink), to: nil, from: nil) }
                     .keyboardShortcut(.link)
+                Button("Toggle Checkbox") { model?.toggleChecklist() }
+                    .keyboardShortcut(.toggleCheckbox)
+                    .disabled(model?.current == nil)
             }
             Divider()
             Menu("Find") {

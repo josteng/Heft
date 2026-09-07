@@ -380,6 +380,7 @@ struct EditorPane: View {
                 generationKeepsPosition: model.documentGenerationKeepsPosition,
                 findSelection: findSelection,
                 insertion: model.pendingInsertion,
+                checklistToggle: model.pendingChecklistToggle,
                 focusRequest: model.editorFocusRequest,
                 context: context,
                 onAttachment: handleAttachment,

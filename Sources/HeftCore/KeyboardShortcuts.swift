@@ -91,6 +91,9 @@ public enum KeyboardShortcuts {
         .init(id: "highlight", title: "Highlight", key: "h", modifiers: [.command, .shift], group: .format),
         .init(id: "code", title: "Code", key: "e", modifiers: [.command], group: .format),
         .init(id: "link", title: "Link", key: "k", modifiers: [.command], group: .format),
+        // ⌘L, as Obsidian binds "Toggle checkbox status", since a reader with
+        // both open should not have to hold two keys for one habit.
+        .init(id: "toggleCheckbox", title: "Toggle checkbox", key: "l", modifiers: [.command], group: .format),
 
         .init(id: "find", title: "Find in note", key: "f", modifiers: [.command], group: .find),
         .init(id: "findNext", title: "Find next", key: "g", modifiers: [.command], group: .find),

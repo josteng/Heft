@@ -51,6 +51,7 @@ struct LiveTextEditor: NSViewRepresentable {
     let generationKeepsPosition: Bool
     let findSelection: FindSelection?
     let insertion: EditorInsertion?
+    var checklistToggle: Int = 0
     /// Changes when the model asks the editor to take the keyboard.
     var focusRequest: Int = 0
     let context: RenderContext
@@ -187,6 +188,13 @@ struct LiveTextEditor: NSViewRepresentable {
             nsContext.coordinator.restyle(textView)
         }
 
+        if checklistToggle != nsContext.coordinator.lastChecklistToggle {
+            nsContext.coordinator.lastChecklistToggle = checklistToggle
+            // Zero is the value a fresh editor starts at, so it is not a
+            // request: it would convert the note the moment one was opened.
+            if checklistToggle > 0 { textView.formatChecklist() }
+        }
+
         if focusRequest != nsContext.coordinator.lastFocusRequest {
             nsContext.coordinator.lastFocusRequest = focusRequest
             nsContext.coordinator.takeKeyboard(textView)
@@ -308,6 +316,7 @@ struct LiveTextEditor: NSViewRepresentable {
         var indexFingerprint = ""
         var lastFindGeneration = -1
         var lastInsertionGeneration = -1
+        var lastChecklistToggle = 0
         /// How far the text has moved since the widgets were computed.
         ///
         /// Only ever non-nil in the window between a storage edit and the
@@ -2498,15 +2507,27 @@ final class HeftTextKit2View: NSTextView {
     @objc func formatCode() { applyFormat(.code) }
     @objc func formatLink() { applyFormat(nil) }
 
+    /// Turns the selected lines into a checklist, or back into plain bullets.
+    /// A block command rather than an inline one, so it goes through its own
+    /// entry point instead of `InlineFormat`.
+    @objc func formatChecklist() {
+        apply(MarkdownEditing.toggleChecklist(in: string, range: selectedRange()))
+    }
+
     func applyFormat(_ format: InlineFormat?) {
         let selection = selectedRange()
         let edit = format.map { MarkdownEditing.toggle($0, in: string, range: selection) }
             ?? MarkdownEditing.makeLink(in: string, range: selection)
-        guard !edit.isEmpty else { return }
+        apply(edit)
+    }
 
-        // Only the affected span is replaced, so the rest of the document keeps
-        // its layout and the undo stack gets one small step rather than the
-        // whole file.
+    /// Puts one planned edit into the buffer.
+    ///
+    /// Only the affected span is replaced, so the rest of the document keeps
+    /// its layout and the undo stack gets one small step rather than the
+    /// whole file.
+    private func apply(_ edit: MarkdownEditing.Edit) {
+        guard !edit.isEmpty else { return }
         guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()

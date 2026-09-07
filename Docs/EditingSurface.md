@@ -207,6 +207,26 @@ matching. The price is that `` \` `` does not stop a code span opening, which
 CommonMark says it should, and that is a far smaller wrong than losing the
 maths. It runs before emphasis and links, which is the point of it.
 
+## Turning lines into a checklist
+
+One command in the Format menu and the palette. The palette route goes
+through the model rather than sending an action down the responder chain:
+while the palette is open it holds the keyboard, so a sent action reaches its
+own search field and stops, and the command silently did nothing. Every other
+command that touches the text goes through the model for the same reason.
+
+It toggles the way every other format does: if every selected item already has a box they all lose it,
+otherwise they all gain one, so a list somebody stopped converting halfway
+finishes rather than reverses.
+
+The indentation and the marker come back out byte for byte rather than being
+rebuilt from a count, because a tab put back as spaces moves a nested item
+under a parser that counts columns, and `*` silently becoming `-` is a change
+nobody asked for. A line that is not a list item gains a marker along with
+its box, since a checkbox with no bullet in front of it is not a task to any
+parser. Blank lines inside the selection are skipped, or a selection that
+happens to span one grows a stray empty task.
+
 ## Reference links, and the two passes they need
 
 `[label]` is a link when something further down the file defines that label

@@ -350,6 +350,13 @@ final class AppModel: ObservableObject {
     /// generation so the editor performs it exactly once, the way a find
     /// selection is applied.
     @Published private(set) var pendingInsertion: EditorInsertion?
+    /// Bumped to ask the editor to toggle a checklist over its selection.
+    ///
+    /// A counter rather than an action sent down the responder chain: the
+    /// palette holds the keyboard while it is open, so `sendAction` reaches
+    /// its search field and stops. Every other command that touches the text
+    /// goes through the model for the same reason.
+    @Published private(set) var pendingChecklistToggle = 0
 
     var recentNotes: [NoteRef] {
         (session?.recentPaths ?? [])
@@ -2098,6 +2105,8 @@ final class AppModel: ObservableObject {
             generation: (pendingInsertion?.generation ?? 0) + 1
         )
     }
+
+    func toggleChecklist() { pendingChecklistToggle += 1 }
 
     func commandPaletteDidDismiss() {
         if shouldPresentDailyNotesSettingsAfterPalette {

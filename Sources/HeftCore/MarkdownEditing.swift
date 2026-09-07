@@ -133,6 +133,174 @@ public enum MarkdownEditing {
         )
     }
 
+    /// Advances each selected line's checkbox one step.
+    ///
+    /// Obsidian's "Toggle checkbox status", and deliberately the same, since
+    /// this is a vault somebody may also open there: a line with no box gains
+    /// an unchecked one, an unchecked box becomes checked, and a checked box
+    /// goes back to unchecked. Nothing ever removes a box, so the command is
+    /// safe to hold down and the state is a cycle of two after the first
+    /// press rather than a three-way toggle nobody can predict.
+    ///
+    /// Per line rather than per selection. A mixed selection would otherwise
+    /// need a rule about what "all of them" means, and every such rule
+    /// surprises somebody; advancing each line one step is what the reader
+    /// can see happening.
+    ///
+    /// Indentation and the marker itself are left exactly as they are, so a
+    /// nested list stays nested and `*` does not silently become `-`. A line
+    /// that is not a list item gets a marker as well as a box, since asking
+    /// for a checkbox on a paragraph plainly means "make this one".
+    /// Genuinely empty lines are skipped, or a selection that happens to span
+    /// a blank line grows a stray empty task.
+    public static func toggleChecklist(in source: String, range: NSRange) -> Edit {
+        let text = source as NSString
+        guard range.location != NSNotFound, NSMaxRange(range) <= text.length
+        else { return .nothing(keeping: range) }
+
+        let block = text.lineRange(for: range)
+        var lines: [NSRange] = []
+        var cursor = block.location
+        while cursor < NSMaxRange(block) {
+            let line = text.lineRange(for: NSRange(location: cursor, length: 0))
+            lines.append(line)
+            cursor = NSMaxRange(line)
+            if line.length == 0 { break }
+        }
+
+        let content = lines.filter {
+            !text.substring(with: $0).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !content.isEmpty else { return .nothing(keeping: range) }
+
+        let parsed = content.map { ListLine(text.substring(with: $0)) }
+
+        // Where each line grew, and by how much, so the caret can be put back
+        // where the reader left it rather than at the top of the block.
+        //
+        // Obsidian leaves it in the word being typed, and that is the whole
+        // point of a keystroke for this: ticking something off must not cost
+        // you your place in the sentence beside it.
+        var growth: [(lineStart: Int, shiftPoint: Int, delta: Int)] = []
+        var replacement = text.substring(with: block)
+        for (line, item) in zip(content, parsed).reversed() {
+            let rewritten = item.advancingCheckbox
+            guard rewritten != item.raw else { continue }
+            let local = NSRange(location: line.location - block.location, length: line.length)
+            replacement = (replacement as NSString).replacingCharacters(in: local, with: rewritten)
+            growth.append((
+                lineStart: line.location,
+                shiftPoint: line.location + item.checkboxInsertionOffset,
+                delta: (rewritten as NSString).length - (item.raw as NSString).length
+            ))
+        }
+        guard replacement != text.substring(with: block) else { return .nothing(keeping: range) }
+
+        return Edit(
+            range: block,
+            replacement: replacement,
+            selection: NSRange(
+                location: shifted(range.location, by: growth),
+                length: shifted(NSMaxRange(range), by: growth) - shifted(range.location, by: growth)
+            )
+        )
+    }
+
+    /// Where a character position ends up once the lines above it have grown.
+    ///
+    /// A position shifts by a line's growth only when it sits at or after the
+    /// point that line actually changed, so a caret inside the bullet itself
+    /// stays inside the bullet.
+    private static func shifted(
+        _ position: Int, by growth: [(lineStart: Int, shiftPoint: Int, delta: Int)]
+    ) -> Int {
+        growth.reduce(position) { moved, line in
+            position >= line.shiftPoint ? moved + line.delta : moved
+        }
+    }
+
+    /// One line of a list, split into the parts a checklist command moves.
+    ///
+    /// Written by hand rather than matched, because the indentation has to
+    /// come back out byte for byte: rebuilding it from a count would turn a
+    /// tab into spaces and shift a nested list under a parser that counts
+    /// columns.
+    struct ListLine: Equatable {
+        let raw: String
+        /// Whitespace and quote markers before the bullet.
+        let indent: String
+        /// `- `, `* `, `1. ` and so on, empty when the line is not a list item.
+        let marker: String
+        /// `[ ] ` or `[x] `, empty when there is none.
+        let checkbox: String
+        let body: String
+
+        init(_ raw: String) {
+            self.raw = raw
+            var rest = Substring(raw)
+            // The line break comes off and goes back on untouched: it is not
+            // part of the item, and a rewrite that dropped it would join two
+            // lines into one.
+            var breakLength = 0
+            while let last = rest.last, last == "\n" || last == "\r" {
+                rest = rest.dropLast()
+                breakLength += 1
+            }
+            let trailing = String(raw.suffix(breakLength))
+
+            let indentEnd = rest.prefix { $0 == " " || $0 == "\t" || $0 == ">" }
+            indent = String(indentEnd)
+            rest = rest.dropFirst(indentEnd.count)
+
+            var marker = ""
+            if let first = rest.first, "-*+".contains(first),
+               rest.dropFirst().first == " " || rest.dropFirst().first == "\t" {
+                marker = String(rest.prefix(1)) + " "
+                rest = rest.dropFirst(2)
+            } else {
+                let digits = rest.prefix(while: \.isNumber)
+                let after = rest.dropFirst(digits.count)
+                if !digits.isEmpty, let delimiter = after.first, delimiter == "." || delimiter == ")",
+                   after.dropFirst().first == " " {
+                    marker = String(digits) + String(delimiter) + " "
+                    rest = after.dropFirst(2)
+                }
+            }
+            self.marker = marker
+
+            if rest.hasPrefix("[ ] ") || rest.hasPrefix("[x] ") || rest.hasPrefix("[X] ") {
+                checkbox = String(rest.prefix(4))
+                rest = rest.dropFirst(4)
+            } else {
+                checkbox = ""
+            }
+            body = String(rest) + trailing
+        }
+
+        var hasCheckbox: Bool { !checkbox.isEmpty }
+
+        /// Where the box is written, as an offset into the line: after the
+        /// indent and the marker when there is one, after the indent alone
+        /// when the marker has to be made too.
+        var checkboxInsertionOffset: Int {
+            let indentLength = (indent as NSString).length
+            guard !marker.isEmpty else { return indentLength }
+            return indentLength + (marker as NSString).length
+        }
+        var isChecked: Bool { checkbox.hasPrefix("[x") || checkbox.hasPrefix("[X") }
+
+        /// The next state: none becomes unchecked, unchecked becomes checked,
+        /// checked becomes unchecked again.
+        ///
+        /// A line with no marker gains one on the way, because a checkbox
+        /// without a bullet in front of it is not a task to any parser.
+        var advancingCheckbox: String {
+            let lead = indent + (marker.isEmpty ? "- " : marker)
+            if !hasCheckbox { return lead + "[ ] " + body }
+            return lead + (isChecked ? "[ ] " : "[x] ") + body
+        }
+    }
+
     /// Whether a selection contains a hard line boundary. Shared with the UI
     /// so it can disable formats that Markdown cannot represent across lines.
     public static func spansMultipleLines(in source: String, range: NSRange) -> Bool {

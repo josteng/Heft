@@ -39,6 +39,7 @@ struct AppCommandShortcut {
     static let highlight = Self("highlight")
     static let code = Self("code")
     static let link = Self("link")
+    static let toggleCheckbox = Self("toggleCheckbox")
     static let find = Self("find")
     static let findNext = Self("findNext")
     static let findPrevious = Self("findPrevious")
@@ -162,6 +163,15 @@ struct AppCommand: Identifiable {
             shortcut: .openToday,
             enabled: { $0.dailyNotesAreInScope },
             action: { $0.openDailyNote(for: Date()) }
+        ),
+        Self(
+            id: "toggleChecklist",
+            title: "Toggle Checkbox",
+            symbol: "checklist",
+            searchTerms: "checklist checkbox task todo tick done bullets list convert",
+            shortcut: .toggleCheckbox,
+            enabled: { $0.current != nil },
+            action: { $0.toggleChecklist() }
         ),
         Self(
             id: "insertTable",
