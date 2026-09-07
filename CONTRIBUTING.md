@@ -17,6 +17,7 @@ than a description can:
 ```bash
 heft render <vault> <note> [caret]   # what the surface would draw, headless
 heft export <vault> <note> out.pdf   # the rendered note, as a file to attach
+    # --force if out.pdf is already there; it will not overwrite one silently
 heft stats <vault>                   # counts, timings, link resolution
 ```
 

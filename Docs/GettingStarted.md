@@ -85,7 +85,10 @@ Note" are there too, and in the palette (⌘P) inside the app.
 **Settings ▸ Capture** names which note in a vault is the inbox, per vault,
 and which vault Spotlight acts on when you have more than one: the one
 opened last, or always the same one. It also decides whether a captured line
-starts with the time it arrived.
+starts with the time it arrived, and whether `heft capture` from an agent
+lands straight in the note or waits in the review centre like every other
+change an agent makes. Your own captures from Spotlight and Shortcuts always
+land straight in.
 
 `Docs/TemplatesAndSlides.md` covers templates, the date tokens, typing
 snippets, and how `---` turns a note into a slide deck.
@@ -132,7 +135,14 @@ heft outline . "Note"         # its headings
 heft tags .                   # tags with counts
 heft config .                 # daily-note folder and format, today's note, inbox note, attachments
 heft files . --by-use         # ordered by what you actually open
+heft find . "word" --files    # which notes matched, and how often
+heft read . "Note" --lines 40-80   # part of a note too long to pull whole
 ```
+
+It can add to the vault without asking, but only by adding: `heft capture .
+"a line"` puts one timestamped line in your inbox note, or in today's log
+with `--daily`. Everything that changes a line you already wrote arrives as
+a proposal.
 
 Those matter because Heft keeps a **resolved** link index. It understands
 `[[Note|alias]]`, `[[Note#Heading]]` and the escaped pipe in

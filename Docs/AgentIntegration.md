@@ -20,10 +20,18 @@ subset — read the real list rather than trusting this one to have kept up.
 
 ```bash
 heft find <vault> <query>              # full-text search, path:line: preview
+    --files                            # ...which notes matched, and how often
+    --limit N                          # ...more than the first 40 lines
 heft read <vault> <note>               # a note's source, by name or by path
-heft files <vault>                     # every note, vault-relative
+    --lines N-M                        # ...only that range; records no read
+heft files <vault>                     # every file, attachments included
+    --notes                            # ...Markdown only
     --by-use                           # ...in the order the reader opens them
     --by-agent                         # ...what an agent has already proposed to
+
+heft capture <vault> "text"            # add one timestamped line to the inbox
+    --daily                            # ...to today's log marker instead
+    --to <note>                        # ...to that note, inside the vault
 
 heft propose <vault> <note.md> \       # the new body arrives on stdin
     --summary "what this is for" \
@@ -39,8 +47,12 @@ heft propose <vault> <note> --replacing <id>   # take a pending one's place
 heft changes <vault> <note>            # what moved since you last read it
 heft proposals <vault>                 # what is waiting for review
 heft diff <vault> <proposal-id>        # what one of them would change
-heft drop <vault> <proposal-id>        # withdraw one
+heft drop <vault> <proposal-id>        # withdraw one, naming who left it
 ```
+
+`--json` on `find`, `files`, `outline`, `links`, `backlinks` and `tags`: a
+note's path can hold a quote or a colon, and the column form cannot say which.
+`find` says how many matching lines it withheld rather than stopping silently.
 
 An id is a name, taken from the `--summary`: `tighten-the-opening`, and
 `tighten-the-opening-2` for the next one like it. It was a bare UUID, which
@@ -70,10 +82,15 @@ An empty string is refused outright — it is a prefix of every id, and
 `heft drop "$ID"` from a shell that expanded `$ID` to nothing used to delete
 whichever proposal happened to be first, and report success.
 
-`heft rename <vault> <path> <new>` applies immediately and is the exception:
-`--dry-run` says what it would do first, and is the right thing to show
-somebody before doing it. `propose --move` is the same change asked for rather
-than made, and is what to reach for when nobody is watching the terminal.
+`heft rename <vault> <path> <new>` writes without review, so it needs `--now`
+to say you meant it. `--dry-run` says what it would do and does nothing, which
+is the right thing to show somebody first. `propose --move` is the same change
+asked for rather than made, and is what to reach for when nobody is watching
+the terminal.
+
+`heft export` is the other one that writes outside the review path, and the
+only verb whose target is an arbitrary path outside the vault. It refuses a
+path that is already taken unless `--force`.
 
 ### Kinds, and changes that span notes
 
@@ -122,9 +139,12 @@ than at review time.
 
 Replacing a note wholesale is only safe if the agent saw the note it is
 replacing. `heft read` records what it handed over, and a whole-body `propose`
-against a note that has changed since is **refused**: without that, a line
-typed between the read and the proposal came back as an ordinary removal among
-the agent's own hunks, with nothing to say the agent had never seen it.
+is **refused** both for a note that has changed since and for one that was
+never read at all. Without the first, a line typed between the read and the
+proposal came back as an ordinary removal among the agent's own hunks. Without
+the second, every line of the note was unseen and nothing said so. A note that
+does not exist yet, or one that is empty, has nothing to lose and needs no
+read; nor does `--lines`, which reads a part and records nothing.
 
 `heft changes <vault> <note>` is the way out — it diffs the recorded read
 against the file as it is now — and then the note is read again. `--replace` is

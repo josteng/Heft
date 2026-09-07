@@ -16,11 +16,17 @@ swift run Heft stats <vault>                    # read-only index report; safe o
 swift run Heft render <vault> <note> [caret]    # what the live surface would draw, headless
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
 swift run Heft help [--json]                    # every verb and flag, from CommandLineSpec
+swift run Heft version                          # also --version and -v
 swift run Heft proposals <vault>                # agent edits waiting for review
 swift run Heft backlinks|links|outline <vault> <note>   # the resolved link index
 swift run Heft tags|config <vault>              # tags with counts; settings as JSON
+swift run Heft find <vault> <query>             # --files for notes not lines, --limit N
+swift run Heft read <vault> <note>              # --lines N-M reads a part, and records no read
+swift run Heft capture <vault> "text"           # one line to the inbox; --daily, --to <note>
 swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headless
+    # --force is needed when the output file already exists
     # --text-size N --paper a4|letter|legal|tabloid --landscape --margin narrow|normal|wide --title
+swift run Heft rename <vault> <path> <new> --now   # writes unreviewed; --dry-run first
 Scripts/perf.sh <vault>                         # what a keystroke, a publish, idle and a save cost; copies the vault
 Scripts/release.sh [--version X] [--notarize]   # signed, notarised zip plus the Homebrew cask, in dist/
 Scripts/publish.sh [--version X]                # the GitHub workflow end to end: run, approve, notes, publish, tap
@@ -84,6 +90,11 @@ Break one of these and something goes quietly wrong rather than failing.
 - **Every assertion is proven to fail under a deliberate defect.** A test that
   cannot be made to fail is not tested; several here passed by luck until they
   were mutated.
+- **Three verbs write without going through review, and each asks for it.**
+  `rename` needs `--now`, `export` refuses an output path that is already
+  taken unless `--force`, and `capture` only ever adds a line to a note
+  inside the vault. `daily` creates today's note and cannot overwrite one.
+  Everything else that changes a line already written is a proposal.
 - **Check drawing by drawing.** `heft export` writes a note to PDF headlessly
   and `heft render` reports what the surface would draw, so a claim about a
   table or a formula can be looked at. `ImageRenderer` sees layout and custom

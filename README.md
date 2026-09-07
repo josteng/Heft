@@ -152,7 +152,7 @@ four-space indented code, raw HTML and entity references;
 
 - **File tree** with inline creation and renaming. Renaming or moving a note
   or a folder repoints the wikilinks that pointed into it and leaves bare
-  links that still resolve exactly as written. `heft rename` is the same
+  links that still resolve exactly as written. `heft rename --now` is the same
   operation from a terminal. Rows select the way a file manager's do,
   command-click to add and shift-click for a range, and copy, paste, drag and
   Move to Trash all act on the whole selection. **⌘Z** puts back the last
@@ -226,10 +226,15 @@ heft [path]                    # open a folder or note, like `code .`
 heft help [--json]             # every verb and flag
 ```
 
-Yours: `daily`, `rename`, `export`, `agent-setup`. An agent's, all read-only:
-`find`, `read`, `files`, `outline`, `links`, `backlinks`, `tags`, `config`,
-`attachment`, `changes`, `keys`; plus `propose`, `proposals`, `diff` and
-`drop`. Diagnostics about Heft's own rendering: `stats`, `render`.
+Yours: `daily`, `rename`, `export`, `agent-setup`, `version`. An agent's, all
+read-only: `find`, `read`, `files`, `outline`, `links`, `backlinks`, `tags`,
+`config`, `attachment`, `changes`, `keys`; plus `propose`, `proposals`, `diff`,
+`drop`, and `capture` for adding a line. Diagnostics about Heft's own
+rendering: `stats`, `render`.
+
+The three that write without going through review say so: `rename` needs
+`--now`, `export` refuses a path that is already taken unless `--force`, and
+`capture` only ever adds a line to a note inside the vault.
 
 The query verbs are why an agent is better off with Heft than with a folder of
 Markdown: the link index is resolved, so `[[Note|alias]]`, `[[Note#Heading]]`
