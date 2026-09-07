@@ -99,11 +99,23 @@ enum HeftMain {
             let daily = DailyNotes(vaultRoot: root, settings: settings)
 
             var date = Date()
-            if arguments.count > 2 {
+            if arguments.count > 2, !arguments[2].hasPrefix("--") {
                 let parser = DateFormatter()
                 parser.dateFormat = "yyyy-MM-dd"
                 parser.timeZone = .current
-                date = parser.date(from: arguments[2]) ?? date
+                // Refused rather than quietly treated as today. A shell
+                // variable that did not expand is the usual way a bad date
+                // arrives, and guessing put a templated note in the vault on
+                // a day nobody asked about.
+                guard let asked = parser.date(from: arguments[2]) else {
+                    FileHandle.standardError.write(Data("""
+                        not a date: \(arguments[2])
+                        daily takes YYYY-MM-DD, or nothing at all for today.
+
+                        """.utf8))
+                    exit(1)
+                }
+                date = asked
             }
 
             do {
@@ -134,9 +146,25 @@ enum HeftMain {
         // without a window. The GUI's Export as PDF goes through exactly this,
         // so what a script produces is what the menu item produces.
         if arguments.first == "export", arguments.count > 3 {
+            let flags = Array(arguments.dropFirst(4))
+            // The output path is arbitrary and outside the vault, so this is
+            // the one verb that could destroy a file the vault knows nothing
+            // about: `heft export . "Note" ~/.zshrc` wrote a PDF over it,
+            // silently, under a blanket allow of the heft command. A mistyped
+            // path or an unset variable is enough. Same rule as rename: the
+            // destructive form has to be asked for.
+            let output = (arguments[3] as NSString).expandingTildeInPath
+            if !flags.contains("--force"), FileManager.default.fileExists(atPath: output) {
+                FileHandle.standardError.write(Data("""
+                    \(arguments[3]) already exists, and export would replace it.
+
+                    Write somewhere else, or add --force to overwrite it.
+
+                    """.utf8))
+                exit(1)
+            }
             runExport(
-                vaultPath: arguments[1], note: arguments[2], output: arguments[3],
-                flags: Array(arguments.dropFirst(4))
+                vaultPath: arguments[1], note: arguments[2], output: arguments[3], flags: flags
             )
             return
         }
@@ -164,7 +192,14 @@ enum HeftMain {
             }
 
             let asJSON = flags.contains("--json")
-            let notes = VaultScanner.scan(root: root).flattened().filter { !$0.isFolder }
+            // Attachments are listed too, and on purpose: "what references
+            // this image, before I delete it" is a question worth asking, and
+            // a list that only held notes rejected paths it had just offered.
+            // `--notes` is for the caller who wanted only the Markdown, which
+            // the summary used to promise and the listing never delivered.
+            let onlyNotes = flags.contains("--notes")
+            let notes = VaultScanner.scan(root: root).flattened()
+                .filter { !$0.isFolder && (!onlyNotes || $0.relativePath.hasSuffix(".md")) }
             guard byUse || byAgent || showScores else {
                 if asJSON {
                     JSONOutput.emit(notes.prefix(limit).map { ["path": $0.relativePath] })

@@ -71,7 +71,8 @@ public enum CommandLineSpec {
              flags: [Flag("--all", "Every one, not just the ones worth memorising.")]),
 
         // Reading a vault
-        Verb("files", "<vault>", "Every note, vault-relative.", flags: [
+        Verb("files", "<vault>", "Every file in the vault, attachments included.", flags: [
+            Flag("--notes", "Markdown only."),
             Flag("--by-use", "Most-used first, the order Quick Open opens on."),
             Flag("--by-agent", "What an agent has proposed changes to."),
             Flag("--scores", "Show each note's score."),
@@ -132,6 +133,7 @@ public enum CommandLineSpec {
             Flag("--landscape", "Turn the page sideways."),
             Flag("--margin", value: "narrow|normal|wide", "White space around the text."),
             Flag("--title", "Put the note's name at the top."),
+            Flag("--force", "Overwrite the output file if it is already there."),
         ], isReadOnly: false),
         Verb("daily", "<vault> [YYYY-MM-DD]", "Create a daily note from the template.",
              isReadOnly: false),

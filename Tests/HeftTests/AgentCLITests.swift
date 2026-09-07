@@ -267,6 +267,120 @@ struct AgentCLITests {
         return log
     }
 
+    // MARK: - export
+
+    /// The output path is arbitrary and outside the vault, so this is the one
+    /// verb that can destroy a file the vault knows nothing about. It did:
+    /// silently, exit 0, under a blanket allow of the heft command.
+    @Test("export will not silently replace a file that is already there")
+    func exportRefusesToClobber() throws {
+        let root = try vault(["Note.md": "# Note\n\nbody\n"])
+        let victim = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-export-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: victim)
+        }
+        let precious = "IMPORTANT PRE-EXISTING CONTENT\n"
+        try Data(precious.utf8).write(to: victim)
+
+        let refused = try run(["export", root.path, "Note.md", victim.path])
+        #expect(refused.status != 0)
+        #expect(refused.error.contains("already exists"))
+        #expect(refused.error.contains("--force"))
+        // Refusing has to mean refusing.
+        #expect(try String(contentsOf: victim, encoding: .utf8) == precious)
+    }
+
+    @Test("--force is how you say you meant it")
+    func exportForceOverwrites() throws {
+        let root = try vault(["Note.md": "# Note\n\nbody\n"])
+        let victim = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-export-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: victim)
+        }
+        try Data("replace me\n".utf8).write(to: victim)
+
+        #expect(try run(["export", root.path, "Note.md", victim.path, "--force"]).status == 0)
+        let written = try Data(contentsOf: victim)
+        #expect(written.starts(with: Array("%PDF".utf8)))
+    }
+
+    @Test("A path that is free still needs no flag")
+    func exportToAFreePathIsUnchanged() throws {
+        let root = try vault(["Note.md": "# Note\n\nbody\n"])
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-export-\(UUID().uuidString).pdf")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: out)
+        }
+
+        #expect(try run(["export", root.path, "Note.md", out.path]).status == 0)
+        #expect(FileManager.default.fileExists(atPath: out.path))
+    }
+
+    // MARK: - daily
+
+    /// A shell variable that did not expand is the usual way a bad date
+    /// arrives, and guessing put a templated note in the vault on a day
+    /// nobody asked about.
+    @Test("daily refuses a date it cannot read rather than assuming today")
+    func dailyRefusesABadDate() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for bad in ["not-a-date", "", "2026-13-45", "../../escape"] {
+            let output = try run(["daily", root.path, bad])
+            #expect(output.status != 0, "`heft daily . \(bad)` was accepted")
+            #expect(output.error.contains("not a date"))
+        }
+    }
+
+    @Test("daily still answers for today, and for a real date")
+    func dailyStillWorks() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["daily", root.path]).status == 0)
+        let dated = try run(["daily", root.path, "2026-03-04"])
+        #expect(dated.status == 0)
+        #expect(dated.text.contains("2026-03-04"))
+    }
+
+    // MARK: - files
+
+    /// The listing includes attachments on purpose, but the summary promised
+    /// "every note", so the one caller who wanted Markdown only had no way to
+    /// ask and no way to know they were not getting it.
+    @Test("files lists everything, and --notes narrows it")
+    func filesCanBeNarrowedToNotes() throws {
+        let root = try vault(["Note.md": "# Note\n", "Folder/Deep.md": "# Deep\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("not markdown".utf8)
+            .write(to: root.appendingPathComponent("picture.png"))
+
+        let everything = try run(["files", root.path])
+        #expect(everything.status == 0)
+        #expect(everything.text.contains("picture.png"))
+        #expect(everything.text.contains("Note.md"))
+
+        let markdown = try run(["files", root.path, "--notes"])
+        #expect(markdown.status == 0)
+        #expect(!markdown.text.contains("picture.png"))
+        #expect(markdown.text.contains("Note.md"))
+        #expect(markdown.text.contains("Folder/Deep.md"))
+    }
+
+    @Test("The summary says what the listing actually returns")
+    func filesSummaryIsHonest() throws {
+        let verb = try #require(CommandLineSpec.verb(named: "files"))
+        #expect(verb.summary.contains("attachments"))
+        #expect(verb.flags.contains { $0.name == "--notes" })
+    }
+
     // MARK: - Machine-readable answers
 
     /// The tab-separated columns are fine to read and wrong to parse: a path
