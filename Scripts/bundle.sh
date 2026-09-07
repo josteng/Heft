@@ -43,6 +43,12 @@ else
     )
 fi
 
+# Stamped here as well as in release.sh, so `heft --version` on a locally
+# installed build names the commit it came from. Without it every local build
+# reports build 1, which is the one thing that number is for. Falls back to 1
+# outside a checkout, since that is not an error worth stopping a build over.
+BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
+
 xcodebuild \
     -quiet \
     -project "$ROOT/Heft.xcodeproj" \
@@ -51,6 +57,7 @@ xcodebuild \
     -destination "platform=macOS,arch=$(uname -m)" \
     -derivedDataPath "$DERIVED_DATA" \
     -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+    "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" \
     "${SIGNING_ARGS[@]}" \
     build
 
