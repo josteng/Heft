@@ -40,6 +40,9 @@ Any of these:
 - **`heft ~/Notes`** — or `heft .` from inside the folder, the way `code .`
   works.
 - **Drag a folder** onto the app.
+- **No folder of notes yet?** `File ▸ New Vault` makes one, with a short
+  `Start Here` note in it that costs nothing to delete once you have read
+  it. The welcome screen offers the same thing.
 
 Heft remembers the last vault and reopens it. `File ▸ Open Recent` switches
 between vaults, which is how you keep a real vault and a scratch copy apart.

@@ -30,7 +30,8 @@ Bring whichever agent you already use. Heft has none of its own to sell you.
 Point it at any folder of Markdown files, or at an existing Obsidian vault,
 which opens unmodified: no import, no database, nothing to migrate out of. It
 stays a normal vault, so those same notes still open and edit in Obsidian on
-your phone. Quick open (⌘O), a command palette (⌘P) and recents are where you
+your phone. Starting from nothing instead, `File ▸ New Vault` makes the
+folder and opens it on one short note. Quick open (⌘O), a command palette (⌘P) and recents are where you
 would expect them.
 
 Oh, and it has daily notes, capture from Spotlight, and a Vim mode (yes,

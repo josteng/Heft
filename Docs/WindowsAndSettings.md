@@ -209,6 +209,26 @@ outranks restoration, or a launch from the Dock would make it do nothing, and
 it is claimed once per process. Only the daily note is created; a path in a
 settings field is not a request to litter the vault with empty files.
 
+## Making a vault
+
+`NewVault` in HeftCore, because the only interesting parts are the refusals and
+the note and neither needs a window to decide: sanitise the name, refuse an
+empty one or a folder that is already there, make the folder, write one note.
+The refusals are `VaultOperations`' own, so a name Heft will not take is
+explained in the same words wherever it is typed. Letting `createDirectory`
+fail instead is not the same thing: its Cocoa error happens to use the same
+words, so the test passes by luck.
+
+The folder is made with `withIntermediateDirectories: false`. The parent was
+chosen in a panel and so is known to exist, and building a path nobody asked
+for is how a typo becomes a folder tree.
+
+Both prompts go through the `VaultHost` rather than a save panel, whose name
+field would read as saving a file somewhere. A new vault opens on its starter
+note, since an empty sidebar and a blank editor is the moment a vault has the
+least to say for itself. Only a new one: opening an existing vault is
+untouched, and the note is not a template, so nothing reads it back.
+
 ## Where captures go
 
 `InboxNotePreference` in HeftCore names the inbox note per vault, stored the
