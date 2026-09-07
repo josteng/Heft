@@ -34,6 +34,16 @@ final class CaptureSettings: ObservableObject {
         }
     }
 
+    /// Whether `heft capture` waits for review. The command line only:
+    /// Spotlight and Shortcuts are the reader capturing their own thought.
+    var agentCaptureNeedsReview: Bool {
+        get { AgentCaptureReviewPreference.isOn }
+        set {
+            AgentCaptureReviewPreference.set(newValue)
+            objectWillChange.send()
+        }
+    }
+
     /// Empty means the vault opened last.
     var chosenVaultPath: String {
         get { CaptureVaultPreference.chosenPath() ?? "" }
@@ -62,6 +72,21 @@ struct CaptureSettingsView: View {
                             + "a capture goes to the vault opened last unless one is "
                             + "chosen here. Open Inbox and Open Today's Note use the "
                             + "same vault."
+                    )
+                }
+                LabeledContent {
+                    Toggle("", isOn: $settings.agentCaptureNeedsReview)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .alignedWithTitle()
+                } label: {
+                    SettingLabel(
+                        "Review agent captures",
+                        detail: "`heft capture` adds a line straight away, since "
+                            + "adding one cannot disturb what you already wrote. Turn "
+                            + "this on and it waits in the review centre like every "
+                            + "other change an agent makes. Your own captures from "
+                            + "Spotlight and Shortcuts are unaffected."
                     )
                 }
                 LabeledContent {

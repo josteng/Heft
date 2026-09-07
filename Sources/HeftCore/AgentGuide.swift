@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 21
+    public static let version = 22
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -224,6 +224,11 @@ public enum AgentGuide {
 
         `--to "Folder/Note.md"` picks another note, and takes a plain path
         inside the vault: no leading `/`, and no `.` or `..` segments.
+
+        If Settings ▸ Capture has *Review agent captures* on, the line arrives
+        as a proposal like everything else and the command says `proposed`
+        rather than `captured`. Either way you have added the line; the
+        setting decides only whether it waits.
 
         ## Reading part of a long note
 

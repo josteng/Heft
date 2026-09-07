@@ -652,6 +652,70 @@ struct AgentCLITests {
         #expect(note.contains("logged from the shell"))
     }
 
+    /// The promise "an agent never writes to your notes" survives a capture
+    /// only if the reader can ask for one. Off by default, since adding a
+    /// line cannot disturb what is already there, but the judgement is the
+    /// reader's to make.
+    @Test("A capture waits for review when the setting says so")
+    func captureCanWaitForReview() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n\n- 09:00 an earlier line\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        AgentCaptureReviewPreference.set(true, in: defaults)
+
+        let before = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        let output = try run(
+            ["capture", root.path, "held for review"], defaultsSuite: suite)
+        #expect(output.status == 0, "\(output.error)")
+        #expect(output.text.contains("proposed"))
+
+        // Nothing written yet.
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8) == before)
+
+        // And what waits is the note as it would be after the capture.
+        let pending = try #require(ProposalStore.all(in: root).first)
+        #expect(pending.notePath == "Inbox.md")
+        #expect(pending.body.contains("held for review"))
+        #expect(pending.body.contains("an earlier line"))
+    }
+
+    @Test("Off by default, so the line goes straight in")
+    func captureWritesStraightAwayByDefault() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["capture", root.path, "straight in"]).status == 0)
+        #expect(ProposalStore.all(in: root).isEmpty)
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+            .contains("straight in"))
+    }
+
+    /// A day with no note yet still gets the template, or accepting the
+    /// proposal would produce a note the immediate path never would.
+    @Test("A reviewed daily capture carries the template too")
+    func reviewedDailyCaptureCarriesTheTemplate() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        AgentCaptureReviewPreference.set(true, in: defaults)
+
+        let output = try run(
+            ["capture", root.path, "logged", "--daily"], defaultsSuite: suite)
+        #expect(output.status == 0, "\(output.error)")
+        let pending = try #require(ProposalStore.all(in: root).first)
+        #expect(pending.body.contains("logged"))
+        // The heading ensureNote would have written.
+        #expect(pending.body.hasPrefix("# "))
+        #expect(pending.kind == .create)
+    }
+
     /// `--to` names a note, and a note is inside the vault. Without this the
     /// argument went straight to the capture, so `--to "../file"` prepended a
     /// heading and a bullet to a file outside it. "It only adds" is a safety

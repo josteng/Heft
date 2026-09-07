@@ -647,6 +647,10 @@ public enum AgentCLI {
             target = cleaned
         }
 
+        if AgentCaptureReviewPreference.isOn {
+            captureAsProposal(text, root: root, daily: options.flag("daily"), to: target)
+        }
+
         do {
             let written: URL
             if options.flag("daily") {
@@ -668,6 +672,79 @@ public enum AgentCLI {
         } catch {
             fail(error.localizedDescription)
         }
+    }
+
+    /// The same line, waiting for review instead of written.
+    ///
+    /// Builds the note as it would be *after* the capture and stores that as
+    /// an ordinary proposal, so the review sheet shows one added line and
+    /// accepting it does exactly what the immediate path would have done.
+    /// Both routes go through the same `contents(byCapturing:)`, or the two
+    /// would drift and the preference would change more than when the write
+    /// happens.
+    private static func captureAsProposal(
+        _ text: String, root: URL, daily: Bool, to target: String?
+    ) -> Never {
+        let now = Date()
+        let relative: String
+        let starting: String?
+        let proposed: String
+        do {
+            if daily {
+                let settings = ObsidianSettings.load(vaultRoot: root)
+                let notes = DailyNotes(vaultRoot: root, settings: settings)
+                relative = notes.relativePath(for: now)
+                let title = notes.stem(for: now)
+                starting = try? String(contentsOf: notes.url(for: now), encoding: .utf8)
+                // What `ensureNote` would have written, so a proposal for a
+                // day with no note yet still carries the template.
+                let base = starting ?? notes.templateBody().map {
+                    MomentFormat.expandTemplate(
+                        $0, date: now, title: title, dateFormat: settings.dailyNoteFormat
+                    )
+                } ?? "# \(title)\n\n"
+                proposed = try DailyNoteCapture.contents(
+                    byCapturing: text, in: base, at: now, title: title,
+                    timestamped: CaptureTimestampPreference.isOn
+                )
+            } else {
+                let inbox = InboxCapture(vaultRoot: root, relativePath: target)
+                relative = inbox.relativePath
+                starting = try? String(contentsOf: inbox.url, encoding: .utf8)
+                let title = ((relative as NSString).lastPathComponent as NSString)
+                    .deletingPathExtension
+                proposed = try InboxCapture.contents(
+                    byCapturing: text, in: starting ?? "", at: now, title: title,
+                    timestamped: CaptureTimestampPreference.isOn
+                )
+            }
+        } catch {
+            fail(error.localizedDescription)
+        }
+
+        let summary = "Capture: \(text.prefix(50))"
+        let proposal = Proposal(
+            id: ProposalStore.identifier(
+                summary: summary,
+                noteName: (relative as NSString).lastPathComponent,
+                taken: taken(in: root, freeing: nil)
+            ),
+            notePath: relative,
+            base: starting,
+            body: proposed,
+            agent: "claude-code",
+            summary: summary,
+            kind: starting == nil ? .create : .edit
+        )
+        do {
+            try ProposalStore.write(proposal, in: root)
+        } catch {
+            fail("could not write the proposal: \(error.localizedDescription)")
+        }
+        print("proposed \(proposal.id)")
+        print("note:    \(relative)")
+        print("Waiting for review in Heft. Settings ▸ Capture decides this.")
+        exit(0)
     }
 
     // MARK: - Helpers

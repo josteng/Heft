@@ -144,6 +144,36 @@ public enum CaptureTimestampPreference {
     }
 }
 
+/// Whether a capture from the command line waits for review.
+///
+/// Off by default, so `heft capture` writes the line straight away: adding a
+/// line cannot disturb what is already there, which is the argument for it
+/// not needing review at all.
+///
+/// It exists because that argument is a judgement, not a fact everyone
+/// shares. "An agent never changes your notes" survives a capture, since a
+/// capture only adds; "an agent never writes to your notes" does not. Turning
+/// this on makes the stronger promise true again, at the cost of accepting a
+/// proposal for every line.
+///
+/// It governs the command line only. Spotlight and Shortcuts captures are the
+/// reader capturing their own thought, and asking someone to review their own
+/// note-taking would be absurd.
+public enum AgentCaptureReviewPreference {
+    public static let key = "dev.stenglein.Heft.agentCaptureNeedsReview"
+
+    public static var isOn: Bool { isOn(in: HeftDefaults.shared) }
+
+    /// Absent means off, which is the behaviour the verb shipped with.
+    public static func isOn(in defaults: UserDefaults = HeftDefaults.shared) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? false
+    }
+
+    public static func set(_ on: Bool, in defaults: UserDefaults = HeftDefaults.shared) {
+        defaults.set(on, forKey: key)
+    }
+}
+
 /// Which note in a vault is its inbox: `Inbox.md` at the root unless the
 /// reader named another in Settings ▸ Capture.
 ///
