@@ -1436,8 +1436,21 @@ final class AppModel: ObservableObject {
 
     var sidebarKeyboardTarget: URL? {
         get { sidebarKeys.url }
-        set { sidebarKeys.url = newValue }
+        set {
+            sidebarKeys.url = newValue
+            // Mirrored onto the model as a path. The tree marks the row this
+            // names, and its rows watch the model; `sidebarKeys` is a separate
+            // object so that the File menu can watch it without the whole
+            // window redrawing, and a row reading it would never be told it
+            // changed. Guarded, because the setter runs on every click.
+            let path = newValue.map { relativePath(of: $0) }
+            if keyTargetPath != path { keyTargetPath = path }
+        }
     }
+
+    /// The row a keystroke would act on, for the tree to mark. Empty once the
+    /// keys go back to the text, which is what makes the mark go out.
+    @Published private(set) var keyTargetPath: String?
 
     /// Hands the keys back to the text. Guarded rather than assigned, since
     /// this runs on every keystroke and publishing on each one would wake

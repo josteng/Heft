@@ -134,11 +134,11 @@ struct SidebarHighlightTests {
         // A PDF dropped in is marked, and the note being read stays selected.
         #expect(SidebarHighlight.litsFile(
             "Papers/Report.pdf", highlighted: "Papers/Report.pdf",
-            current: "Index.md", selectedFolder: nil
+            current: "Index.md"
         ))
         #expect(SidebarHighlight.litsFile(
             "Index.md", highlighted: "Papers/Report.pdf",
-            current: "Index.md", selectedFolder: nil
+            current: "Index.md"
         ))
     }
 
@@ -146,29 +146,56 @@ struct SidebarHighlightTests {
     func othersAreDark() {
         #expect(!SidebarHighlight.litsFile(
             "Other.md", highlighted: "Papers/Report.pdf",
-            current: "Index.md", selectedFolder: nil
+            current: "Index.md"
         ))
     }
 
-    /// A folder clicked in the tree takes the light off the open note, which
-    /// is what makes the click visible at all.
-    @Test("A clicked folder takes the light from the open note")
-    func clickedFolderWins() {
-        #expect(!SidebarHighlight.litsFile(
-            "Index.md", highlighted: nil, current: "Index.md", selectedFolder: "Papers"
+    /// Opening a folder is navigation, not a choice of what to act on, so it
+    /// lights nothing. The folder already shows it is open through its
+    /// disclosure arrow and filled icon, and the open note is the only row
+    /// that says which note is being edited.
+    @Test("Opening a folder lights nothing and leaves the note lit")
+    func openedFolderLightsNothing() {
+        let visible = ["Papers", "Index.md"]
+        var browsing = SidebarSelection()
+        browsing.click("Papers", .plain, visible: visible, folders: ["Papers"])
+
+        #expect(browsing.isEmpty, "a plain click on a folder chooses nothing")
+        #expect(browsing.anchor == "Papers", "but it still moves the anchor")
+        #expect(!SidebarHighlight.litsFolder("Papers", highlighted: nil, selected: browsing))
+        #expect(SidebarHighlight.litsFile(
+            "Index.md", highlighted: nil, current: "Index.md", selected: browsing
         ))
-        #expect(SidebarHighlight.litsFolder(
-            "Papers", highlighted: nil, selectedFolder: "Papers"
+
+        // Collapsing it again is the same click and answers the same way.
+        browsing.click("Papers", .plain, visible: visible, folders: ["Papers"])
+        #expect(!SidebarHighlight.litsFolder("Papers", highlighted: nil, selected: browsing))
+        #expect(SidebarHighlight.litsFile(
+            "Index.md", highlighted: nil, current: "Index.md", selected: browsing
         ))
-        #expect(!SidebarHighlight.litsFolder(
-            "Papers", highlighted: nil, selectedFolder: "Ideas"
+    }
+
+    /// A folder gathered on purpose is a different thing from one browsed
+    /// into, and has to be visible: it is about to be trashed or moved.
+    @Test("A folder picked out by hand is lit")
+    func gatheredFolderIsLit() {
+        let visible = ["Papers", "Ideas", "Index.md"]
+        var picked = SidebarSelection()
+        picked.click("Papers", .toggle, visible: visible, folders: ["Papers", "Ideas"])
+        picked.click("Ideas", .toggle, visible: visible, folders: ["Papers", "Ideas"])
+
+        #expect(SidebarHighlight.litsFolder("Papers", highlighted: nil, selected: picked))
+        #expect(SidebarHighlight.litsFolder("Ideas", highlighted: nil, selected: picked))
+        // Still only folders, so the open note keeps its row as well.
+        #expect(SidebarHighlight.litsFile(
+            "Index.md", highlighted: nil, current: "Index.md", selected: picked
         ))
     }
 
     @Test("A folder pasted in is lit wherever the click was")
     func revealedFolderIsLit() {
         #expect(SidebarHighlight.litsFolder(
-            "Papers copy", highlighted: "Papers copy", selectedFolder: "Ideas"
+            "Papers copy", highlighted: "Papers copy"
         ))
     }
 }

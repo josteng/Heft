@@ -311,6 +311,27 @@ while the marker shows. The list only moves when that row is off screen, since
 scrolling the tree under a reader who can see the thing already is what reads
 as losing their place.
 
+Picking rows out by hand does replace it, but only when a *file* is among
+them: choosing files is choosing what to act on, and lighting the open note as
+well would hide one of them. Opening a folder is navigation instead, so a
+plain click on one selects nothing and lights nothing: the disclosure arrow
+and the filled icon already say the folder is open, and the open note keeps
+the only row that says which note is being edited. The anchor still moves, or
+a shift-click starting from a folder would have nothing to measure from. A
+folder gathered with command or shift is lit like any other chosen row,
+because that one is about to be trashed or moved.
+
+A selection is a set of paths and a path does not say what it points at, which
+is why `SidebarSelection` records which of the rows clicked were folders
+rather than asking the tree at draw time.
+
+What a browsed folder loses is not nothing: ⌘⌫ and ⌘C act on the row last
+clicked when no rows are chosen, so it is still what the keys would take. That
+row gets a weaker mark instead, a tint rather than the accent, saying the keys
+point here without claiming anything was chosen. It needs no rule for going
+out again, because `releaseSidebarKeys` clears the target the moment the
+reader types in the note, which is the same moment the keys stop meaning it.
+
 Dragging a daily note out of its folder asks first, and an agent proposing the
 same move is told while it proposes, with the review sheet repeating it in a
 caution band above the buttons. Not in the description beside the standard

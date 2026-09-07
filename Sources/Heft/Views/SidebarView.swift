@@ -715,10 +715,14 @@ private struct TreeRow: View {
         let click = SidebarSelection.click(
             command: flags.contains(.command), shift: flags.contains(.shift)
         )
+        let children = model.scopedTree?.children ?? []
         selection.click(
             item.relativePath, click,
             visible: SidebarSelection.visibleOrder(
-                of: model.scopedTree?.children ?? [], expanded: model.expandedFolders
+                of: children, expanded: model.expandedFolders
+            ),
+            folders: SidebarSelection.visibleFolders(
+                of: children, expanded: model.expandedFolders
             )
         )
         return click == .plain
@@ -738,17 +742,33 @@ private struct TreeRow: View {
         return parts.count > 1 ? parts.dropLast().joined(separator: "/") : ""
     }
 
+    /// Whether this row is lit, by whichever rule governs its kind.
+    private var isLit: Bool {
+        item.isFolder
+            ? SidebarHighlight.litsFolder(
+                item.relativePath, highlighted: model.highlightedPath, selected: selection
+            )
+            : SidebarHighlight.litsFile(
+                item.relativePath, highlighted: model.highlightedPath,
+                current: model.current?.relativePath, selected: selection
+            )
+    }
+
+    /// ...and whether it gets the weaker mark instead, as the row the keys
+    /// would act on.
+    private var isKeyTarget: Bool {
+        SidebarHighlight.marksKeyTarget(
+            isTarget: model.keyTargetPath == item.relativePath, lit: isLit, selected: selection
+        )
+    }
+
     var body: some View {
         if item.isFolder {
             NoteRow(
                 name: item.name,
                 detail: nil,
-                isSelected: SidebarHighlight.litsFolder(
-                    item.relativePath,
-                    highlighted: model.highlightedPath,
-                    selectedFolder: selectedFolderPath,
-                    selected: selection.paths
-                ),
+                isSelected: isLit,
+                isKeyTarget: isKeyTarget,
                 depth: depth,
                 symbol: isExpanded ? "folder.fill" : "folder",
                 disclosure: isExpanded,
@@ -817,13 +837,8 @@ private struct TreeRow: View {
             NoteRow(
                 name: item.name,
                 detail: nil,
-                isSelected: SidebarHighlight.litsFile(
-                    item.relativePath,
-                    highlighted: model.highlightedPath,
-                    current: model.current?.relativePath,
-                    selectedFolder: selectedFolderPath,
-                    selected: selection.paths
-                ),
+                isSelected: isLit,
+                isKeyTarget: isKeyTarget,
                 depth: depth,
                 symbol: symbol(for: item.kind),
                 isDimmed: item.needsDownload,
@@ -1065,27 +1080,56 @@ final class FileDragSource: NSObject, NSDraggingSource {
 /// the selection off the open note for those seconds would be a worse lie
 /// than showing both.
 enum SidebarHighlight {
-    /// A selected row is lit whatever else is true. Once the reader has
-    /// picked rows out by hand, that is what the light is about: showing the
-    /// open note instead would hide one of the files they are about to act
-    /// on. With nothing picked, the older rules stand unchanged.
+    /// A row picked out by hand is lit whatever else is true. Once the reader
+    /// has chosen files, that is what the light is about: showing the open
+    /// note instead would hide one of the files they are about to act on.
+    ///
+    /// Choosing *folders* is not that, and the difference is the whole reason
+    /// the selection is passed rather than its paths. Opening a folder is
+    /// navigation, so it lights nothing: not the folder, whose disclosure
+    /// arrow and filled icon already say it is open, and not at the cost of
+    /// the open note, which is the only row saying what is being edited.
+    ///
+    /// Which folder is focused is therefore not an input here at all. It
+    /// decides where a new note goes; it used to light its row as well, and
+    /// that is what took the light off the open note every time one was
+    /// browsed.
     static func litsFile(
-        _ path: String, highlighted: String?, current: String?, selectedFolder: String?,
-        selected: Set<String> = []
+        _ path: String, highlighted: String?, current: String?,
+        selected: SidebarSelection = SidebarSelection()
     ) -> Bool {
         if selected.contains(path) { return true }
-        if !selected.isEmpty { return false }
+        if selected.holdsFile { return false }
         if highlighted == path { return true }
-        return selectedFolder == nil && current == path
+        return current == path
     }
 
     static func litsFolder(
-        _ path: String, highlighted: String?, selectedFolder: String?,
-        selected: Set<String> = []
+        _ path: String, highlighted: String?,
+        selected: SidebarSelection = SidebarSelection()
     ) -> Bool {
         if selected.contains(path) { return true }
-        if !selected.isEmpty { return false }
-        return highlighted == path || selectedFolder == path
+        if selected.holdsFile { return false }
+        return highlighted == path
+    }
+
+    /// Whether a row gets the weaker mark: the one a keystroke would act on.
+    ///
+    /// ⌘⌫ and ⌘C take the selection, or the row last clicked when there is
+    /// none. A folder browsed into is exactly that second case, and since
+    /// opening one stopped lighting it there was nothing on screen saying the
+    /// keys were pointing at it. Drawn lighter than a selection because it is
+    /// a weaker claim: the keys point here, but nothing has been chosen.
+    ///
+    /// It needs no rule for going out again. `releaseSidebarKeys` clears the
+    /// target the moment the reader types in the note, which is the same
+    /// moment the keys stop meaning this.
+    static func marksKeyTarget(
+        isTarget: Bool, lit: Bool, selected: SidebarSelection = SidebarSelection()
+    ) -> Bool {
+        // Nothing is marked twice, and a selection speaks for itself: when
+        // there is one, that is what the keys act on.
+        isTarget && !lit && selected.isEmpty
     }
 }
 
@@ -1263,6 +1307,8 @@ struct NoteRow: View {
     let name: String
     let detail: String?
     let isSelected: Bool
+    /// The weaker mark: what a keystroke would act on, with nothing chosen.
+    var isKeyTarget: Bool = false
     let depth: Int
     let symbol: String
     var disclosure: Bool? = nil
@@ -1370,6 +1416,11 @@ struct NoteRow: View {
                     )
             } else if isSelected {
                 RoundedRectangle(cornerRadius: 5).fill(accent)
+            } else if isKeyTarget {
+                // A tint rather than the accent itself, and the text keeps its
+                // own colour: this row is where the keys point, not something
+                // the reader has chosen.
+                RoundedRectangle(cornerRadius: 5).fill(accent.opacity(0.18))
             } else if isHovering {
                 RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
             }

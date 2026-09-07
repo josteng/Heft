@@ -295,18 +295,140 @@ struct SidebarMultiSelectTests {
 
     @Test("A selected row is lit even while another note is open")
     func selectionOwnsTheLight() {
-        // Once rows are picked out by hand, that is what the light is about.
+        // Once files are picked out by hand, that is what the light is about.
         // Lighting the open note as well would hide one of the files that is
         // about to be trashed.
         #expect(SidebarHighlight.litsFile(
-            "A.md", highlighted: nil, current: "B.md", selectedFolder: nil, selected: ["A.md"]
+            "A.md", highlighted: nil, current: "B.md",
+            selected: SidebarSelection(paths: ["A.md"])
         ))
         #expect(!SidebarHighlight.litsFile(
-            "B.md", highlighted: nil, current: "B.md", selectedFolder: nil, selected: ["A.md"]
+            "B.md", highlighted: nil, current: "B.md",
+            selected: SidebarSelection(paths: ["A.md"])
         ))
         // And with nothing selected the older rules are untouched.
         #expect(SidebarHighlight.litsFile(
-            "B.md", highlighted: nil, current: "B.md", selectedFolder: nil, selected: []
+            "B.md", highlighted: nil, current: "B.md"
+        ))
+        // A folder-only selection is navigation and does not claim the light,
+        // so the open note stays visible while a folder is being browsed.
+        #expect(SidebarHighlight.litsFile(
+            "B.md", highlighted: nil, current: "B.md",
+            selected: SidebarSelection(paths: ["Folder"], folders: ["Folder"])
+        ))
+        // One file among the folders is enough to make it a choice again.
+        #expect(!SidebarHighlight.litsFile(
+            "B.md", highlighted: nil, current: "B.md",
+            selected: SidebarSelection(paths: ["Folder", "A.md"], folders: ["Folder"])
         ))
     }
+
+    /// A click records whether the row was a folder, because nothing else can
+    /// tell afterwards: a selection is a set of paths, and a path does not say
+    /// what it points at.
+    @Test("A click remembers which rows were folders")
+    func clicksRecordFolders() {
+        let visible = ["Folder", "Folder/A.md", "B.md"]
+        let folders: Set<String> = ["Folder"]
+
+        // A plain click on a folder is navigation and chooses nothing, but it
+        // still moves the anchor a later shift-click measures from.
+        var selection = SidebarSelection()
+        selection.click("Folder", .plain, visible: visible, folders: folders)
+        #expect(selection.isEmpty)
+        #expect(selection.anchor == "Folder")
+        #expect(!selection.holdsFile)
+
+        // Command-clicking one is a choice, and is remembered as a folder.
+        selection.click("Folder", .toggle, visible: visible, folders: folders)
+        #expect(selection.folders == ["Folder"])
+        #expect(!selection.holdsFile)
+
+        selection.click("B.md", .toggle, visible: visible, folders: folders)
+        #expect(selection.folders == ["Folder"])
+        #expect(selection.holdsFile)
+
+        // Extending re-derives the whole set, so the folders come with it, and
+        // a range that began on a browsed folder still has its anchor.
+        var extended = SidebarSelection()
+        extended.click("Folder", .plain, visible: visible, folders: folders)
+        extended.click("Folder/A.md", .extend, visible: visible, folders: folders)
+        #expect(extended.paths == ["Folder", "Folder/A.md"])
+        #expect(extended.folders == ["Folder"])
+        #expect(extended.holdsFile)
+
+        // Dropping the file again leaves only folders behind.
+        var toggled = SidebarSelection()
+        toggled.click("Folder", .toggle, visible: visible, folders: folders)
+        toggled.click("B.md", .toggle, visible: visible, folders: folders)
+        toggled.click("B.md", .toggle, visible: visible, folders: folders)
+        #expect(toggled.paths == ["Folder"])
+        #expect(!toggled.holdsFile)
+    }
+
+    /// Only the rows a click can reach, so a shift-click and the folder set it
+    /// is measured against describe the same tree.
+    @Test("The visible folders follow what is expanded")
+    func visibleFoldersMatchTheDrawnRows() {
+        let tree = [
+            VaultItem(
+                url: URL(fileURLWithPath: "/v/Folder"), relativePath: "Folder", kind: .folder, name: "Folder",
+                children: [
+                    VaultItem(
+                        url: URL(fileURLWithPath: "/v/Folder/Nested"), relativePath: "Folder/Nested",
+                        kind: .folder, name: "Nested", children: []
+                    )
+                ]
+            ),
+            VaultItem(
+                url: URL(fileURLWithPath: "/v/B.md"), relativePath: "B.md", kind: .markdown, name: "B.md",
+                children: []
+            ),
+        ]
+        #expect(SidebarSelection.visibleFolders(of: tree, expanded: []) == ["Folder"])
+        #expect(
+            SidebarSelection.visibleFolders(of: tree, expanded: ["Folder"])
+                == ["Folder", "Folder/Nested"]
+        )
+    }
+
+    /// The weaker mark, and the thing it exists for: a folder browsed into is
+    /// what ⌘⌫ acts on, and since opening one stopped lighting it there was
+    /// nothing on screen saying so.
+    @Test("The row the keys act on is marked, and unmarked when they go back")
+    func keyTargetIsMarkedUntilTheKeysGoBack() async throws {
+        let root = try vaultRoot(["Folder/A.md": "a\n", "C.md": "c\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "C.md"),
+            host: ScriptedHost()
+        ))
+        defer { model.closeWorkspace() }
+
+        let folder = try #require(
+            model.tree?.flattened().first { $0.relativePath == "Folder" }
+        )
+        model.sidebarKeyboardTarget = folder.url
+        #expect(model.keyTargetPath == "Folder", "the tree is told which row the keys point at")
+        #expect(SidebarHighlight.marksKeyTarget(isTarget: true, lit: false))
+
+        // Typing in the note hands the keys back, and the mark goes with them.
+        model.releaseSidebarKeys()
+        #expect(model.keyTargetPath == nil)
+    }
+
+    @Test("The weaker mark yields to anything stronger")
+    func keyTargetYields() {
+        // A lit row says it already, and marking it twice would only make the
+        // light look inconsistent.
+        #expect(!SidebarHighlight.marksKeyTarget(isTarget: true, lit: true))
+        // With rows chosen by hand, those are what the keys act on, so the
+        // last-clicked row has no claim on the reader's attention.
+        #expect(!SidebarHighlight.marksKeyTarget(
+            isTarget: true, lit: false, selected: SidebarSelection(paths: ["A.md"])
+        ))
+        #expect(!SidebarHighlight.marksKeyTarget(isTarget: false, lit: false))
+    }
+
 }

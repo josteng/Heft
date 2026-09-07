@@ -27,6 +27,12 @@ struct SidebarSelection: Equatable {
 
     private(set) var paths: Set<String> = []
 
+    /// Which of `paths` are folders. Carried rather than looked up, because
+    /// the only thing that needs it is a highlight decision taken once per
+    /// row per redraw, and answering it from the tree there would flatten the
+    /// whole vault on every one of them.
+    private(set) var folders: Set<String> = []
+
     /// The row a shift-click measures from: the last one clicked without
     /// shift. Kept separately from the selection, because extending twice
     /// must both times measure from where the reader started rather than
@@ -35,20 +41,38 @@ struct SidebarSelection: Equatable {
 
     init() {}
 
-    init(paths: Set<String>, anchor: String? = nil) {
+    init(paths: Set<String>, anchor: String? = nil, folders: Set<String> = []) {
         self.paths = paths
         self.anchor = anchor
+        self.folders = folders.intersection(paths)
     }
 
     var isEmpty: Bool { paths.isEmpty }
+
+    /// Whether the reader has picked out a file, as opposed to only folders.
+    ///
+    /// The two mean different things to the open note's highlight: picking
+    /// files out is choosing what to act on and the open note must get out of
+    /// the way, but clicking a folder is navigation, and losing track of which
+    /// note is open every time one is opened was the bug that put this here.
+    var holdsFile: Bool { paths.count > folders.count }
     var count: Int { paths.count }
     func contains(_ path: String) -> Bool { paths.contains(path) }
 
     /// Applies a click on `path`, with the rows as they are drawn.
-    mutating func click(_ path: String, _ click: Click, visible: [String]) {
+    mutating func click(
+        _ path: String, _ click: Click, visible: [String], folders visibleFolders: Set<String> = []
+    ) {
+        defer { folders.formIntersection(paths) }
         switch click {
         case .plain:
-            paths = [path]
+            // A plain click on a folder is navigation: it opens or closes the
+            // folder, and nothing is being chosen to act on, so no row is
+            // selected and none lights up. The anchor still moves, or a
+            // shift-click starting from a folder would have nothing to
+            // measure from.
+            paths = visibleFolders.contains(path) ? [] : [path]
+            folders = []
             anchor = path
         case .toggle:
             if paths.contains(path) {
@@ -59,6 +83,7 @@ struct SidebarSelection: Equatable {
                 anchor = path
             } else {
                 paths.insert(path)
+                if visibleFolders.contains(path) { folders.insert(path) }
                 anchor = path
             }
         case .extend:
@@ -67,10 +92,12 @@ struct SidebarSelection: Equatable {
             // it as a no-op would look like the sidebar had ignored it.
             guard let anchor, let range = Self.range(from: anchor, to: path, in: visible) else {
                 paths = [path]
+                folders = visibleFolders.contains(path) ? [path] : []
                 self.anchor = path
                 return
             }
             paths = Set(range)
+            folders = paths.intersection(visibleFolders)
         }
     }
 
@@ -91,6 +118,7 @@ struct SidebarSelection: Equatable {
     mutating func prune(to visible: some Sequence<String>) {
         let present = Set(visible)
         paths.formIntersection(present)
+        folders.formIntersection(paths)
         if let anchor, !present.contains(anchor) { self.anchor = nil }
     }
 
@@ -154,5 +182,17 @@ extension SidebarSelection {
             }
         }
         return order
+    }
+
+    /// The drawn rows that are folders, walked the same way as `visibleOrder`.
+    /// Only the rows a click can reach are in it, which is all a click needs.
+    static func visibleFolders(of children: [VaultItem], expanded: Set<String>) -> Set<String> {
+        var found: Set<String> = []
+        for child in children where child.isFolder {
+            found.insert(child.relativePath)
+            guard expanded.contains(child.relativePath) else { continue }
+            found.formUnion(visibleFolders(of: child.children, expanded: expanded))
+        }
+        return found
     }
 }
