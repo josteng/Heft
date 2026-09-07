@@ -75,6 +75,12 @@ struct SidebarView: View {
     /// compact create menu. Nil means use the open note's folder, then the
     /// window's focused root when there is no open note in this scope.
     @State private var selectedFolderPath: String?
+    /// Rows picked out by hand, for acting on several at once. Held here
+    /// rather than on `AppModel` for the same reason `selectedFolderPath` is:
+    /// it belongs to this list, and the model publishes on every keystroke.
+    /// It is mirrored onto `sidebarKeys` below, which is what the File menu
+    /// watches to know whether ⌘⌫ has anything to act on.
+    @State private var selection = SidebarSelection()
     /// Vault-relative path of the folder a drop would land in, or nil when
     /// nothing is being dragged over the tree.
     ///
@@ -117,6 +123,7 @@ struct SidebarView: View {
         .background(.ultraThinMaterial)
         .onChange(of: model.scopePath) {
             selectedFolderPath = nil
+            selection = SidebarSelection()
         }
         // Reveal has to happen here as well as in the tree, because the tree
         // may not be what is showing: the sidebar could be on Tags, or filtered
@@ -128,7 +135,18 @@ struct SidebarView: View {
             mode = .files
             filter = ""
         }
+        .onChange(of: selection) { _, selection in
+            // The File menu settles ⌘⌫ when it is built, so what it acts on
+            // has to be somewhere it can watch. `sidebarKeys` is that place.
+            model.sidebarKeys.selection = selection
+        }
         .onChange(of: model.tree) { _, tree in
+            // A trashed or moved row must leave the selection, or the next
+            // ⌘⌫ asks about files that are already gone and counts them.
+            if let tree {
+                selection.prune(to: tree.flattened().map(\.relativePath))
+                model.sidebarKeys.selection = selection
+            }
             if let selectedFolderPath,
                tree?.flattened().contains(where: {
                    $0.isFolder && $0.relativePath == selectedFolderPath
@@ -226,7 +244,8 @@ struct SidebarView: View {
                             item: child, depth: 0,
                             dropTarget: $dropTarget,
                             inlineEdit: $inlineEdit,
-                            selectedFolderPath: $selectedFolderPath
+                            selectedFolderPath: $selectedFolderPath,
+                            selection: $selection
                         )
                     }
                 }
@@ -256,6 +275,7 @@ struct SidebarView: View {
         // is what ⌘V pastes into and what the + button creates in.
         .onTapGesture {
             selectedFolderPath = nil
+            selection = SidebarSelection()
             model.highlightedPath = nil
             model.sidebarKeyboardTarget = model.scopeRoot
         }
@@ -658,8 +678,39 @@ private struct TreeRow: View {
     @Binding var dropTarget: String?
     @Binding var inlineEdit: SidebarInlineEdit?
     @Binding var selectedFolderPath: String?
+    @Binding var selection: SidebarSelection
 
     @State private var springLoad: Task<Void, Never>?
+
+    /// What a drag starting on this row carries: the whole selection when
+    /// this row is part of it, and this row alone otherwise. Dragging a row
+    /// the reader has not selected must not quietly move the files they
+    /// selected a minute ago and forgot about.
+    private var draggedURLs: [URL] {
+        let paths = selection.target(clicking: item.relativePath)
+        guard paths.count > 1 else { return [item.url] }
+        return model.items(for: paths).map(\.url)
+    }
+
+    /// Applies the click that just happened to the selection, and says
+    /// whether it was a plain one. Only a plain click opens the note or
+    /// folds the folder: command and shift are the reader gathering rows,
+    /// and opening a note on the way past would swap the editor out from
+    /// under a selection they are still building.
+    @discardableResult
+    private func selectOnClick() -> Bool {
+        let flags = NSEvent.modifierFlags
+        let click = SidebarSelection.click(
+            command: flags.contains(.command), shift: flags.contains(.shift)
+        )
+        selection.click(
+            item.relativePath, click,
+            visible: SidebarSelection.visibleOrder(
+                of: model.scopedTree?.children ?? [], expanded: model.expandedFolders
+            )
+        )
+        return click == .plain
+    }
 
     private var isExpanded: Bool { model.expandedFolders.contains(item.relativePath) }
 
@@ -683,7 +734,8 @@ private struct TreeRow: View {
                 isSelected: SidebarHighlight.litsFolder(
                     item.relativePath,
                     highlighted: model.highlightedPath,
-                    selectedFolder: selectedFolderPath
+                    selectedFolder: selectedFolderPath,
+                    selected: selection.paths
                 ),
                 depth: depth,
                 symbol: isExpanded ? "folder.fill" : "folder",
@@ -693,9 +745,11 @@ private struct TreeRow: View {
                 onRenameCommit: commitRename,
                 onRenameCancel: cancelRename
             ) {
-                selectedFolderPath = item.relativePath
+                let plain = selectOnClick()
                 model.highlightedPath = nil
                 model.sidebarKeyboardTarget = item.url
+                guard plain else { return }
+                selectedFolderPath = item.relativePath
                 if isExpanded { model.expandedFolders.remove(item.relativePath) }
                 else { model.expandedFolders.insert(item.relativePath) }
             }
@@ -713,7 +767,7 @@ private struct TreeRow: View {
             // only fires once the pointer has actually travelled.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 6)
-                    .onChanged { _ in beginFileDrag(for: item.url) }
+                    .onChanged { _ in beginFileDrag(for: draggedURLs) }
             )
             .dropDestination(for: URL.self) { urls, _ in
                 dropTarget = nil
@@ -738,7 +792,8 @@ private struct TreeRow: View {
                         item: child, depth: depth + 1,
                         dropTarget: $dropTarget,
                         inlineEdit: $inlineEdit,
-                        selectedFolderPath: $selectedFolderPath
+                        selectedFolderPath: $selectedFolderPath,
+                        selection: $selection
                     )
                 }
             }
@@ -750,7 +805,8 @@ private struct TreeRow: View {
                     item.relativePath,
                     highlighted: model.highlightedPath,
                     current: model.current?.relativePath,
-                    selectedFolder: selectedFolderPath
+                    selectedFolder: selectedFolderPath,
+                    selected: selection.paths
                 ),
                 depth: depth,
                 symbol: symbol(for: item.kind),
@@ -759,11 +815,13 @@ private struct TreeRow: View {
                 onRenameCommit: commitRename,
                 onRenameCancel: cancelRename
             ) {
+                let plain = selectOnClick()
                 selectedFolderPath = nil
                 model.highlightedPath = nil
                 // The row stays the keyboard's subject until the text is
                 // clicked or typed into: ⌘C then ⌘V here duplicates the file.
                 model.sidebarKeyboardTarget = item.url
+                guard plain else { return }
                 model.open(item: item)
             }
             .id(SidebarAnchor(path: item.relativePath))
@@ -771,6 +829,7 @@ private struct TreeRow: View {
             .contextMenu {
                 FileMenu(
                     item: item,
+                    selected: selection.target(clicking: item.relativePath),
                     onCreateNote: { beginCreatingNote(in: destination) },
                     onRename: beginRename
                 )
@@ -779,7 +838,7 @@ private struct TreeRow: View {
             // only fires once the pointer has actually travelled.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 6)
-                    .onChanged { _ in beginFileDrag(for: item.url) }
+                    .onChanged { _ in beginFileDrag(for: draggedURLs) }
             )
             // Dropping onto a file means "put it here, beside this" — the row
             // itself is not the destination, its folder is. So the drop is
@@ -898,24 +957,38 @@ func fileDragPasteboardWriter(for url: URL) -> NSPasteboardWriting { url as NSUR
 /// around it.
 @MainActor
 func beginFileDrag(for url: URL, allowsInternalMove: Bool = true) {
+    beginFileDrag(for: [url], allowsInternalMove: allowsInternalMove)
+}
+
+/// Starts a drag carrying every URL given.
+///
+/// Several rows travel as several dragging items, which is what lets one
+/// drop move all of them: the destination reads a list either way, and
+/// always could, since a drag out of the Finder can carry any number.
+@MainActor
+func beginFileDrag(for urls: [URL], allowsInternalMove: Bool = true) {
     // `onChanged` repeats for the whole gesture; a session is already running.
     guard !FileDragSource.shared.isDragging,
+          !urls.isEmpty,
           let event = NSApp.currentEvent,
           let view = event.window?.contentView
     else { return }
 
-    let item = NSDraggingItem(pasteboardWriter: fileDragPasteboardWriter(for: url))
-    let icon = NSWorkspace.shared.icon(forFile: url.path)
-    icon.size = NSSize(width: 32, height: 32)
     let origin = view.convert(event.locationInWindow, from: nil)
-    item.setDraggingFrame(
-        NSRect(x: origin.x - 16, y: origin.y - 16, width: 32, height: 32),
-        contents: icon
-    )
+    let items = urls.map { url -> NSDraggingItem in
+        let item = NSDraggingItem(pasteboardWriter: fileDragPasteboardWriter(for: url))
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: 32, height: 32)
+        item.setDraggingFrame(
+            NSRect(x: origin.x - 16, y: origin.y - 16, width: 32, height: 32),
+            contents: icon
+        )
+        return item
+    }
 
     FileDragSource.shared.isDragging = true
     FileDragSource.shared.allowsInternalMove = allowsInternalMove
-    view.beginDraggingSession(with: [item], event: event, source: FileDragSource.shared)
+    view.beginDraggingSession(with: items, event: event, source: FileDragSource.shared)
 }
 
 /// Owns the drag operation. A dragging source has to outlive the session, and
@@ -972,15 +1045,27 @@ final class FileDragSource: NSObject, NSDraggingSource {
 /// the selection off the open note for those seconds would be a worse lie
 /// than showing both.
 enum SidebarHighlight {
+    /// A selected row is lit whatever else is true. Once the reader has
+    /// picked rows out by hand, that is what the light is about: showing the
+    /// open note instead would hide one of the files they are about to act
+    /// on. With nothing picked, the older rules stand unchanged.
     static func litsFile(
-        _ path: String, highlighted: String?, current: String?, selectedFolder: String?
+        _ path: String, highlighted: String?, current: String?, selectedFolder: String?,
+        selected: Set<String> = []
     ) -> Bool {
+        if selected.contains(path) { return true }
+        if !selected.isEmpty { return false }
         if highlighted == path { return true }
         return selectedFolder == nil && current == path
     }
 
-    static func litsFolder(_ path: String, highlighted: String?, selectedFolder: String?) -> Bool {
-        highlighted == path || selectedFolder == path
+    static func litsFolder(
+        _ path: String, highlighted: String?, selectedFolder: String?,
+        selected: Set<String> = []
+    ) -> Bool {
+        if selected.contains(path) { return true }
+        if !selected.isEmpty { return false }
+        return highlighted == path || selectedFolder == path
     }
 }
 
@@ -1022,8 +1107,16 @@ private struct TreeViewportHeightKey: PreferenceKey {
 private struct FileMenu: View {
     @EnvironmentObject private var model: AppModel
     let item: VaultItem
+    /// The rows this menu acts on: the whole selection when the clicked row
+    /// is inside it, that row alone otherwise. Everything that reads as
+    /// acting on "these files" uses it; renaming does not, because renaming
+    /// several files at once means nothing here.
+    var selected: [String] = []
     var onCreateNote: (() -> Void)? = nil
     var onRename: (() -> Void)? = nil
+
+    private var items: [VaultItem] { model.items(for: selected) }
+    private var many: Bool { items.count > 1 }
 
     var body: some View {
         // Every item carries a symbol: macOS 26 draws them in menus, and a
@@ -1043,7 +1136,9 @@ private struct FileMenu: View {
             if let onRename { onRename() }
             else { model.rename(item) }
         }
-        MenuButton("Move to…", symbol: "folder") { model.promptToMove(item) }
+        MenuButton(many ? "Move \(items.count) Items to…" : "Move to…", symbol: "folder") {
+            many ? model.promptToMove(items) : model.promptToMove(item)
+        }
         MenuButton("Duplicate", symbol: "plus.square.on.square") { model.duplicate(item) }
         Divider()
         // The file itself, for pasting into a folder here or in the Finder.
@@ -1055,7 +1150,9 @@ private struct FileMenu: View {
         // looking for without registering a second handler for it. What the
         // key actually does is decided in the text view, which holds the
         // keyboard, against the row clicked last.
-        MenuButton("Copy", symbol: "doc.on.doc") { model.copy(item) }
+        MenuButton(many ? "Copy \(items.count) Items" : "Copy", symbol: "doc.on.doc") {
+            many ? model.copy(items) : model.copy(item)
+        }
             .keyboardShortcut("c", modifiers: .command)
         MenuButton("Paste", symbol: "doc.on.clipboard") {
             model.paste(into: item.url.deletingLastPathComponent())
@@ -1077,7 +1174,12 @@ private struct FileMenu: View {
             model.revealInFinder(item.url)
         }
         Divider()
-        MenuButton("Move to Trash", symbol: "trash", role: .destructive) { model.delete(item) }
+        MenuButton(
+            many ? "Move \(items.count) Items to Trash" : "Move to Trash",
+            symbol: "trash", role: .destructive
+        ) {
+            many ? model.delete(items) : model.delete(item)
+        }
             .keyboardShortcut(.delete, modifiers: .command)
     }
 }
@@ -1127,7 +1229,10 @@ private struct FolderMenu: View {
     }
 }
 
-private struct NoteRow: View {
+/// Internal rather than private so a snapshot test can draw one. The rows
+/// are the one part of multi-select with no value to check: whether a
+/// selected row actually looks selected is a question about pixels.
+struct NoteRow: View {
     @Environment(\.appAccent) private var accent
     // From the environment, not from an `@ObservedObject` here: this view is
     // one row of hundreds and `AppModel` publishes on every keystroke, so

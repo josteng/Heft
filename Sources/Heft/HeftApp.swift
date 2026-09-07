@@ -193,7 +193,13 @@ struct HeftCommands: Commands {
             // to the start of the line.
             Button("Move to Trash") { model?.deleteFromKeyboard() }
                 .keyboardShortcut(.delete, modifiers: .command)
-                .disabled(sidebarKeys?.url == nil || model?.canDeleteFromSidebar != true)
+                // Both halves are read here so the menu depends on both: it
+                // settles this when it is built, and a selection made without
+                // a row clicked last would otherwise leave the item stale.
+                .disabled(
+                    (sidebarKeys?.url == nil && sidebarKeys?.selection.isEmpty != false)
+                        || model?.canDeleteFromSidebar != true
+                )
             Divider()
             Button("Export as PDF…") { model?.exportPDF() }
                 .keyboardShortcut(.exportPDF)

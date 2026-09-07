@@ -45,6 +45,32 @@ a palette must not be a faster way to lose a note. A test holds the two
 lists against each other, because the failure here is a verb added to the
 menu and forgotten in the palette.
 
+## Selecting several rows
+
+`SidebarSelection` holds the picked rows and the three clicks that change
+them: plain replaces, command toggles, shift takes the range. The range is
+measured against the tree *as drawn*, so shift-clicking across a collapsed
+folder takes the folder and not the notes inside it that nobody can see. The
+anchor is the last row clicked without shift, kept apart from the selection
+so extending twice measures from where the reader started rather than from
+wherever the last extension ended.
+
+Only a plain click opens the note or folds the folder. Command and shift are
+the reader gathering rows, and swapping the editor out underneath a
+half-built selection is the thing that makes multi-select feel unsafe.
+
+A verb acts on the whole selection when the clicked row is inside it and on
+that row alone otherwise, which is what stops a menu quietly acting on a
+selection made a minute ago and forgotten. Trashing asks once for the lot and
+drops anything already inside a selected folder, since trashing the folder
+takes its contents and the count in the question has to be true. The
+selection is pruned on every rescan, or the next keystroke asks about files
+already in the Trash.
+
+The list of URLs was never the hard part: moving, copying to the pasteboard
+and pasting all took several before anything could select several, because a
+drag out of the Finder always could.
+
 ## Ranking the switchers
 
 Quick Open and the command palette order by **frecency**: `Frecency` in

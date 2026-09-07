@@ -81,6 +81,10 @@ final class NoteStats: ObservableObject {
 @MainActor
 final class SidebarKeyTarget: ObservableObject {
     @Published var url: URL?
+    /// The rows picked out by hand, mirrored from the sidebar so the File
+    /// menu can watch them. Empty means "just the row above", which is what
+    /// every keystroke meant before there was a selection at all.
+    @Published var selection = SidebarSelection()
 }
 
 @MainActor
@@ -1388,6 +1392,15 @@ final class AppModel: ObservableObject {
         copyFile(at: item.url, named: item.name)
     }
 
+    /// Copies several rows onto the pasteboard, or one the ordinary way.
+    func copy(_ items: [VaultItem]) {
+        guard items.count > 1 else {
+            if let item = items.first { copy(item) }
+            return
+        }
+        copyFiles(at: items.map(\.url), describing: items.count)
+    }
+
     /// What the sidebar's last click chose: the row ⌘C copies, and the folder
     /// ⌘V pastes into, which for a file is the folder holding it, so ⌘C then
     /// ⌘V on a note is the duplicate it is in the Finder. Nil once the text
@@ -1424,6 +1437,7 @@ final class AppModel: ObservableObject {
     /// Whether ⌘⌫ has a row to trash. False while the reader is in the text,
     /// where that key deletes to the start of the line.
     var canDeleteFromSidebar: Bool {
+        if !sidebarKeys.selection.isEmpty { return true }
         guard sidebarKeyboardTarget != nil, copyTargetIsNotTheVaultRoot else { return false }
         return true
     }
@@ -1436,6 +1450,7 @@ final class AppModel: ObservableObject {
     /// disabled menu item swallows its own key equivalent, and ⌘C beeped
     /// without ever reaching the text view.
     var canCopyFile: Bool {
+        if !sidebarKeys.selection.isEmpty { return true }
         if sidebarKeyboardTarget != nil, copyTargetIsNotTheVaultRoot { return true }
         return current != nil
     }
@@ -1450,6 +1465,11 @@ final class AppModel: ObservableObject {
     /// copy, and the text view goes on to its own rule.
     @discardableResult
     func copyFromKeyboard() -> Bool {
+        let selected = items(for: sidebarKeys.selection.paths)
+        if selected.count > 1 {
+            copyFiles(at: selected.map(\.url), describing: selected.count)
+            return true
+        }
         guard let target = sidebarKeyboardTarget, copyTargetIsNotTheVaultRoot else { return false }
         copyFile(at: target, named: target.lastPathComponent)
         return true
@@ -1478,6 +1498,13 @@ final class AppModel: ObservableObject {
     /// and no keystroke is going to delete it.
     @discardableResult
     func deleteFromKeyboard() -> Bool {
+        let selected = items(for: sidebarKeys.selection.paths)
+        if !selected.isEmpty {
+            delete(selected)
+            sidebarKeys.selection = SidebarSelection()
+            sidebarKeyboardTarget = nil
+            return true
+        }
         guard let target = sidebarKeyboardTarget, copyTargetIsNotTheVaultRoot,
               let item = tree?.flattened().first(where: { $0.relativePath == relativePath(of: target) })
         else { return false }
@@ -1502,6 +1529,50 @@ final class AppModel: ObservableObject {
         if isCurrent(url) { flushPendingSave() }
         host.copyFiles([url])
         status = "Copied \(name)"
+    }
+
+    /// Copies several rows at once. The pasteboard has always taken a list,
+    /// which is why a drag could carry five files before anything could
+    /// select five.
+    private func copyFiles(at urls: [URL], describing count: Int) {
+        guard !urls.isEmpty else { return }
+        if urls.contains(where: isCurrent) { flushPendingSave() }
+        host.copyFiles(urls)
+        status = "Copied \(count) items"
+    }
+
+    /// Trashes several rows, asking once for all of them.
+    ///
+    /// One question rather than one per file: somebody who picked five notes
+    /// out and pressed the key meant five, and five sheets in a row is how
+    /// the fourth gets confirmed without being read.
+    func delete(_ items: [VaultItem], confirmed: Bool = false) {
+        guard !items.isEmpty else { return }
+        guard items.count > 1 else {
+            delete(items[0], confirmed: confirmed)
+            return
+        }
+        let files = items.reduce(0) { total, item in
+            total + (item.isFolder ? item.flattened().filter { !$0.isFolder }.count : 1)
+        }
+        guard confirmed || host.confirm(
+            title: "Delete \(items.count) items?",
+            message: "\(files) file\(files == 1 ? "" : "s") will be moved to the Trash.",
+            confirm: "Delete", destructive: true
+        ) else { return }
+        for item in items { delete(item, confirmed: true) }
+        status = "Moved \(items.count) items to the Trash"
+    }
+
+    /// The tree's items for a set of paths, outermost first and with
+    /// anything inside a selected folder dropped.
+    func items(for paths: some Sequence<String>) -> [VaultItem] {
+        guard let tree else { return [] }
+        let wanted = SidebarSelection.outermost(paths)
+        let byPath = Dictionary(
+            tree.flattened().map { ($0.relativePath, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+        return wanted.compactMap { byPath[$0] }
     }
 
     /// By resolved path, not URL equality: a pasteboard URL comes back
@@ -1815,6 +1886,25 @@ final class AppModel: ObservableObject {
     /// Drag and drop is the quicker way, but it needs both ends visible at
     /// once; moving into a collapsed corner of a large vault is easier chosen
     /// from a list.
+    /// Moves several rows into one chosen folder, asking for it once.
+    func promptToMove(_ items: [VaultItem]) {
+        guard items.count > 1 else {
+            if let item = items.first { promptToMove(item) }
+            return
+        }
+        guard let vaultRoot else { return }
+        guard let target = host.chooseFolder(
+            prompt: "Move",
+            message: "Choose a folder inside the vault to move \(items.count) items into.",
+            startingAt: items[0].url.deletingLastPathComponent()
+        ) else { return }
+        guard VaultOperations.isInside(target, vaultRoot: vaultRoot) else {
+            status = "That folder is outside the vault"
+            return
+        }
+        move(items.map(\.url), into: target)
+    }
+
     func promptToMove(_ item: VaultItem) {
         guard let vaultRoot else { return }
         guard let target = host.chooseFolder(
