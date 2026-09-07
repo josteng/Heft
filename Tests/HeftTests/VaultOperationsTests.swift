@@ -314,3 +314,54 @@ extension DailyFilingTests {
             + "The calendar only looks in Daily Notes.")
     }
 }
+
+/// The one note a new vault starts with.
+@Suite("A new vault's starter note")
+struct NewVaultNoteTests {
+
+    /// A bare name in that position is a product's name in nearly every app
+    /// that says it, so "Welcome to Notes." reads as an app called Notes.
+    /// Naming the thing puts it back.
+    @Test("The welcome names the vault as a vault")
+    func welcomeNamesTheVault() {
+        #expect(NewVault.welcome(to: "Notes") == "Welcome to the Notes vault.")
+        #expect(NewVault.starterNote(for: "Notes").contains("Welcome to the Notes vault."))
+    }
+
+    /// ...but not twice.
+    @Test("A vault already named after itself is left alone")
+    func vaultNamedVault() {
+        #expect(NewVault.welcome(to: "My Vault") == "Welcome to My Vault.")
+        #expect(NewVault.welcome(to: "notes-vault") == "Welcome to notes-vault.")
+    }
+
+    /// A heading sits straight against the text under it. The blank line is
+    /// a real line in the file, and he does not want one there; this note is
+    /// the one place the app writes prose of its own.
+    @Test("No heading in the starter note is followed by a blank line")
+    func headingsSitAgainstTheirText() {
+        let lines = NewVault.starterNote(for: "Notes").components(separatedBy: "\n")
+        let headings = lines.indices.filter { lines[$0].hasPrefix("#") }
+        #expect(headings.count == 4, "the note's four headings")
+        for index in headings {
+            #expect(
+                index + 1 < lines.count
+                    && !lines[index + 1].trimmingCharacters(in: .whitespaces).isEmpty,
+                "a blank line follows \(lines[index])"
+            )
+        }
+    }
+
+    /// There is no agent button, so the note has to say where to point one or
+    /// the reader goes looking for one that is not there.
+    @Test("The note says where an agent is pointed")
+    func noteExplainsTheAgent() {
+        let body = NewVault.starterNote(for: "Notes")
+        // Spelled out, because these sentences are assembled from continued
+        // string lines and a join that goes wrong is invisible in the source.
+        #expect(body.contains("Heft has no agent of its own."))
+        #expect(body.contains("open a terminal in this folder and start it there"))
+        #expect(body.contains("Set Up Agent Access"))
+        #expect(body.contains("`heft`"))
+    }
+}

@@ -150,6 +150,8 @@ struct HeftCommands: Commands {
             }
             .disabled(model?.vaultRoot == nil)
             Divider()
+            Button("New Vault…") { model?.createVault() }
+                .disabled(model == nil)
             Button("Open Vault in New Window…") { openVaultInNewWindow() }
                 .keyboardShortcut(.openVaultInNewWindow)
             Menu("Open Recent") {

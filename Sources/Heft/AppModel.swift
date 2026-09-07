@@ -565,6 +565,46 @@ final class AppModel: ObservableObject {
 
     // MARK: - Vault lifecycle
 
+    /// Makes a new vault and opens it.
+    ///
+    /// Two prompts rather than a save panel: the panel's name field would be
+    /// naming a folder that is about to become a vault, which reads as saving
+    /// a file somewhere. Both prompts go through the host, so the whole path
+    /// is reachable from a test.
+    func createVault() {
+        guard let parent = host.chooseFolder(
+            prompt: "Choose",
+            message: "Choose where the new vault folder should go.",
+            startingAt: vaultRoot?.deletingLastPathComponent()
+        ) else { return }
+        guard let entered = host.name(
+            title: "New Vault",
+            message: "Heft makes a folder with this name and opens it as a vault.",
+            initial: "Notes", confirm: "Create"
+        ) else { return }
+
+        let planned = NewVault.plan(named: entered, in: parent) {
+            FileManager.default.fileExists(atPath: $0.path)
+        }
+        switch planned {
+        case .failure(let refusal):
+            status = refusal.message
+        case .success(let root):
+            do {
+                try NewVault.create(at: root)
+            } catch {
+                status = "Could not create vault: \(error.localizedDescription)"
+                return
+            }
+            openVault(at: root)
+            // ...on its one note. A new vault is otherwise an empty sidebar
+            // and a blank editor, which is the moment it has the least to say
+            // for itself. Resolved against the file system by `openIfPresent`,
+            // so it does not wait for the scan that has just started.
+            openIfPresent(NewVault.starterNoteName)
+        }
+    }
+
     func promptForVault() {
         guard let url = host.chooseFolder(
             prompt: "Open Vault",

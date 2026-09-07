@@ -1252,4 +1252,84 @@ struct VaultHostTests {
         #expect(host.opened.map(\.lastPathComponent) == ["shot.png"])
         #expect(model.current?.relativePath == "Index.md")
     }
+
+    // MARK: - Making a vault
+
+    @Test("New Vault makes the folder, seeds it, and opens it")
+    func createsAndOpensAVault() async throws {
+        let root = try vault()
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host))
+
+        let parent = root.deletingLastPathComponent()
+        let name = "heft-new-\(UUID().uuidString)"
+        host.folders = [parent]
+        host.names = [name]
+        model.createVault()
+        let made = parent.appendingPathComponent(name)
+        defer { try? FileManager.default.removeItem(at: made) }
+
+        #expect(host.asked == ["folder: Choose", "name: New Vault"])
+        #expect(FileManager.default.fileExists(atPath: made.path))
+        // Seeded, because an empty sidebar and a blank editor say nothing
+        // about what the app does.
+        let note = made.appendingPathComponent(NewVault.starterNoteName)
+        let body = try String(contentsOf: note, encoding: .utf8)
+        #expect(
+            body.contains("Welcome to the \(name) vault."),
+            "the starter note names the vault, and names it as a vault"
+        )
+        // Where to point an agent, since there is no button for it and the
+        // reader would otherwise go looking for one.
+        #expect(body.contains("Set Up Agent Access"))
+        #expect(model.vaultRoot?.resolved == made.resolved, "the new vault is the open one")
+        // ...opened on it, rather than on the empty sidebar and blank editor
+        // that say nothing about what the app does.
+        #expect(
+            model.current?.relativePath == NewVault.starterNoteName,
+            "a new vault opens on the note it was seeded with"
+        )
+    }
+
+    /// The prompts are in the order the reader answers them, and the second
+    /// one is never reached when the first is cancelled: a folder created
+    /// after a cancelled name prompt is the classic shape of this bug.
+    @Test("Cancelling either prompt creates nothing")
+    func cancellingCreatesNothing() async throws {
+        let root = try vault()
+
+        let noFolder = ScriptedHost()
+        let a = try await ready(model(root, noFolder))
+        a.createVault()
+        #expect(noFolder.asked == ["folder: Choose"])
+
+        let noName = ScriptedHost()
+        let parent = root.deletingLastPathComponent()
+        noName.folders = [parent]
+        let b = try await ready(model(root, noName))
+        b.createVault()
+        #expect(noName.asked == ["folder: Choose", "name: New Vault"])
+        #expect(b.vaultRoot?.resolved == root.resolved, "the open vault did not change")
+    }
+
+    @Test("A vault is refused rather than written over")
+    func refusesAnExistingFolder() async throws {
+        let root = try vault()
+        let host = ScriptedHost()
+        let model = try await ready(model(root, host))
+
+        // The vault's own folder, which is certainly there already.
+        host.folders = [root.deletingLastPathComponent()]
+        host.names = [root.lastPathComponent]
+        model.createVault()
+
+        // The exact refusal, not merely a message mentioning it: letting
+        // `createDirectory` fail instead produces a Cocoa error that also says
+        // "already exists", so a looser assertion passes without the guard.
+        #expect(model.status == "\(root.lastPathComponent) already exists")
+        #expect(model.vaultRoot?.resolved == root.resolved, "the open vault did not change")
+        // And the note that was already in it is untouched.
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Index.md").path))
+    }
+
 }

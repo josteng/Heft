@@ -708,15 +708,36 @@ private struct WelcomeView: View {
                             .frame(width: 300)
                         }
                         .buttonStyle(.bordered)
+                        // Named in the ordinary text colour: these are a list
+                        // of what was found, and tinted labels made three
+                        // shades of accent stack up down the pane.
+                        .tint(.primary)
                     }
                 }
                 .padding(.top, 4)
             }
 
-            Button("Choose Folder…") { model.promptForVault() }
-                .buttonStyle(.borderedProminent)
+            // One row of two, rather than a third and fourth thing stacked
+            // under the list. They are peers: one opens notes you already
+            // keep, the other starts a folder for notes you do not.
+            HStack(spacing: 10) {
+                // Filled only when nothing was found. With a vault on screen
+                // *that* is what the reader came for, and a filled button
+                // under it pulls the eye onto the fallback instead.
+                if candidates.isEmpty {
+                    chooseFolder.buttonStyle(.borderedProminent)
+                } else {
+                    chooseFolder.buttonStyle(.bordered)
+                }
+                Button("New Vault…") { model.createVault() }
+                    .buttonStyle(.bordered)
+            }
         }
         .padding(40)
+    }
+
+    private var chooseFolder: some View {
+        Button("Choose Folder…") { model.promptForVault() }
     }
 }
 
