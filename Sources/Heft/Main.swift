@@ -146,7 +146,14 @@ enum HeftMain {
         // without a window. The GUI's Export as PDF goes through exactly this,
         // so what a script produces is what the menu item produces.
         if arguments.first == "export", arguments.count > 3 {
-            let flags = Array(arguments.dropFirst(4))
+            let split = CommandLineSpec.split(Array(arguments.dropFirst()), forVerb: "export")
+            guard split.positional.count >= 3 else {
+                FileHandle.standardError.write(Data(
+                    "usage: heft export <vault> <note> <out.pdf> [flags]\n".utf8))
+                exit(1)
+            }
+            let arguments = [arguments[0]] + split.positional
+            let flags = split.flags
             // The output path is arbitrary and outside the vault, so this is
             // the one verb that could destroy a file the vault knows nothing
             // about: `heft export . "Note" ~/.zshrc` wrote a PDF over it,
@@ -338,6 +345,11 @@ enum HeftMain {
                 options.isLandscape = true
             case "--title":
                 options.includesTitle = true
+            case "--force":
+                // Handled before the export starts, where the file still
+                // exists to ask about. Named here so it is not reported as
+                // ignored, which would read as "the flag did not take".
+                break
             default:
                 FileHandle.standardError.write(Data("ignoring \(flag)\n".utf8))
             }

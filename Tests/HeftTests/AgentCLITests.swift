@@ -381,6 +381,87 @@ struct AgentCLITests {
         #expect(verb.flags.contains { $0.name == "--notes" })
     }
 
+    /// Flags in any position, because every other command line takes them
+    /// that way and an agent writes them that way. Taking the output by index
+    /// made `--force` the output path, and a PDF was written to a file of
+    /// that name in the working directory, silently and outside the vault.
+    @Test("export takes its flags before the output path too")
+    func exportParsesFlagsInAnyPosition() throws {
+        let root = try vault(["Note.md": "# Note\n\nbody\n"])
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-export-\(UUID().uuidString).pdf")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: out)
+        }
+        try Data("replace me\n".utf8).write(to: out)
+        // Named after the flag, in the working directory, is where the bug
+        // put it. Swept either way: this suite has its defects reintroduced
+        // deliberately, and a leftover would fail the run after.
+        defer { try? FileManager.default.removeItem(atPath: "--force") }
+
+        let output = try run(["export", root.path, "Note.md", "--force", out.path])
+        #expect(output.status == 0)
+        #expect(!output.error.contains("ignoring"))
+        #expect(try Data(contentsOf: out).starts(with: Array("%PDF".utf8)))
+        // The bug wrote a file named after the flag. Nowhere.
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("--force").path))
+        #expect(!FileManager.default.fileExists(atPath: "--force"))
+    }
+
+    @Test("A flag's value is never mistaken for the output path")
+    func exportFlagValuesAreNotPositional() throws {
+        let root = try vault(["Note.md": "# Note\n\nbody\n"])
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-export-\(UUID().uuidString).pdf")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: out)
+        }
+
+        defer {
+            try? FileManager.default.removeItem(atPath: "letter")
+            try? FileManager.default.removeItem(atPath: "--paper")
+        }
+        let output = try run(
+            ["export", root.path, "Note.md", "--paper", "letter", out.path, "--landscape"])
+        #expect(output.status == 0)
+        #expect(FileManager.default.fileExists(atPath: out.path))
+        #expect(!FileManager.default.fileExists(atPath: "letter"))
+    }
+
+    @Test("--force no longer claims it was ignored")
+    func forceIsNotReportedAsIgnored() throws {
+        let root = try vault(["Note.md": "# Note\n\nbody\n"])
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-export-\(UUID().uuidString).pdf")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: out)
+        }
+
+        let output = try run(["export", root.path, "Note.md", out.path, "--force"])
+        #expect(output.status == 0)
+        #expect(!output.error.contains("ignoring"))
+    }
+
+    @Test("The split itself")
+    func splitSeparatesFlagsFromPositionals() {
+        let result = CommandLineSpec.split(
+            ["/vault", "Note.md", "--paper", "letter", "out.pdf", "--landscape"],
+            forVerb: "export"
+        )
+        #expect(result.positional == ["/vault", "Note.md", "out.pdf"])
+        #expect(result.flags == ["--paper", "letter", "--landscape"])
+
+        // A switch takes nothing with it.
+        let switches = CommandLineSpec.split(
+            ["/vault", "Note.md", "--force", "out.pdf"], forVerb: "export")
+        #expect(switches.positional == ["/vault", "Note.md", "out.pdf"])
+        #expect(switches.flags == ["--force"])
+    }
+
     // MARK: - Machine-readable answers
 
     /// The tab-separated columns are fine to read and wrong to parse: a path

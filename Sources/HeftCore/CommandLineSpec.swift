@@ -151,6 +151,42 @@ public enum CommandLineSpec {
              isReadOnly: false),
     ]
 
+    /// A verb's arguments split into the positional ones and the flags.
+    ///
+    /// Every other command line takes its flags in any position, so an agent
+    /// writes them that way. Taking the output path by index instead meant
+    /// `export <vault> <note> --force <path>` treated `--force` as the path
+    /// and wrote a PDF to a file of that name, in the working directory,
+    /// silently. Which flags swallow the argument after them is already
+    /// declared here, so this is the one place that can answer it.
+    public static func split(
+        _ arguments: [String], forVerb name: String
+    ) -> (positional: [String], flags: [String]) {
+        let takesValue = Set(
+            (verb(named: name)?.flags ?? []).filter { $0.value != nil }.map(\.name)
+        )
+        var positional: [String] = []
+        var flags: [String] = []
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            guard argument.hasPrefix("--") else {
+                positional.append(argument)
+                index += 1
+                continue
+            }
+            flags.append(argument)
+            // Its value goes with it, and is not a positional. Without this,
+            // `--paper a4` would offer `a4` as the output path.
+            if takesValue.contains(argument), index + 1 < arguments.count {
+                flags.append(arguments[index + 1])
+                index += 1
+            }
+            index += 1
+        }
+        return (positional, flags)
+    }
+
     public static func verb(named name: String) -> Verb? {
         verbs.first { $0.name == name }
     }
