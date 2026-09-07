@@ -1,6 +1,8 @@
+import AppKit
 import Foundation
 import HeftCore
 import Testing
+@testable import Heft
 
 /// Advancing each selected line's checkbox one step, the way Obsidian's
 /// "Toggle checkbox status" does.
@@ -115,6 +117,37 @@ struct ChecklistToggleTests {
         )
         #expect(source.contains("action: { $0.toggleChecklist() }"))
         #expect(!source.contains("formatChecklist"), "sendAction cannot reach the text view")
+    }
+
+    /// The menu goes the other way, and the difference is the whole point of
+    /// having both. A menu shortcut fires while the text view holds the
+    /// keyboard, so the action arrives; routing it through the model instead
+    /// cost a publish, measured at 20ms of main thread, which ⌘B and ⌘I never
+    /// pay. Held down, that is what made ⌘L lag behind the key.
+    @Test("The menu command reaches the editor down the responder chain")
+    func menuCommandSendsAnAction() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Heft/HeftApp.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("#selector(HeftTextKit2View.formatChecklist)"))
+        #expect(
+            !source.contains("model?.toggleChecklist()"),
+            "the menu must not pay for a publish to toggle a checkbox"
+        )
+    }
+
+    /// `sendAction` fails silently against a selector nothing answers, so a
+    /// rename would take the menu command with it and nothing would say so.
+    @Test("The selectors the Format menu sends all exist")
+    @MainActor
+    func formatSelectorsExist() {
+        #expect(HeftTextKit2View.instancesRespond(to: #selector(HeftTextKit2View.formatChecklist)))
+        #expect(HeftTextKit2View.instancesRespond(to: #selector(HeftTextKit2View.formatHighlight)))
+        #expect(HeftTextKit2View.instancesRespond(to: #selector(HeftTextKit2View.formatCode)))
+        #expect(HeftTextKit2View.instancesRespond(to: #selector(HeftTextKit2View.formatLink)))
     }
 
     // MARK: - Where the caret ends up

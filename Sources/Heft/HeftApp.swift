@@ -254,9 +254,17 @@ struct HeftCommands: Commands {
                 Divider()
                 Button("Link") { NSApp.sendAction(#selector(HeftTextKit2View.formatLink), to: nil, from: nil) }
                     .keyboardShortcut(.link)
-                Button("Toggle Checkbox") { model?.toggleChecklist() }
-                    .keyboardShortcut(.toggleCheckbox)
-                    .disabled(model?.current == nil)
+                // Down the responder chain, like the four above it, and
+                // unlike the palette's copy of this command. A menu shortcut
+                // fires while the text view holds the keyboard, so the action
+                // arrives; going through the model instead cost a publish,
+                // and a publish is 20ms of main thread that ⌘B does not pay.
+                // Held down, that is what made ⌘L visibly lag.
+                Button("Toggle Checkbox") {
+                    NSApp.sendAction(#selector(HeftTextKit2View.formatChecklist), to: nil, from: nil)
+                }
+                .keyboardShortcut(.toggleCheckbox)
+                .disabled(model?.current == nil)
             }
             Divider()
             Menu("Find") {
