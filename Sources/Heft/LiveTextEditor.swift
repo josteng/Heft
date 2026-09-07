@@ -61,6 +61,9 @@ struct LiveTextEditor: NSViewRepresentable {
     /// Whether there is a file for ⌘C to copy, asked while the Edit menu
     /// validates Copy. Nothing is copied by asking.
     var canCopyFile: (() -> Bool)? = nil
+    /// Whether there are files for ⌘V to put in the tree, asked while the
+    /// Edit menu validates Paste. Nothing is pasted by asking.
+    var canPasteFile: (() -> Bool)? = nil
     /// ⌘C and ⌘V when the sidebar's last click was a row: the host copies
     /// or pastes the file, and returns true. False leaves the key to the
     /// text. ⌘⌫ is not here: it is a File menu command, because a menu's
@@ -101,6 +104,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onAttachment = onAttachment
         textView.onCopyFile = onCopyFile
         textView.canCopyFile = canCopyFile
+        textView.canPasteFile = canPasteFile
         textView.onSidebarCopy = onSidebarCopy
         textView.onSidebarPaste = onSidebarPaste
         textView.onEditorClaimed = onEditorClaimed
@@ -154,6 +158,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onAttachment = onAttachment
         textView.onCopyFile = onCopyFile
         textView.canCopyFile = canCopyFile
+        textView.canPasteFile = canPasteFile
         textView.onSidebarCopy = onSidebarCopy
         textView.onSidebarPaste = onSidebarPaste
         textView.onEditorClaimed = onEditorClaimed
@@ -913,6 +918,7 @@ private struct VimRepeatRecipe {
 final class HeftTextKit2View: NSTextView {
     var onAttachment: ((NSPasteboard) -> String?)?
     var onCopyFile: (() -> Bool)?
+    var canPasteFile: (() -> Bool)?
     var canCopyFile: (() -> Bool)?
     var onSidebarCopy: (() -> Bool)?
     var onSidebarPaste: (() -> Bool)?
@@ -1743,19 +1749,29 @@ final class HeftTextKit2View: NSTextView {
         return tableMenu(at: point) ?? super.menu(for: event)
     }
 
-    /// ⌘C, before the menu bar can answer for it.
+    /// ⌘C and ⌘V, before the menu bar can answer for them.
     ///
-    /// The Edit menu's Copy is disabled while nothing is selected. A disabled
-    /// item does not perform its key equivalent, so the key falls through to
-    /// the view hierarchy and then to nothing at all, which is the beep: the
-    /// menu had already decided there was nothing to copy. Taking the key
-    /// here is what makes copying the file work whatever the menu thinks.
+    /// The Edit menu's items are disabled while nothing is selected and while
+    /// the pasteboard holds nothing it wants. A disabled item does not perform
+    /// its key equivalent, so the key falls through to the view hierarchy and
+    /// then to nothing at all, which is the beep: the menu had already decided
+    /// there was nothing to do. Taking the keys here is what makes the file
+    /// operations work whatever the menu thinks.
+    ///
+    /// Both keys, because they failed together. ⌘C was guarded here from the
+    /// start and ⌘V was not, so a pasteboard of files could be filled by a key
+    /// and emptied only by the context menu, which is exactly the asymmetry a
+    /// reader hits as "copy works, paste does not".
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers == .command, event.charactersIgnoringModifiers == "c",
            copiesFileInsteadOfText {
             if onSidebarCopy?() == true { return true }
             if onCopyFile?() == true { return true }
+        }
+        if modifiers == .command, event.charactersIgnoringModifiers == "v",
+           onSidebarPaste?() == true {
+            return true
         }
         return super.performKeyEquivalent(with: event)
     }
@@ -1767,6 +1783,12 @@ final class HeftTextKit2View: NSTextView {
         // reached `copy(_:)` at all. With no selection the file is what ⌘C
         // copies, so Copy stays enabled while there is a file to copy.
         if item.action == #selector(copy(_:)), copiesFileInsteadOfText, canCopyFile?() == true {
+            return true
+        }
+        // The same for Paste. A pasteboard holding files and nothing else is
+        // not something a text view wants, so it disables Paste and swallows
+        // ⌘V; the tree is what those files are for.
+        if item.action == #selector(paste(_:)), canPasteFile?() == true {
             return true
         }
         return super.validateMenuItem(item)

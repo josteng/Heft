@@ -386,6 +386,7 @@ struct EditorPane: View {
                 onAttachment: handleAttachment,
                 onCopyFile: { model.copyCurrentNote() },
                 canCopyFile: { model.canCopyFile },
+                canPasteFile: { model.canPasteIntoSidebar },
                 onSidebarCopy: { model.copyFromKeyboard() },
                 onSidebarPaste: { model.pasteFromKeyboard() },
                 onEditorClaimed: { model.releaseSidebarKeys() },

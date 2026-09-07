@@ -220,6 +220,44 @@ struct SidebarMultiSelectTests {
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("B.md").path))
     }
 
+    @Test("Paste falls back to the selection when nothing was clicked last")
+    func pasteFallsBackToTheSelection() async throws {
+        // A ⌘V that silently does nothing is worse than one that pastes
+        // beside the rows the reader can see are chosen.
+        let root = try vaultRoot(["A.md": "a\n", "Folder/Keep.md": "k\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let host = ScriptedHost()
+        let model = try await ready(AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: nil),
+            host: host
+        ))
+        defer { model.closeWorkspace() }
+
+        host.pasteboardFiles = [root.appendingPathComponent("A.md")]
+        model.sidebarKeyboardTarget = nil
+        model.sidebarKeys.selection = SidebarSelection(paths: ["Folder"])
+        #expect(model.pasteFromKeyboard())
+        await waitForTree(model, toContain: "Folder/A.md")
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Folder/A.md").path))
+    }
+
+    @Test("A right-click aims the keys at the row it opened on")
+    func rightClickAimsTheKeys() throws {
+        // Copying from the context menu and then pressing ⌘V has to paste
+        // somewhere. Before this the keys were still aimed at whatever was
+        // left-clicked last, which could be nothing at all.
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Heft/Views/SidebarView.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("private func aimKeyboard()"))
+        #expect(source.components(separatedBy: ".onAppear { aimKeyboard() }").count == 3,
+                "both the file menu and the folder menu should aim the keys")
+    }
+
     // MARK: - What the tree draws
 
     @Test("A collapsed folder hides its children from a range")

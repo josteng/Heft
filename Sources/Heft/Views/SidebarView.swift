@@ -682,6 +682,18 @@ private struct TreeRow: View {
 
     @State private var springLoad: Task<Void, Never>?
 
+    /// Points the keys at this row, without disturbing the selection.
+    ///
+    /// A right-click is a click: copying from the menu and then pressing ⌘V
+    /// has to paste somewhere, and before this the keys were still aimed at
+    /// whatever was left-clicked last, which could be nothing at all. The
+    /// selection is deliberately untouched, since right-clicking inside one
+    /// acts on all of it and right-clicking outside acts on the row alone,
+    /// and both of those are decided by `target(clicking:)` rather than here.
+    private func aimKeyboard() {
+        model.sidebarKeyboardTarget = item.url
+    }
+
     /// What a drag starting on this row carries: the whole selection when
     /// this row is part of it, and this row alone otherwise. Dragging a row
     /// the reader has not selected must not quietly move the files they
@@ -762,6 +774,7 @@ private struct TreeRow: View {
                     onCreateFolder: { beginCreatingFolder(in: item.url) },
                     onRename: beginRename
                 )
+                .onAppear { aimKeyboard() }
             }
             // Simultaneous, so the row's button still gets its click: this
             // only fires once the pointer has actually travelled.
@@ -833,6 +846,7 @@ private struct TreeRow: View {
                     onCreateNote: { beginCreatingNote(in: destination) },
                     onRename: beginRename
                 )
+                .onAppear { aimKeyboard() }
             }
             // Simultaneous, so the row's button still gets its click: this
             // only fires once the pointer has actually travelled.

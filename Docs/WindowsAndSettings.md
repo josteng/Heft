@@ -59,6 +59,24 @@ Only a plain click opens the note or folds the folder. Command and shift are
 the reader gathering rows, and swapping the editor out underneath a
 half-built selection is the thing that makes multi-select feel unsafe.
 
+Handing the keys back to the editor takes the selection with it. The
+selection is what ⌘C, ⌘V and ⌘⌫ act on, so leaving it behind would mean the
+sidebar still owned those keys after the reader had started typing, which is
+the one thing handing them back exists to prevent.
+
+⌘C and ⌘V are both taken before the menu bar can answer for them. A disabled
+Edit-menu item swallows its own key equivalent, which is the beep: the menu
+had already decided there was nothing to do. ⌘C was guarded from the start
+and ⌘V was not, so a pasteboard of files could be filled by a key and emptied
+only by the context menu.
+
+A right-click aims the keys at the row it opened on, without disturbing the
+selection: copying from the menu and then pressing ⌘V has to paste somewhere,
+and the keys were otherwise still pointed at whatever was left-clicked last.
+Paste falls back to the selection when nothing has been clicked at all, since
+a ⌘V that silently does nothing is worse than one that pastes beside the rows
+the reader can see are chosen.
+
 A verb acts on the whole selection when the clicked row is inside it and on
 that row alone otherwise, which is what stops a menu quietly acting on a
 selection made a minute ago and forgotten. Trashing asks once for the lot and
@@ -70,6 +88,25 @@ already in the Trash.
 The list of URLs was never the hard part: moving, copying to the pasteboard
 and pasting all took several before anything could select several, because a
 drag out of the Finder always could.
+
+## Undoing what the tree did
+
+The editor has had undo since the first day because `NSTextView` brings its
+own. The tree had none: a note dragged into the wrong folder could only be
+put back by hand, and the reader had to work out where it came from.
+`SidebarUndo` closes that, on ⌘Z, offered only while a row is what the keys
+act on so the editor's own undo still wins with the caret in a note.
+
+One step deep, on purpose. A deeper stack has to answer what happens when a
+step's files have been changed since by hand or by an agent, and the honest
+answer is that it cannot know; one step is what a reader is holding in their
+head after a mis-drag. A move and a rename are run backwards through the same
+code that did them, so links are repointed on the way back exactly as they
+were on the way out. Undoing a paste puts the copies in the Trash rather than
+unlinking them, since undo must not be the one operation in the app that
+destroys a file. Undoing a trash uses the URL the Trash reported, because the
+Trash renames on a collision and the file is not necessarily where its name
+says.
 
 ## Ranking the switchers
 

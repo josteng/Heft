@@ -1312,6 +1312,7 @@ final class AppModel: ObservableObject {
             }
 
             status = "Renamed to \(filename)"
+            sidebarUndo.record(.renamed(to: renamedPath, from: item.relativePath))
             let repointed = VaultOperations.repointSummary(
                 applyLinkRewrites(rewrites, after: changes)
             )
@@ -1429,6 +1430,10 @@ final class AppModel: ObservableObject {
     /// has no business being rebuilt that often.
     let sidebarKeys = SidebarKeyTarget()
 
+    /// What ⌘Z in the tree would put back. Published, because the File menu
+    /// names the step in its own item and has to be rebuilt when it changes.
+    @Published private(set) var sidebarUndo = SidebarUndo()
+
     var sidebarKeyboardTarget: URL? {
         get { sidebarKeys.url }
         set { sidebarKeys.url = newValue }
@@ -1439,6 +1444,18 @@ final class AppModel: ObservableObject {
     /// the whole window to say nothing.
     func releaseSidebarKeys() {
         if sidebarKeyboardTarget != nil { sidebarKeyboardTarget = nil }
+        // The selection goes with the target. It is what ⌘C, ⌘V and ⌘⌫ act
+        // on, so leaving it behind means the sidebar still owns those keys
+        // after the reader has started typing in the note, which is the one
+        // thing handing the keys back is supposed to prevent.
+        if !sidebarKeys.selection.isEmpty { sidebarKeys.selection = SidebarSelection() }
+    }
+
+    /// Whether ⌘V has files to put somewhere in the tree. Asked while the
+    /// Edit menu validates Paste, and it must not paste anything by asking.
+    var canPasteIntoSidebar: Bool {
+        guard canPaste else { return false }
+        return sidebarKeyboardTarget != nil || !sidebarKeys.selection.isEmpty
     }
 
     /// Whether ⌘⌫ has a row to trash. False while the reader is in the text,
@@ -1490,7 +1507,12 @@ final class AppModel: ObservableObject {
     /// report that there was nothing to paste.
     @discardableResult
     func pasteFromKeyboard() -> Bool {
-        guard let target = sidebarKeyboardTarget, canPaste,
+        // The selection is the fallback when nothing was clicked last: rows
+        // can be selected by a route that leaves no single target, and a ⌘V
+        // that silently does nothing is worse than one that pastes beside
+        // the rows the reader can see are chosen.
+        let target = sidebarKeyboardTarget ?? items(for: sidebarKeys.selection.paths).first?.url
+        guard let target, canPaste,
               FileManager.default.fileExists(atPath: target.path)
         else { return false }
         let isFolder = (try? target.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
@@ -1567,8 +1589,88 @@ final class AppModel: ObservableObject {
             message: "\(files) file\(files == 1 ? "" : "s") will be moved to the Trash.",
             confirm: "Delete", destructive: true
         ) else { return }
-        for item in items { delete(item, confirmed: true) }
+        var landed: [(original: String, inTrash: URL)] = []
+        for item in items {
+            delete(item, confirmed: true)
+            // Each delete recorded itself; collect them into one step so ⌘Z
+            // puts the whole group back rather than the last file of it.
+            if case .trashed(let one) = sidebarUndo.step { landed.append(contentsOf: one) }
+        }
+        if !landed.isEmpty { sidebarUndo.record(.trashed(landed)) }
         status = "Moved \(items.count) items to the Trash"
+    }
+
+    /// Whether ⌘Z in the tree has anything to put back, and what it is
+    /// called, which is what the File menu shows in its own item.
+    var sidebarUndoName: String? { sidebarUndo.name }
+
+    /// Puts back the last thing the sidebar did to the vault.
+    ///
+    /// Each case is the operation run backwards through the same code that
+    /// did it, so a move back repoints links exactly as the move out did,
+    /// rather than leaving a vault whose notes point at where a file used to
+    /// be. The step is taken rather than read: undoing twice must not undo
+    /// the same move twice.
+    @discardableResult
+    func undoSidebarOperation() -> Bool {
+        guard let vaultRoot, let step = sidebarUndo.take() else { return false }
+        switch step {
+        case .moved(let to, let from):
+            // Back one at a time, since each came from its own folder.
+            for (landed, origin) in zip(to, from) {
+                let parent = (origin as NSString).deletingLastPathComponent
+                move(
+                    [vaultRoot.appendingPathComponent(landed)],
+                    into: parent.isEmpty ? vaultRoot : vaultRoot.appendingPathComponent(parent)
+                )
+            }
+            // The moves back recorded themselves; the reader has undone this
+            // one and should not be offered it again.
+            sidebarUndo.clear()
+            status = "Put back \(to.count == 1 ? (to[0] as NSString).lastPathComponent : "\(to.count) items")"
+        case .renamed(let to, let from):
+            guard let item = tree?.flattened().first(where: { $0.relativePath == to }) else {
+                status = "Cannot undo the rename: \((to as NSString).lastPathComponent) is no longer there"
+                return false
+            }
+            _ = rename(item, to: (from as NSString).lastPathComponent)
+            sidebarUndo.clear()
+            status = "Renamed back to \((from as NSString).lastPathComponent)"
+        case .pasted(let paths):
+            var removed = 0
+            for path in paths {
+                let url = vaultRoot.appendingPathComponent(path)
+                guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                // To the Trash rather than unlinked: undoing a paste must not
+                // be the one operation in the app that destroys a file, in
+                // case the copy was edited before the undo.
+                if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
+                    removed += 1
+                }
+            }
+            reload()
+            status = removed == 1
+                ? "Removed the pasted copy"
+                : "Removed \(removed) pasted copies"
+        case .trashed(let items):
+            var restored = 0
+            for entry in items {
+                let target = vaultRoot.appendingPathComponent(entry.original)
+                guard FileManager.default.fileExists(atPath: entry.inTrash.path),
+                      !FileManager.default.fileExists(atPath: target.path) else { continue }
+                try? FileManager.default.createDirectory(
+                    at: target.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
+                if (try? FileManager.default.moveItem(at: entry.inTrash, to: target)) != nil {
+                    restored += 1
+                }
+            }
+            reload()
+            status = restored == 1
+                ? "Put \((items[0].original as NSString).lastPathComponent) back"
+                : "Put \(restored) items back"
+        }
+        return true
     }
 
     /// The tree's items for a set of paths, outermost first and with
@@ -1600,7 +1702,7 @@ final class AppModel: ObservableObject {
             status = "Nothing on the pasteboard to paste"
             return
         }
-        let made = copyFiles(urls, into: folder, verb: "Paste")
+        let made = pasteFiles(urls, into: folder, verb: "Paste")
         guard !made.isEmpty else { return }
         // Where it went, which for a folder pasted onto itself is beside it.
         status = made.count == 1
@@ -1610,7 +1712,7 @@ final class AppModel: ObservableObject {
 
     /// A copy beside the original, `Name copy`, and folders duplicate whole.
     func duplicate(_ item: VaultItem) {
-        let made = copyFiles([item.url], into: item.url.deletingLastPathComponent(), verb: "Duplicate")
+        let made = pasteFiles([item.url], into: item.url.deletingLastPathComponent(), verb: "Duplicate")
         guard let copy = made.first else { return }
         status = "Duplicated to \(copy.lastPathComponent)"
     }
@@ -1622,6 +1724,19 @@ final class AppModel: ObservableObject {
     /// A folder pasted onto itself, ⌘C then ⌘V with it still selected, is
     /// what the Finder answers with a copy beside it, so that is what it
     /// is here: the copy goes into the folder's parent, not into the folder.
+    /// Copies files in and remembers them, so ⌘Z can take the copies away
+    /// again. Separate from `copyFiles` because a move records itself as a
+    /// move, and a move brings outside files along without them being the
+    /// thing the reader would expect to undo.
+    @discardableResult
+    private func pasteFiles(_ urls: [URL], into folder: URL, verb: String) -> [URL] {
+        let made = copyFiles(urls, into: folder, verb: verb)
+        if !made.isEmpty {
+            sidebarUndo.record(.pasted(made.map { relativePath(of: $0) }))
+        }
+        return made
+    }
+
     private func copyFiles(_ urls: [URL], into folder: URL, verb: String) -> [URL] {
         guard let vaultRoot else { return [] }
         if urls.contains(where: isCurrent) { flushPendingSave() }
@@ -1738,6 +1853,12 @@ final class AppModel: ObservableObject {
         var trashed: NSURL?
         do {
             try FileManager.default.trashItem(at: item.url, resultingItemURL: &trashed)
+            if let landed = trashed as URL? {
+                // `resultingItemURL` is the only way back: the Trash renames
+                // on a collision, so the file is not necessarily where its
+                // name says it should be.
+                sidebarUndo.record(.trashed([(original: item.relativePath, inTrash: landed)]))
+            }
             if item.isFolder, let scopePath,
                scopePath == item.relativePath || scopePath.hasPrefix(item.relativePath + "/") {
                 showEntireVault()
@@ -1760,6 +1881,8 @@ final class AppModel: ObservableObject {
         let urls = confirmedLeavingDailyNotes(among: urls, into: folder)
         guard !urls.isEmpty else { return }
         var moved = 0
+        var movedFrom: [String] = []
+        var movedTo: [String] = []
         var repointed = VaultRename.Summary()
         var fromOutside: [URL] = []
 
@@ -1874,10 +1997,21 @@ final class AppModel: ObservableObject {
             repointed.notes += result.notes
             repointed.skipped += result.skipped
             moved += 1
+            movedFrom.append(oldPath)
+            movedTo.append(newPath)
         }
 
-        let copied = copyFiles(fromOutside, into: folder, verb: "Copy").count
+        let pasted = copyFiles(fromOutside, into: folder, verb: "Copy")
+        let copied = pasted.count
         guard moved > 0 || copied > 0 else { return }
+        // A drag that both moved things and pulled files in from outside is
+        // recorded as the move: undoing half of it would be worse than
+        // offering the half a reader can predict.
+        if moved > 0 {
+            sidebarUndo.record(.moved(to: movedTo, from: movedFrom))
+        } else {
+            sidebarUndo.record(.pasted(pasted.map { relativePath(of: $0) }))
+        }
         var parts: [String] = []
         if moved > 0 { parts.append("Moved \(moved) item\(VaultOperations.plural(moved))") }
         if copied > 0 { parts.append("Copied \(copied) item\(VaultOperations.plural(copied)) in") }
