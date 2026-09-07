@@ -153,7 +153,18 @@ extension HeftTextKit2View {
             setSelectedRange(NSRange(location: start, length: abs(anchor - existing.location)))
             return true
         }
-        if event.clickCount >= 2, cell.source.location != NSNotFound {
+        // Clicks widen the selection the way they do in prose: two take the
+        // word under the pointer, three take the whole cell. A cell is the
+        // paragraph here — the row's source runs through the pipes, and
+        // selecting across those is never what a triple-click on a drawn grid
+        // looks like it should do.
+        if event.clickCount >= 3, cell.source.location != NSNotFound {
+            setSelectedRange(NSRange(
+                location: grid.documentStart + cell.source.location, length: cell.source.length
+            ))
+            return true
+        }
+        if event.clickCount == 2, cell.source.location != NSNotFound {
             selectWord(around: anchor, in: cell, grid: grid)
             return true
         }

@@ -706,15 +706,19 @@ public enum LiveDecorator {
         let lines = contentLines(of: text)
         guard lines.count >= 2 else { return nil }
 
-        let delimiterCells = splitRow(text, lines[1])
-        guard !delimiterCells.isEmpty,
-              delimiterCells.allSatisfy({
-                  $0.text.range(of: #"^:?-+:?$"#, options: .regularExpression) != nil
+        // Fully trimmed, unlike a content cell: `splitRow` leaves one trailing
+        // blank on a cell so a typed space has somewhere to live, and the
+        // delimiter row is the one row that is never typed into.
+        let delimiters = splitRow(text, lines[1])
+            .map { $0.text.trimmingCharacters(in: .whitespaces) }
+        guard !delimiters.isEmpty,
+              delimiters.allSatisfy({
+                  $0.range(of: #"^:?-+:?$"#, options: .regularExpression) != nil
               })
         else { return nil }
 
-        let alignments: [MDColumnAlignment] = delimiterCells.map { cell in
-            switch (cell.text.hasPrefix(":"), cell.text.hasSuffix(":")) {
+        let alignments: [MDColumnAlignment] = delimiters.map { cell in
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
             case (true, true): .center
             case (false, true): .trailing
             default: .leading
@@ -800,9 +804,18 @@ public enum LiveDecorator {
         }
     }
 
-    /// `span` with its surrounding spaces and tabs removed. An all-blank span
-    /// collapses onto the position just inside its leading pad, which is where
-    /// typing into an empty cell should land: `| x |`, not `|x  |`.
+    /// `span` with its padding removed. An all-blank span collapses onto the
+    /// position just inside its leading pad, which is where typing into an
+    /// empty cell should land: `| x |`, not `|x  |`.
+    ///
+    /// Leading blanks all go, but only *one* trailing blank does, and that
+    /// asymmetry is the point. A cell's range is where its caret is allowed to
+    /// be, so trimming the whole trailing run put the space at the end of
+    /// `| foo |` outside the cell: pressing space typed it into the file and
+    /// then had nowhere to put the caret, so the grid redrew identically and
+    /// the space looked as though it had been swallowed. One space is the pad
+    /// this writes; a second is content, and the reader has to be able to see
+    /// it land.
     private static func trimming(_ text: NSString, _ span: NSRange) -> NSRange {
         var start = span.location
         var end = NSMaxRange(span)
@@ -811,10 +824,9 @@ public enum LiveDecorator {
             guard character == 32 || character == 9 else { break }
             start += 1
         }
-        while end > start {
+        if end > start {
             let character = text.character(at: end - 1)
-            guard character == 32 || character == 9 else { break }
-            end -= 1
+            if character == 32 || character == 9 { end -= 1 }
         }
         if start == end, span.length > 0 {
             return NSRange(location: min(span.location + 1, NSMaxRange(span)), length: 0)

@@ -483,6 +483,53 @@ enum TableSurfaceCheck {
             r.failures.append("a wide blank table is not drawn as a grid")
         }
 
+        // MARK: Clicks widen the selection the way they do in prose
+
+        view.string = document
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        coordinator.restyle(view)
+        if let grid = view.liveLayout.tables.first,
+           let live = view.tableOrigin(of: grid),
+           let cell = grid.cell(row: 1, column: 0) {
+            // "SGLang FP8": two words, so a word selection and a cell
+            // selection are different answers and one cannot pass for the
+            // other.
+            let source = NSRange(
+                location: grid.documentStart + cell.source.location, length: cell.source.length
+            )
+            let onFirstWord = CGPoint(
+                x: live.x + cell.rect.minX + 18, y: live.y + cell.rect.midY
+            )
+            expectTrue(click(onFirstWord, clicks: 2), "a double click on a cell is handled")
+            let word = view.selectedRange()
+            expect((view.string as NSString).substring(with: word), "SGLang", "two clicks take the word")
+
+            expectTrue(click(onFirstWord, clicks: 3), "a triple click on a cell is handled")
+            expect(view.selectedRange(), source, "three clicks take the whole cell")
+        } else {
+            r.failures.append("no grid to click into")
+        }
+
+        // MARK: A typed trailing space moves the caret
+
+        // The cell range now keeps a second trailing blank, but that only
+        // helps if the drawn caret actually advances over it: a space the
+        // reader cannot see land reads as a swallowed keystroke.
+        view.string = "| Name |\n| --- |\n| foo  |"
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        coordinator.restyle(view)
+        if let grid = view.liveLayout.tables.first, let cell = grid.cell(row: 1, column: 0) {
+            expect(cell.text.string, "foo ", "the drawn cell keeps the typed space")
+            let beforeSpace = grid.caretRect(in: cell, offset: 3).minX
+            let afterSpace = grid.caretRect(in: cell, offset: 4).minX
+            expectTrue(
+                afterSpace > beforeSpace,
+                "the caret advances over the typed space (\(afterSpace) <= \(beforeSpace))"
+            )
+        } else {
+            r.failures.append("a table with a typed trailing space is not drawn as a grid")
+        }
+
         return r
     }
 }

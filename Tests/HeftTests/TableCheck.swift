@@ -337,6 +337,39 @@ public enum TableCheck {
             "Return moves down a row in the same column"
         )
 
+        // A space typed at the end of a cell has to land somewhere the caret
+        // can follow it. One trailing blank is the pad and is trimmed off; a
+        // second is what the reader just typed, and trimming that too left the
+        // caret pinned to the last letter with the grid redrawing unchanged.
+        let typed = "| Name |\n| --- |\n| foo  |"
+        guard let spaced = LiveDecorator.parseTable(typed) else {
+            r.failures.append("table with a typed trailing space did not parse")
+            return r
+        }
+        checkRanges(typed, spaced, "typed trailing space")
+        expect(spaced.rows[1][0], "foo ", "the typed space stays in the cell")
+        let afterSpace = spaced.cellRanges[1][0]
+        expect(afterSpace.length, 4, "the cell range covers the typed space")
+        expect(
+            spaced.cursor(
+                for: NSRange(location: NSMaxRange(afterSpace), length: 0), tableStart: 0
+            )?.offset,
+            4,
+            "the caret sits after the typed space rather than before it"
+        )
+        // The pad itself is still not content, or every cell would gain one.
+        guard let padded = LiveDecorator.parseTable("| Name |\n| --- |\n| foo |") else {
+            r.failures.append("padded table did not parse")
+            return r
+        }
+        expect(padded.rows[1][0], "foo", "the single pad space is still trimmed")
+        // A delimiter row is never typed into, so it is trimmed all the way and
+        // extra padding there must not stop the table parsing at all.
+        expectTrue(
+            LiveDecorator.parseTable("| Name |\n| ---  |\n| foo |") != nil,
+            "a delimiter row with extra padding still parses"
+        )
+
         return r
     }
 }
