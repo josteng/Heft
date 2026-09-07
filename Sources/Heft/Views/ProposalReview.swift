@@ -190,14 +190,18 @@ struct HunkCard: View {
             .background(.quaternary.opacity(0.35))
 
             VStack(alignment: .leading, spacing: 0) {
+                // Computed once for the card rather than per line: the two
+                // sides are paired, so asking a line on its own what changed
+                // would mean running the comparison twice for every pair.
+                let inline = InlineDiff.spans(removed: hunk.removed, added: hunk.added)
                 ForEach(Array(hunk.leading.enumerated()), id: \.offset) { _, text in
                     line(text, kind: .context)
                 }
-                ForEach(Array(hunk.removed.enumerated()), id: \.offset) { _, text in
-                    line(text, kind: .removed)
+                ForEach(Array(hunk.removed.enumerated()), id: \.offset) { index, text in
+                    line(text, kind: .removed, spans: inline.removed[index])
                 }
-                ForEach(Array(hunk.added.enumerated()), id: \.offset) { _, text in
-                    line(text, kind: .added)
+                ForEach(Array(hunk.added.enumerated()), id: \.offset) { index, text in
+                    line(text, kind: .added, spans: inline.added[index])
                 }
                 ForEach(Array(hunk.trailing.enumerated()), id: \.offset) { _, text in
                     line(text, kind: .context)
@@ -205,7 +209,11 @@ struct HunkCard: View {
             }
             .padding(.vertical, 6)
         }
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 7))
+        .background(.background.secondary)
+        // One rounded container with square content inside, rather than
+        // rounded bands nested in a rounded card. Clipped rather than merely
+        // backed by the shape, or a full-width row's corner sits outside it.
+        .clipShape(RoundedRectangle(cornerRadius: 7))
         .overlay(
             RoundedRectangle(cornerRadius: 7).stroke(.separator, lineWidth: 1)
         )
@@ -216,8 +224,10 @@ struct HunkCard: View {
     typealias Kind = DiffLine.Kind
 
     @ViewBuilder
-    private func line(_ text: String, kind: Kind) -> some View {
-        DiffLine(text: text, kind: kind)
+    private func line(
+        _ text: String, kind: Kind, spans: [InlineDiff.Span]? = nil
+    ) -> some View {
+        DiffLine(text: text, kind: kind, spans: spans)
     }
 }
 
@@ -229,21 +239,45 @@ struct DiffLine: View {
 
     let text: String
     let kind: Kind
+    /// Which words moved, when this line was compared with its counterpart.
+    /// Nil where there was nothing to compare it against, or where the two
+    /// lines had too little in common to mark up honestly.
+    var spans: [InlineDiff.Span]?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Text(kind == .removed ? "−" : kind == .added ? "+" : " ")
                 .font(.system(size: 11.5, design: .monospaced))
                 .foregroundStyle(marker(kind))
-            Text(text.isEmpty ? " " : text)
+            Text(marked)
                 .font(.system(size: 11.5, design: .monospaced))
                 .foregroundStyle(kind == .context ? .secondary : .primary)
+                .lineSpacing(3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 1)
+        .padding(.vertical, 2)
         .background(background(kind))
+    }
+
+    /// The line, with the words that moved carrying a stronger tint than the
+    /// line's own.
+    ///
+    /// One `AttributedString` rather than concatenated `Text` runs: a line
+    /// broken into views breaks selection and wrapping with it, and a diff
+    /// line is something people copy out.
+    private var marked: AttributedString {
+        guard let spans, kind != .context else {
+            return AttributedString(text.isEmpty ? " " : text)
+        }
+        var result = AttributedString()
+        for span in spans {
+            var piece = AttributedString(span.text)
+            if span.changed { piece.backgroundColor = emphasis(kind) }
+            result.append(piece)
+        }
+        return result
     }
 
     private func marker(_ kind: Kind) -> Color {
@@ -257,8 +291,19 @@ struct DiffLine: View {
     private func background(_ kind: Kind) -> Color {
         switch kind {
         case .context: .clear
-        case .removed: .red.opacity(0.12)
-        case .added: .green.opacity(0.12)
+        case .removed: .red.opacity(0.10)
+        case .added: .green.opacity(0.10)
+        }
+    }
+
+    /// The word-level tint, over the line's own. Strong enough to find at a
+    /// glance and weak enough to read black text through, which rules out the
+    /// full-strength colour the markers use.
+    private func emphasis(_ kind: Kind) -> Color {
+        switch kind {
+        case .context: .clear
+        case .removed: .red.opacity(0.40)
+        case .added: .green.opacity(0.40)
         }
     }
 }

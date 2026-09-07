@@ -89,6 +89,25 @@ atomic: refusing eleven changes because the twelfth is stale is worse, and
 what is left unanswered stays as a smaller change. `performMove` is split out
 of `rename` so an accepted move repoints the same links.
 
+#### Reading a hunk, as opposed to deciding it
+
+`InlineDiff` marks which words moved inside a changed line. It is display
+only, and separate from `NoteDiff` on purpose: the hunk stays what a person
+decides about, for the reason written there, and what was missing was never a
+finer decision but a way to read the one on offer. `NoteDiff.apply` never sees
+a span.
+
+Two floors decide how fine the marking goes, and both exist because the
+tempting answer is worse than none. Under 35% of tokens in common, two lines
+paired only by position are left unmarked rather than painted end to end,
+which is how a wrong pairing costs a comparison instead of a wrong answer.
+Within a stretch where one word replaced one word, the comparison drops to
+letters only above 70% of letters in common: a plain character diff of `takes`
+against `keeps` keeps the k, e and s and stripes both words with fragments,
+which reads as noise, while `window` against `wiNdow` is one letter and is
+exactly what the reader wants. A mark never begins inside a word, so a space
+joins two changes only when both are whole tokens.
+
 #### Teaching the agent
 
 `agent-setup` writes `CLAUDE.md`, `AGENTS.md` and `.claude/settings.json`
