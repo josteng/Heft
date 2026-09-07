@@ -20,12 +20,13 @@ import Foundation
 ///   `.heft/proposals`, and the editor applies it.
 ///
 /// One rule covers all three writing tools, and it has to be spelled `Edit`.
-/// Claude Code matches a path-scoped rule against the file a tool would touch,
-/// and only `Edit(path)` takes part in that check: `Write(**)` and
-/// `NotebookEdit(**)` are reported as rules that match nothing, and a settings
-/// file carrying one falls back to asking about everything. So the rules Heft
-/// used to write are now removed from the file rather than left as noise that
-/// disables the thing they were written for.
+/// Claude Code checks path-scoped permissions against `Edit(path)` and
+/// `Read(path)` rules only. A path rule written for `Write`, `NotebookEdit`
+/// or `Glob` is accepted and then never consulted, and warned about at
+/// startup; the documentation says to write `Edit(docs/**)` in place of
+/// `Write(docs/**)`. So `Edit(**)` is what actually denies the Write tool,
+/// and the older spellings are removed rather than left as rules that look
+/// like they are doing the work and are not.
 ///
 /// This is a guardrail, not a sandbox. An agent with a shell can still write a
 /// file, and the point is not to stop a determined one; it is that the easy
@@ -41,13 +42,18 @@ public enum AgentPermissions {
     /// not on which tool asked.
     public static let deny = ["Edit(**)"]
 
-    /// Rules an earlier Heft wrote that Claude Code now rejects.
+    /// Rules an earlier Heft wrote that Claude Code no longer consults.
     ///
-    /// Removed on merge rather than ignored. Leaving them costs more than
-    /// tidiness: Claude Code warns about each one at startup and then declines
-    /// to apply the file's permission mode at all, so a vault set up by Heft 10
-    /// ends up with *no* rule denying the writes, which is the opposite of what
-    /// `agent-setup` was run for.
+    /// Removed on merge rather than ignored, for two reasons that are worth
+    /// keeping apart. Each one earns a warning at startup, which trains the
+    /// reader to skip warnings. And a rule that is never consulted still
+    /// reads as protection to whoever opens the file, so leaving it makes the
+    /// settings claim a guarantee it does not provide.
+    ///
+    /// Deliberately not claiming more than that. An earlier version of this
+    /// comment said such a rule made Claude Code decline the file's
+    /// permission mode outright, which the documentation does not say; the
+    /// case for removing them does not need it.
     public static let superseded = ["Write(**)", "NotebookEdit(**)"]
 
     /// The vault's settings with Heft's rules present, and everything else in
