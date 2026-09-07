@@ -2265,7 +2265,29 @@ final class HeftTextKit2View: NSTextView {
             insertText(markdown, replacementRange: selectedRange())
             return
         }
+        // Read here rather than passed in, the way auto-pairing reads its own
+        // switches: the setting is app-wide and a paste is not hot.
+        if TypingSettings.shared.trimsPastedListMarker,
+           let text = NSPasteboard.general.string(forType: .string) {
+            let trimmed = MarkdownEditing.pasted(text, afterLinePrefix: lineBeforeCaret)
+            if trimmed != text {
+                insertText(trimmed, replacementRange: selectedRange())
+                return
+            }
+        }
         pasteAsPlainText(sender)
+    }
+
+    /// The current line up to the caret, which is what decides whether a
+    /// pasted list marker would be a second one.
+    private var lineBeforeCaret: String {
+        let text = string as NSString
+        let selection = selectedRange()
+        guard selection.location <= text.length else { return "" }
+        let line = text.lineRange(for: NSRange(location: selection.location, length: 0))
+        return text.substring(with: NSRange(
+            location: line.location, length: selection.location - line.location
+        ))
     }
 
     /// Auto-pairs the second `[` so the caret remains inside `[[]]`, matching

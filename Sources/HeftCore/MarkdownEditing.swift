@@ -133,6 +133,38 @@ public enum MarkdownEditing {
         )
     }
 
+    /// What a paste should actually insert, given what is already on the line
+    /// in front of the caret.
+    ///
+    /// Copying a bullet out of a note carries its `- ` with it, so pasting it
+    /// at the end of a list item that is already `- ` writes `- - milk`.
+    /// Every editor that has ever annoyed anybody about this does the same,
+    /// and the fix is small: when the caret sits directly after a list marker
+    /// and nothing else, the marker on the pasted text's first line is
+    /// dropped, because the line already has one.
+    ///
+    /// Only the first line, and only when the line so far is nothing but a
+    /// marker. Pasting into the middle of a sentence keeps every character:
+    /// `see - milk` is text somebody wrote, not a list marker to be tidied
+    /// away, and stripping one there would silently eat a dash.
+    public static func pasted(_ text: String, afterLinePrefix prefix: String) -> String {
+        guard !text.isEmpty else { return text }
+        let line = ListLine(prefix + "x")
+        guard !line.marker.isEmpty, line.body == "x" else { return text }
+
+        let incoming = ListLine(firstLine(of: text))
+        guard !incoming.marker.isEmpty, incoming.indent.isEmpty else { return text }
+
+        // The box comes through even though the marker does not: pasting a
+        // task onto a bare bullet plainly means the task.
+        let dropped = incoming.marker.count
+        return String(text.dropFirst(dropped))
+    }
+
+    private static func firstLine(of text: String) -> String {
+        String(text.prefix { $0 != "\n" && $0 != "\r" })
+    }
+
     /// Advances each selected line's checkbox one step.
     ///
     /// Obsidian's "Toggle checkbox status", and deliberately the same, since

@@ -46,6 +46,19 @@ final class TypingSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(pairsMarkdown, forKey: Self.markdownKey) }
     }
 
+    /// Whether pasting a copied list item onto a line that is already a
+    /// bullet drops the pasted marker.
+    ///
+    /// A setting rather than a rule, because it is the one thing here that
+    /// throws away a character somebody copied. Every other typing aid adds:
+    /// this one decides that two markers were not meant, and being wrong
+    /// about that is silent. On by default, since `- - milk` is not a thing
+    /// anybody wants, but a reader who pastes Markdown *about* Markdown can
+    /// turn it off and get every byte back.
+    @Published var trimsPastedListMarker: Bool {
+        didSet { HeftDefaults.shared.set(trimsPastedListMarker, forKey: Self.pastedMarkerKey) }
+    }
+
     var config: SmartTypographyConfig {
         SmartTypographyConfig(
             isEnabled: substitutionsEnabled, enabledGroups: enabledGroups, custom: customRules
@@ -104,6 +117,7 @@ final class TypingSettings: ObservableObject {
 
     private static let bracketsKey = "dev.stenglein.Heft.typing.pairsBrackets"
     private static let markdownKey = "dev.stenglein.Heft.typing.pairsMarkdown"
+    private static let pastedMarkerKey = "dev.stenglein.Heft.typing.trimsPastedListMarker"
 
     private static func persist(_ groups: Set<SmartTypographyGroup>) {
         let disabled = Set(SmartTypographyGroup.allCases).subtracting(groups)
@@ -121,6 +135,9 @@ final class TypingSettings: ObservableObject {
         pairsMarkdown = defaults.object(forKey: Self.markdownKey) == nil
             ? true
             : defaults.bool(forKey: Self.markdownKey)
+        trimsPastedListMarker = defaults.object(forKey: Self.pastedMarkerKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.pastedMarkerKey)
         let groups = Self.groups(
             disabled: defaults.array(forKey: Self.disabledGroupsKey) as? [String],
             legacyEnabled: defaults.array(forKey: Self.legacyGroupsKey) as? [String]
@@ -212,6 +229,14 @@ struct TypingSettingsView: View {
                         "Markdown Syntax",
                         detail: "The same for * _ and `, at the start of a word. Typing the "
                             + "closing half yourself steps over the one already there."
+                    )
+                }
+                Toggle(isOn: $settings.trimsPastedListMarker) {
+                    SettingLabel(
+                        "Trim a Pasted List Marker",
+                        detail: "Pasting a copied \u{201C}- item\u{201D} onto a line that is already "
+                            + "a bullet drops the pasted marker, so you get one bullet rather "
+                            + "than two. The only aid here that leaves out something you copied."
                     )
                 }
             } header: {

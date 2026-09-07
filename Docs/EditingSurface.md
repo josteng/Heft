@@ -207,6 +207,23 @@ matching. The price is that `` \` `` does not stop a code span opening, which
 CommonMark says it should, and that is a far smaller wrong than losing the
 maths. It runs before emphasis and links, which is the point of it.
 
+## A bullet pasted onto a bullet
+
+Copying a list item carries its `- ` with it, so pasting one at the end of a
+line that is already `- ` wrote `- - milk`. When the caret sits directly
+after a list marker and nothing else, the marker on the pasted text's first
+line is dropped, since the line already has one. A pasted task keeps its box:
+putting a task on a bare bullet plainly means the task.
+
+Only the first line, and only when the line so far is nothing but a marker.
+`see - milk` is something somebody wrote, so a paste into the middle of a
+sentence keeps every character rather than tidying a dash away.
+
+It is a setting, on by default, unlike every other typing aid here. The
+others add characters; this one decides that two markers were not meant and
+throws one away, and being wrong about that is silent. Somebody pasting
+Markdown *about* Markdown can turn it off and get every byte back.
+
 ## Turning lines into a checklist
 
 One command in the Format menu and the palette. The palette route goes
