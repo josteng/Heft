@@ -920,6 +920,33 @@ enum LiveStyler {
                 ], range: range)
             }
 
+        case .referenceDefinition(let label):
+            // The label takes the link colour so it reads as one half of a
+            // pair; the URL after it is dimmed, because it is machinery the
+            // reader keeps but does not read. Nothing here is hidden beyond
+            // the brackets and the colon: a definition whose URL could not be
+            // seen could not be corrected without revealing the line first.
+            // Past the opening bracket: it is collapsed, not removed, so it
+            // still holds a character position and colouring from the start
+            // of the range tints `[` and leaves the label's last letter bare.
+            let labelLength = (label as NSString).length
+            let start = range.location + 1
+            if labelLength > 0, start + labelLength <= NSMaxRange(range) {
+                storage.addAttribute(
+                    .foregroundColor, value: context.linkColor,
+                    range: NSRange(location: start, length: labelLength)
+                )
+                let rest = NSRange(
+                    location: start + labelLength,
+                    length: NSMaxRange(range) - start - labelLength
+                )
+                if rest.length > 0 {
+                    storage.addAttribute(
+                        .foregroundColor, value: NSColor.secondaryLabelColor, range: rest
+                    )
+                }
+            }
+
         case .footnoteDefinition:
             // The label keeps the reference's colour so the two read as a
             // pair; the definition's prose is left alone.

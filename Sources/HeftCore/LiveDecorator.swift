@@ -55,6 +55,10 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case footnoteReference(label: String)
         /// `[^1]:` opening a definition line.
         case footnoteDefinition(label: String)
+        /// `[label]: /url "title"`, the line a reference link points at. The
+        /// label is kept so the definition still reads as the pair it is
+        /// half of, rather than as a paragraph that happens to hold a URL.
+        case referenceDefinition(label: String)
         /// An emphasis delimiter that has been opened and not yet closed:
         /// `**bold` while it is still being typed. `level` is 1 for `*` and 2
         /// for `**`. Carries no `syntax`, because an unclosed delimiter is
@@ -381,8 +385,10 @@ public struct Reveal: Equatable, Sendable {
         case .frontmatter, .comment, .codeBlock, .heading, .quoteLine,
              .table, .thematicBreak, .blockMath, .image, .agentGuideBoundary,
              // A definition *is* its line, and its `[^1]:` sits at the start
-             // of it, where a caret arriving from the line above lands.
-             .footnoteDefinition:
+             // of it, where a caret arriving from the line above lands. A
+             // reference definition is the same shape and reveals the same
+             // way: its brackets and colon are both on that one line.
+             .footnoteDefinition, .referenceDefinition:
             true
         // An embed owning its line is drawn as a block, so it behaves like one.
         case .wikiLink(let link):
@@ -1405,6 +1411,20 @@ public enum LiveDecorator {
         return result
     }
 
+    /// How two reference labels are compared.
+    ///
+    /// CommonMark matches labels case-insensitively and treats any run of
+    /// whitespace as one space, so `[Read More]` finds `[read   more]:`. Doing
+    /// it any other way makes a link silently fail to resolve over a capital
+    /// letter, which reads as the feature being broken.
+    public static func referenceKey(_ label: String) -> String {
+        label
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+    }
+
     /// GFM's end-of-link rule: trailing punctuation is not part of a URL,
     /// and a closing bracket counts only when something inside the URL
     /// opened it, so the paren ending "(see https://example.com)" is not
@@ -1560,6 +1580,49 @@ public enum LiveDecorator {
             protected.insert(match)
         }
 
+        // Reference link definitions, and the labels they define.
+        //
+        // Two passes, and the only construct here that needs them: `[label]`
+        // on its own is a link when something defines that label further down
+        // the file and an ordinary bracketed aside when nothing does, so the
+        // definitions all have to be in hand before a single reference can be
+        // read. Collected here rather than in a separate walk because the
+        // matcher already runs top to bottom over the whole text.
+        //
+        // Before the autolink matcher, or the URL in `[a]: https://example.com`
+        // is claimed as a bare autolink and the definition is left in pieces.
+        //
+        // The single-line form only. CommonMark lets a definition put its URL
+        // or title on following lines; nobody writes that by hand, and the
+        // matcher here works line by line.
+        var references: [String: String] = [:]
+        for match in matches(
+            #"(?m)^[ \t]{0,3}\[([^\^\]\n][^\]\n]*)\]:[ \t]*(\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*$"#,
+            text, excluding: protected
+        ) {
+            let raw = text.substring(with: match)
+            guard let open = raw.range(of: "["), let close = raw.range(of: "]:") else { continue }
+            let label = String(raw[open.upperBound..<close.lowerBound])
+            let rest = raw[close.upperBound...].trimmingCharacters(in: .whitespaces)
+            let destination = String(rest.prefix { !$0.isWhitespace })
+            guard !destination.isEmpty else { continue }
+            references[Self.referenceKey(label)] = destination
+            let openStart = match.location + raw.distance(from: raw.startIndex, to: open.lowerBound)
+            let closeStart = match.location + raw.distance(from: raw.startIndex, to: close.lowerBound)
+            result.append(MarkdownDecoration(
+                range: match,
+                // `[` and `]:` hide; the label and the URL stay, because a
+                // definition whose URL was hidden could not be checked or
+                // corrected without revealing the line first.
+                syntax: [
+                    NSRange(location: openStart, length: 1),
+                    NSRange(location: closeStart, length: 2),
+                ],
+                style: .referenceDefinition(label: label)
+            ))
+            protected.insert(match)
+        }
+
         // Images before links: `![alt](x.png)` contains a valid link match, and
         // whichever runs first claims the range.
         for match in matches(#"!\[([^\]\n]*)\]\(([^)\n]+)\)"#, text, excluding: protected) {
@@ -1590,6 +1653,74 @@ public enum LiveDecorator {
                 style: .link(destination: destination)
             ))
             protected.insert(match)
+        }
+
+        // The three reference forms, once the definitions are known. All
+        // three resolve to an ordinary `.link`, so colouring, clicking and
+        // every rendered view work on them without knowing they were ever
+        // written this way.
+        //
+        // Full `[text][label]` first, then collapsed `[label][]`, then the
+        // shortcut `[label]`. Longest first, because the shorter patterns are
+        // prefixes of the longer ones: matching the shortcut first would take
+        // the `[text]` out of `[text][label]` and leave `[label]` behind as
+        // prose.
+        // Skipped entirely when nothing was defined. An optimisation, not a
+        // rule: each form below checks its own label against the table, so
+        // running the loops on an empty table would find nothing anyway.
+        if !references.isEmpty {
+            for match in matches(#"\[([^\]\n]+)\]\[([^\]\n]+)\]"#, text, excluding: protected) {
+                let raw = text.substring(with: match)
+                guard let split = raw.range(of: "]["),
+                      let destination = references[
+                          Self.referenceKey(String(raw[split.upperBound...].dropLast()))
+                      ] else { continue }
+                let textLength = raw.distance(from: raw.index(after: raw.startIndex), to: split.lowerBound)
+                result.append(MarkdownDecoration(
+                    range: match,
+                    syntax: [
+                        NSRange(location: match.location, length: 1),
+                        NSRange(location: match.location + 1 + textLength,
+                                length: match.length - textLength - 1),
+                    ],
+                    style: .link(destination: destination)
+                ))
+                protected.insert(match)
+            }
+
+            for match in matches(#"\[([^\]\n]+)\]\[\]"#, text, excluding: protected) {
+                let raw = text.substring(with: match)
+                let label = String(raw.dropFirst().prefix { $0 != "]" })
+                guard let destination = references[Self.referenceKey(label)] else { continue }
+                result.append(MarkdownDecoration(
+                    range: match,
+                    syntax: [
+                        NSRange(location: match.location, length: 1),
+                        NSRange(location: match.location + 1 + label.utf16.count, length: 3),
+                    ],
+                    style: .link(destination: destination)
+                ))
+                protected.insert(match)
+            }
+
+            // The shortcut form is the one that could swallow prose, so it
+            // is the strictest: only a label something actually defines, and
+            // never one holding a bracket or a newline. `- [ ]` survives
+            // because nothing defines a single space.
+            for match in matches(#"\[([^\]\n]+)\](?![\[(:])"#, text, excluding: protected) {
+                let raw = text.substring(with: match)
+                let label = String(raw.dropFirst().dropLast())
+                guard let destination = references[Self.referenceKey(label)] else { continue }
+                result.append(MarkdownDecoration(
+                    range: match,
+                    syntax: [
+                        NSRange(location: match.location, length: 1),
+                        NSRange(location: NSMaxRange(match) - 1, length: 1),
+                    ],
+                    style: .link(destination: destination)
+                ))
+                protected.insert(match)
+            }
         }
 
         // Autolinks, after the bracketed form so `[label](url)` keeps its own

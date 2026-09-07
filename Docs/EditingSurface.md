@@ -207,6 +207,36 @@ matching. The price is that `` \` `` does not stop a code span opening, which
 CommonMark says it should, and that is a far smaller wrong than losing the
 maths. It runs before emphasis and links, which is the point of it.
 
+## Reference links, and the two passes they need
+
+`[label]` is a link when something further down the file defines that label
+and an ordinary bracketed aside when nothing does. It is the only construct
+here whose meaning depends on the rest of the note, so the definitions are
+collected first and every reference is checked against them; anything with no
+definition is left as prose. That is what keeps `[ ]`, a bracketed aside and
+a wikilink out of it without a single special case.
+
+Order does the rest of the work. Definitions are matched before bare URLs are
+looked for, or the autolink matcher claims the URL out of `[a]: https://…`
+and leaves the definition in pieces. The full form is matched before the
+collapsed one and the collapsed before the shortcut, because each shorter
+pattern is a prefix of the longer: matching `[label]` first would take the
+`[text]` out of `[text][label]` and leave the rest as prose.
+
+All three forms resolve to an ordinary link decoration, so colouring,
+clicking, PDF export and every rendered view work on them without knowing
+they were written this way. Only the definition line has a style of its own:
+its brackets and colon collapse, the label keeps the link colour, and the URL
+stays visible in grey, because a definition whose URL was hidden could not be
+checked or corrected without revealing the line first. Labels are compared
+lowercased with runs of whitespace collapsed, which is CommonMark's rule and
+the difference between `[Read More]` finding its definition and failing
+silently over a capital letter.
+
+Single-line definitions only. CommonMark allows the URL or title to run onto
+following lines; the matcher here works line by line, and nobody writes that
+by hand.
+
 ## Setext headings
 
 `Text` underlined with `===` is an H1 and with `---` an H2, matched before the
