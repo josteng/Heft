@@ -117,11 +117,77 @@ struct BracketPairingTests {
         #expect(act("'", "", caret: 0) == .none)
     }
 
+    /// Promoting `*word*` to `**word**` by hand is one marker typed at each
+    /// end, and neither end may do anything clever. The front stepped over the
+    /// marker already there, so the keystroke moved the caret and typed
+    /// nothing at all.
+    @Test("Bold is reached by typing a marker at each end")
+    func promotingItalicToBold() {
+        #expect(act("*", "*hello*", caret: 0) == .none)
+        #expect(act("_", "_hello_", caret: 0) == .none)
+        // Mid-line, where a space rather than the line start sits behind.
+        #expect(act("*", "see *hello*", caret: 4) == .none)
+        // And with the front done, the same keystroke at the back.
+        #expect(act("*", "**hello*", caret: 8) == .none)
+    }
+
+    /// Stepping over is about the count, not about the neighbouring
+    /// characters: a marker ahead is consumed only while the run that opened
+    /// the emphasis is still owed one.
+    @Test("A marker steps over only while a closer is still owed")
+    func skippingFollowsTheCount() {
+        // One owed and one ahead, so the marker finishes the pair.
+        #expect(act("*", "*hello*", caret: 6) == .skip)
+        #expect(act("*", "*a*", caret: 2) == .skip)
+        #expect(act("*", "*hello *", caret: 7) == .skip)
+
+        // Two owed and only one of them written: the second is typed rather
+        // than consumed, which is the back half of promoting italic to bold.
+        #expect(act("*", "**One live surface*", caret: 18) == .none)
+        #expect(act("_", "__One live surface_", caret: 18) == .none)
+        // ...and with both written, the run is paid off and steps over again.
+        #expect(act("*", "**One live surface**", caret: 19) == .skip)
+
+        // Nothing open at all, so the marker ahead belongs to something else.
+        #expect(act("*", "see *hello*", caret: 4) == .none)
+    }
+
+    /// Promoting `*word*` to bold is typing one marker at each end. Pairing at
+    /// the closing end wrote two and left three markers there.
+    @Test("A marker after a closing marker is typed alone")
+    func afterAClosingMarker() {
+        #expect(act("*", "*hello*", caret: 7) == .none)
+        #expect(act("_", "_hello_", caret: 7) == .none)
+        // Mid-line, with the rest of the sentence still ahead.
+        #expect(act("*", "*hello* there", caret: 7) == .none)
+    }
+
+    /// The marker ahead is what tells the two apart: inside `**|**` there is
+    /// one, at the end of `*hello*|` there is not.
+    @Test("The bold pair is still opened from inside its own")
+    func boldStillPairsInsideItsPair() {
+        #expect(act("*", "**", caret: 1) == .insert("**", caretOffset: 1, selects: 0))
+    }
+
     @Test("Backspace between a pair takes both")
     func deletesBothHalves() {
         #expect(BracketPairing.deletesPair(in: "()", at: 1, brackets: true, markdown: true))
         #expect(BracketPairing.deletesPair(in: "**", at: 1, brackets: true, markdown: true))
         #expect(!BracketPairing.deletesPair(in: "ab", at: 1, brackets: true, markdown: true))
         #expect(!BracketPairing.deletesPair(in: "()", at: 1, brackets: false, markdown: false))
+        // An empty pair still counts as one with a word in front of it.
+        #expect(BracketPairing.deletesPair(in: "word **", at: 6, brackets: true, markdown: true))
+    }
+
+    /// Demoting `**bold**` to `*bold*` deletes one marker from each end. The
+    /// caret between the two closing markers looks exactly like the caret in
+    /// an empty pair, and taking both left `**bold`.
+    @Test("Backspace inside a closing run takes one marker")
+    func keepsTheOtherClosingMarker() {
+        #expect(!BracketPairing.deletesPair(in: "**bold**", at: 7, brackets: true, markdown: true))
+        #expect(!BracketPairing.deletesPair(in: "__bold__", at: 7, brackets: true, markdown: true))
+        // The opening run is unaffected: `b` is not a marker, so it was never
+        // a pair to begin with.
+        #expect(!BracketPairing.deletesPair(in: "**bold**", at: 2, brackets: true, markdown: true))
     }
 }
