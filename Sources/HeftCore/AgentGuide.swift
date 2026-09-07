@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 13
+    public static let version = 16
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -199,8 +199,9 @@ public enum AgentGuide {
         out the hunks itself, against the note as it is *now*.
 
         Read before you propose. Heft remembers what `heft read` handed you and
-        refuses a full-body proposal for a note that has changed since — you
-        would be replacing text you never saw:
+        refuses a full-body proposal for a note you never read, or one that has
+        changed since — either way you would be replacing text you never saw.
+        A note that does not exist yet, or one that is empty, needs no read:
 
         ```bash
         heft changes . "Path/To/Note.md"   # what moved since you read it
@@ -208,6 +209,18 @@ public enum AgentGuide {
 
         Then read it again and rebuild your version on top. `--replace` below
         is exempt, because its anchors are checked against the current note.
+
+        ## Reading part of a long note
+
+        ```bash
+        heft outline . "Note"           # headings with their line numbers
+        heft read . "Note" --lines 40-80
+        ```
+
+        A part is not the note: it records nothing, so `propose` still asks
+        for the whole thing to have been read. Read a part to find your way
+        around, then either read it all or send anchored edits with
+        `--replace`, which never needs a read.
 
         ## Changing part of a long note
 
@@ -310,6 +323,10 @@ public enum AgentGuide {
         heft outline . "Note"    # its headings, with line numbers
         heft tags .              # tags with counts; add a tag to list its notes
         heft config .            # daily-note folder, date format, attachments
+
+        Add `--json` to `find`, `files`, `outline`, `links`, `backlinks` and
+        `tags` when you are parsing rather than reading: a path can hold a
+        quote or a colon, and the column form cannot say which.
         heft attachment . "Note" shot.png   # where that file goes, and the link
         ```
 

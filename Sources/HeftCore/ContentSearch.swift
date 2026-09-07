@@ -25,15 +25,31 @@ public struct ContentSearchResult: Sendable {
     public let totalOccurrences: Int
     public let matchedNotes: Int
 
+    /// How many lines matched before the limit was applied.
+    ///
+    /// Carried separately from `totalOccurrences`, which counts hits and can
+    /// be several on one line. A caller showing a truncated list has to say
+    /// how many it is not showing, and that count has to be in the same unit
+    /// as the rows it printed or the sentence is a lie by rounding.
+    public let totalMatches: Int
+
+    public var isTruncated: Bool { totalMatches > matches.count }
+
     public static func empty(_ query: String = "") -> Self {
-        ContentSearchResult(query: query, matches: [], totalOccurrences: 0, matchedNotes: 0)
+        ContentSearchResult(
+            query: query, matches: [], totalOccurrences: 0, matchedNotes: 0, totalMatches: 0
+        )
     }
 
-    public init(query: String, matches: [ContentMatch], totalOccurrences: Int, matchedNotes: Int) {
+    public init(
+        query: String, matches: [ContentMatch], totalOccurrences: Int, matchedNotes: Int,
+        totalMatches: Int? = nil
+    ) {
         self.query = query
         self.matches = matches
         self.totalOccurrences = totalOccurrences
         self.matchedNotes = matchedNotes
+        self.totalMatches = totalMatches ?? matches.count
     }
 }
 
@@ -88,7 +104,8 @@ public enum ContentSearch {
             query: query,
             matches: Array(matches.prefix(limit)),
             totalOccurrences: totalOccurrences,
-            matchedNotes: matchedNotes.count
+            matchedNotes: matchedNotes.count,
+            totalMatches: matches.count
         )
     }
 

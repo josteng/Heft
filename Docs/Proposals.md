@@ -41,10 +41,16 @@ undone.
 
 #### Read before you replace
 
-`propose` refuses a whole-body proposal for a note that changed since the
-agent read it; otherwise a line typed between the read and the proposal came
-back as an ordinary removal among the agent's hunks, and `isStale` could not
-fire because `base` was captured at propose time. `ReadLog` records what
+`propose` refuses a whole-body proposal for a note the agent never read, and
+for one that changed since it did. The second came first: a line typed between
+the read and the proposal came back as an ordinary removal among the agent's
+hunks, and `isStale` could not fire because `base` was captured at propose
+time. The first was missed for a year because the guard was written as a
+question about the baseline rather than about the text, so `unread` read as
+"nothing to be stale against" when it meant "every line of this is unseen".
+A note that is absent or empty is still exempt: there is nothing there to
+lose, and refusing would make creating a note require reading one that does
+not exist. `ReadLog` records what
 `heft read` handed over, one snapshot per note swept after a week, and `heft
 changes` diffs it against the file now. It lives in Application Support, not
 `.heft/`: a read snapshot is one machine's scratch state, and writing into an

@@ -75,14 +75,30 @@ public enum CommandLineSpec {
             Flag("--by-use", "Most-used first, the order Quick Open opens on."),
             Flag("--by-agent", "What an agent has proposed changes to."),
             Flag("--scores", "Show each note's score."),
+            Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
             Flag("--limit", value: "N", "Stop after N."),
         ]),
-        Verb("find", "<vault> <query>", "Full-text search across the vault."),
-        Verb("read", "<vault> <note>", "A note's source."),
-        Verb("outline", "<vault> <note>", "The note's headings, with their lines."),
-        Verb("links", "<vault> <note>", "Links out of a note, resolved and unresolved."),
-        Verb("backlinks", "<vault> <note>", "Notes linking to this one, with context."),
-        Verb("tags", "<vault> [tag]", "Tags with counts, or the notes carrying one."),
+        Verb("find", "<vault> <query>", "Full-text search across the vault.", flags: [
+            Flag("--limit", value: "N",
+                 "How many lines to show. 40 by default, and it says when it withheld any."),
+            Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
+        ]),
+        Verb("read", "<vault> <note>", "A note's source.", flags: [
+            Flag("--lines", value: "N-M",
+                 "Only those lines. A part does not count as having read the note."),
+        ]),
+        Verb("outline", "<vault> <note>", "The note's headings, with their lines.", flags: [
+            Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
+        ]),
+        Verb("links", "<vault> <note>", "Links out of a note, resolved and unresolved.", flags: [
+            Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
+        ]),
+        Verb("backlinks", "<vault> <note>", "Notes linking to this one, with context.", flags: [
+            Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
+        ]),
+        Verb("tags", "<vault> [tag]", "Tags with counts, or the notes carrying one.", flags: [
+            Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
+        ]),
         Verb("config", "<vault>", "The vault's settings, as JSON."),
         Verb("attachment", "<vault> <note> [filename]",
              "Where a file attached to that note goes, and the link to write.",
@@ -120,8 +136,11 @@ public enum CommandLineSpec {
         Verb("daily", "<vault> [YYYY-MM-DD]", "Create a daily note from the template.",
              isReadOnly: false),
         Verb("rename", "<vault> <path> <new>",
-             "Rename a note, attachment or folder, repointing the links into it.", flags: [
+             "Rename a note, attachment or folder, repointing the links into it. "
+             + "Needs --now, since it writes without review; `propose --move` is the "
+             + "reviewed form.", flags: [
             Flag("--dry-run", "Say what would change, and change nothing."),
+            Flag("--now", "Rename immediately, unreviewed."),
         ], isReadOnly: false),
         Verb("render", "<vault> <note> [caret]",
              "What the live surface would draw, fragment by fragment.",

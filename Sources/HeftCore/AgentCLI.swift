@@ -147,17 +147,34 @@ public enum AgentCLI {
         // agent saw the note it is replacing. `--replace` is exempt: its
         // anchors resolve against the note as it is now and fail if the text
         // it named has moved, which is a stricter check than this one.
-        if !options.flag("replace"),
-           case let .stale(readAt) = ReadLog.shared.freshness(
-               vault: root, relativePath: relative, current: current
-           ) {
+        if !options.flag("replace") {
             let formatter = ISO8601DateFormatter()
-            fail("""
-                \(relative) has changed since you read it at \(formatter.string(from: readAt)).
-                Proposing the whole body now would revert whatever was typed in between.
-                Run `heft changes "\(root.path)" "\(relative)"` to see what moved, \
-                then read it again.
-                """)
+            switch ReadLog.shared.freshness(
+                vault: root, relativePath: relative, current: current
+            ) {
+            case let .stale(readAt):
+                fail("""
+                    \(relative) has changed since you read it at \(formatter.string(from: readAt)).
+                    Proposing the whole body now would revert whatever was typed in between.
+                    Run `heft changes "\(root.path)" "\(relative)"` to see what moved, \
+                    then read it again.
+                    """)
+            // Never read at all, and there is something there to lose. The
+            // refusal is the same one as for a stale read and for the same
+            // reason: a whole body replaces every line, including the ones
+            // that were never seen. A note that does not exist yet, or one
+            // that is empty, has nothing to lose and is left alone.
+            case .unread where !(current ?? "").isEmpty:
+                fail("""
+                    \(relative) has not been read, and a whole-body proposal replaces \
+                    every line of it.
+                    Run `heft read "\(root.path)" "\(relative)"` first, \
+                    or send anchored edits with --replace, which are checked \
+                    against the note as it is now.
+                    """)
+            case .unread, .fresh:
+                break
+            }
         }
 
         let summary = options["summary"]
@@ -340,12 +357,41 @@ public enum AgentCLI {
     /// Reading a note by name rather than by path, the way a wikilink does, so
     /// an agent can work from what the vault calls things.
     private static func read(root: URL, arguments: [String]) {
-        guard let name = arguments.first else { fail("usage: heft read <vault> <note>") }
+        guard let name = arguments.first, !name.hasPrefix("--") else {
+            fail("usage: heft read <vault> <note> [--lines N-M]")
+        }
+        let options = Options(arguments.dropFirst())
         let relative = resolveNote(named: name, in: root)
         let noteURL = root.appendingPathComponent(relative)
         guard let text = try? String(contentsOf: noteURL, encoding: .utf8) else {
             fail("could not read \(relative)")
         }
+
+        if let asked = options["lines"] {
+            let lines = NoteDiff.lines(of: text)
+            guard let range = lineRange(asked, of: lines.count) else {
+                fail("""
+                    --lines takes a range like 40-80, or 40- for everything from there.
+                    \(relative) has \(lines.count) line\(lines.count == 1 ? "" : "s").
+                    """)
+            }
+            // Deliberately no ReadLog entry. A part is not the note, and
+            // recording one would let a whole-body proposal be built on
+            // having seen forty lines of four hundred, which is the exact
+            // thing the read-before-propose guard exists to prevent.
+            let shown = lines[range].joined(separator: "\n") + "\n"
+            FileHandle.standardOutput.write(Data(shown.utf8))
+            let last = range.upperBound
+            if last < lines.count || range.lowerBound > 0 {
+                print("""
+                    — lines \(range.lowerBound + 1)-\(last) of \(lines.count). \
+                    A part does not count as having read the note: `propose` still \
+                    wants the whole thing read, or use --replace.
+                    """)
+            }
+            exit(0)
+        }
+
         // Recorded before it is written, so what `propose` later holds the
         // agent to is exactly the bytes the agent was given.
         ReadLog.shared.record(text, vault: root, relativePath: relative)
@@ -355,6 +401,17 @@ public enum AgentCLI {
         // line — and an agent has no way to tell which newline was the file's.
         FileHandle.standardOutput.write(Data(text.utf8))
         exit(0)
+    }
+
+    /// `40-80`, `40-` or `-80`, as a 0-based half-open range, or nil when it
+    /// is not a range or falls outside the note.
+    static func lineRange(_ text: String, of count: Int) -> Range<Int>? {
+        let parts = text.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 2, count > 0 else { return nil }
+        let first = parts[0].isEmpty ? 1 : Int(parts[0])
+        let last = parts[1].isEmpty ? count : Int(parts[1])
+        guard let first, let last, first >= 1, last >= first, first <= count else { return nil }
+        return (first - 1)..<min(last, count)
     }
 
     /// `heft changes <vault> <note>` — what moved since this agent last read it.
@@ -464,18 +521,56 @@ public enum AgentCLI {
         exit(0)
     }
 
+    static let findLimit = 40
+
     private static func find(root: URL, arguments: [String]) {
-        guard !arguments.isEmpty else { fail("usage: heft find <vault> <query>") }
+        let options = Options(arguments[...])
+        let words = arguments.prefix { !$0.hasPrefix("--") }
+        guard !words.isEmpty else { fail("usage: heft find <vault> <query> [--limit N]") }
+
+        var limit = findLimit
+        if let asked = options["limit"] {
+            guard let value = Int(asked), value > 0 else {
+                fail("--limit takes a positive whole number, not \(asked)")
+            }
+            limit = value
+        }
+
         let index = VaultIndex.open(vaultAt: root)
         let result = ContentSearch.run(
-            notes: index.notes, query: arguments.joined(separator: " "), limit: 40
+            notes: index.notes, query: words.joined(separator: " "), limit: limit
         )
         guard !result.matches.isEmpty else {
             print("no matches")
             exit(0)
         }
+        if options.flag("json") {
+            JSONOutput.emit([
+                "matches": result.matches.map {
+                    [
+                        "path": $0.note.relativePath, "line": $0.line,
+                        "preview": $0.preview, "occurrences": $0.occurrences,
+                    ]
+                },
+                "shown": result.matches.count,
+                "total": result.totalMatches,
+                "notes": result.matchedNotes,
+                "truncated": result.isTruncated,
+            ])
+        }
         for match in result.matches {
             print("\(match.note.relativePath):\(match.line)  \(match.preview)")
+        }
+        // Said on stdout, and only when something was withheld. A list that
+        // stops at the limit and says nothing reads as the whole answer, and
+        // an agent that believes it answers confidently about the 40 it saw
+        // and never learns about the other 260.
+        if result.isTruncated {
+            print("""
+                — showing \(result.matches.count) of \(result.totalMatches) matching lines \
+                in \(result.matchedNotes) notes. Narrow the query, or pass \
+                --limit \(result.totalMatches).
+                """)
         }
         exit(0)
     }
@@ -569,11 +664,7 @@ public enum AgentCLI {
     /// resolves: a path, or a bare note name. `read` and `changes` both go
     /// through it so that a name means the same thing to each.
     private static func resolveNote(named name: String, in root: URL) -> String {
-        let index = VaultIndex.open(vaultAt: root)
-        let wanted = normalized(name)
-        guard let found = index.notes.first(where: {
-            $0.relativePath == wanted || $0.name == name || $0.name == note(name)
-        }) else {
+        guard let found = VaultIndex.open(vaultAt: root).note(named: name) else {
             fail("no such note: \(name)")
         }
         return found.relativePath
@@ -586,9 +677,6 @@ public enum AgentCLI {
         return value.hasSuffix(".md") ? value : value + ".md"
     }
 
-    private static func note(_ name: String) -> String {
-        name.hasSuffix(".md") ? String(name.dropLast(3)) : name
-    }
 
     /// `--key value` pairs. Small enough not to want an argument parser, and a
     /// dependency here would be a dependency in the app.

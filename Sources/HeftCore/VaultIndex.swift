@@ -400,6 +400,47 @@ public final class VaultIndex: @unchecked Sendable {
         byPath[path.lowercased()]
     }
 
+    /// The note a name on the command line refers to, however it was written.
+    ///
+    /// One resolver rather than one per verb. There were three, and they had
+    /// drifted: `read` accepted `Folder/Note`, `outline` did not, so an agent
+    /// following the documented style hit "no such note" on anything outside
+    /// the vault root and had no way to tell which spelling a verb wanted.
+    public func note(named name: String) -> NoteRef? {
+        Self.match(name, among: notes)
+    }
+
+    /// The same, over any list of files.
+    ///
+    /// `heft files` lists attachments too, so the verbs that answer about one
+    /// resolve against `allFiles` and cannot go through `note(named:)`. The
+    /// rule has to be identical all the same, which is why it lives here and
+    /// not at either call site.
+    ///
+    /// Order matters: an exact path is unambiguous and a bare name is not, so
+    /// the exact spelling wins. Otherwise adding `Archive/Note.md` would
+    /// change what an existing `heft read . "Note"` resolves to.
+    public static func match(_ name: String, among candidates: [NoteRef]) -> NoteRef? {
+        var path = name
+        if path.hasPrefix("./") { path.removeFirst(2) }
+        let lowered = path.lowercased()
+
+        if let found = candidates.first(where: { $0.relativePath.lowercased() == lowered }) {
+            return found
+        }
+        // Written without the extension. Only Markdown has one worth
+        // guessing; an attachment was matched exactly above or not at all.
+        if !lowered.hasSuffix(".md") {
+            let asNote = lowered + ".md"
+            if let found = candidates.first(where: { $0.relativePath.lowercased() == asNote }) {
+                return found
+            }
+        }
+
+        let bare = path.hasSuffix(".md") ? String(path.dropLast(3)) : path
+        return candidates.first { $0.name == name || $0.name == bare }
+    }
+
     /// Filename candidates for an inline `[[…]]` / `![[…]]` completion.
     /// Embeds additionally offer files Heft can actually present inline.
     public func linkSuggestions(

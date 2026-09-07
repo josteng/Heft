@@ -61,9 +61,28 @@ enum HeftMain {
         // has to move with it — and it cannot be expressed as a proposal,
         // which carries the new body of one note.
         if arguments.first == "rename", arguments.count > 3 {
+            let dryRun = arguments.contains("--dry-run")
+            // Writing to the vault unreviewed has to be asked for. A rename
+            // repoints links across every note that pointed at the old name,
+            // so it is the widest-reaching edit the command line can make,
+            // and it was the only one that happened the moment it was typed.
+            // `propose --move` was already the reviewed form of exactly this.
+            if !dryRun, !arguments.contains("--now") {
+                FileHandle.standardError.write(Data("""
+                    rename writes to the vault straight away, with no review.
+
+                    For a move you can accept or reject in Heft:
+                      heft propose "\(arguments[1])" "\(arguments[2])" --move "\(arguments[3])"
+
+                    To see what would change and change nothing, add --dry-run.
+                    To rename now anyway, add --now.
+
+                    """.utf8))
+                exit(1)
+            }
             runRename(
                 vaultPath: arguments[1], target: arguments[2], newName: arguments[3],
-                dryRun: arguments.contains("--dry-run")
+                dryRun: dryRun
             )
             return
         }
@@ -144,8 +163,12 @@ enum HeftMain {
                 limit = max(0, value)
             }
 
+            let asJSON = flags.contains("--json")
             let notes = VaultScanner.scan(root: root).flattened().filter { !$0.isFolder }
             guard byUse || byAgent || showScores else {
+                if asJSON {
+                    JSONOutput.emit(notes.prefix(limit).map { ["path": $0.relativePath] })
+                }
                 for item in notes.prefix(limit) { print(item.relativePath) }
                 exit(0)
             }
@@ -163,7 +186,14 @@ enum HeftMain {
                     $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
                 }
             }
-            for item in (byUse || byAgent ? ranked : notes).prefix(limit) {
+            let listed = (byUse || byAgent ? ranked : notes).prefix(limit)
+            if asJSON {
+                JSONOutput.emit(listed.map { item -> [String: Any] in
+                    let score = MainActor.assumeIsolated { store.score(item.relativePath) }
+                    return ["path": item.relativePath, "score": score]
+                })
+            }
+            for item in listed {
                 if showScores {
                     let score = MainActor.assumeIsolated { store.score(item.relativePath) }
                     print(String(format: "%8.3f  %@", score, item.relativePath))
@@ -298,6 +328,7 @@ enum HeftMain {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
             .standardizedFileURL
         let index = VaultIndex.open(vaultAt: root)
+        let asJSON = arguments.contains("--json")
 
         /// Resolved against **every** file, not only the Markdown ones.
         ///
@@ -307,9 +338,7 @@ enum HeftMain {
         /// this image, before I delete it.
         func file(_ name: String, markdownOnly: Bool = false) -> NoteRef {
             let candidates = markdownOnly ? index.notes : index.allFiles
-            guard let ref = candidates.first(where: {
-                $0.relativePath == name || $0.name == name
-            }) else {
+            guard let ref = VaultIndex.match(name, among: candidates) else {
                 let what = markdownOnly ? "no such note" : "no such file"
                 FileHandle.standardError.write(Data("\(what): \(name)\n".utf8))
                 exit(1)
@@ -327,11 +356,18 @@ enum HeftMain {
             }
 
         case "tags":
-            if arguments.count > 1 {
+            if arguments.count > 1, !arguments[1].hasPrefix("--") {
                 let tag = arguments[1].hasPrefix("#")
                     ? String(arguments[1].dropFirst()) : arguments[1]
-                for ref in index.notes(taggedWith: tag) { print(ref.relativePath) }
+                let tagged = index.notes(taggedWith: tag)
+                if asJSON { JSONOutput.emit(tagged.map { ["path": $0.relativePath] }) }
+                for ref in tagged { print(ref.relativePath) }
             } else {
+                if asJSON {
+                    JSONOutput.emit(index.allTags.map {
+                        ["tag": $0, "notes": index.noteCount(forTag: $0)]
+                    })
+                }
                 for tag in index.allTags {
                     print("\(index.noteCount(forTag: tag))\t#\(tag)")
                 }
@@ -346,13 +382,23 @@ enum HeftMain {
             let ref = file(arguments[1], markdownOnly: true)
             let source = (try? String(contentsOf: ref.url, encoding: .utf8)) ?? ""
             let document = MarkdownModel.parseDocument(source)
+            var headings: [(line: Int, level: Int, text: String, anchor: String)] = []
             for (offset, block) in document.blocks.enumerated() {
                 guard case .heading(let level, let inlines, let anchor) = block else { continue }
                 let line = document.lineRanges.indices.contains(offset)
                     ? document.lineRanges[offset].lowerBound + 1 : 0
-                let indent = String(repeating: "  ", count: max(0, level - 1))
-                print("\(line)\t\(indent)\(String(repeating: "#", count: level)) "
-                    + "\(MarkdownModel.plainText(inlines))\t\(anchor)")
+                headings.append((line, level, MarkdownModel.plainText(inlines), anchor))
+            }
+            if asJSON {
+                JSONOutput.emit(headings.map {
+                    ["line": $0.line, "level": $0.level, "text": $0.text, "anchor": $0.anchor]
+                })
+            }
+            for heading in headings {
+                let indent = String(repeating: "  ", count: max(0, heading.level - 1))
+                print("\(heading.line)\t\(indent)"
+                    + "\(String(repeating: "#", count: heading.level)) "
+                    + "\(heading.text)\t\(heading.anchor)")
             }
 
         case "links":
@@ -364,10 +410,18 @@ enum HeftMain {
             let unresolved = Set(
                 index.unresolvedLinks(from: ref.relativePath, source: ref).map(\.target)
             )
-            for link in index.outgoingLinks(from: ref.relativePath) {
+            let outgoing = index.outgoingLinks(from: ref.relativePath).map { link in
                 let target = index.resolve(link, from: ref)
-                let mark = target == nil || unresolved.contains(link.target) ? "unresolved" : "ok"
-                print("\(mark)\t\(link.target)\t\(target?.relativePath ?? "")")
+                let resolved = target != nil && !unresolved.contains(link.target)
+                return (link: link.target, resolved: resolved, path: target?.relativePath ?? "")
+            }
+            if asJSON {
+                JSONOutput.emit(outgoing.map {
+                    ["target": $0.link, "resolved": $0.resolved, "path": $0.path]
+                })
+            }
+            for link in outgoing {
+                print("\(link.resolved ? "ok" : "unresolved")\t\(link.link)\t\(link.path)")
             }
 
         case "backlinks":
@@ -378,7 +432,16 @@ enum HeftMain {
             // Any file: "what references this image" is the question worth
             // asking before deleting an attachment.
             let ref = file(arguments[1])
-            for backlink in index.backlinks(to: ref.relativePath) {
+            let incoming = index.backlinks(to: ref.relativePath)
+            if asJSON {
+                JSONOutput.emit(incoming.map {
+                    [
+                        "path": $0.source.relativePath, "line": $0.line,
+                        "context": $0.context.trimmingCharacters(in: .whitespaces),
+                    ]
+                })
+            }
+            for backlink in incoming {
                 let context = backlink.context.trimmingCharacters(in: .whitespaces)
                 print("\(backlink.source.relativePath):\(backlink.line)\t\(context)")
             }
@@ -394,9 +457,7 @@ enum HeftMain {
     ) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
         let index = VaultIndex.open(vaultAt: root)
-        guard let ref = index.notes.first(where: {
-            $0.relativePath == note || $0.name == note
-        }) else {
+        guard let ref = index.note(named: note) else {
             FileHandle.standardError.write(Data("no such note: \(note)\n".utf8))
             exit(1)
         }
@@ -424,9 +485,7 @@ enum HeftMain {
     private static func runRenderProbe(vaultPath: String, note: String, caret: Int?) {
         let root = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
         let index = VaultIndex.open(vaultAt: root)
-        guard let ref = index.notes.first(where: {
-            $0.relativePath == note || $0.name == note
-        }) else {
+        guard let ref = index.note(named: note) else {
             print("no such note: \(note)")
             exit(1)
         }

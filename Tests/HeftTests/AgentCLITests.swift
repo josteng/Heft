@@ -157,13 +157,15 @@ struct AgentCLITests {
     func hunkCountReadsRight() throws {
         let root = try vault(["Note.md": "one\ntwo\nthree\nfour\nfive\n"])
         defer { try? FileManager.default.removeItem(at: root) }
+        let log = try readLog(having: ["Note.md"], in: root)
 
-        let single = try run(["propose", root.path, "Note.md"], stdin: "one\ntwo revised\nthree\nfour\nfive\n")
+        let single = try run(["propose", root.path, "Note.md"], stdin: "one\ntwo revised\nthree\nfour\nfive\n", readLog: log)
         #expect(single.text.contains("in 1 hunk\n"), "\(single.text)")
         // A second vault: a note with a proposal waiting refuses another.
         let other = try vault(["Note.md": "one\ntwo\nthree\nfour\nfive\n"])
         defer { try? FileManager.default.removeItem(at: other) }
-        let double = try run(["propose", other.path, "Note.md"], stdin: "one revised\ntwo\nthree\nfour\nfive revised\n")
+        let otherLog = try readLog(having: ["Note.md"], in: other)
+        let double = try run(["propose", other.path, "Note.md"], stdin: "one revised\ntwo\nthree\nfour\nfive revised\n", readLog: otherLog)
         #expect(double.text.contains("in 2 hunks\n"), "\(double.text)")
     }
 
@@ -253,6 +255,325 @@ struct AgentCLITests {
         #expect(ProposalStore.match("abc", among: []) == .unknown("abc"))
     }
 
+    /// A whole-body proposal needs the note read first. Tests whose subject
+    /// is something else get their read through this, rather than each one
+    /// restating a rule that has its own tests below.
+    private func readLog(having notes: [String], in root: URL) throws -> URL {
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        for note in notes {
+            #expect(try run(["read", root.path, note], readLog: log).status == 0)
+        }
+        return log
+    }
+
+    // MARK: - Machine-readable answers
+
+    /// The tab-separated columns are fine to read and wrong to parse: a path
+    /// can hold a quote, a colon or a tab, and nothing in the line says which.
+    @Test("Every read verb can answer as JSON")
+    func readVerbsAnswerAsJSON() throws {
+        let root = try vault([
+            "Folder/Note.md": "# Heading\n\n#tagged\n\nsee [[Other]] and [[Missing]]\n",
+            "Other.md": "# Other\n\nsee [[Folder/Note]]\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        func parsed(_ arguments: [String]) throws -> Any {
+            let output = try run(arguments)
+            #expect(output.status == 0, "\(arguments.joined(separator: " ")): \(output.error)")
+            let data = Data(output.text.utf8)
+            return try #require(try? JSONSerialization.jsonObject(with: data))
+        }
+
+        let headings = try #require(try parsed(
+            ["outline", root.path, "Folder/Note", "--json"]) as? [[String: Any]])
+        #expect(headings.first?["text"] as? String == "Heading")
+        #expect(headings.first?["line"] as? Int == 1)
+
+        let links = try #require(try parsed(
+            ["links", root.path, "Folder/Note", "--json"]) as? [[String: Any]])
+        #expect(links.count == 2)
+        #expect(links.contains { $0["target"] as? String == "Other" && $0["resolved"] as? Bool == true })
+        #expect(links.contains { $0["target"] as? String == "Missing" && $0["resolved"] as? Bool == false })
+
+        let backlinks = try #require(try parsed(
+            ["backlinks", root.path, "Folder/Note", "--json"]) as? [[String: Any]])
+        #expect(backlinks.first?["path"] as? String == "Other.md")
+
+        let tags = try #require(try parsed(["tags", root.path, "--json"]) as? [[String: Any]])
+        #expect(tags.contains { $0["tag"] as? String == "tagged" && $0["notes"] as? Int == 1 })
+
+        let tagged = try #require(try parsed(["tags", root.path, "tagged", "--json"]) as? [[String: Any]])
+        #expect(tagged.first?["path"] as? String == "Folder/Note.md")
+
+        let files = try #require(try parsed(["files", root.path, "--json"]) as? [[String: Any]])
+        #expect(files.count == 2)
+    }
+
+    /// A find in JSON has to carry the truncation, or the shape is honest and
+    /// the answer still is not.
+    @Test("find in JSON says what it withheld")
+    func findJSONCarriesTheTruncation() throws {
+        let many = (1...60).map { "needle \($0)" }.joined(separator: "\n") + "\n"
+        let root = try vault(["Big.md": many])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["find", root.path, "needle", "--json"])
+        #expect(output.status == 0)
+        let object = try #require(
+            try? JSONSerialization.jsonObject(with: Data(output.text.utf8)) as? [String: Any])
+        #expect(object["shown"] as? Int == 40)
+        #expect(object["total"] as? Int == 60)
+        #expect(object["truncated"] as? Bool == true)
+        #expect((object["matches"] as? [[String: Any]])?.count == 40)
+    }
+
+    /// The reason for the flag, made concrete.
+    @Test("A path with a quote in it survives the round trip")
+    func awkwardPathsSurviveJSON() throws {
+        let root = try vault([#"He said "hi".md"#: "# Quoted\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["files", root.path, "--json"])
+        #expect(output.status == 0)
+        let listed = try #require(
+            try? JSONSerialization.jsonObject(with: Data(output.text.utf8)) as? [[String: Any]])
+        #expect(listed.first?["path"] as? String == #"He said "hi".md"#)
+    }
+
+    // MARK: - Reading part of a note
+
+    @Test("--lines returns the range asked for, and says what it is")
+    func readLinesReturnsTheRange() throws {
+        let body = (1...100).map { "line \($0)" }.joined(separator: "\n") + "\n"
+        let root = try vault(["Long.md": body])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["read", root.path, "Long.md", "--lines", "40-45"])
+        #expect(output.status == 0)
+        #expect(output.text.contains("line 40\nline 41"))
+        #expect(!output.text.contains("line 39\n"))
+        #expect(!output.text.contains("line 46\n"))
+        #expect(output.text.contains("lines 40-45 of 100"))
+    }
+
+    @Test("An open end runs to the end of the note")
+    func readLinesOpenEnd() throws {
+        let body = (1...10).map { "line \($0)" }.joined(separator: "\n") + "\n"
+        let root = try vault(["Short.md": body])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["read", root.path, "Short.md", "--lines", "8-"])
+        #expect(output.status == 0)
+        #expect(output.text.contains("line 8\nline 9\nline 10"))
+        #expect(!output.text.contains("line 7\n"))
+    }
+
+    @Test("A range that is not one is refused, and says the note's length")
+    func readLinesRefusesNonsense() throws {
+        let root = try vault(["Short.md": "a\nb\nc\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for bad in ["abc", "10-2", "0-2", "99-200", "5"] {
+            let output = try run(["read", root.path, "Short.md", "--lines", bad])
+            #expect(output.status != 0, "--lines \(bad) was accepted")
+            #expect(output.error.contains("has 3 lines"))
+        }
+    }
+
+    /// The interaction that matters. If a part counted as a read, an agent
+    /// could see forty lines of four hundred and then replace all four
+    /// hundred, which is exactly what the guard exists to stop.
+    @Test("A part does not count as having read the note")
+    func partialReadDoesNotSatisfyTheGuard() throws {
+        let body = (1...100).map { "line \($0)" }.joined(separator: "\n") + "\n"
+        let root = try vault(["Long.md": body])
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: log)
+        }
+
+        #expect(try run(
+            ["read", root.path, "Long.md", "--lines", "1-40"], readLog: log
+        ).status == 0)
+        let refused = try run(
+            ["propose", root.path, "Long.md"], stdin: "replacement\n", readLog: log
+        )
+        #expect(refused.status != 0)
+        #expect(refused.error.contains("has not been read"))
+
+        // The whole note, and now it goes through.
+        #expect(try run(["read", root.path, "Long.md"], readLog: log).status == 0)
+        #expect(try run(
+            ["propose", root.path, "Long.md"], stdin: "replacement\n", readLog: log
+        ).status == 0)
+    }
+
+    @Test("The range arithmetic itself")
+    func lineRangeArithmetic() {
+        #expect(AgentCLI.lineRange("40-45", of: 100) == 39..<45)
+        #expect(AgentCLI.lineRange("8-", of: 10) == 7..<10)
+        #expect(AgentCLI.lineRange("-3", of: 10) == 0..<3)
+        #expect(AgentCLI.lineRange("1-999", of: 10) == 0..<10)
+        #expect(AgentCLI.lineRange("0-3", of: 10) == nil)
+        #expect(AgentCLI.lineRange("5-2", of: 10) == nil)
+        #expect(AgentCLI.lineRange("20-30", of: 10) == nil)
+        #expect(AgentCLI.lineRange("abc", of: 10) == nil)
+        #expect(AgentCLI.lineRange("5", of: 10) == nil)
+    }
+
+    // MARK: - rename
+
+    /// The one command line verb that wrote to the vault the moment it was
+    /// typed, and the widest-reaching one there is: a rename repoints every
+    /// link that pointed at the old name. `propose --move` was already the
+    /// reviewed form of the same operation.
+    @Test("rename will not write without being asked twice")
+    func renameNeedsAsking() throws {
+        let root = try vault(["Note.md": "# Note\n", "Other.md": "see [[Note]]\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let refused = try run(["rename", root.path, "Note.md", "Renamed"])
+        #expect(refused.status != 0)
+        #expect(refused.error.contains("--move"))
+        #expect(refused.error.contains("--now"))
+        // Refusing has to mean refusing.
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+    }
+
+    @Test("--dry-run still reports without the extra asking")
+    func renameDryRunStillWorks() throws {
+        let root = try vault(["Note.md": "# Note\n", "Other.md": "see [[Note]]\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["rename", root.path, "Note.md", "Renamed", "--dry-run"])
+        #expect(output.status == 0)
+        #expect(output.text.contains("would rename"))
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+    }
+
+    @Test("--now renames, and repoints the links as before")
+    func renameNowStillRenames() throws {
+        let root = try vault(["Note.md": "# Note\n", "Other.md": "see [[Note]]\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["rename", root.path, "Note.md", "Renamed", "--now"])
+        #expect(output.status == 0)
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+        #expect(FileManager.default.fileExists(
+            atPath: root.appendingPathComponent("Renamed.md").path))
+        let other = try String(
+            contentsOf: root.appendingPathComponent("Other.md"), encoding: .utf8)
+        #expect(other.contains("[[Renamed]]"))
+    }
+
+    // MARK: - Naming a note
+
+    /// There were two resolvers, and they had drifted: `read` accepted
+    /// `Folder/Note` and `outline` did not, so CLAUDE.md's own examples
+    /// failed on any note that was not at the vault root.
+    @Test("Every verb accepts every spelling of a note's name")
+    func oneResolverForEverySpelling() throws {
+        let root = try vault([
+            "Folder/Note.md": "# Heading\n\nbody\n",
+            "Root.md": "# Root\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for spelling in ["Folder/Note.md", "Folder/Note", "./Folder/Note.md", "Note"] {
+            for verb in ["read", "outline", "links", "backlinks"] {
+                let output = try run([verb, root.path, spelling])
+                #expect(output.status == 0, "`heft \(verb) . \(spelling)` was rejected")
+            }
+        }
+    }
+
+    @Test("A name that matches nothing is still refused")
+    func unknownNamesAreStillRefused() throws {
+        let root = try vault(["Root.md": "# Root\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for spelling in ["Nope", "Nope.md", "Folder/Nope"] {
+            let output = try run(["read", root.path, spelling])
+            #expect(output.status != 0, "`\(spelling)` resolved to something")
+        }
+    }
+
+    /// A folder path names one note; a bare name might name several. The exact
+    /// spelling has to win, or adding a note somewhere else in the vault
+    /// changes what an existing command resolves to.
+    @Test("An exact path beats a bare name that collides with it")
+    func exactPathBeatsBareName() throws {
+        let root = try vault([
+            "Heft/Heft.md": "# The subfolder one\n",
+            "Heft.md": "# The root one\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let nested = try run(["read", root.path, "Heft/Heft"])
+        #expect(nested.status == 0)
+        #expect(nested.text.contains("The subfolder one"))
+
+        let top = try run(["read", root.path, "Heft.md"])
+        #expect(top.status == 0)
+        #expect(top.text.contains("The root one"))
+    }
+
+    // MARK: - find
+
+    /// The failure this prevents is not slowness, it is confidence. A list cut
+    /// at the limit with nothing said reads as the whole answer, so an agent
+    /// answers about the 40 it saw and never learns of the rest.
+    @Test("A truncated search says so, and says how much it withheld")
+    func findSaysWhenItTruncates() throws {
+        let many = (1...60).map { "needle on line \($0)" }.joined(separator: "\n") + "\n"
+        let root = try vault(["Big.md": many])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let capped = try run(["find", root.path, "needle"])
+        #expect(capped.status == 0)
+        #expect(capped.text.contains("showing 40 of 60 matching lines"))
+        #expect(capped.text.contains("--limit 60"))
+        #expect(capped.text.components(separatedBy: "Big.md:").count - 1 == 40)
+    }
+
+    @Test("--limit raises the ceiling, and then there is nothing to withhold")
+    func findLimitRaisesTheCeiling() throws {
+        let many = (1...60).map { "needle on line \($0)" }.joined(separator: "\n") + "\n"
+        let root = try vault(["Big.md": many])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let all = try run(["find", root.path, "needle", "--limit", "100"])
+        #expect(all.status == 0)
+        #expect(all.text.components(separatedBy: "Big.md:").count - 1 == 60)
+        #expect(!all.text.contains("showing"))
+    }
+
+    @Test("A search well under the limit says nothing about limits")
+    func findStaysQuietWhenComplete() throws {
+        let root = try vault(["Small.md": "needle here\nand nothing else\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let output = try run(["find", root.path, "needle"])
+        #expect(output.status == 0)
+        #expect(!output.text.contains("showing"))
+    }
+
+    @Test("A limit that is not a number is refused rather than ignored")
+    func findRefusesNonsenseLimits() throws {
+        let root = try vault(["Small.md": "needle\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for bad in ["abc", "0", "-5"] {
+            let output = try run(["find", root.path, "needle", "--limit", bad])
+            #expect(output.status != 0, "--limit \(bad) was accepted")
+            #expect(output.error.contains("positive whole number"))
+        }
+    }
+
     // MARK: - Reading before proposing
 
     @Test("A note that changed since the agent read it refuses a whole-body proposal")
@@ -287,13 +608,62 @@ struct AgentCLITests {
         #expect(ProposalStore.all(in: root).count == 1)
     }
 
-    @Test("An agent that never read the note is not held to a read it never made")
-    func unreadNoteProposesFreely() throws {
-        let root = try vault(["Note.md": "one\n"])
+    /// The same hazard as a stale read, reached the other way round. Keyed on
+    /// a baseline, the guard never fired here, so a whole body could replace
+    /// lines the agent had never seen and nothing said a word.
+    @Test("A note that was never read refuses a whole-body proposal")
+    func unreadNoteIsRefused() throws {
+        let root = try vault(["Note.md": "one\ntwo\nthree\n"])
         defer { try? FileManager.default.removeItem(at: root) }
 
-        #expect(try run(["propose", root.path, "Note.md"], stdin: "two\n").status == 0)
+        let refused = try run(["propose", root.path, "Note.md"], stdin: "replacement\n")
+        #expect(refused.status != 0)
+        #expect(refused.error.contains("has not been read"))
+        #expect(ProposalStore.all(in: root).isEmpty)
+    }
+
+    @Test("Reading it first is the way through")
+    func readingFirstAllowsIt() throws {
+        let root = try vault(["Note.md": "one\ntwo\nthree\n"])
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: log)
+        }
+        #expect(try run(["read", root.path, "Note.md"], readLog: log).status == 0)
+        #expect(try run(
+            ["propose", root.path, "Note.md"], stdin: "replacement\n", readLog: log
+        ).status == 0)
         #expect(ProposalStore.all(in: root).count == 1)
+    }
+
+    /// A note with nothing in it, and a note that is not there at all, have
+    /// nothing to lose. Refusing those would make creating a note impossible
+    /// without first reading something that does not exist.
+    @Test("A new or empty note still proposes without a read")
+    func nothingToLoseProposesFreely() throws {
+        let root = try vault(["Empty.md": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["propose", root.path, "Empty.md"], stdin: "first words\n").status == 0)
+        #expect(try run(["propose", root.path, "Brand New.md"], stdin: "a new note\n").status == 0)
+        #expect(ProposalStore.all(in: root).count == 2)
+    }
+
+    /// --replace stays exempt whether or not the note was read: its anchors
+    /// are resolved against the note as it is now, which is the stricter
+    /// check, and requiring a read as well would make it useless for the
+    /// small edit it exists for.
+    @Test("--replace does not need a read either")
+    func replaceNeedsNoRead() throws {
+        let root = try vault(["Note.md": "alpha\nbeta\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(
+            ["propose", root.path, "Note.md", "--replace"],
+            stdin: #"[{"old": "beta", "new": "BETA"}]"#
+        ).status == 0)
     }
 
     @Test("--replace is exempt, because its anchors are checked against the note now")
@@ -378,7 +748,7 @@ struct AgentCLITests {
         defaults.set(seeded.encoded, forKey: "dev.stenglein.Heft.frecency.notes.\(root.standardizedFileURL.path)")
         defaults.synchronize()
 
-        #expect(try run(["rename", root.path, "Old.md", "New.md"], defaultsSuite: suite).status == 0)
+        #expect(try run(["rename", root.path, "Old.md", "New.md", "--now"], defaultsSuite: suite).status == 0)
         let ranked = try run(["files", root.path, "--by-use", "--scores"], defaultsSuite: suite).text
         let lines = ranked.split(separator: "\n").map(String.init)
         #expect(lines.first?.contains("New.md") == true, Comment(rawValue: ranked))
@@ -402,7 +772,7 @@ struct AgentCLITests {
         defaults.set(seeded.encoded, forKey: "dev.stenglein.Heft.frecency.notes.\(root.standardizedFileURL.path)")
         defaults.synchronize()
 
-        #expect(try run(["rename", root.path, "Old", "New"], defaultsSuite: suite).status == 0)
+        #expect(try run(["rename", root.path, "Old", "New", "--now"], defaultsSuite: suite).status == 0)
         let ranked = try run(["files", root.path, "--by-use", "--scores"], defaultsSuite: suite).text
         #expect(ranked.split(separator: "\n").first?.contains("New/Inner.md") == true, Comment(rawValue: ranked))
         let score = ranked.split(separator: "\n").map(String.init).first { $0.contains("New/Inner.md") }
@@ -543,14 +913,22 @@ struct AgentCLITests {
     @Test("A second proposal on the same note is refused, and says how to replace it")
     func secondProposalIsRefused() throws {
         let root = try vault(["Note.md": "one\ntwo\n"])
-        defer { try? FileManager.default.removeItem(at: root) }
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: log)
+        }
+        // A whole body needs the note read first. That rule has its own test;
+        // this one is about what happens once a proposal exists.
+        #expect(try run(["read", root.path, "Note.md"], readLog: log).status == 0)
 
         let first = try run(["propose", root.path, "Note.md", "--summary", "widen the intro"],
-                            stdin: "one\ntwo\nthree\n")
+                            stdin: "one\ntwo\nthree\n", readLog: log)
         #expect(first.status == 0)
 
         let second = try run(["propose", root.path, "Note.md", "--summary", "something else"],
-                             stdin: "one\nfour\n")
+                             stdin: "one\nfour\n", readLog: log)
         #expect(second.status != 0)
         let complaint = second.error
         // Names the one in the way, and both ways out of it.
@@ -565,16 +943,24 @@ struct AgentCLITests {
     @Test("`--replacing` swaps one proposal for another in a single command")
     func replacingSwapsTheProposal() throws {
         let root = try vault(["Note.md": "one\ntwo\n"])
-        defer { try? FileManager.default.removeItem(at: root) }
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: log)
+        }
+        // A whole body needs the note read first. That rule has its own test;
+        // this one is about what happens once a proposal exists.
+        #expect(try run(["read", root.path, "Note.md"], readLog: log).status == 0)
 
         #expect(try run(["propose", root.path, "Note.md", "--summary", "remove the image"],
-                        stdin: "one\n").status == 0)
+                        stdin: "one\n", readLog: log).status == 0)
         let old = try #require(ProposalStore.all(in: root).first)
 
         let output = try run(
             ["propose", root.path, "Note.md", "--replacing", old.id,
              "--summary", "remove the whole quote block"],
-            stdin: "\n"
+            stdin: "\n", readLog: log
         )
         #expect(output.status == 0)
         #expect(output.text.contains("replaced \(old.id)"))
@@ -589,13 +975,21 @@ struct AgentCLITests {
     @Test("Replacing under the same summary keeps the name rather than numbering it")
     func replacingReusesTheName() throws {
         let root = try vault(["Note.md": "one\ntwo\n"])
-        defer { try? FileManager.default.removeItem(at: root) }
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: log)
+        }
+        // A whole body needs the note read first. That rule has its own test;
+        // this one is about what happens once a proposal exists.
+        #expect(try run(["read", root.path, "Note.md"], readLog: log).status == 0)
 
         #expect(try run(["propose", root.path, "Note.md", "--summary", "tighten the opening"],
-                        stdin: "one\n").status == 0)
+                        stdin: "one\n", readLog: log).status == 0)
         #expect(try run(["propose", root.path, "Note.md", "--replacing", "tighten-the-opening",
                          "--summary", "tighten the opening"],
-                        stdin: "two\n").status == 0)
+                        stdin: "two\n", readLog: log).status == 0)
 
         let pending = ProposalStore.all(in: root)
         #expect(pending.count == 1)
@@ -608,21 +1002,28 @@ struct AgentCLITests {
     func otherNotesAreUnaffected() throws {
         let root = try vault(["A.md": "a\n", "B.md": "b\n"])
         defer { try? FileManager.default.removeItem(at: root) }
+        let log = try readLog(having: ["A.md", "B.md"], in: root)
 
         #expect(try run(["propose", root.path, "A.md", "--summary", "change a"],
-                        stdin: "a2\n").status == 0)
+                        stdin: "a2\n", readLog: log).status == 0)
         #expect(try run(["propose", root.path, "B.md", "--summary", "change b"],
-                        stdin: "b2\n").status == 0)
+                        stdin: "b2\n", readLog: log).status == 0)
         #expect(ProposalStore.all(in: root).count == 2)
     }
 
     @Test("A delete cannot be stacked on a pending edit to the same note either")
     func structuralProposalsCollideToo() throws {
         let root = try vault(["Note.md": "one\n"])
-        defer { try? FileManager.default.removeItem(at: root) }
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: log)
+        }
+        #expect(try run(["read", root.path, "Note.md"], readLog: log).status == 0)
 
         #expect(try run(["propose", root.path, "Note.md", "--summary", "rewrite it"],
-                        stdin: "two\n").status == 0)
+                        stdin: "two\n", readLog: log).status == 0)
         let delete = try run(["propose", root.path, "Note.md", "--delete",
                               "--summary", "drop the note"])
         #expect(delete.status != 0)
@@ -871,10 +1272,11 @@ struct AgentCLITests {
     func namedProposalRoundTrip() throws {
         let root = try vault(["Note.md": "one\n"])
         defer { try? FileManager.default.removeItem(at: root) }
+        let log = try readLog(having: ["Note.md"], in: root)
 
         let proposed = try run(
             ["propose", root.path, "Note.md", "--summary", "Tighten the opening"],
-            stdin: "two\n"
+            stdin: "two\n", readLog: log
         )
         #expect(proposed.text.contains("proposed tighten-the-opening"))
         #expect(ProposalStore.all(in: root).first?.id == "tighten-the-opening")
@@ -981,11 +1383,12 @@ struct AgentCLITests {
     func groupsJoinByTheirWords() throws {
         let root = try vault(["A.md": "one\n", "B.md": "one\n"])
         defer { try? FileManager.default.removeItem(at: root) }
+        let log = try readLog(having: ["A.md", "B.md"], in: root)
 
         for note in ["A.md", "B.md"] {
             #expect(try run(
                 ["propose", root.path, note, "--group", "Rename the concept"],
-                stdin: "two\n"
+                stdin: "two\n", readLog: log
             ).status == 0)
         }
         let pending = ProposalStore.pending(in: root)

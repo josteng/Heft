@@ -128,8 +128,11 @@ public struct ReadLog: Sendable {
 
     /// Whether a proposal built from the last read may be trusted.
     public enum Freshness: Equatable, Sendable {
-        /// Nothing was recorded: the agent proposed without reading, which is
-        /// its own business. Nothing to be stale against.
+        /// Nothing was recorded. `propose` refuses a whole body on this when
+        /// the note has something in it, because replacing lines that were
+        /// never read is the hazard the stale case exists for, arrived at by
+        /// a different route. A note that is absent or empty reads as unread
+        /// too, and there it means what it says: nothing to lose.
         case unread
         case fresh
         /// The note moved on after the agent read it.
