@@ -84,7 +84,12 @@ public enum MarkdownEditing {
         else { return .nothing(keeping: range) }
 
         guard spansMultipleLines(in: source, range: range) else {
-            return toggleSingle(format, in: text, range: range)
+            // A whole bullet selected by a triple-click starts at its `- `.
+            let start = contentStart(ofLineAt: range.location, in: text)
+            let trimmed = range.location < start && NSMaxRange(range) > start
+                ? NSRange(location: start, length: NSMaxRange(range) - start)
+                : range
+            return toggleSingle(format, in: text, range: trimmed)
         }
 
         // Backticks are deliberately line-local. Wrapping each selected line
@@ -415,7 +420,9 @@ public enum MarkdownEditing {
             )
             let newline = text.rangeOfCharacter(from: .newlines, options: [], range: remaining)
             let segmentEnd = newline.location == NSNotFound ? selectionEnd : newline.location
-            var lower = segmentStart
+            // Never before the line's own markup, or `- item` becomes
+            // `**- item**`, which is no longer a list item.
+            var lower = max(segmentStart, contentStart(ofLineAt: segmentStart, in: text))
             var upper = segmentEnd
             while lower < upper, isHorizontalWhitespace(text.character(at: lower)) { lower += 1 }
             while upper > lower, isHorizontalWhitespace(text.character(at: upper - 1)) { upper -= 1 }
@@ -430,6 +437,23 @@ public enum MarkdownEditing {
 
     private static func isHorizontalWhitespace(_ character: unichar) -> Bool {
         character == 0x20 || character == 0x09
+    }
+
+    /// Where the words of the line holding `location` begin: after its
+    /// indentation and quote markers, a list marker and checkbox, or a
+    /// heading's hashes.
+    static func contentStart(ofLineAt location: Int, in text: NSString) -> Int {
+        let line = text.lineRange(for: NSRange(location: location, length: 0))
+        let parsed = ListLine(text.substring(with: line))
+        var prefix = parsed.indent + parsed.marker + parsed.checkbox
+        if parsed.marker.isEmpty, parsed.checkbox.isEmpty {
+            let hashes = parsed.body.prefix { $0 == "#" }
+            let next = parsed.body.dropFirst(hashes.count).first
+            if (1...6).contains(hashes.count), next == " " || next == "\t", let next {
+                prefix += String(hashes) + String(next)
+            }
+        }
+        return line.location + (prefix as NSString).length
     }
 
     /// Wraps the selection in a link, putting the caret where the destination
