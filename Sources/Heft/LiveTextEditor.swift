@@ -2033,7 +2033,8 @@ final class HeftTextKit2View: NSTextView {
     }
 
     /// Rebuilt when the view is scrolled, since the regions are scoped to the
-    /// lines on screen and scrolling changes which those are.
+    /// lines on screen and scrolling changes which those are. The formatting
+    /// bar is kept on screen, so it moves on the same notification.
     private var scrollObserver: NSObjectProtocol?
 
     override func viewDidMoveToWindow() {
@@ -2047,7 +2048,10 @@ final class HeftTextKit2View: NSTextView {
         scrollObserver = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.invalidatePointerRects() }
+            MainActor.assumeIsolated {
+                self?.invalidatePointerRects()
+                self?.updateFormatBar()
+            }
         }
     }
 

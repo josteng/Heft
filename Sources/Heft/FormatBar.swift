@@ -119,6 +119,20 @@ final class FormatBar: NSView {
         onFormat?(nil)
     }
 
+    /// The part of the text view that is on screen and not beneath the
+    /// toolbar, which the scroll view reports as its content insets. Outside a
+    /// window `visibleRect` is infinite, so that falls back to the bounds.
+    private static func unobscuredRect(of textView: NSTextView) -> CGRect {
+        var rect = textView.visibleRect
+        guard textView.window != nil, rect.width.isFinite, rect.height.isFinite, !rect.isEmpty
+        else { return textView.bounds }
+        if let insets = textView.enclosingScrollView?.contentInsets {
+            rect.origin.y += insets.top
+            rect.size.height -= insets.top + insets.bottom
+        }
+        return rect
+    }
+
     /// Places the bar above `selectionRect`, or hides it when there is nothing
     /// to format.
     func update(
@@ -139,19 +153,33 @@ final class FormatBar: NSView {
             ? "Link"
             : "Links are only available for a single line"
 
+        // Placed within what can be seen, not within the document. Against the
+        // document, a selection starting above the screen put the bar under
+        // the toolbar, where it could not be seen or clicked.
+        let visible = Self.unobscuredRect(of: textView)
+        guard selectionRect.intersects(visible) else {
+            isHidden = true
+            return
+        }
+
         let size = NSSize(width: stack.fittingSize.width, height: Self.height)
         var origin = CGPoint(
             x: selectionRect.midX - size.width / 2,
             y: selectionRect.minY - size.height - Self.gap
         )
 
-        // Keep it inside the text view, and flip below the selection when there
-        // is no room above — which is the case on the document's first line.
         let bounds = textView.bounds
         origin.x = min(max(origin.x, bounds.minX + 8), bounds.maxX - size.width - 8)
-        if origin.y < bounds.minY + 4 {
-            origin.y = selectionRect.maxY + Self.gap
+
+        // Above the selection, else below it, else pinned to the top edge when
+        // the selection runs past both.
+        let top = visible.minY + 4
+        let bottom = max(top, visible.maxY - size.height - 4)
+        if origin.y < top {
+            let below = selectionRect.maxY + Self.gap
+            origin.y = below <= bottom ? below : top
         }
+        origin.y = min(max(origin.y, top), bottom)
 
         setFrameOrigin(origin)
         setFrameSize(size)
