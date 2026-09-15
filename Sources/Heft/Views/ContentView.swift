@@ -176,6 +176,8 @@ struct WorkspaceSplit: View {
         if chrome.columnVisibility != .detailOnly {
             ToolbarSpacer(.flexible, placement: .status)
             ToolbarItem(placement: .status) { WorkspaceScopePicker() }
+                // A label in the title bar, not another glass button.
+                .sharedBackgroundVisibility(.hidden)
             ToolbarSpacer(.flexible, placement: .status)
         }
     }
@@ -293,6 +295,13 @@ struct WorkspaceScopePicker: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
+        // Wrapped so the toolbar hosts a view, not a menu. On macOS 27 a bare
+        // `Menu` here is turned into a native toolbar menu sized for an icon,
+        // and a text-only label drew as a lone chevron.
+        HStack(spacing: 0) { menu }
+    }
+
+    private var menu: some View {
         Menu {
             Button("Entire Vault") { model.showEntireVault() }
                 .disabled(model.scopePath == nil)
@@ -304,23 +313,29 @@ struct WorkspaceScopePicker: View {
                 }
             }
         } label: {
-            // Text alone, and the chevron left to the system.
-            //
-            // A hand-drawn one had to go: an `Image` anywhere in a toolbar
-            // menu's label — even inside an overlay, positioned trailing — is
-            // hoisted out and re-laid as a *leading* menu icon, tinted with
-            // the accent colour. So the chevron sat on the wrong side and
-            // turned yellow the moment the accent did. The built-in indicator
-            // is trailing and label-coloured, which is what it should have
-            // looked like all along.
-            Text(model.scopePath == nil ? "All Notes" : model.scopeName)
-                .lineLimit(1)
-                .font(.system(size: 12, weight: .semibold))
-                .frame(minWidth: 76)
+            // The chevron is drawn here because `.plain` has no indicator.
+            // A hand-drawn one used to be hoisted out as a leading menu icon
+            // in the accent colour, but only by the native toolbar menu that
+            // the wrapper above now keeps this from becoming.
+            HStack(spacing: 4) {
+                Text(model.scopePath == nil ? "All Notes" : model.scopeName)
+                    .lineLimit(1)
+                    .font(.system(size: 12, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 76)
+            .padding(.horizontal, 8)
+            // The whole label is the target: a plain button otherwise
+            // answers only clicks that land on the glyphs themselves.
+            .contentShape(.rect)
         }
         .menuStyle(.button)
-        .buttonStyle(.bordered)
-        .menuIndicator(.visible)
+        // Plain, in the label colour. Bordered drew a filled capsule, and
+        // borderless painted the label in the accent colour.
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .controlSize(.small)
         .fixedSize()
         .help(model.scopePath.map { "\(model.vaultName) / \($0)" } ?? model.vaultName)
