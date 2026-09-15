@@ -48,6 +48,10 @@ jobs:
           echo "Releasing $VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      # Still Xcode 26 on macos-26. Heft is tested against Xcode 27, but the
+      # xcode-27 runner image only carried a beta when 0.4.1 shipped, so that
+      # release was built locally with Scripts/release.sh. Move this job to
+      # runs-on: xcode-27 once that image has the release Xcode 27.
       - name: Select the newest Xcode 26
         run: |
           XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"

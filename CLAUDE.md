@@ -82,8 +82,8 @@ Break one of these and something goes quietly wrong rather than failing.
   never `UserDefaults.standard`, or `--sandbox` leaks. A test fails if any call
   site reaches for the latter.
 - **`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`** is needed for
-  `xcodebuild`, `actool` and `swift test`: `xcode-select` points at the Command
-  Line Tools on this machine. `Scripts/bundle.sh` sets it for itself.
+  `xcodebuild`, `actool` and `swift test` wherever `xcode-select` points at the
+  Command Line Tools. `Scripts/bundle.sh` sets it for itself.
 - **Launch the app detached** (`nohup … >/dev/null 2>&1 &` then `disown`), or a
   backgrounded GUI app holds the shell's stdout open and the caller blocks
   until it quits.
