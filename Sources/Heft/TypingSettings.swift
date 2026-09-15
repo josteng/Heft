@@ -398,6 +398,7 @@ struct TypingSettingsView: View {
             }
             .labelsHidden()
             .frame(width: 130)
+            .defaultMenuTint()
             .help("When this replacement fires")
 
             Image(systemName: "arrow.right")

@@ -58,6 +58,7 @@ struct CalendarSettingsView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .defaultMenuTint()
 
                 Toggle(isOn: $settings.marksMissingToday) {
                     SettingLabel(

@@ -61,6 +61,14 @@ extension View {
     func alignedWithTitle() -> some View {
         alignmentGuide(.firstTextBaseline) { $0[.top] + 13 }
     }
+
+    /// A menu picker drawn the way System Settings draws one: its value in
+    /// the text colour and a neutral chevron. Every pane is tinted with Heft's
+    /// accent so switches follow it, and on macOS 27 a menu picker takes that
+    /// tint for its value and chevron too, which no system pane does.
+    func defaultMenuTint() -> some View {
+        tint(nil)
+    }
 }
 
 /// A menu of the vaults Heft remembers, with "the vault opened last" as the
@@ -79,6 +87,7 @@ struct VaultChoiceMenu: View {
             }
         }
         .pickerStyle(.menu)
+        .defaultMenuTint()
         .labelsHidden()
         .fixedSize()
     }

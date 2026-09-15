@@ -132,6 +132,7 @@ struct GeneralSettingsView: View {
                             + "picked in the sidebar first still wins."
                     )
                 }
+                .defaultMenuTint()
                 if choice.wrappedValue == .folder {
                     // Bordered and with its label hidden, the way the Startup
                     // pane's path field is: a plain `TextField` in a grouped
@@ -170,6 +171,7 @@ struct GeneralSettingsView: View {
                             : "How every window opens. ⇧⌘D shows and hides it at any time."
                     )
                 }
+                .defaultMenuTint()
             }
 
             Section {
