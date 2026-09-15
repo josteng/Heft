@@ -14,7 +14,7 @@ final class FormatBar: NSView {
     var onFormat: ((InlineFormat?) -> Void)?
 
     private let stack = NSStackView()
-    private let background = NSVisualEffectView()
+    private let glass = NSGlassEffectView()
     private var formatButtons: [InlineFormat: NSButton] = [:]
     private var linkButton: NSButton?
 
@@ -24,33 +24,26 @@ final class FormatBar: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
         isHidden = true
 
-        background.material = .popover
-        background.blendingMode = .withinWindow
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 8
-        background.layer?.borderWidth = 0.5
-        background.layer?.borderColor = NSColor.separatorColor.cgColor
-        background.layer?.masksToBounds = true
-        addSubview(background)
-
-        // The bar floats over prose, so it needs a shadow to read as being in
-        // front of the text rather than part of it.
-        shadow = {
-            let shadow = NSShadow()
-            shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
-            shadow.shadowBlurRadius = 8
-            shadow.shadowOffset = NSSize(width: 0, height: -2)
-            return shadow
-        }()
+        // Liquid Glass, the layer controls float in above content. It brings
+        // its own edge and depth, so the border and shadow the old material
+        // needed would only fight it. Regular, not clear: it sits over text.
+        glass.style = .regular
+        glass.cornerRadius = Self.height / 2
+        // Interactive glass is macOS 27 API. Set by key so this still builds
+        // with an SDK that does not declare it.
+        if glass.responds(to: NSSelectorFromString("setEffectIsInteractive:")) {
+            glass.setValue(true, forKey: "effectIsInteractive")
+        }
+        addSubview(glass)
 
         stack.orientation = .horizontal
         stack.spacing = 1
-        stack.edgeInsets = NSEdgeInsets(top: 3, left: 5, bottom: 3, right: 5)
-        addSubview(stack)
+        // Wider at the sides than the top: a pill's ends curve into the first
+        // and last button.
+        stack.edgeInsets = NSEdgeInsets(top: 3, left: 10, bottom: 3, right: 10)
+        glass.contentView = stack
 
         for format in InlineFormat.allCases {
             let formatButton = button(
@@ -75,8 +68,8 @@ final class FormatBar: NSView {
 
     override func layout() {
         super.layout()
-        background.frame = bounds
-        stack.frame = bounds
+        // The glass sizes its content view to itself.
+        glass.frame = bounds
     }
 
     /// The bar must never take focus: clicking a button has to leave the text
