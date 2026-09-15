@@ -25,12 +25,18 @@ Command and Option shortcuts bypass the Vim engine. Insert mode also delegates
 ordinary input to AppKit, retaining dead-key, composed-character, dictation,
 completion, smart-typography, and accessibility behavior.
 
-Two enabled-by-default options are intentional Heft extensions, and both can be
+Three enabled-by-default options are intentional Heft extensions, and all can be
 turned off for strict Vim.
 
 “Preserve Markdown structure in Vim edits”: `o`/`O` continue list, task,
 numbered, and quote markers, while `cc`, `S`, and Visual-Line changes retain the
 current marker.
+
+“Show the formatting bar in Visual mode”: Visual and Visual Line selections get
+the formatting bar, and formatting from it or with ⌘B hands the new selection
+back to Visual mode, so the next operator acts on the formatted words. Visual
+Block never shows it, since the bar formats one range and a block is one per
+line.
 
 “Match typographic quotes in text objects”: `i"`/`a"` also match `“…”` and
 `«…»`, and `i'`/`a'` also match `‘…’`. This exists because the two features

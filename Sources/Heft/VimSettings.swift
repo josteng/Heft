@@ -31,12 +31,22 @@ final class VimSettings: ObservableObject {
             )
         }
     }
+    @Published var showsFormatBarInVisual: Bool {
+        didSet {
+            HeftDefaults.shared.set(
+                showsFormatBarInVisual,
+                forKey: Self.showsFormatBarInVisualKey
+            )
+        }
+    }
 
     private static let enabledKey = "dev.stenglein.Heft.vim.enabled"
     private static let continuesMarkdownStructureKey =
         "dev.stenglein.Heft.vim.continuesMarkdownStructure"
     private static let matchesTypographicQuotesKey =
         "dev.stenglein.Heft.vim.matchesTypographicQuotes"
+    private static let showsFormatBarInVisualKey =
+        "dev.stenglein.Heft.vim.showsFormatBarInVisual"
     private init() {
         let defaults = HeftDefaults.shared
         isEnabled = defaults.bool(forKey: Self.enabledKey)
@@ -46,6 +56,9 @@ final class VimSettings: ObservableObject {
         matchesTypographicQuotes = defaults.object(
             forKey: Self.matchesTypographicQuotesKey
         ) == nil || defaults.bool(forKey: Self.matchesTypographicQuotesKey)
+        showsFormatBarInVisual = defaults.object(
+            forKey: Self.showsFormatBarInVisualKey
+        ) == nil || defaults.bool(forKey: Self.showsFormatBarInVisualKey)
     }
 
     func report(mode: VimMode, message: String? = nil) {
@@ -84,7 +97,7 @@ struct VimSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                // The two below only mean anything while Vim is on, so they
+                // The options below only mean anything while Vim is on, so they
                 // grey out with it rather than inviting a change nobody can
                 // see.
                 Toggle(isOn: $vim.continuesMarkdownStructure) {
@@ -104,6 +117,15 @@ struct VimSettingsView: View {
                             + "straight characters as you write, so without this the quotes in your notes are no "
                             + "longer the ones those commands look for. Turn it off for strict Vim, which matches "
                             + "only \" and '."
+                    )
+                }
+                .disabled(!vim.isEnabled)
+                Toggle(isOn: $vim.showsFormatBarInVisual) {
+                    SettingLabel(
+                        "Show the formatting bar in Visual mode",
+                        detail: "Shows bold, italic, and the other formatting buttons over a Visual or Visual Line "
+                            + "selection, as over any other selection. Visual Block keeps it hidden, since the bar "
+                            + "formats one range and a block is one per line."
                     )
                 }
                 .disabled(!vim.isEnabled)

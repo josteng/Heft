@@ -116,6 +116,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.vimEnabled = vim.isEnabled
         textView.vimContinuesMarkdownStructure = vim.continuesMarkdownStructure
         textView.vimMatchesTypographicQuotes = vim.matchesTypographicQuotes
+        textView.vimShowsFormatBarInVisual = vim.showsFormatBarInVisual
         textView.textContainer?.widthTracksTextView = true
         // The delegate hands each paragraph its widgets; without it tables,
         // formulae, images and list glyphs have nothing to draw them.
@@ -170,6 +171,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.vimEnabled = vim.isEnabled
         textView.vimContinuesMarkdownStructure = vim.continuesMarkdownStructure
         textView.vimMatchesTypographicQuotes = vim.matchesTypographicQuotes
+        textView.vimShowsFormatBarInVisual = vim.showsFormatBarInVisual
         textView.updateLinkCompletion(allowStart: false)
 
         // `string` includes the input method's marked text, while the SwiftUI
@@ -961,6 +963,12 @@ final class HeftTextKit2View: NSTextView {
     /// while the object is being resolved.
     var vimMatchesTypographicQuotes = true {
         didSet { vimEngine.options.matchesTypographicQuotes = vimMatchesTypographicQuotes }
+    }
+    /// Whether Visual and Visual Line selections get the formatting bar.
+    /// Visual Block never does: the bar formats one range, and a block is one
+    /// per line.
+    var vimShowsFormatBarInVisual = true {
+        didSet { updateFormatBar() }
     }
     var vimCaretColor = NSColor.controlAccentColor {
         didSet { updateVimCursor() }
@@ -2495,13 +2503,15 @@ final class HeftTextKit2View: NSTextView {
     /// Shows or hides the formatting bar for the current selection.
     func updateFormatBar() {
         let selection = selectedRange()
-        let vimVisual = vimEnabled && (
-            vimEngine.mode == .visual
-                || vimEngine.mode == .visualLine
-                || vimEngine.mode == .visualBlock
+        // A block is a range per line and the bar formats one, so it stays
+        // hidden there; Visual and Visual Line follow the setting.
+        let vimHidesBar = vimEnabled && (
+            vimEngine.mode == .visualBlock
                 || vimEngine.mode == .blockInsert
+                || (!vimShowsFormatBarInVisual
+                    && (vimEngine.mode == .visual || vimEngine.mode == .visualLine))
         )
-        guard selection.length > 0, !vimVisual, window?.firstResponder === self else {
+        guard selection.length > 0, !vimHidesBar, window?.firstResponder === self else {
             formatBar?.isHidden = true
             return
         }
@@ -2567,6 +2577,15 @@ final class HeftTextKit2View: NSTextView {
         let edit = format.map { MarkdownEditing.toggle($0, in: string, range: selection) }
             ?? MarkdownEditing.makeLink(in: string, range: selection)
         apply(edit)
+        // The edit moved the text under Vim's visual selection, so the
+        // engine takes the new one the way it takes a mouse selection;
+        // otherwise the next `d` acts on where the words used to be.
+        if vimEnabled, vimEngine.mode == .visual || vimEngine.mode == .visualLine,
+           selectedRange().length > 0 {
+            vimEngine.adoptVisualSelection(selectedRange(), in: string)
+            VimSettings.shared.report(mode: .visual)
+            updateVimCursor()
+        }
     }
 
     /// Puts one planned edit into the buffer.
