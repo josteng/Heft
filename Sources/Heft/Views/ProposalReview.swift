@@ -16,10 +16,12 @@ struct ProposalBanner: View {
             VStack(spacing: 0) {
                 ForEach(pending) { proposal in
                     row(for: proposal)
-                    Divider()
                 }
             }
-            .background(.regularMaterial)
+            .background(accent.opacity(0.08), in: .rect(cornerRadius: 8))
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
             .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
