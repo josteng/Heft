@@ -49,34 +49,24 @@ struct WikiCompletionItem {
 final class WikiCompletionPanel: NSView {
     var onPick: ((Int) -> Void)?
 
-    private let background = NSVisualEffectView()
+    private let background = NSGlassEffectView()
     private var rows: [WikiCompletionRow] = []
     private static let width: CGFloat = 390
     private static let rowHeight: CGFloat = 34
     private static let padding: CGFloat = 4
+    static let rowCornerRadius: CGFloat = 6
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         isHidden = true
         wantsLayer = true
 
-        background.material = .popover
-        background.blendingMode = .withinWindow
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 9
-        background.layer?.borderWidth = 0.5
-        background.layer?.borderColor = NSColor.separatorColor.cgColor
-        background.layer?.masksToBounds = true
+        // Liquid Glass, like the format bar: it floats above the text. It
+        // brings its own edge and shadow. The radius is the row's plus the
+        // inset, so the selected row's corners run parallel to the panel's.
+        background.style = .regular
+        background.cornerRadius = Self.rowCornerRadius + Self.padding
         addSubview(background)
-
-        shadow = {
-            let value = NSShadow()
-            value.shadowColor = NSColor.black.withAlphaComponent(0.3)
-            value.shadowBlurRadius = 12
-            value.shadowOffset = NSSize(width: 0, height: -3)
-            return value
-        }()
     }
 
     @available(*, unavailable)
@@ -141,7 +131,7 @@ final class WikiCompletionRow: NSView {
         self.selected = selected
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = WikiCompletionPanel.rowCornerRadius
         // Read straight from the settings rather than tinted by the
         // environment: this row is AppKit, so the scene's `appAccentTint` does
         // not reach it. The panel is rebuilt each time it opens, so it picks
