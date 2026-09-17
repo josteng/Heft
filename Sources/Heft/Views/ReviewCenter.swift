@@ -54,9 +54,15 @@ struct ReviewCenter: View {
                     .padding(.horizontal, 6)
                     .padding(.bottom, 6)
                 }
-                Divider()
             }
-            .background(accent.opacity(0.06))
+            // A card inset to the header's margins rather than a full-width
+            // band: flush to the sidebar's edges and against the filter field
+            // above it, the tint read as part of the chrome instead of as one
+            // thing waiting for an answer.
+            .background(accent.opacity(0.08), in: .rect(cornerRadius: 8))
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
         }
         if model.shouldOfferAgentSetup {
             AgentSetupOffer()
@@ -432,8 +438,11 @@ struct AgentSetupOffer: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(accent.opacity(0.06))
-        .overlay(alignment: .bottom) { Divider() }
+        // The same card as the review list above it, for the same reason.
+        .background(accent.opacity(0.08), in: .rect(cornerRadius: 8))
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
     }
 
     private var help: some View {
