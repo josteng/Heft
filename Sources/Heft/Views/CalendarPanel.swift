@@ -513,14 +513,14 @@ private struct DayCell: View {
             .frame(height: 22)
             .background {
                 if isSelected {
-                    RoundedRectangle(cornerRadius: 4).fill(accent.opacity(0.25))
+                    RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.25))
                 } else if isHovering {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.08))
                 }
             }
             .overlay {
                 if isToday {
-                    RoundedRectangle(cornerRadius: 4).stroke(accent, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 6).stroke(accent, lineWidth: 1)
                 }
             }
             .contentShape(.rect)

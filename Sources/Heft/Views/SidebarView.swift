@@ -172,17 +172,17 @@ struct SidebarView: View {
         }
     }
 
-    /// One height for the filter field and the button beside it, so the two
-    /// fills read as a pair.
-    private static let filterHeight: CGFloat = 28
-
     private var header: some View {
         VStack(spacing: 8) {
             // The picker comes first: it decides what the field below filters,
             // so reading top to bottom matches what the controls do.
             modePicker
 
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
+                // Hand-rolled rather than `NSSearchField`: its capsule bezel
+                // is the brightest thing in the sidebar and overhangs its
+                // frame, and without the bezel it lays its icon over the text.
+                // This one is the tab track's fill, height and shape.
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
@@ -198,33 +198,24 @@ struct SidebarView: View {
                         .foregroundStyle(.tertiary)
                     }
                 }
-                .padding(.horizontal, 8)
-                .frame(height: Self.filterHeight)
-                .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(Color(nsColor: .quaternarySystemFill), in: .capsule)
 
                 if mode == .files, model.scopeRoot != nil {
                     Menu {
                         Button("New Note") { createNoteAtCreationTarget() }
                         Button("New Folder") { createFolderAtCreationTarget() }
                     } label: {
-                        // A plus, not the pencil: the pencil's box centres
-                        // but its square does not, which shows in a 28-point
-                        // fill where Notes' larger circle hides it, and the
-                        // menu makes folders as well as notes.
+                        // A plus, not the pencil: the menu makes folders as
+                        // well as notes.
                         Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .semibold))
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
                     .menuIndicator(.hidden)
-                    // The same fill as the filter field beside it and the
-                    // mode tabs above, at the field's height and square: a
-                    // bare glyph between three filled shapes read as
-                    // something that had fallen off. The frame is pinned
-                    // here, on the menu, because the menu style discards a
-                    // background put on its label and pads a frame put
-                    // inside it, so both left the fill smaller than the field.
-                    .frame(width: Self.filterHeight, height: Self.filterHeight)
-                    .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 6))
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
                     .help("Create in \(creationTargetName)")
                 }
             }
@@ -430,41 +421,44 @@ struct SidebarView: View {
 
     /// Switches which list the sidebar shows.
     ///
-    /// Hand-rolled rather than a `Picker`. `.segmented` fills the sidebar's
-    /// whole width with three words and reads as heavy chrome; `.palette`
-    /// shrinks the icons past legibility. This keeps the icon at a readable
-    /// size *and* keeps the labels, which matter because "Recent" and "Tags"
-    /// are not guessable from a clock and a hash.
+    /// Hand-rolled rather than a `Picker`. In the sidebar `.segmented`, and
+    /// macOS 27's `.tabs`, both draw the flat control without icons;
+    /// `.palette` shrinks the icons past legibility. The labels matter because
+    /// "Recent" and "Tags" are not guessable from a clock and a hash. The
+    /// selection is a glass pill that slides, as Liquid Glass controls do.
     private var modePicker: some View {
-        HStack(spacing: 2) {
-            ForEach(SidebarMode.allCases) { option in
-                let isSelected = mode == option
-                Button {
-                    mode = option
-                    filter = ""
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: option.symbol).font(.system(size: 12))
-                        Text(option.title).font(.system(size: 11, weight: .medium))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .background {
-                        if isSelected {
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(Color(nsColor: .controlBackgroundColor))
-                                .shadow(color: .black.opacity(0.16), radius: 1, y: 0.5)
+        GeometryReader { proxy in
+            let segmentWidth = proxy.size.width / CGFloat(SidebarMode.allCases.count)
+            ZStack(alignment: .leading) {
+                Color.clear
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .frame(width: segmentWidth, height: proxy.size.height)
+                    .offset(x: segmentWidth * CGFloat(SidebarMode.allCases.firstIndex(of: mode) ?? 0))
+
+                HStack(spacing: 0) {
+                    ForEach(SidebarMode.allCases) { option in
+                        let isSelected = mode == option
+                        Button {
+                            filter = ""
+                            withAnimation(.snappy(duration: 0.25)) { mode = option }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: option.symbol).font(.system(size: 12))
+                                Text(option.title).font(.system(size: 11, weight: .medium))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(.rect)
                         }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        .help(option.title)
                     }
-                    .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                .help(option.title)
             }
         }
+        .frame(height: 24)
         .padding(2)
-        .background(Color(nsColor: .quaternarySystemFill), in: .rect(cornerRadius: 7))
+        .background(Color(nsColor: .quaternarySystemFill), in: .capsule)
     }
 
     /// Tags, most used first, each expanding to the notes carrying it.
@@ -1409,20 +1403,20 @@ struct NoteRow: View {
             if isDropTargeted {
                 // Outlined rather than filled, so it reads as "into here"
                 // rather than as a selection.
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(accent, lineWidth: 2)
                     .background(
-                        RoundedRectangle(cornerRadius: 5).fill(accent.opacity(0.12))
+                        RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.12))
                     )
             } else if isSelected {
-                RoundedRectangle(cornerRadius: 5).fill(accent)
+                RoundedRectangle(cornerRadius: 6).fill(accent)
             } else if isKeyTarget {
                 // A tint rather than the accent itself, and the text keeps its
                 // own colour: this row is where the keys point, not something
                 // the reader has chosen.
-                RoundedRectangle(cornerRadius: 5).fill(accent.opacity(0.18))
+                RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.18))
             } else if isHovering {
-                RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06))
+                RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06))
             }
         }
         .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
