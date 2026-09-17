@@ -8,6 +8,7 @@ struct CalendarPanel: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject private var settings = CalendarSettings.shared
     @State private var isWarningPresented = false
+    @State private var isHoveringNavigation = false
 
     /// The grid's calendar, which carries the user's chosen first weekday.
     private var calendar: Calendar { settings.gridCalendar }
@@ -67,31 +68,63 @@ struct CalendarPanel: View {
 
             Spacer(minLength: 6)
 
-            Button { shiftMonth(-1) } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 15, height: 18)
-            }
-            .buttonStyle(.plain)
-            .help("Previous month")
+            // One track holding all three, like the sidebar's mode tabs: bare
+            // glyphs on the panel's own fill read as label text rather than as
+            // something to click, and gave no sign of what the pointer had hit.
+            HStack(spacing: 2) {
+                NavButton(help: "Previous month", action: { shiftMonth(-1) }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                }
 
-            Button { goToCurrentMonth() } label: {
-                Text("Today")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(height: 18)
-            }
-            .buttonStyle(.plain)
-            .help("Jump to this month")
+                NavButton(help: "Jump to this month", action: goToCurrentMonth) {
+                    Text("Today")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(height: 18)
+                        .padding(.horizontal, 6)
+                }
 
-            Button { shiftMonth(1) } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 15, height: 18)
+                NavButton(help: "Next month", action: { shiftMonth(1) }) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                }
             }
-            .buttonStyle(.plain)
-            .help("Next month")
+            .padding(2)
+            // The track appears under the pointer, not at rest: the glyphs
+            // have to stay visible to be found at all, but a filled capsule
+            // sitting there permanently is more chrome than a month arrow
+            // needs beside a grid of dates.
+            .background {
+                if isHoveringNavigation {
+                    Capsule().fill(Color(nsColor: .quaternarySystemFill))
+                }
+            }
+            .onHover { isHoveringNavigation = $0 }
         }
         .foregroundStyle(.secondary)
+    }
+
+    /// One month-navigation button: a capsule that lights under the pointer.
+    private struct NavButton<Label: View>: View {
+        let help: String
+        let action: () -> Void
+        @ViewBuilder let label: () -> Label
+        @State private var isHovering = false
+
+        var body: some View {
+            Button(action: action) {
+                label().contentShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isHovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .background {
+                if isHovering { Capsule().fill(Color.primary.opacity(0.08)) }
+            }
+            .onHover { isHovering = $0 }
+            .help(help)
+        }
     }
 
     private var calendarWarning: String? {

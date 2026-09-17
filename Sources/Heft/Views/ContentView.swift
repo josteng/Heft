@@ -293,6 +293,7 @@ private struct WindowToolbarConfiguration: NSViewRepresentable {
 /// Internal, not private, so a test can measure what it costs the title bar.
 struct WorkspaceScopePicker: View {
     @EnvironmentObject private var model: AppModel
+    @State private var isHovering = false
 
     var body: some View {
         // Wrapped so the toolbar hosts a view, not a menu. On macOS 27 a bare
@@ -325,12 +326,23 @@ struct WorkspaceScopePicker: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .frame(minWidth: 76)
-            .padding(.horizontal, 8)
+            // The height is the toolbar's, not the text's: the hover fill
+            // sits in a row with the system's toolbar buttons, and a pill
+            // shorter than they are reads as a different kind of control.
+            .frame(minWidth: 76, minHeight: 28)
+            .padding(.horizontal, 10)
+            // Under the pointer only: the title bar says what this window is
+            // browsing, and a permanent bezel around it competes with the
+            // toolbar's own buttons. The fill is what says it can be clicked,
+            // the way the calendar's month arrows do.
+            .background {
+                if isHovering { Capsule().fill(Color(nsColor: .quaternarySystemFill)) }
+            }
             // The whole label is the target: a plain button otherwise
             // answers only clicks that land on the glyphs themselves.
             .contentShape(.rect)
         }
+        .onHover { isHovering = $0 }
         .menuStyle(.button)
         // Plain, in the label colour. Bordered drew a filled capsule, and
         // borderless painted the label in the accent colour.
