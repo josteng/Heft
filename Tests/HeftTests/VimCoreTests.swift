@@ -1602,6 +1602,67 @@ struct VimCoreTests {
         }
     }
 
+    /// How long one oracle process gets before it is taken as wedged.
+    /// A batch takes about a second; this is only a bound on a hang.
+    private static let oracleTimeout: TimeInterval = 120
+
+    private final class OracleOutput: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+        var timedOut = false
+
+        func append(_ chunk: Data) {
+            lock.lock(); data.append(chunk); lock.unlock()
+        }
+
+        var text: String {
+            lock.lock(); defer { lock.unlock() }
+            return String(decoding: data, as: UTF8.self)
+        }
+    }
+
+    /// Runs one Neovim to completion and returns what it wrote to stderr.
+    ///
+    /// Each part of this stops a wedged oracle from hanging the whole suite
+    /// rather than failing one test. Stderr is drained while it runs, because
+    /// reading it only after exit deadlocks as soon as a batch writes more
+    /// than a pipe holds. Stdin is /dev/null, so a Neovim that reaches the end
+    /// of its script gets EOF instead of waiting for a key it will never be
+    /// sent. And the wait is bounded, so the run ends even when Neovim stops
+    /// somewhere neither of those explains: once seen, a batch was left
+    /// waiting on a half-typed command line with 50 of its 64 cases written.
+    private static func runOracle(_ process: Process) throws -> String {
+        process.standardInput = FileHandle.nullDevice
+        let errors = Pipe()
+        process.standardError = errors
+        let output = OracleOutput()
+        errors.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty { output.append(chunk) }
+        }
+        try process.run()
+        let watchdog = DispatchWorkItem {
+            guard process.isRunning else { return }
+            output.timedOut = true
+            process.terminate()
+        }
+        DispatchQueue.global(qos: .background).asyncAfter(
+            deadline: .now() + oracleTimeout, execute: watchdog
+        )
+        process.waitUntilExit()
+        watchdog.cancel()
+        errors.fileHandleForReading.readabilityHandler = nil
+        output.append(errors.fileHandleForReading.availableData)
+        guard !output.timedOut else {
+            // The tail only: a wedged batch has echoed every command it got
+            // through, and the end is the part that says where it stopped.
+            throw VimOracleError.failed(
+                "timed out after \(Int(oracleTimeout))s, last output: \(output.text.suffix(400))"
+            )
+        }
+        return output.text
+    }
+
     /// `keys` as the body of a double-quoted Vim string: Escape as `\<Esc>`,
     /// and the characters that string syntax would otherwise read.
     private static func vimStringLiteral(_ keys: String) -> String {
@@ -1661,11 +1722,7 @@ struct VimCoreTests {
             var environment = ProcessInfo.processInfo.environment
             environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
             process.environment = environment
-            let errors = Pipe()
-            process.standardError = errors
-            try process.run()
-            process.waitUntilExit()
-            let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            let diagnostic = try runOracle(process)
             guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
             return cases.indices.map { index in
                 Result {
@@ -1703,11 +1760,7 @@ struct VimCoreTests {
         var environment = ProcessInfo.processInfo.environment
         environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
         process.environment = environment
-        let errors = Pipe()
-        process.standardError = errors
-        try process.run()
-        process.waitUntilExit()
-        let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let diagnostic = try runOracle(process)
         guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
         return String(decoding: try Data(contentsOf: file), as: UTF8.self)
     }
@@ -1733,11 +1786,7 @@ struct VimCoreTests {
         var environment = ProcessInfo.processInfo.environment
         environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
         process.environment = environment
-        let errors = Pipe()
-        process.standardError = errors
-        try process.run()
-        process.waitUntilExit()
-        let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let diagnostic = try runOracle(process)
         guard process.terminationStatus == 0 else {
             throw VimOracleError.failed(diagnostic)
         }
@@ -1779,11 +1828,7 @@ struct VimCoreTests {
         var environment = ProcessInfo.processInfo.environment
         environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
         process.environment = environment
-        let errors = Pipe()
-        process.standardError = errors
-        try process.run()
-        process.waitUntilExit()
-        let diagnostic = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let diagnostic = try runOracle(process)
         guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
 
         let state = try JSONDecoder().decode(
