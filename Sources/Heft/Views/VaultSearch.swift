@@ -99,7 +99,8 @@ struct VaultSearchView: View {
             .frame(height: 420)
         }
         .frame(width: 680)
-        .background(.regularMaterial)
+        .background(PaletteSheetBackground())
+        .presentationBackground(.clear)
         .onKeyPress(.escape) { dismiss(); return .handled }
         .task(id: "\(query)|\(searchesEntireVault)") { await search() }
     }

@@ -435,7 +435,8 @@ struct CommandPaletteView: View {
             .frame(height: 240)
         }
         .frame(width: 560)
-        .background(.regularMaterial)
+        .background(PaletteSheetBackground())
+        .presentationBackground(.clear)
         .onAppear { isFocused = true }
         .onKeyPress(.upArrow) { move(-1); return .handled }
         .onKeyPress(.downArrow) { move(1); return .handled }

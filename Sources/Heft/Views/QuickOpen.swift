@@ -78,7 +78,8 @@ struct QuickOpenView: View {
             .frame(height: 320)
         }
         .frame(width: 560)
-        .background(.regularMaterial)
+        .background(PaletteSheetBackground())
+        .presentationBackground(.clear)
         .onAppear { isFocused = true }
         .onKeyPress(.escape) { dismiss(); return .handled }
     }
