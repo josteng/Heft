@@ -386,7 +386,9 @@ struct LiveTextEditor: NSViewRepresentable {
         init(_ parent: LiveTextEditor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
+            guard let textView = notification.object as? NSTextView,
+                  textView.delegate === self
+            else { return }
             let now = DispatchTime.now().uptimeNanoseconds
             editGap = lastEditAt.map { Double(now - $0) / 1_000_000 } ?? .infinity
             lastEditAt = now
@@ -395,8 +397,18 @@ struct LiveTextEditor: NSViewRepresentable {
             scheduleRestyle(textView)
         }
 
+        /// Only this coordinator's own text view.
+        ///
+        /// These arrive through the notification centre, which hands a
+        /// coordinator selection changes from *other* text views in the
+        /// process, and every line below acts on whichever view the
+        /// notification carried. A second window's editor was restyled with
+        /// this one's context, and its pointer regions dropped, on nothing
+        /// more than a caret moving here.
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
+            guard let textView = notification.object as? NSTextView,
+                  textView.delegate === self
+            else { return }
             let selection = textView.selectedRange()
             let line = (textView.string as NSString).lineRange(for: selection)
             // Block markup reveals per line, inline spans per caret position,
