@@ -97,6 +97,9 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = false
         textView.isAutomaticDataDetectionEnabled = false
         textView.usesFindBar = false
+        // The editor is in a window and can host the affordance; the view
+        // itself defaults it off for everything that is not.
+        textView.writingToolsBehavior = .default
         textView.vimCaretColor = context.accentColor
         textView.textContainerInset = NSSize(width: 28, height: 28)
         textView.linkTextAttributes = [:]
@@ -930,6 +933,24 @@ private struct VimRepeatRecipe {
 
 /// Text view with vault-aware paste and list continuation.
 final class HeftTextKit2View: NSTextView {
+    /// Writing Tools, off until the editor asks for it in `makeNSView`.
+    ///
+    /// AppKit offers the affordance to any text view carrying a selection,
+    /// the bare ones the tests build included, and showing it opens an
+    /// `NSRemoteView` connection to a UI service. In the test process that
+    /// connection raises while decoding a reply, and an uncaught
+    /// Objective-C exception on its XPC queue aborts the whole run: about
+    /// one full suite in four died there, in whichever test happened to
+    /// hold the main thread.
+    ///
+    /// Defaulted in the view rather than set beside the other switches in
+    /// `makeNSView`, because only the view is common to both worlds.
+    private var writingTools: NSWritingToolsBehavior = .none
+    override var writingToolsBehavior: NSWritingToolsBehavior {
+        get { writingTools }
+        set { writingTools = newValue }
+    }
+
     var onAttachment: ((NSPasteboard) -> String?)?
     var onCopyFile: (() -> Bool)?
     var canPasteFile: (() -> Bool)?
