@@ -31,6 +31,46 @@ struct AgentCLITests {
         var text: String { String(decoding: standard, as: UTF8.self) }
     }
 
+    /// Throws away a temporary defaults suite, its file included.
+    ///
+    /// `removePersistentDomain` empties the domain but leaves cfprefsd's
+    /// plist behind, so a suite per invocation left about a hundred and forty
+    /// files per suite run in `~/Library/Preferences`; thousands had piled up.
+    /// Unlinking is the step that makes it stay gone, and it has to come last
+    /// or cfprefsd writes the file out again.
+    ///
+    /// Not quite all of them: cfprefsd flushes on its own schedule and writes
+    /// an empty file back for perhaps a fifth of these, which is why the run
+    /// still leaves a few behind rather than none. Emptying the domain is the
+    /// part that matters for isolation; the residue is 42 bytes each.
+    private static func discardSuite(_ suite: String) {
+        UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+        UserDefaults.standard.removePersistentDomain(forName: suite)
+        CFPreferencesAppSynchronize(suite as CFString)
+        try? FileManager.default.removeItem(atPath: Self.suitePath(suite))
+    }
+
+    /// Where cfprefsd keeps a suite, so a test can see that it is gone.
+    static func suitePath(_ suite: String) -> String {
+        NSHomeDirectory() + "/Library/Preferences/\(suite).plist"
+    }
+
+    @Test("A throwaway defaults suite leaves no file behind")
+    func discardingASuiteRemovesItsFile() throws {
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.set("value", forKey: "dev.stenglein.Heft.probe")
+        defaults.synchronize()
+        try #require(
+            FileManager.default.fileExists(atPath: Self.suitePath(suite)),
+            "cfprefsd never wrote the suite, so there is nothing to clean up"
+        )
+
+        Self.discardSuite(suite)
+
+        #expect(!FileManager.default.fileExists(atPath: Self.suitePath(suite)))
+    }
+
     private func run(
         _ arguments: [String], stdin: String? = nil, readLog: URL? = nil,
         defaultsSuite: String? = nil
@@ -43,9 +83,7 @@ struct AgentCLITests {
         // suite per run unless the test wants to look inside one.
         let suite = defaultsSuite ?? "HeftCLIDefaults-\(UUID().uuidString)"
         defer {
-            if defaultsSuite == nil {
-                UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
-            }
+            if defaultsSuite == nil { Self.discardSuite(suite) }
         }
         let process = Process()
         process.executableURL = binary
@@ -661,7 +699,7 @@ struct AgentCLITests {
         let root = try vault(["Inbox.md": "# Inbox\n\n- 09:00 an earlier line\n"])
         defer { try? FileManager.default.removeItem(at: root) }
         let suite = "HeftCLIDefaults-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        defer { Self.discardSuite(suite) }
         let defaults = try #require(UserDefaults(suiteName: suite))
         AgentCaptureReviewPreference.set(true, in: defaults)
 
@@ -702,7 +740,7 @@ struct AgentCLITests {
         let root = try vault(["Note.md": "# Note\n"])
         defer { try? FileManager.default.removeItem(at: root) }
         let suite = "HeftCLIDefaults-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        defer { Self.discardSuite(suite) }
         let defaults = try #require(UserDefaults(suiteName: suite))
         AgentCaptureReviewPreference.set(true, in: defaults)
 
@@ -1265,7 +1303,7 @@ struct AgentCLITests {
         let suite = "HeftCLIDefaults-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer {
-            defaults.removePersistentDomain(forName: suite)
+            Self.discardSuite(suite)
             try? FileManager.default.removeItem(at: root)
         }
         var seeded = Frecency()
@@ -1291,7 +1329,7 @@ struct AgentCLITests {
         let suite = "HeftCLIDefaults-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer {
-            defaults.removePersistentDomain(forName: suite)
+            Self.discardSuite(suite)
             try? FileManager.default.removeItem(at: root)
         }
         var seeded = Frecency()
