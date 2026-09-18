@@ -86,4 +86,30 @@ struct SetextHeadingTests {
         #expect(headings("Some text\n-\n").isEmpty)
         #expect(headings("Some text\n--\n").count == 1)
     }
+
+    /// A comment is an HTML block, and CommonMark does not let one carry an
+    /// underline. A template that loses the blank line between its marker and
+    /// its rule would otherwise collapse both lines and draw neither.
+    @Test("A comment is not underlined into a heading")
+    func aCommentIsNotHeadingText() {
+        #expect(headings("<!-- heft:daily-log -->\n---\n").isEmpty)
+        #expect(headings("<!-- a comment -->\n---\n").isEmpty)
+        #expect(headings("<!-- a comment -->\n===\n").isEmpty)
+    }
+
+    @Test("The rule under a comment is still a rule")
+    func theRuleSurvives() {
+        #expect(rules("<!-- heft:daily-log -->\n---\n") == 1)
+        // What it was with the blank line, so losing the line changes nothing.
+        #expect(rules("<!-- heft:daily-log -->\n\n---\n") == 1)
+    }
+
+    /// Only a comment that opens the line. One ending a sentence leaves it an
+    /// ordinary paragraph, and an underline under that is a heading.
+    @Test("A comment at the end of a line does not protect it")
+    func anInlineCommentStillUnderlines() {
+        let found = headings("Real heading <!-- note -->\n---\n")
+        #expect(found.count == 1)
+        #expect(found.first?.level == 2)
+    }
 }

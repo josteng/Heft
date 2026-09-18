@@ -986,8 +986,14 @@ public enum LiveDecorator {
             // means the `---` is a rule, and a line that opens a block of its
             // own is that block, not a heading waiting for an underline.
             guard !content.isEmpty else { continue }
+            // `<!--` is in the list because a comment is an HTML block, and
+            // CommonMark does not let one carry a setext underline. Without it
+            // a template whose blank line goes missing turns its own marker
+            // into the heading: both lines then collapse, one as the comment
+            // and one as the underline, and the note grows a tall empty band
+            // where the rule should have been.
             let opensItsOwnBlock = #"^(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d+[.)](?:[ \t]|$)"#
-                + #"|```|~~~|\||=+[ \t]*$|-+[ \t]*$)"#
+                + #"|```|~~~|\||<!--|=+[ \t]*$|-+[ \t]*$)"#
             if firstMatch(opensItsOwnBlock, content as NSString) != nil { continue }
 
             let range = NSRange(
