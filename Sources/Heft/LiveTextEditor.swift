@@ -2866,11 +2866,31 @@ final class HeftTextKit2View: NSTextView {
         let newDepth = outdent ? max(0, depth - 1) : depth + 1
         guard newDepth != depth else { return true }
 
-        // Tabs are Heft's canonical list indentation. Replacing the complete
-        // prefix also normalizes older space-indented and mixed-whitespace
-        // items whenever the user explicitly changes their depth.
-        let editRange = NSRange(location: line.location, length: leading.utf16.count)
-        let replacement = String(repeating: "\t", count: newDepth)
+        let editRange: NSRange
+        let replacement: String
+        if leading.allSatisfy({ $0 == "\t" }) {
+            // One tab in or out, rather than rewriting a run that is already
+            // canonical. Undoing a *replacement* makes AppKit select what it
+            // put back, and a selection on the line raises the format bar over
+            // it and sends the next keystroke to the front of the line.
+            // Undoing an insertion leaves a plain caret, which is what one
+            // level in already did and what the reader expects from every
+            // level after it.
+            if outdent {
+                editRange = NSRange(location: line.location + leading.utf16.count - 1, length: 1)
+                replacement = ""
+            } else {
+                editRange = NSRange(location: line.location + leading.utf16.count, length: 0)
+                replacement = "\t"
+            }
+        } else {
+            // Tabs are Heft's canonical list indentation. Replacing the
+            // complete prefix also normalizes older space-indented and
+            // mixed-whitespace items whenever the user explicitly changes
+            // their depth, and that one does have to rewrite the run.
+            editRange = NSRange(location: line.location, length: leading.utf16.count)
+            replacement = String(repeating: "\t", count: newDepth)
+        }
 
         guard shouldChangeText(in: editRange, replacementString: replacement) else { return true }
         textStorage?.replaceCharacters(in: editRange, with: replacement)
