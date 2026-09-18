@@ -1107,12 +1107,30 @@ enum LiveStyler {
         NSAttributedString(string: marker, attributes: [.font: font]).size().width
     }
 
+    /// The marker as it would be written the ordinary way: no indentation, and
+    /// one space wherever the source ran several together.
+    ///
+    /// The glyph is only ever drawn while the marker is collapsed, and a
+    /// collapsed run of whitespace takes no width on screen. Measuring the
+    /// literal run therefore moved the glyph a further space to the left for
+    /// every space that happened to be typed, walking it out of the gutter the
+    /// line reserves, while the text it belongs to never moved at all.
+    private static func canonicalMarker(_ marker: String) -> String {
+        let squeezed = marker.replacingOccurrences(
+            of: #"[ \t]+"#, with: " ", options: .regularExpression
+        )
+        return String(squeezed.drop(while: { $0 == " " }))
+    }
+
     /// Centre of the rendered glyph relative to the list item's content edge.
-    /// It is derived from the literal source marker, so revealing `-`, `1.` or
-    /// `[ ]` swaps in place rather than making the marker jump sideways.
+    /// It is derived from the source marker, so revealing `-`, `1.` or `[ ]`
+    /// swaps in place rather than making the marker jump sideways. From its
+    /// canonical spelling rather than the literal one, because the whitespace
+    /// the literal carries is collapsed at the moment this is used.
     static func listGlyphOffset(
-        marker: String, kind: ListMarkerKind, font: NSFont
+        marker literal: String, kind: ListMarkerKind, font: NSFont
     ) -> CGFloat {
+        let marker = canonicalMarker(literal)
         let fullWidth = markerWidth(marker, font: font)
         switch kind {
         case .bullet:
