@@ -24,7 +24,17 @@ struct SegmentedModePicker: NSViewRepresentable {
         // an older system. `.tabs` in a capsule is what Calendar's
         // Day/Week/Month/Year is.
         control.borderShape = .capsule
-        if #available(macOS 27.0, *) { control.role = .tabs }
+        if #available(macOS 27.0, *) {
+            control.role = .tabs
+        } else {
+            // 26 has no tabs role, and there a `selectOne` control fills the
+            // selected segment with the accent colour: a blue pill, brighter
+            // than anything else in the sidebar. Naming the bezel colour is
+            // what turns it neutral, which is the one thing 26 and 27 then
+            // agree on. Checked in a 26.6 VM, since the SDK here only draws
+            // the 27 appearance.
+            control.selectedSegmentBezelColor = .unemphasizedSelectedContentBackgroundColor
+        }
         for (index, option) in SidebarMode.allCases.enumerated() {
             control.setLabel(option.title, forSegment: index)
             control.setImage(
