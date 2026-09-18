@@ -35,4 +35,36 @@ struct WritingToolsDefaultTests {
         )
         #expect(seen == NSWritingToolsBehavior.none.rawValue)
     }
+
+    /// The other two that draw through a UI service. Both are on by default
+    /// on a plain `NSTextView`, and the editor names what it wants itself.
+    @Test("A bare view offers neither completion nor predictions")
+    func theOtherServicesAreOffToo() {
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        #expect(view.isAutomaticTextCompletionEnabled == false)
+        #expect(view.inlinePredictionType == .no)
+    }
+
+    @Test("The editor can still turn those on")
+    func theEditorCanOptIntoThoseToo() {
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isAutomaticTextCompletionEnabled = true
+        view.inlinePredictionType = .default
+        #expect(view.isAutomaticTextCompletionEnabled)
+        #expect(view.inlinePredictionType == .default)
+    }
+
+    /// Both are read through the Objective-C accessors as well.
+    @Test("Objective-C sees those overrides too")
+    func objectiveCSeesTheOthers() throws {
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        let completion = try #require(
+            (view as AnyObject).value(forKey: "automaticTextCompletionEnabled") as? Bool
+        )
+        #expect(completion == false)
+        let predictions = try #require(
+            (view as AnyObject).value(forKey: "inlinePredictionType") as? Int
+        )
+        #expect(predictions == NSTextInputTraitType.no.rawValue)
+    }
 }

@@ -107,6 +107,10 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isAutomaticTextCompletionEnabled = false
+        // Named rather than inherited: the view defaults it off so that the
+        // views a test builds offer nothing, and the editor is the one place
+        // that decides what the reader gets.
+        textView.inlinePredictionType = .default
         textView.isAutomaticLinkDetectionEnabled = false
         textView.isAutomaticDataDetectionEnabled = false
         textView.usesFindBar = false
@@ -990,6 +994,25 @@ final class HeftTextKit2View: NSTextView {
     override var writingToolsBehavior: NSWritingToolsBehavior {
         get { writingTools }
         set { writingTools = newValue }
+    }
+
+    /// The other two affordances that draw through a UI service, defaulted off
+    /// for the same reason and in the same place.
+    ///
+    /// Each one opens an `NSRemoteView` connection when it offers itself, and
+    /// in the test process that connection raises on a queue no test owns,
+    /// which takes the whole run down. The editor names what it wants in
+    /// `makeNSView`, so turning them off here changes nothing it does.
+    private var automaticCompletion = false
+    override var isAutomaticTextCompletionEnabled: Bool {
+        get { automaticCompletion }
+        set { automaticCompletion = newValue }
+    }
+
+    private var predictions: NSTextInputTraitType = .no
+    override var inlinePredictionType: NSTextInputTraitType {
+        get { predictions }
+        set { predictions = newValue }
     }
 
     /// The top of the document, which is not `.zero`.
