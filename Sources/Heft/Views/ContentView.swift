@@ -565,7 +565,11 @@ struct EditorPane: View {
         guard let range = NoteText.range(ofLine: line, in: model.text) else { return }
 
         findSelectionGeneration += 1
-        findSelection = FindSelection(range: range, generation: findSelectionGeneration)
+        findSelection = FindSelection(
+            range: range,
+            generation: findSelectionGeneration,
+            reveal: model.pendingLineRevealKind
+        )
     }
 
     private func closeFind() {

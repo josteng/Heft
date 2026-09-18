@@ -4,9 +4,22 @@ import HeftCore
 import HeftVimCore
 import SwiftUI
 
+/// Why the editor is jumping to a line.
+///
+/// A search match is selected and flashed, because the reader is hunting for
+/// it and wants to be shown which one. A link's destination is somewhere they
+/// asked to go: it takes the caret and nothing else. Flashing it reads as an
+/// error, and it only flashed at all when the scroll happened to be short
+/// enough that AppKit had already laid the range out.
+enum LineReveal: Equatable {
+    case match
+    case destination
+}
+
 struct FindSelection: Equatable {
     let range: NSRange
     let generation: Int
+    var reveal: LineReveal = .match
 }
 
 /// Text a command asked the editor to type at the caret.
@@ -213,7 +226,12 @@ struct LiveTextEditor: NSViewRepresentable {
         if let findSelection,
            nsContext.coordinator.lastFindGeneration != findSelection.generation {
             nsContext.coordinator.lastFindGeneration = findSelection.generation
-            nsContext.coordinator.selectFindResult(findSelection.range, in: textView)
+            switch findSelection.reveal {
+            case .match:
+                nsContext.coordinator.selectFindResult(findSelection.range, in: textView)
+            case .destination:
+                nsContext.coordinator.landOn(findSelection.range, in: textView)
+            }
         } else if findSelection == nil {
             nsContext.coordinator.hideSelectionWhenUnfocused(in: textView)
         }
@@ -494,6 +512,29 @@ struct LiveTextEditor: NSViewRepresentable {
             textView.setSelectedRange(match)
             textView.scrollRangeToVisible(match)
             textView.showFindIndicator(for: match)
+        }
+
+        /// Lands on a line the reader asked to go to, rather than showing them
+        /// one they were hunting for.
+        ///
+        /// The caret goes to the start of the line and nothing is selected: a
+        /// link is navigation, so the line it lands on is where typing should
+        /// carry on from, not a block of highlighted text to replace. No find
+        /// indicator either, which is what the yellow flash was.
+        func landOn(_ line: NSRange, in textView: NSTextView) {
+            guard line.location != NSNotFound else { return }
+            revealsSelection = true
+            let caret = NSRange(location: line.location, length: 0)
+            textView.setSelectedRange(caret)
+            restyle(textView)
+            // The restyle can move things above the caret, so it is set again
+            // afterwards, exactly as a find result is.
+            textView.setSelectedRange(caret)
+            if let view = textView as? HeftTextKit2View {
+                view.scrollToTop(of: line)
+            } else {
+                textView.scrollRangeToVisible(line)
+            }
         }
 
         /// Renders as though nothing were focused, for an export: no caret
@@ -964,6 +1005,36 @@ final class HeftTextKit2View: NSTextView {
     ///
     /// `constrainBoundsRect` is what applies the inset, which is why the Vim
     /// `zt` and `zb` scrolls below have always landed correctly.
+    /// How far below the chrome a link's destination comes to rest.
+    static let destinationMargin: CGFloat = 28
+
+    /// Puts `range` just below the top of the viewport.
+    ///
+    /// `scrollRangeToVisible` scrolls the least it can, so the same link lands
+    /// in a different place depending on where the reader happened to be: a
+    /// heading below the fold arrives pinned to the bottom edge with its whole
+    /// section still off screen, and one just above arrives at the top edge.
+    /// A destination should land in one place, with its section under it.
+    ///
+    /// The content inset is part of the sum, not something to leave to the
+    /// clamp: subtracting only the text margin would put the heading under the
+    /// toolbar everywhere except at the very top of the document.
+    func scrollToTop(of range: NSRange) {
+        guard let scrollView = enclosingScrollView,
+              let rect = rect(forSelection: range)
+        else {
+            scrollRangeToVisible(range)
+            return
+        }
+        let clip = scrollView.contentView
+        var origin = clip.bounds.origin
+        origin.y = rect.minY - scrollView.contentInsets.top - Self.destinationMargin
+        clip.scroll(to: clip.constrainBoundsRect(
+            NSRect(origin: origin, size: clip.bounds.size)
+        ).origin)
+        scrollView.reflectScrolledClipView(clip)
+    }
+
     func scrollToDocumentTop() {
         guard let scrollView = enclosingScrollView else {
             scroll(.zero)
@@ -2594,7 +2665,9 @@ final class HeftTextKit2View: NSTextView {
     }
 
     /// Bounding box of a selection in view coordinates.
-    private func rect(forSelection range: NSRange) -> CGRect? {
+    /// Internal rather than private so that a test can ask where a range
+    /// landed using the same geometry the scrolling used to put it there.
+    func rect(forSelection range: NSRange) -> CGRect? {
         guard let manager = textLayoutManager,
               let content = manager.textContentManager,
               let start = content.location(content.documentRange.location, offsetBy: range.location),

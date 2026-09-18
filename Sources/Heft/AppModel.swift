@@ -341,6 +341,9 @@ final class AppModel: ObservableObject {
     /// Line the editor should jump to once the note is open, 1-based. Consumed
     /// by the editor, which clears it.
     @Published var pendingLineReveal: Int?
+    /// Which kind of jump `pendingLineReveal` is. Not published: it is read
+    /// when the line is, and publishing it would run the reveal twice.
+    private(set) var pendingLineRevealKind: LineReveal = .match
 
     /// Asks the editor to take the keyboard. Stamped so that one request is
     /// one focus: a note just named in the sidebar has the caret in the
@@ -791,9 +794,14 @@ final class AppModel: ObservableObject {
     }
 
     /// Opens a note and puts the caret on `line`, as a search result does.
-    func open(_ ref: NoteRef, revealingLine line: Int) {
+    ///
+    /// `reveal` says which of the two this is. A search hit is selected and
+    /// flashed; a link's destination only takes the caret. It is set before
+    /// the line, because publishing the line is what wakes the reveal.
+    func open(_ ref: NoteRef, revealingLine line: Int, as reveal: LineReveal = .match) {
         open(ref, recordingNavigation: true)
         guard current?.relativePath == ref.relativePath else { return }
+        pendingLineRevealKind = reveal
         pendingLineReveal = line
     }
 
@@ -975,7 +983,7 @@ final class AppModel: ObservableObject {
             open(ref)
             return
         }
-        open(ref, revealingLine: line)
+        open(ref, revealingLine: line, as: .destination)
     }
 
     /// The **1-based** line a link names, which is what `revealingLine` takes.
