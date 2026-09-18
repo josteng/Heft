@@ -22,18 +22,16 @@ struct StatusExpiryTests {
         )
     }
 
-    /// How long until `status` is empty, or nil if it was not by the deadline.
-    private func timeUntilClear(_ model: AppModel, deadline: Duration) async -> Duration? {
+    /// How long the model's own expiry took to clear `status`.
+    ///
+    /// Awaits that task rather than polling against a deadline: the expiry
+    /// resumes on the main actor, a loaded suite can hold that for tens of
+    /// seconds, and no deadline a poll picks is both quick and reliable.
+    private func timeToClear(_ model: AppModel) async -> Duration {
         let clock = ContinuousClock()
         let start = clock.now
-        // Read after every wake, the last one included: another suite can
-        // hold the main thread past the deadline, and the expiry's own
-        // continuation may be queued right behind this one.
-        repeat {
-            if model.status.isEmpty { return clock.now - start }
-            try? await Task.sleep(for: .milliseconds(20))
-        } while clock.now - start < deadline
-        return model.status.isEmpty ? clock.now - start : nil
+        await model.statusExpiry?.value
+        return clock.now - start
     }
 
     @Test("A message clears after its lifetime")
@@ -47,7 +45,8 @@ struct StatusExpiryTests {
 
         model.status = "Renamed to Other.md"
         #expect(model.status == "Renamed to Other.md")
-        #expect(await timeUntilClear(model, deadline: .seconds(30)) != nil, "the message should have expired")
+        _ = await timeToClear(model)
+        #expect(model.status.isEmpty, "the message should have expired")
     }
 
     @Test("A newer message restarts the clock")
@@ -60,11 +59,18 @@ struct StatusExpiryTests {
         model.statusLifetime = .seconds(1)
 
         model.status = "First"
+        let first = try #require(model.statusExpiry)
         try await Task.sleep(for: .milliseconds(500))
         model.status = "Second"
-        // If the first message's expiry were still running it would clear
-        // the second half a second in; its own expiry takes the full second.
-        let lived = try #require(await timeUntilClear(model, deadline: .seconds(30)))
-        #expect(lived >= .seconds(1), "the first message's expiry cleared the second after \(lived)")
+
+        // The claim is that the first expiry no longer governs, and that is
+        // a fact about the tasks rather than about the clock: timing it
+        // means racing a suite that can hold the main actor for seconds.
+        #expect(first.isCancelled, "the first message's expiry still governs the second")
+        #expect(model.statusExpiry?.isCancelled == false)
+
+        let lived = await timeToClear(model)
+        #expect(model.status.isEmpty)
+        #expect(lived >= .milliseconds(900), "the second message lived only \(lived)")
     }
 }

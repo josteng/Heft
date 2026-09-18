@@ -302,7 +302,10 @@ final class AppModel: ObservableObject {
     }
     /// How long a message stays. A test shortens it.
     var statusLifetime: Duration = .seconds(5)
-    private var statusExpiry: Task<Void, Never>?
+    /// The pending clear. Readable so a test can await the expiry itself
+    /// rather than poll for it: under a loaded suite the main actor can be
+    /// held for longer than any deadline a poll would pick.
+    private(set) var statusExpiry: Task<Void, Never>?
 
     private func expireStatus() {
         statusExpiry?.cancel()
