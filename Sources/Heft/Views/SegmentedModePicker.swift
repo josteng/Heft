@@ -16,9 +16,15 @@ struct SegmentedModePicker: NSViewRepresentable {
     func makeNSView(context: Context) -> NSSegmentedControl {
         let control = NSSegmentedControl()
         control.segmentCount = SidebarMode.allCases.count
-        control.segmentStyle = .automatic
         control.trackingMode = .selectOne
         control.controlSize = .small
+        // The Tahoe appearance, not the old bezel: `.automatic` and
+        // `.valueSelection` both rule a divider between the segments and
+        // square the ends, which is what made this read as a control from
+        // an older system. `.tabs` in a capsule is what Calendar's
+        // Day/Week/Month/Year is.
+        control.borderShape = .capsule
+        if #available(macOS 27.0, *) { control.role = .tabs }
         for (index, option) in SidebarMode.allCases.enumerated() {
             control.setLabel(option.title, forSegment: index)
             control.setImage(
