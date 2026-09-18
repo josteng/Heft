@@ -832,7 +832,11 @@ enum LiveStyler {
             let leading = marker.prefix { $0 == " " || $0 == "\t" }
             let leadingLength = leading.utf16.count
             let visibleMarker = String(marker.dropFirst(leadingLength))
-            let visibleMarkerWidth = markerWidth(visibleMarker, font: base)
+            // The canonical spelling, because only that much of the run is
+            // collapsed. Any space beyond the first renders either way, so
+            // measuring it here too would pull the revealed line left by a
+            // width it had already accounted for and the item would jump.
+            let visibleMarkerWidth = markerWidth(canonicalMarker(visibleMarker), font: base)
             let glyphOffset = listGlyphOffset(
                 marker: visibleMarker, kind: kind, font: base
             )

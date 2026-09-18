@@ -936,9 +936,9 @@ public enum LiveDecorator {
                 kind = .bullet(shape: .forLevel(depth))
             }
 
-            // The whole marker hides, indentation included: the editor redraws
-            // it as a real bullet, checkbox or numeral, and positions it from
-            // the paragraph indent rather than from leading whitespace.
+            // The marker hides, indentation included: the editor redraws it as
+            // a real bullet, checkbox or numeral, and positions it from the
+            // paragraph indent rather than from leading whitespace.
             let visible = String(marker.dropFirst(leading.utf16.count))
             let semanticLength = visible
                 .trimmingCharacters(in: .whitespacesAndNewlines).utf16.count
@@ -946,8 +946,19 @@ public enum LiveDecorator {
                 location: match.location + leading.utf16.count,
                 length: semanticLength
             )
+            // The marker and the single space that separates it from the item,
+            // and no more of the run than that. A collapsed space takes no
+            // width, so hiding the whole run meant a second space moved
+            // nothing: the caret stood still and the item never shifted, while
+            // the file gained a character. What is left over is ordinary
+            // whitespace and renders as itself.
+            let hidden = min(
+                leading.utf16.count + semanticLength + 1, match.length
+            )
             result.append(MarkdownDecoration(
-                range: match, syntax: [match], revealRange: revealRange,
+                range: match,
+                syntax: [NSRange(location: match.location, length: hidden)],
+                revealRange: revealRange,
                 style: .listMarker(kind: kind, depth: depth)
             ))
         }
