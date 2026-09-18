@@ -80,9 +80,9 @@ struct QuickOpenView: View {
             // Give the result subtree query identity so filtering cannot show
             // stale empty-query rows.
             .id(query)
-            .frame(height: 320)
+            .frame(height: PaletteMetrics.pickerListHeight)
         }
-        .frame(width: 560)
+        .frame(width: PaletteMetrics.pickerWidth)
         .background(PaletteSheetBackground())
         .presentationBackground(.clear)
         .onAppear { isFocused = true }

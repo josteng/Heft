@@ -443,9 +443,9 @@ struct CommandPaletteView: View {
                 .onChange(of: selection) { proxy.scrollTo(selection) }
             }
             .id(query)
-            .frame(height: 240)
+            .frame(height: PaletteMetrics.pickerListHeight)
         }
-        .frame(width: 560)
+        .frame(width: PaletteMetrics.pickerWidth)
         .background(PaletteSheetBackground())
         .presentationBackground(.clear)
         .onAppear { isFocused = true }

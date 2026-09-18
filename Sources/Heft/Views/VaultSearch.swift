@@ -99,9 +99,9 @@ struct VaultSearchView: View {
                 // move. It matters more here, where a hit is two lines tall.
                 .onChange(of: selection) { proxy.scrollTo(selection) }
             }
-            .frame(height: 420)
+            .frame(height: PaletteMetrics.searchListHeight)
         }
-        .frame(width: 680)
+        .frame(width: PaletteMetrics.searchWidth)
         .background(PaletteSheetBackground())
         .presentationBackground(.clear)
         .onKeyPress(.escape) { dismiss(); return .handled }
