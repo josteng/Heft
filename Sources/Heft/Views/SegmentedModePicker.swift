@@ -43,6 +43,12 @@ struct SegmentedModePicker: NSViewRepresentable {
             )
             control.setImageScaling(.scaleProportionallyDown, forSegment: index)
         }
+        // AppKit draws the track for a toolbar, where the surface behind it is
+        // lighter than this sidebar, so at full strength it is the brightest
+        // thing here and louder than the filter field below it. There is no
+        // API for the track's fill, and the vibrant appearances leave it
+        // alone, so the only lever is the whole control's opacity.
+        control.alphaValue = 0.85
         control.target = context.coordinator
         control.action = #selector(Coordinator.segmentChanged(_:))
         // The sidebar gives it the width; without this it keeps its fitting
