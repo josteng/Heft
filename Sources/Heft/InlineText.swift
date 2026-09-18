@@ -121,12 +121,22 @@ enum InlineText {
 
     /// Internal URL scheme used to route clicks in rendered text back into the
     /// app. Real `http(s)` links keep their own destination and open normally.
-    static func heftURL(target: String) -> URL? {
+    private static func heftURL(target: String) -> URL? {
         var components = URLComponents()
         components.scheme = "heft"
         components.host = "follow"
         components.queryItems = [URLQueryItem(name: "target", value: target)]
         return components.url
+    }
+
+    /// The URL for a whole link, heading and block id included.
+    ///
+    /// Every caller wants this one. `heftURL(target:)` takes a bare string and
+    /// the live surface passed `link.target` to it, which silently dropped the
+    /// `#Heading` and landed every sectioned link on line one while the
+    /// rendered preview, which composed the string first, jumped correctly.
+    static func heftURL(_ link: WikiLink) -> URL? {
+        heftURL(target: linkTarget(link))
     }
 
     static func pieces(
@@ -183,7 +193,7 @@ enum InlineText {
 
                 case .wikiLink(let link):
                     let resolved = context.resolve(link)
-                    let url = heftURL(target: linkTarget(link))
+                    let url = heftURL(link)
                     let linkColor = resolved == nil
                         ? Color(nsColor: context.linkColor.withAlphaComponent(0.55))
                         : Color(nsColor: context.linkColor)

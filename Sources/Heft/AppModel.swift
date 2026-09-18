@@ -952,12 +952,59 @@ final class AppModel: ObservableObject {
 
     // MARK: - Links
 
+    /// Opens a note, and when the link names a heading or a block, puts the
+    /// caret on it instead of at the top.
+    ///
+    /// The line is counted against the whole file, frontmatter included,
+    /// because that is what the editor shows and what `pendingLineReveal`
+    /// counts. `embedBody` strips frontmatter first and deliberately does not
+    /// share this: an embed quotes a slice, this one navigates.
+    ///
+    /// A link naming something the note does not have opens it at the top
+    /// rather than refusing, which is what an unresolved heading means to a
+    /// reader who is mid-rename.
+    private func open(_ ref: NoteRef, revealing link: WikiLink) {
+        guard link.heading != nil || link.blockID != nil else {
+            open(ref)
+            return
+        }
+        // `[[#Heading]]` resolves to the note already on screen, whose unsaved
+        // text is the truth; the file on disk is a save behind it.
+        let source = ref.relativePath == current?.relativePath ? text : read(ref.url)
+        guard let source, let line = Self.line(of: link, in: source) else {
+            open(ref)
+            return
+        }
+        open(ref, revealingLine: line)
+    }
+
+    /// The **1-based** line a link names, which is what `revealingLine` takes.
+    ///
+    /// `lineOfHeading` and `lineOfBlockID` both count from 0, and a reveal
+    /// counts from 1, the way a search hit does. Handing the raw index over
+    /// landed every link one line early, and a heading on the first line of a
+    /// note became 0, which a reveal discards: that is why this looked like it
+    /// was doing nothing rather than like it was off by one.
+    ///
+    /// A block id wins over a heading because `#^id` parses as both.
+    static func line(of link: WikiLink, in source: String) -> Int? {
+        let index: Int?
+        if let blockID = link.blockID {
+            index = NoteText.lineOfBlockID(blockID, in: source)
+        } else if let heading = link.heading {
+            index = NoteText.lineOfHeading(heading, in: source)
+        } else {
+            index = nil
+        }
+        return index.map { $0 + 1 }
+    }
+
     func follow(_ link: WikiLink) {
         guard let vaultRoot else { return }
         if let target = index.resolve(link, from: current) {
             // Not tested for markdown here: `open` already hands anything
             // else to the system, and asking twice let the two answers drift.
-            open(target)
+            open(target, revealing: link)
             return
         }
         // An unresolved link proposes a note beside the current one when it

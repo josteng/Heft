@@ -939,7 +939,7 @@ enum LiveStyler {
                 value: resolved ? context.linkColor : context.linkColor.withAlphaComponent(0.55),
                 range: range
             )
-            if let url = InlineText.heftURL(target: link.target) {
+            if let url = InlineText.heftURL(link) {
                 storage.addAttributes([.link: url, .cursor: NSCursor.pointingHand], range: range)
             }
 

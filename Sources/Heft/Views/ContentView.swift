@@ -562,26 +562,7 @@ struct EditorPane: View {
     /// Selects a 1-based line and scrolls to it, which is how a search result
     /// lands on the text it matched instead of at the top of the note.
     private func reveal(line: Int) {
-        let text = model.text as NSString
-        guard text.length > 0, line > 0 else { return }
-
-        var start = 0
-        var number = 1
-        while number < line {
-            let next = NSMaxRange(text.lineRange(for: NSRange(location: start, length: 0)))
-            guard next > start, next < text.length else { break }
-            start = next
-            number += 1
-        }
-
-        var range = text.lineRange(for: NSRange(location: start, length: 0))
-        // Drop the trailing newline so the highlight covers the text alone.
-        while range.length > 0,
-              let last = text.substring(with: NSRange(location: NSMaxRange(range) - 1, length: 1)).first,
-              last == "\n" || last == "\r" {
-            range.length -= 1
-        }
-        guard range.length > 0 else { return }
+        guard let range = NoteText.range(ofLine: line, in: model.text) else { return }
 
         findSelectionGeneration += 1
         findSelection = FindSelection(range: range, generation: findSelectionGeneration)

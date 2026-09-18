@@ -70,6 +70,37 @@ public enum NoteText {
         return headings(in: source).first { $0.text.lowercased() == needle }?.line
     }
 
+    /// The characters of a **1-based** line, without its trailing newline.
+    ///
+    /// The number is 1-based because that is what a search hit carries and
+    /// what the editor reveals against; `headings` and `lineOfBlockID` count
+    /// from 0. Mixing the two is silent: it lands a line early, and a heading
+    /// on the very first line becomes 0, which reveals nothing at all.
+    public static func range(ofLine line: Int, in source: String) -> NSRange? {
+        let text = source as NSString
+        guard text.length > 0, line > 0 else { return nil }
+
+        var start = 0
+        var number = 1
+        while number < line {
+            let next = NSMaxRange(text.lineRange(for: NSRange(location: start, length: 0)))
+            guard next > start, next < text.length else { break }
+            start = next
+            number += 1
+        }
+
+        var range = text.lineRange(for: NSRange(location: start, length: 0))
+        // The highlight covers the text alone.
+        while range.length > 0,
+              let last = text.substring(
+                  with: NSRange(location: NSMaxRange(range) - 1, length: 1)
+              ).first,
+              last == "\n" || last == "\r" {
+            range.length -= 1
+        }
+        return range.length > 0 ? range : nil
+    }
+
     /// Line index carrying a `^blockid` marker.
     public static func lineOfBlockID(_ blockID: String, in source: String) -> Int? {
         let needle = "^" + blockID
