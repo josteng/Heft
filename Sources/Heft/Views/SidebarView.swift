@@ -421,44 +421,20 @@ struct SidebarView: View {
 
     /// Switches which list the sidebar shows.
     ///
-    /// Hand-rolled rather than a `Picker`. In the sidebar `.segmented`, and
-    /// macOS 27's `.tabs`, both draw the flat control without icons;
-    /// `.palette` shrinks the icons past legibility. The labels matter because
-    /// "Recent" and "Tags" are not guessable from a clock and a hash. The
-    /// selection is a glass pill that slides, as Liquid Glass controls do.
+    /// The real `NSSegmentedControl`, not a SwiftUI `Picker`. It is the
+    /// picker *styles* that cannot draw an icon beside a label, which is
+    /// what a hand-rolled pill was built for; the control underneath has
+    /// taken both for years. Going back to it restores what only AppKit
+    /// draws: the resting fill rather than a permanent glass pill, the
+    /// hover capsule, the morph between segments, and dragging the
+    /// selection across them.
+    ///
+    /// `.small`, because the three labels with their icons want 209pt and a
+    /// sidebar at its 240pt minimum has about 216pt to give. `.regular`
+    /// wants 221pt and would be clipped there.
     private var modePicker: some View {
-        GeometryReader { proxy in
-            let segmentWidth = proxy.size.width / CGFloat(SidebarMode.allCases.count)
-            ZStack(alignment: .leading) {
-                Color.clear
-                    .glassEffect(.regular.interactive(), in: .capsule)
-                    .frame(width: segmentWidth, height: proxy.size.height)
-                    .offset(x: segmentWidth * CGFloat(SidebarMode.allCases.firstIndex(of: mode) ?? 0))
-
-                HStack(spacing: 0) {
-                    ForEach(SidebarMode.allCases) { option in
-                        let isSelected = mode == option
-                        Button {
-                            filter = ""
-                            withAnimation(.snappy(duration: 0.25)) { mode = option }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: option.symbol).font(.system(size: 12))
-                                Text(option.title).font(.system(size: 11, weight: .medium))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                        .help(option.title)
-                    }
-                }
-            }
-        }
-        .frame(height: 24)
-        .padding(2)
-        .background(Color(nsColor: .quaternarySystemFill), in: .capsule)
+        SegmentedModePicker(mode: $mode, filter: $filter)
+            .frame(height: 20)
     }
 
     /// Tags, most used first, each expanding to the notes carrying it.
