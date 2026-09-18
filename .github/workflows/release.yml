@@ -34,7 +34,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-26
+    runs-on: xcode-27
     environment: release
     steps:
       - uses: actions/checkout@v7
@@ -48,16 +48,21 @@ jobs:
           echo "Releasing $VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      # Still Xcode 26 on macos-26. Heft is tested against Xcode 27, but the
-      # xcode-27 runner image only carried a beta when 0.4.1 shipped, so that
-      # release was built locally with Scripts/release.sh. Move this job to
-      # runs-on: xcode-27 once that image has the release Xcode 27.
-      - name: Select the newest Xcode 26
+      # Images are one per major Xcode now, so xcode-27 is the only one with
+      # the toolchain Heft is tested against; macos-26 stops at Xcode 26 and
+      # built a release with a compiler no test had ever seen. Nothing selects
+      # an Xcode here because the image installs exactly one and points at it
+      # already; the check is what fails loudly if that stops being true.
+      #
+      # The image is arm64-only and still a public preview, so it can queue or
+      # change under a run. A release that cannot wait is still buildable by
+      # hand with Scripts/release.sh --notarize, which is how 0.4.1 shipped.
+      - name: Check the toolchain is Xcode 27
         run: |
-          XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
-          echo "Using $XCODE"
-          sudo xcode-select -s "$XCODE"
-          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+          FOUND="$(xcodebuild -version | sed -n '1s/^Xcode //p')"
+          [[ "$FOUND" == 27.* ]] || { echo "Expected Xcode 27, found $FOUND"; exit 1; }
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
 
       - name: Import the Developer ID certificate
         env:
