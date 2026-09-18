@@ -68,7 +68,12 @@ struct QuickOpenView: View {
                     .background(OverlayScrollerConfiguration())
                     #endif
                 }
-                .onChange(of: selection) { proxy.scrollTo(selection, anchor: .center) }
+                // No anchor, so the list scrolls the least it can to reveal the
+                // row and holds still while the selection is already visible.
+                // Naming one asks for the row to be put *there* on every move,
+                // which scrolls from the first arrow press and pins the
+                // selection mid-list, unlike every other menu on the system.
+                .onChange(of: selection) { proxy.scrollTo(selection) }
             }
             // A sheet's scrolling subtree can retain its initial children even
             // while the query and surrounding controls update.

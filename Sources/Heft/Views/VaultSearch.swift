@@ -94,7 +94,10 @@ struct VaultSearchView: View {
                     }
                 }
                 .id(visible.query)
-                .onChange(of: selection) { proxy.scrollTo(selection, anchor: .center) }
+                // Anchorless for the reason Quick Open is: the least scrolling
+                // that reveals the row, rather than repositioning it on every
+                // move. It matters more here, where a hit is two lines tall.
+                .onChange(of: selection) { proxy.scrollTo(selection) }
             }
             .frame(height: 420)
         }

@@ -414,22 +414,33 @@ struct CommandPaletteView: View {
 
             Divider()
 
-            ScrollView {
-                VStack(spacing: 1) {
-                    ForEach(Array(results.enumerated()), id: \.element.id) { index, command in
-                        CommandRow(
-                            command: command,
-                            title: command.title(on: model),
-                            isSelected: index == selection,
-                            isEnabled: command.isEnabled(on: model)
-                        )
-                            .onTapGesture {
-                                selection = index
-                                runSelection()
-                            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 1) {
+                        ForEach(Array(results.enumerated()), id: \.element.id) { index, command in
+                            CommandRow(
+                                command: command,
+                                title: command.title(on: model),
+                                isSelected: index == selection,
+                                isEnabled: command.isEnabled(on: model)
+                            )
+                                // The row's own identity is the command; the
+                                // index is what `scrollTo` is given, because
+                                // the selection is an index.
+                                .id(index)
+                                .onTapGesture {
+                                    selection = index
+                                    runSelection()
+                                }
+                        }
                     }
+                    .padding(6)
                 }
-                .padding(6)
+                // Anchorless, as in Quick Open: the least scrolling that
+                // reveals the row. Without this the arrow keys walk the
+                // highlight off the bottom of the seven visible rows and the
+                // list never moves, since the registry is far longer.
+                .onChange(of: selection) { proxy.scrollTo(selection) }
             }
             .id(query)
             .frame(height: 240)
