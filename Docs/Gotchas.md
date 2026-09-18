@@ -170,6 +170,11 @@ preferences or the icon.
 - **A styling pass must not scroll.** `keepCaretVisible` scrolls only when the
   caret has moved and is off screen; a pass that ran `scrollRangeToVisible`
   pulled the page to a caret the reader had left behind.
+- **The top of the document is `-contentInsets.top`, not zero.** The scroll
+  view runs under the toolbar, so `scroll(.zero)` opens a note the chrome's
+  height too high. A note shorter than the window is clamped back and looks
+  correct, which is why only long ones showed it. `scrollToDocumentTop` goes
+  through `constrainBoundsRect`, as the Vim `zt` scroll always has.
 - **Lay the document out eagerly** (`ensureLayout`) after every restyle.
   TextKit estimates the height of regions it has not reached as ordinary
   lines, and this editor's fragments are nothing like ordinary, so a click

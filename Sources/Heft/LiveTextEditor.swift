@@ -249,14 +249,14 @@ struct LiveTextEditor: NSViewRepresentable {
                     nsContext.coordinator.load(text, into: textView)
                     textView.setSelectedRange(NSRange(location: 0, length: 0))
                     textView.resetVim()
-                    textView.scroll(.zero)
+                    textView.scrollToDocumentTop()
                 }
             } else if switchedNote {
                 // Two notes can hold the same text, and the buffer is then
                 // never replaced. The reader still moved.
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
                 textView.resetVim()
-                textView.scroll(.zero)
+                textView.scrollToDocumentTop()
             }
             nsContext.coordinator.restyle(textView)
         } else if textView.string != text {
@@ -949,6 +949,32 @@ final class HeftTextKit2View: NSTextView {
     override var writingToolsBehavior: NSWritingToolsBehavior {
         get { writingTools }
         set { writingTools = newValue }
+    }
+
+    /// The top of the document, which is not `.zero`.
+    ///
+    /// The scroll view runs under the toolbar and AppKit insets it by the
+    /// chrome's height, so the first line sits at `y = -contentInsets.top`.
+    /// `scroll(.zero)` asks for `y = 0` instead, and whether that is wrong
+    /// depends on the length of the note: a short one is clamped straight back
+    /// to `-inset` and looks right, while a long one accepts `0` as a legal
+    /// offset and starts exactly the toolbar's height too high, with its first
+    /// line behind the chrome. That is why this only ever showed up on notes
+    /// longer than the window.
+    ///
+    /// `constrainBoundsRect` is what applies the inset, which is why the Vim
+    /// `zt` and `zb` scrolls below have always landed correctly.
+    func scrollToDocumentTop() {
+        guard let scrollView = enclosingScrollView else {
+            scroll(.zero)
+            return
+        }
+        let clip = scrollView.contentView
+        let top = NSPoint(x: clip.bounds.origin.x, y: -scrollView.contentInsets.top)
+        clip.scroll(to: clip.constrainBoundsRect(
+            NSRect(origin: top, size: clip.bounds.size)
+        ).origin)
+        scrollView.reflectScrolledClipView(clip)
     }
 
     var onAttachment: ((NSPasteboard) -> String?)?
