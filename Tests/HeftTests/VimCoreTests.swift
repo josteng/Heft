@@ -1147,7 +1147,7 @@ struct VimCoreTests {
     }
 
     @Test("External Neovim agrees on prose objects from every cursor position")
-    func neovimProseObjectMatrix() throws {
+    func neovimProseObjectMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         // Sentence and paragraph boundaries are the part of this surface with
         // the most Vim folklore in it — a sentence filling its line takes the
@@ -1183,11 +1183,11 @@ struct VimCoreTests {
                 }
             }
         }
-        Self.expectNeovimAgrees(nvim, on: cases)
+        await Self.expectNeovimAgrees(nvim, on: cases)
     }
 
     @Test("External Neovim agrees on tag objects, case operators, and backward word ends")
-    func neovimTagAndCaseMatrix() throws {
+    func neovimTagAndCaseMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         let tags = "<div class=\"a\">outer <b>bold text</b> tail</div>\n<p>plain</p>\n"
         var cases: [OracleCase] = []
@@ -1219,11 +1219,11 @@ struct VimCoreTests {
                 ))
             }
         }
-        Self.expectNeovimAgrees(nvim, on: cases)
+        await Self.expectNeovimAgrees(nvim, on: cases)
     }
 
     @Test("External Neovim agrees on straight quote objects from every cursor position")
-    func neovimQuoteObjectMatrix() throws {
+    func neovimQuoteObjectMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         // The typographic forms have no oracle — Vim has no object for them —
         // so what is checked here is that adding them left the straight-quote
@@ -1256,7 +1256,7 @@ struct VimCoreTests {
                 }
             }
         }
-        Self.expectNeovimAgrees(nvim, on: cases)
+        await Self.expectNeovimAgrees(nvim, on: cases)
     }
 
     @Test("External Neovim agrees on registers, marks, and macros")
@@ -1554,11 +1554,15 @@ struct VimCoreTests {
     /// the kernel forking. Inside a batch each case reloads its own fixture
     /// from disk, starts with an empty register, and writes its result to
     /// its own file.
+    /// Awaited rather than waited on: `group.wait()` blocks the thread the
+    /// test runs on, which is one of Swift concurrency's cooperative threads,
+    /// and a batch holds it for tens of seconds. Block enough of them and
+    /// unrelated tests whose work is a `Task` are left unscheduled.
     private static func expectNeovimAgrees(
         _ executable: URL,
         on cases: [OracleCase],
         sourceLocation: SourceLocation = #_sourceLocation
-    ) {
+    ) async {
         let batchSize = 64
         let batches = stride(from: 0, to: cases.count, by: batchSize).map {
             Array(cases[$0..<min($0 + batchSize, cases.count)])
@@ -1589,7 +1593,9 @@ struct VimCoreTests {
                 }
             }
         }
-        group.wait()
+        await withCheckedContinuation { continuation in
+            group.notify(queue: .global(qos: .background)) { continuation.resume() }
+        }
         for (index, item) in cases.enumerated() {
             switch oracles[index] {
             case .success(let oracle)?:
