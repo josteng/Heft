@@ -2892,6 +2892,23 @@ final class HeftTextKit2View: NSTextView {
             replacement = String(repeating: "\t", count: newDepth)
         }
 
+        // Put the caret back where the reader left it rather than where the
+        // edit happened. Undoing an insertion leaves AppKit's insertion point
+        // at the change, and an indent changes the front of the line, so
+        // undoing one dropped the caret in front of the marker and the next
+        // keystroke landed there.
+        //
+        // Registered before the text change so that it runs after it, since a
+        // group is undone in reverse: the caret can only be placed once the
+        // line it refers to is back.
+        //
+        // This is Vim's `u` as much as ⌘Z, and deliberately: Vim saves the
+        // cursor with the change and restores it on undo, which the Neovim
+        // oracle confirms, so both want this rule rather than one each.
+        undoManager?.registerUndo(withTarget: self) { view in
+            view.setSelectedRange(selection)
+        }
+
         guard shouldChangeText(in: editRange, replacementString: replacement) else { return true }
         textStorage?.replaceCharacters(in: editRange, with: replacement)
         didChangeText()

@@ -17,6 +17,11 @@ struct ListIndentEditShapeTests {
     final class Recorder: NSObject, NSTextViewDelegate {
         var ranges: [NSRange] = []
         var replacements: [String] = []
+        /// A view outside a window finds no undo manager up the responder
+        /// chain, so the delegate hands it one.
+        let manager = UndoManager()
+
+        func undoManager(for view: NSTextView) -> UndoManager? { manager }
 
         func textView(
             _ view: NSTextView, shouldChangeTextIn range: NSRange,
@@ -73,6 +78,52 @@ struct ListIndentEditShapeTests {
         let edit = indenting("- x")
         #expect(edit.range.length == 0)
         #expect(edit.result == "\t- x")
+    }
+
+    /// Undoing an insertion leaves AppKit's insertion point at the change,
+    /// and an indent changes the front of the line, so without this the caret
+    /// came back in front of the marker and the next keystroke landed there.
+    ///
+    /// The caret is deliberately moved between the indent and the undo, the
+    /// way leaving insert mode or a restyle moves it in the editor: without
+    /// it, AppKit's own answer and the right one are the same and the test
+    /// could not tell them apart.
+    @Test("Undoing an indent puts the caret back where it was")
+    func undoRestoresTheCaret() {
+        let recorder = Recorder()
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.allowsUndo = true
+        view.string = "\t- x"
+        view.delegate = recorder
+        let before = NSRange(location: 4, length: 0)
+        view.setSelectedRange(before)
+        view.insertTab(nil)
+        #expect(view.string == "\t\t- x")
+
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        recorder.manager.undo()
+        #expect(view.string == "\t- x")
+        #expect(view.selectedRange() == before)
+    }
+
+    @Test("Undoing an outdent puts the caret back too")
+    func undoOfAnOutdentRestoresTheCaret() {
+        let recorder = Recorder()
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.allowsUndo = true
+        view.string = "\t\t- x"
+        view.delegate = recorder
+        let before = NSRange(location: 5, length: 0)
+        view.setSelectedRange(before)
+        view.insertBacktab(nil)
+        #expect(view.string == "\t- x")
+
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        recorder.manager.undo()
+        #expect(view.string == "\t\t- x")
+        #expect(view.selectedRange() == before)
     }
 
     /// The one case that still rewrites the run, and deliberately: spaces are
