@@ -59,6 +59,22 @@ struct SidebarSelection: Equatable {
     var count: Int { paths.count }
     func contains(_ path: String) -> Bool { paths.contains(path) }
 
+    /// The selection once the open note has become `path`.
+    ///
+    /// One file picked out is not a set to act on, it is where the reader
+    /// last clicked, and a click on a row is also how that note was opened.
+    /// So it follows the open note: after arriving somewhere by the calendar,
+    /// Quick Open or a wikilink, the light otherwise stays on a note that is
+    /// no longer open, and `holdsFile` stops the open one from lighting at all.
+    ///
+    /// Several rows picked out is an operation in progress and is left alone,
+    /// and an empty selection stays empty, so that the open note keeps lighting
+    /// the way it already does and ⌘⌫ still has nothing to act on.
+    func following(openNote path: String?) -> SidebarSelection {
+        guard let path, count == 1, holdsFile, !contains(path) else { return self }
+        return SidebarSelection(paths: [path], anchor: path)
+    }
+
     /// Applies a click on `path`, with the rows as they are drawn.
     mutating func click(
         _ path: String, _ click: Click, visible: [String], folders visibleFolders: Set<String> = []

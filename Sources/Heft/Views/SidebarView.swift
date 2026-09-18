@@ -140,6 +140,14 @@ struct SidebarView: View {
             // has to be somewhere it can watch. `sidebarKeys` is that place.
             model.sidebarKeys.selection = selection
         }
+        .onChange(of: model.current?.relativePath) { _, path in
+            // The light follows the note that is open. Opening one deliberately
+            // does not rearrange the tree, but a row left lit from an earlier
+            // click points at a note that is no longer open, and while it is
+            // lit the open one cannot light at all. The mirror is left to the
+            // handler above, which this assignment wakes.
+            selection = selection.following(openNote: path)
+        }
         .onChange(of: model.tree) { _, tree in
             // A trashed or moved row must leave the selection, or the next
             // ⌘⌫ asks about files that are already gone and counts them.
