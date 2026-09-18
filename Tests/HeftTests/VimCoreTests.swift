@@ -1013,6 +1013,54 @@ struct VimCoreTests {
         #expect(visualEnd.text == "albeta gamma\n")
     }
 
+    /// Hands a text view an undo manager, which it otherwise only finds by
+    /// looking up the responder chain to a window it does not have.
+    private final class UndoHost: NSObject, NSTextViewDelegate {
+        let manager = UndoManager()
+        func undoManager(for view: NSTextView) -> UndoManager? { manager }
+    }
+
+    /// Where the cursor belongs after undoing an indent.
+    ///
+    /// Heft's Tab and Vim's `>>` make the same change, so Vim's own answer
+    /// settles it: it saves the cursor with the change and restores it, rather
+    /// than leaving it at the edit or on the line's first non-blank. Other
+    /// editors' Vim emulations differ here, which is the reason to ask the
+    /// real one rather than copy a plausible-looking rule.
+    @Test("External Neovim agrees where undoing an indent leaves the cursor")
+    @MainActor
+    func neovimAgreesOnTheUndoCursor() throws {
+        guard let nvim = Self.neovimURL else { return }
+        let source = "\t- x"
+        // On the `x`, which is where a reader typing the item would be.
+        let caret = 3
+        // `0` between the indent and the undo moves the cursor to the margin,
+        // the way leaving insert mode or a restyle moves it in the editor.
+        // Without it the undo has nowhere to put the cursor but where it
+        // already is, and the test would pass whatever the editor did.
+        let oracle = try Self.runNeovimCursor(
+            nvim, source: source, cursor: caret, command: ">>0u"
+        )
+
+        let host = UndoHost()
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.allowsUndo = true
+        view.string = source
+        view.delegate = host
+        view.setSelectedRange(NSRange(location: caret, length: 0))
+        view.insertTab(nil)
+        #expect(view.string == "\t\t- x")
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        host.manager.undo()
+
+        #expect(view.string == source)
+        #expect(view.selectedRange().location == oracle)
+        // Stated outright as well, so a broken oracle cannot quietly agree
+        // with a broken editor.
+        #expect(oracle == caret)
+    }
+
     @Test("External Neovim agrees on representative buffer edits")
     func neovimDifferential() throws {
         guard let nvim = Self.neovimURL else { return }
