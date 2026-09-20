@@ -176,7 +176,9 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Open document
-    @Published private(set) var current: NoteRef?
+    @Published private(set) var current: NoteRef? {
+        didSet { if current?.url != oldValue?.url { updateProxyIcon() } }
+    }
     /// The open note's source. Deliberately not `@Published`.
     ///
     /// The editor writes the whole note here on every keystroke, and every
@@ -213,6 +215,17 @@ final class AppModel: ObservableObject {
 
     private func updateEditedMarker() {
         registry.window(for: workspaceID)?.isDocumentEdited = saveIsBlocked
+    }
+
+    /// Hands the open note's file to the window, which is what puts the
+    /// document icon beside the title.
+    ///
+    /// That icon is the system's own handle on the file: it drags into a
+    /// terminal or the Finder as the note itself, and ⌘-clicking the title
+    /// walks up the folders it sits in. Heft draws no handle of its own for
+    /// this, because AppKit's is already where a Mac user reaches for it.
+    private func updateProxyIcon() {
+        registry.window(for: workspaceID)?.showDocumentIcon(for: current?.url)
     }
     /// Bumped whenever `text` is replaced from outside the editor, so the
     /// NSTextView knows to reset rather than treat it as user typing.

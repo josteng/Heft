@@ -464,8 +464,12 @@ final class VaultRegistry: ObservableObject {
 
     func register(window: NSWindow, for owner: UUID) {
         workspaceWindows[owner] = WeakWindow(window)
-        // The window may arrive while a save is already blocked.
-        window.isDocumentEdited = workspaceModels[owner]?.value?.saveIsBlocked ?? false
+        // The window may arrive while a save is already blocked, and it
+        // arrives after the note it is showing was opened, so it is told
+        // about both rather than waiting for the next change.
+        let model = workspaceModels[owner]?.value
+        window.isDocumentEdited = model?.saveIsBlocked ?? false
+        window.showDocumentIcon(for: model?.current?.url)
     }
 
     func window(for owner: UUID) -> NSWindow? {
@@ -566,5 +570,19 @@ final class VaultRegistry: ObservableObject {
             guard candidateOwner != owner else { return false }
             return candidate == path || (includingDescendants && candidate.hasPrefix(path + "/"))
         }
+    }
+}
+
+extension NSWindow {
+    /// Puts the note's file behind the window title, as its document icon.
+    ///
+    /// The icon is what a reader drags into a terminal or the Finder to get
+    /// at the note itself, and ⌘-clicking the title walks up the folders it
+    /// sits in. Shown rather than left to appear on hover, which is what a
+    /// title bar does by default since Big Sur: a handle nobody knows is
+    /// there is not a handle.
+    func showDocumentIcon(for url: URL?) {
+        representedURL = url
+        standardWindowButton(.documentIconButton)?.isHidden = url == nil
     }
 }
