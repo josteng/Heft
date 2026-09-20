@@ -61,6 +61,15 @@ struct QuickOpenView: View {
                             ResultRow(note: note, isSelected: index == selection)
                                 .id(index)
                                 .onTapGesture { selection = index; openSelection() }
+                                // A result is a file, and dragging one out
+                                // beats opening it to find its path. The
+                                // gesture is simultaneous so a click still
+                                // opens it, and only fires once the pointer
+                                // has travelled.
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 6)
+                                        .onChanged { _ in beginFileDrag(for: note.url) }
+                                )
                         }
                     }
                     .padding(6)

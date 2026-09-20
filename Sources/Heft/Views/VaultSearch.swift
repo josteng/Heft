@@ -88,6 +88,12 @@ struct VaultSearchView: View {
                                     selection = index
                                     openSelection()
                                 }
+                                // As in Quick Open: a hit is a file, and it
+                                // drags out as one without being opened.
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 6)
+                                        .onChanged { _ in beginFileDrag(for: hit.note.url) }
+                                )
                             }
                         }
                         .padding(6)
