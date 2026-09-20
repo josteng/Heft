@@ -21,7 +21,6 @@ final class ScriptedHost: VaultHost {
     private(set) var asked: [String] = []
 
     var names: [String] = []
-    var paths: [String] = []
     var confirmations: [Bool] = []
     var folders: [URL] = []
     var exportDestinations: [URL] = []
@@ -36,11 +35,6 @@ final class ScriptedHost: VaultHost {
     func name(title: String, message: String, initial: String, confirm: String) -> String? {
         asked.append("name: \(title)")
         return names.isEmpty ? nil : names.removeFirst()
-    }
-
-    func path(title: String, message: String) -> String? {
-        asked.append("path: \(title)")
-        return paths.isEmpty ? nil : paths.removeFirst()
     }
 
     func confirm(title: String, message: String, confirm: String, destructive: Bool) -> Bool {

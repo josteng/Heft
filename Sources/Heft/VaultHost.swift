@@ -26,9 +26,6 @@ protocol VaultHost {
     /// A single-field name prompt. Nil when cancelled or left empty.
     func name(title: String, message: String, initial: String, confirm: String) -> String?
 
-    /// A path prompt, wider than a name field. Nil when cancelled or empty.
-    func path(title: String, message: String) -> String?
-
     /// A yes/no. `destructive` marks the confirming button, which is what
     /// makes it red and what stops Return from being the safe answer.
     func confirm(title: String, message: String, confirm: String, destructive: Bool) -> Bool

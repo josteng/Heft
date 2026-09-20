@@ -630,10 +630,8 @@ enum AppIntegrationCheck {
         }
         expect(spacedAppeared, "a folder with a space appears in the tree")
 
-        let escapedFolder = spacedFolder.path.replacingOccurrences(of: " ", with: "\\ ")
-        expect(files.goToPath(escapedFolder), "an escaped folder path is accepted")
-        expectEqual(files.scopePath, "Thesis", "an escaped folder path focuses that folder")
-
+        // A path with spaces reaches its note through Quick Open, which
+        // takes the escaped form a terminal copies.
         let escapedNote = spacedFolder
             .appendingPathComponent("Questions To Ask.md").path
             .replacingOccurrences(of: " ", with: "\\ ")
@@ -641,15 +639,13 @@ enum AppIntegrationCheck {
             files.index.note(atRelativePath: "Thesis/Questions To Ask.md") != nil
         }
         expect(noteIndexed, "a note in a spaced folder is indexed")
-        expect(files.goToPath(escapedNote), "an escaped note path is accepted")
         expectEqual(
-            files.current?.relativePath, "Thesis/Questions To Ask.md",
-            "an escaped note path opens that note"
+            files.noteAtPath(escapedNote)?.relativePath, "Thesis/Questions To Ask.md",
+            "an escaped note path names that note"
         )
-
         expect(
-            !files.goToPath("\(root.path)/Nowhere\\ At\\ All.md"),
-            "a path that points at nothing is refused"
+            files.noteAtPath("\(root.path)/Nowhere\\ At\\ All.md") == nil,
+            "a path that points at nothing names none"
         )
         files.showEntireVault()
 

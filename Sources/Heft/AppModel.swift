@@ -2909,24 +2909,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Asks for a path and goes wherever it points.
-    ///
-    /// The system's own Go to Folder sheet is not ours to preprocess, and it
-    /// takes a literal path, so a shell-escaped one pasted into a file panel
-    /// simply fails to resolve. This is the entry point that accepts the forms
-    /// a path is actually copied in; `PathInput` documents which and why.
-    func promptToGoToPath() {
-        guard let entered = host.path(
-            title: "Go to Path",
-            message: "Paste a path to a note or folder. Escaped paths, quoted "
-                + "paths and file:// URLs are all accepted."
-        ) else { return }
-        goToPath(entered)
-    }
-
-    /// Focuses a folder, opens a note, or offers to open a vault, depending on
-    /// what the path turns out to be.
-    @discardableResult
     /// The note a typed or pasted path names, whether it is absolute or
     /// relative to the vault, or nil when it names no note in this vault.
     ///
@@ -2944,64 +2926,6 @@ final class AppModel: ObservableObject {
             relative = normalized
         }
         return index.note(atRelativePath: relative)
-    }
-
-    func goToPath(_ raw: String) -> Bool {
-        guard let normalized = PathInput.normalize(raw) else { return false }
-        let url = URL(fileURLWithPath: normalized)
-
-        var isFolder: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else {
-            status = "There is nothing at \(normalized)"
-            return false
-        }
-
-        // With no vault open, any folder is a candidate to become one.
-        guard let vaultRoot else {
-            guard isFolder.boolValue else {
-                status = "Open a vault before opening a note"
-                return false
-            }
-            openVault(at: url)
-            return true
-        }
-
-        let rootPath = vaultRoot.standardizedFileURL.path
-        let target = url.standardizedFileURL.path
-        guard target == rootPath || target.hasPrefix(rootPath + "/") else {
-            // Outside the vault entirely. A folder can become its own vault,
-            // which is the same offer the scope picker makes.
-            guard isFolder.boolValue else {
-                status = "\(url.lastPathComponent) is outside \(vaultName)"
-                return false
-            }
-            pendingOutsideVaultFolder = url
-            return true
-        }
-
-        if target == rootPath {
-            showEntireVault()
-            return true
-        }
-
-        let relative = String(target.dropFirst(rootPath.count + 1))
-        if isFolder.boolValue {
-            guard let folder = tree?.flattened().first(where: {
-                $0.isFolder && $0.relativePath == relative
-            }) else {
-                status = "That folder is not available in the vault yet"
-                return false
-            }
-            setScope(to: folder)
-            return true
-        }
-
-        guard let note = index.note(atRelativePath: relative) else {
-            status = "That note is not in the vault index yet"
-            return false
-        }
-        open(note)
-        return true
     }
 
     func promptForScope() {

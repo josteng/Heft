@@ -48,9 +48,12 @@ menu and forgotten in the palette.
 Quick Open answers a path as well as a name, whether it is vault-relative
 or absolute, escaped, quoted or a `file://` URL, and puts the note it names
 first. A name search cannot find a note by where it lives, which is the one
-thing pasting a path is for, so it belongs there rather than in a command of
-its own; the File menu keeps Go to Path for the rest of what it does, which
-is focusing a folder and offering one outside the vault as a vault.
+thing pasting a path is for, so it belongs where notes are looked up rather
+than in a prompt of its own. There was such a prompt, Go to Path, and it
+went: what it did beyond this was focus a folder, unfocus, and offer a
+folder outside the vault as a vault, and the first two read as side effects
+of typing a path while the third is what choosing a folder outside the
+vault already offers.
 
 The palette also carries what was otherwise only a keystroke or a menu away:
 Quick Open, the vault search and Find in note; the formatting bar's own six,

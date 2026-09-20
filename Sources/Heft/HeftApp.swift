@@ -166,10 +166,6 @@ struct HeftCommands: Commands {
                     .disabled(registry.recentVaults.isEmpty)
             }
             .disabled(registry.recentVaults.isEmpty)
-            // No ⇧⌘G: that is Find Previous. The system's Go to Folder sheet
-            // cannot be given a shell-escaped path, which is the form one is
-            // almost always copied in, so this is Heft's own way in.
-            Button("Go to Path…") { model?.promptToGoToPath() }
             // The proposal verbs are only reachable if something tells an
             // agent they exist, and a vault of markdown says nothing. This
             // writes that into the vault's CLAUDE.md and AGENTS.md, where a
