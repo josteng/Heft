@@ -2927,6 +2927,25 @@ final class AppModel: ObservableObject {
     /// Focuses a folder, opens a note, or offers to open a vault, depending on
     /// what the path turns out to be.
     @discardableResult
+    /// The note a typed or pasted path names, whether it is absolute or
+    /// relative to the vault, or nil when it names no note in this vault.
+    ///
+    /// What lets Quick Open answer a path as well as a name: the two are
+    /// told apart by trying, not by guessing at slashes, and a name that
+    /// happens to look like a path costs one failed lookup.
+    func noteAtPath(_ raw: String) -> NoteRef? {
+        guard let vaultRoot, let normalized = PathInput.normalize(raw) else { return nil }
+        let root = vaultRoot.standardizedFileURL.path
+        let relative: String
+        if normalized.hasPrefix("/") {
+            guard normalized.hasPrefix(root + "/") else { return nil }
+            relative = String(normalized.dropFirst(root.count + 1))
+        } else {
+            relative = normalized
+        }
+        return index.note(atRelativePath: relative)
+    }
+
     func goToPath(_ raw: String) -> Bool {
         guard let normalized = PathInput.normalize(raw) else { return false }
         let url = URL(fileURLWithPath: normalized)

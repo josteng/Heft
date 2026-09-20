@@ -37,7 +37,7 @@ struct PaletteReachTests {
 
     @Test("The window's own menus are reachable too")
     func menuVerbsAreReachable() throws {
-        for id in ["newNote", "goToPath", "newVault", "saveNow", "settings",
+        for id in ["newNote", "newVault", "saveNow", "settings",
                    "agentAccess", "focusEntireVault", "focusFolder",
                    "revealScopeInFinder"] {
             _ = try command(id)

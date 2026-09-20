@@ -28,16 +28,23 @@ struct QuickOpenView: View {
         // the empty list then fell through to the alphabetical tiebreak.
         // `VaultIndex.search` saturates for the typed case, where it belongs.
         let frecency = model.noteFrecency
-        return model.index.search(query, limit: 60) { note in
+        let found = model.index.search(query, limit: 60) { note in
             frecency?.score(note.relativePath) ?? 0
         }
+        // A pasted path is answered here rather than by a command of its
+        // own: it is the one thing a name search cannot do, since a path is
+        // matched by where a note is and a name by what it is called. An
+        // agent or a terminal hands over the long, escaped, quoted or
+        // file:// form, and it lands at the top of the list.
+        guard let atPath = model.noteAtPath(query) else { return found }
+        return [atPath] + found.filter { $0.relativePath != atPath.relativePath }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search notes", text: $query)
+                TextField("Search notes, or paste a path", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 16))
                     .focused($isFocused)

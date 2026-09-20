@@ -45,6 +45,13 @@ a palette must not be a faster way to lose a note. A test holds the two
 lists against each other, because the failure here is a verb added to the
 menu and forgotten in the palette.
 
+Quick Open answers a path as well as a name, whether it is vault-relative
+or absolute, escaped, quoted or a `file://` URL, and puts the note it names
+first. A name search cannot find a note by where it lives, which is the one
+thing pasting a path is for, so it belongs there rather than in a command of
+its own; the File menu keeps Go to Path for the rest of what it does, which
+is focusing a folder and offering one outside the vault as a vault.
+
 The palette also carries what was otherwise only a keystroke or a menu away:
 Quick Open, the vault search and Find in note; the formatting bar's own six,
 bold through link; and the window's verbs, from a new note to Settings and

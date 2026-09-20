@@ -188,14 +188,6 @@ struct AppCommand: Identifiable {
             action: { $0.createNote() }
         ),
         Self(
-            id: "goToPath",
-            title: "Go to Path…",
-            symbol: "arrow.right.doc.on.clipboard",
-            searchTerms: "open file location absolute relative type navigate",
-            enabled: { $0.vaultRoot != nil },
-            action: { model in model.afterPalette { $0.promptToGoToPath() } }
-        ),
-        Self(
             id: "newVault",
             title: "New Vault…",
             symbol: "folder.badge.plus",
