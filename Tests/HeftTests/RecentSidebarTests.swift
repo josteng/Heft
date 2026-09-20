@@ -78,7 +78,13 @@ struct RecentSidebarTests {
         }
         await session.awaitReload()
 
-        let yesterday = Date().addingTimeInterval(-26 * 3600)
+        // The same clock time a day earlier, which is yesterday whatever the
+        // hour. Counting back a fixed 26 hours is yesterday only after two in
+        // the morning, and lands on the day before that between midnight and
+        // then, which is how this first failed.
+        let yesterday = try #require(
+            Calendar.current.date(byAdding: .day, value: -1, to: Date())
+        )
         session.recordRecent("A.md", at: yesterday)
         session.recordRecent("B.md")
         #expect(session.lastOpened("A.md").map { abs($0.timeIntervalSince(yesterday)) < 1 } == true)
