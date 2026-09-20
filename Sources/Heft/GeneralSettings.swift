@@ -16,7 +16,8 @@ import SwiftUI
 final class GeneralSettings: ObservableObject {
     static let shared = GeneralSettings()
 
-    private static let newNoteKey = "dev.stenglein.Heft.general.newNoteLocation"
+    /// One key, shared with the extension through `HeftCore`.
+    private static let newNoteKey = NewNoteLocation.defaultsKey
     private static let calendarKey = "dev.stenglein.Heft.general.calendarVisibility"
     private static let agentOfferKey = "dev.stenglein.Heft.general.offersAgentSetup"
 

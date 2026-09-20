@@ -44,6 +44,16 @@ final class CaptureSettings: ObservableObject {
         }
     }
 
+    /// Where a note made without a window is written: by Siri, or by a
+    /// shortcut. Empty means the vault root.
+    var noteFolder: String {
+        get { CaptureNoteFolderPreference.folder ?? "" }
+        set {
+            CaptureNoteFolderPreference.set(newValue)
+            objectWillChange.send()
+        }
+    }
+
     /// Empty means the vault opened last.
     var chosenVaultPath: String {
         get { CaptureVaultPreference.chosenPath() ?? "" }
@@ -127,6 +137,22 @@ struct CaptureSettingsView: View {
                         .alignedWithTitle()
                     } label: {
                         SettingLabel("Inbox note", detail: detail(for: vault))
+                    }
+                    LabeledContent {
+                        TextField(
+                            "", text: $settings.noteFolder,
+                            prompt: Text("Vault root")
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .labelsHidden()
+                        .alignedWithTitle()
+                    } label: {
+                        SettingLabel(
+                            "New notes from Siri",
+                            detail: "Where a note made without a window is written. The sidebar's "
+                                + "setting answers this for a window, and its answer is beside the "
+                                + "open note, which Siri does not have. Made on first use."
+                        )
                     }
                 } else {
                     Text("Open a vault to choose its inbox note.")

@@ -41,6 +41,19 @@ public enum NewNoteLocation: Codable, Equatable, Sendable, Hashable {
         }
     }
 
+    /// Where the setting lives, named here rather than in the pane because the
+    /// capture extension reads it too: a note Siri makes should land where the
+    /// reader said new notes go, not in a place only Siri knows about.
+    public static let defaultsKey = "dev.stenglein.Heft.general.newNoteLocation"
+
+    public static var current: NewNoteLocation {
+        current(in: HeftDefaults.shared)
+    }
+
+    public static func current(in defaults: UserDefaults) -> NewNoteLocation {
+        NewNoteLocation(stored: defaults.string(forKey: defaultsKey) ?? "")
+    }
+
     /// A folder as the settings field should store it: no leading or trailing
     /// slashes, no `.` or `..`, so it cannot name anything outside the vault.
     public static func normalised(_ path: String) -> String {

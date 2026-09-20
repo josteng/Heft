@@ -284,6 +284,31 @@ preferences or the icon.
   which Siri kept offering a removed intent and failed every request with
   it (`WFActionErrorDomain 1`). Register, then leave the daemon alone.
 
+- **A `.system.searchInApp` intent takes every Siri request that names the
+  app.** "Open my thesis note in Heft" and "what do my notes in Heft say
+  about the thesis" both ran it, never the open or find intents, and Siri
+  then sat on "looking over results" because the schema returns nothing.
+  Removed; `FindNotesIntent` returns the notes instead.
+
+- **Spotlight can refuse every `indexAppEntities` donation from a non-Apple
+  process, and Apple documents no such rule.** On the development Mac under
+  27.0 (26A428) Heft's fails with `CSIndexErrorDomain -1000`, and so, in the
+  same log, do Firefox, Obsidian, Spotify and Chrome; only Apple's own
+  processes get through, and Siri's per-app "Learn from this application"
+  being on changes nothing. Apple's page calls the conformance "the only
+  requirement", so the code path stays and the gap is theirs to close.
+
+- **The metadata processor cannot see a static dependency's queries.** A
+  schema intent whose parameter entity lives in `HeftCore` failed the build
+  with "requires 'SiriNoteEntity' to conform to 'IndexedEntity' ... or
+  provide a default 'EntityStringQuery'" although the query was right there
+  in `HeftCore.appintents`. The conformance on the entity is what it reads.
+
+- **`log` in zsh is a shell builtin.** `log show ...` from the Bash tool ran
+  zsh's `log`, which prints nothing and errors only on some argument shapes,
+  so five queries in a row came back empty and looked like a quiet system.
+  Call `/usr/bin/log`.
+
 ## Known gaps
 
 Markdown Heft does not read, found by auditing the decorator against CommonMark:

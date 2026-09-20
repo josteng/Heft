@@ -85,11 +85,62 @@ struct HeftCaptureShortcuts: AppShortcutsProvider {
             intent: AddToTodaysNoteIntent(),
             phrases: [
                 "Add to today's note in \(.applicationName)",
+                "Add to my \(.applicationName) daily note",
                 "Log this in \(.applicationName)",
             ],
             shortTitle: "Add to Today's Note",
             systemImageName: "calendar.badge.plus"
         )
+        // The note is named in the phrase itself, so "add the milk to my
+        // shopping note" resolves through `NoteEntityQuery` and asks nothing.
+        AppShortcut(
+            intent: AppendToNoteIntent(),
+            phrases: [
+                "Add to \(\.$note) in \(.applicationName)",
+                "Add to my \(\.$note) note in \(.applicationName)",
+                "Append to \(\.$note) in \(.applicationName)",
+            ],
+            shortTitle: "Add to a Note",
+            systemImageName: "square.and.pencil"
+        )
+        AppShortcut(
+            intent: TodaysNoteIntent(),
+            phrases: [
+                "Get today's note in \(.applicationName)",
+                "Today's \(.applicationName) note",
+            ],
+            shortTitle: "Get Today's Note",
+            systemImageName: "calendar"
+        )
+        AppShortcut(
+            intent: CreateNoteIntent(),
+            phrases: [
+                "Create a note in \(.applicationName)",
+                "New \(.applicationName) note",
+                "Start a note in \(.applicationName)",
+            ],
+            shortTitle: "Create a Note",
+            systemImageName: "doc.badge.plus"
+        )
+        // Last, because the extractor applies an availability branch to
+        // every row after it, and the rows above must stay on macOS 26.
+        // Without a phrase Siri never chose this one: asked what the notes
+        // say about something, it queried its own index, found nothing of
+        // Heft's, and answered so. A phrase cannot carry free text, so the
+        // question comes as a second turn.
+        if #available(macOS 27.0, *) {
+            AppShortcut(
+                intent: FindNotesIntent(),
+                phrases: [
+                    "Find notes in \(.applicationName)",
+                    "Search my \(.applicationName) notes",
+                    "Find a note in \(.applicationName)",
+                    "What do my \(.applicationName) notes say",
+                ],
+                shortTitle: "Find Notes",
+                systemImageName: "magnifyingglass"
+            )
+        }
     }
 
     static let shortcutTileColor: ShortcutTileColor = .navy

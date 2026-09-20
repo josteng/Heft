@@ -246,8 +246,10 @@ the activation to the screen. The extension is a process with no windows,
 so there is nothing to put back. It is sandboxed, because macOS launches no
 extension that is not, and reads the app's preference domain and the vault
 through exception entitlements rather than an app group: the app is not
-sandboxed and its settings already live in one domain. The two intents that
-open a note stay in the app, which is where the windows are; a provider can
+sandboxed and its settings already live in one domain. Which side an intent
+belongs on is one question: does it need a window? The three that open a note
+are in the app, which is where the windows are, and everything that only
+writes a line is in the extension, which has no screen to take. A provider can
 only name intents in its own target, so there is one in each. The
 Capture pane in Settings edits it for the vault in front, keeps what was
 typed, and says what that amounts to; a value that cannot be a path inside
@@ -267,6 +269,100 @@ since that is what keeps the file readable.
 Daily captures have no setting: the log
 marker in the template is the placement control, and the pane offers it to
 copy.
+
+## Naming a note to Siri
+
+Heft's intents were four verbs with no nouns: open today's note, open the
+inbox, capture, log. Siri could run them if you said roughly the registered
+phrase and could do nothing else, because there was no way to say *which*
+note. `NoteEntity` is the noun. It is identified by vault-relative path, since
+two folders may each hold a `Notes.md` and an id kept in a shortcut written
+months ago still has to point at one of them.
+
+It lives in `HeftCore`, not beside either set of intents, because the app and
+the extension both need it and each declaring its own would put two entities
+of the same name into one app's metadata. `AppIntents` is neither AppKit nor
+SwiftUI, so the rule that keeps that module windowless still holds; the
+command line still runs headless with it linked.
+
+`NoteEntityQuery` resolves a spoken name by reading the vault from disk, which
+is the point: being asked which note you meant must not launch the app, for
+the same reason filing a line must not. `NoteMatching` is the part worth
+testing and is pure. An exact name wins outright; otherwise every note whose
+name holds all of the words, shortest name first, because speech does not put
+the words in the order the filename has.
+
+`AppendToNoteIntent` and `CreateNoteIntent` are therefore in the extension
+with the other two captures, and `OpenNoteIntent` is in the app with the other
+two openers. Both new ones only ever add: a name already taken gets a numbered
+sibling rather than being replaced, which is what lets them run unattended
+while every other edit that changes a line already written is a proposal.
+`UpdateNoteIntent` exists in the system's schema and is deliberately not
+adopted, because rewriting a note with no diff and no review is exactly what
+the proposal system is for.
+
+A note made this way lands in the folder named in the Capture pane, which is
+its own setting rather than the sidebar's `NewNoteLocation`. That one answers
+the same question for a window, and two of its four cases are "beside the open
+note" and "the focused folder", neither of which Siri has; both would collapse
+to the vault root, which is a fallback rather than a decision. Unset, the
+sidebar's answer still applies. With no window there is no open note and no focused folder, so the
+three cases that would have used them fall back to the vault root. A folder
+named in Settings is created on demand, as it is for the sidebar's New Note;
+a folder *spoken* into the intent has to exist already, because a misheard
+word should fail rather than scatter folders through a vault. Whatever is
+created or appended to is recorded in the vault's frecency store. A note made
+by voice is the one whose name you are least likely to remember, and without
+that it would be nowhere in Quick Open's ordering until you had found it by
+hand.
+
+`NoteEntity` is also an `IndexedEntity`, which is the difference between a note
+Siri can be *handed* and one it can *find*. Adopting a schema does not replace
+this: a schema tells Siri the shape of an entity, and indexing is what puts one
+in the semantic index, so the two stack.
+
+Through a *named* `CSSearchableIndex` and `indexAppEntities`, never the default
+index and never a hand-built `CSSearchableItem`. Apple's macOS 27 docs say in
+as many words not to ship the default one, and on 27 content indexed the older
+way is retrievable by a query while never reaching Spotlight. `IndexedEntityQuery`
+answers the system asking for a rebuild, and is gated because its argument type
+arrived in 27. Without it the entity only ever fills a parameter of a Heft
+action, and asking Siri to find a note openly never reaches the vault at all.
+Whether the donation is accepted is not Heft's to decide; `Docs/Gotchas.md`
+has what macOS 27.0 does with it. The vault is donated from `VaultSession` when the
+tree changes, coalesced by two seconds because moving a folder reports many
+changes, and never awaited: indexing is an improvement, and a vault that
+cannot be donated still opens, searches and captures.
+
+The plain entity carries no text, since Spotlight already indexes the files
+and a second copy would double every note in its results. The schema note,
+which is what goes on macOS 27, carries its body, because Apple's own words for what Siri does with an indexed entity are
+"reason over it, and use it to answer questions", and a card without its
+text is a title.
+
+The system's assistant schemas, which let Siri map a phrasing nobody
+registered onto an intent, are macOS 27 only: the macOS 26 set has no Notes
+domain at all. Heft adopts them behind `@available(macOS 27.0, *)`, so the
+deployment target stays at 26 and `NoteEntity` with its phrases is what works
+there. The schema's nouns (`SiriNoteEntity`, its folder and account) are in
+`HeftCore` for the reason `NoteEntity` is, and the note and folder are
+`IndexedEntity` as well, which Apple's recipe asks for and the metadata
+processor insists on across modules (`Docs/Gotchas.md`); the verbs are split
+by process exactly as the plain ones are: `createNote` and `appendText` in
+the extension, `.system.open` in the app. The open intent is what makes a
+note Siri hands back clickable, since an `OpenIntent` opens only its own
+target type.
+
+Searching is answered, not shown. `FindNotesIntent` takes the question and
+*returns* the notes (`NoteFinding`, which is `heft find --files` in order),
+so Siri lays them out as cards and can read them, which is what it does with
+Apple Notes through an index Heft is not allowed into. It has an App Shortcut
+phrase ("Find notes in Heft") because Siri never chose it unprompted: every
+intent Siri ran on 27.0 was a schema intent or a phrased shortcut, and a plain
+intent with a good description was enumerated and ignored. The `.system.searchInApp`
+schema was adopted first and removed: it only opens the search window, and
+once declared it took every Siri request that named Heft, including "open my
+thesis note", so the intents that could answer were never reached.
 
 ## Settings that are not about one vault
 

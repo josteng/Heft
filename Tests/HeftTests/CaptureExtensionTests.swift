@@ -96,7 +96,14 @@ struct CaptureExtensionTests {
     func capturesLiveOnlyInTheExtension() throws {
         // A copy in the app would be a second place the system could run
         // one, and a running app is the place it prefers.
-        let captures = ["CaptureToInboxIntent", "AddToTodaysNoteIntent"]
+        // Every intent that runs without showing anything. `AppendToNote`
+        // and `CreateNote` join the two originals: being asked which note you
+        // meant must not take the screen either. `FindNotes` answers, and an
+        // answer must not take it either.
+        let captures = [
+            "CaptureToInboxIntent", "AddToTodaysNoteIntent",
+            "AppendToNoteIntent", "CreateNoteIntent", "FindNotesIntent",
+        ]
         let extensionSources = try swiftFiles(in: "Sources/HeftCapture").map(\.text).joined()
         for capture in captures {
             #expect(extensionSources.contains("struct \(capture): AppIntent"), Comment(rawValue: capture))
@@ -105,6 +112,44 @@ struct CaptureExtensionTests {
             for file in try swiftFiles(in: directory) {
                 for capture in captures {
                     #expect(!file.text.contains("struct \(capture)"), "\(directory)/\(file.name) declares \(capture)")
+                }
+            }
+        }
+    }
+
+    /// The Notes-schema entities are what Siri creates, appends to and hands
+    /// back; the app is the process that can open one. A copy in either
+    /// process would be a second entity of the same name in the app's
+    /// metadata, so the one declaration is in the module both link.
+    @Test("The Siri schema entities are declared once, in HeftCore")
+    func schemaEntitiesLiveInCore() throws {
+        let entities = ["SiriNoteEntity", "SiriFolderEntity", "SiriAccountEntity"]
+        let core = try swiftFiles(in: "Sources/HeftCore").map(\.text).joined()
+        for entity in entities {
+            #expect(core.contains("public struct \(entity)"), Comment(rawValue: entity))
+        }
+        for directory in ["Sources/Heft", "Sources/Heft/Views", "Sources/HeftCapture"] {
+            for file in try swiftFiles(in: directory) {
+                for entity in entities {
+                    #expect(!file.text.contains("struct \(entity)"), "\(directory)/\(file.name) declares \(entity)")
+                }
+            }
+        }
+    }
+
+    /// Only the app has windows, so opening runs there. And no search schema
+    /// anywhere: `.system.searchInApp` took every Siri request that named
+    /// Heft, opened the search window, and starved the intents that answer.
+    @Test("Open runs in the app, and nothing declares an in-app search")
+    func openRunsInTheAppAndNothingSearchesInApp() throws {
+        let app = try swiftFiles(in: "Sources/Heft").map(\.text).joined()
+        #expect(app.contains("@AppIntent(schema: .system.open)"))
+        for directory in ["Sources/Heft", "Sources/Heft/Views", "Sources/HeftCore", "Sources/HeftCapture"] {
+            for file in try swiftFiles(in: directory) {
+                #expect(!file.text.contains("ShowInAppSearchResultsIntent"), "\(directory)/\(file.name) declares an in-app search")
+                #expect(!file.text.contains("schema: .system.search"), "\(directory)/\(file.name) declares a search schema")
+                if directory == "Sources/HeftCapture" {
+                    #expect(!file.text.contains(".system.open"), "\(file.name) opens from the extension")
                 }
             }
         }

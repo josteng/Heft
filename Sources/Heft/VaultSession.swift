@@ -23,6 +23,7 @@ final class VaultSession: ObservableObject {
     @Published private(set) var settings: ObsidianSettings
     @Published private(set) var tree: VaultItem?
     @Published private(set) var index = VaultIndex.empty
+    private var donationTask: Task<Void, Never>?
     /// The newest build, whether or not it was worth publishing. A reload
     /// starts from this one, so a note re-read for a save that changed no
     /// answer is not re-read again on every event after it.
@@ -153,6 +154,26 @@ final class VaultSession: ObservableObject {
             if treeChanged { tree = scanned.0 }
             if treeChanged || !scanned.1.answersMatch(index) { index = scanned.1 }
             if settings != scanned.2 { settings = scanned.2 }
+            // What makes a note findable by Siri rather than merely nameable
+            // in a Heft action. Only when the tree moved: the notes Spotlight
+            // is told about are the files that exist, and editing one changes
+            // nothing about that.
+            if treeChanged { donateToSpotlight(scanned.1, of: root) }
+        }
+    }
+
+    /// Hands the vault to Spotlight, off the reload's path.
+    ///
+    /// Detached and unawaited: indexing is an improvement, and a vault that
+    /// cannot be donated still opens, searches and captures. Coalesced,
+    /// because a folder being moved reports many changes and each one would
+    /// otherwise re-donate every note in the vault.
+    private func donateToSpotlight(_ index: VaultIndex, of root: URL) {
+        donationTask?.cancel()
+        donationTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await NoteIndexing.donate(index.notes, in: root, vaultIndex: index)
         }
     }
 
