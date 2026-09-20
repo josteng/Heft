@@ -85,6 +85,22 @@ final class AppearanceSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(showsFolderArrows, forKey: Self.folderArrowsKey) }
     }
 
+    /// What the sidebar's Recent list is ordered by.
+    ///
+    /// Last edited by default: it follows the files' own dates, so a note
+    /// changed on another device rises with it, and it is what Notes does.
+    /// Last opened is this Mac's own history, kept for the reader who wants
+    /// to get back to what they were reading rather than writing.
+    @Published var recentOrder: RecentOrder {
+        didSet { HeftDefaults.shared.set(recentOrder.rawValue, forKey: Self.recentOrderKey) }
+    }
+
+    /// Whether a Recent row is one line, or the name over its date, first
+    /// line and folder.
+    @Published var recentLayout: RecentLayout {
+        didSet { HeftDefaults.shared.set(recentLayout.rawValue, forKey: Self.recentLayoutKey) }
+    }
+
     var accentColor: NSColor { customAccentColor ?? Self.defaultAccentColor }
     var linkColor: NSColor { customLinkColor ?? accentColor }
     var tagColor: NSColor { customTagColor ?? accentColor }
@@ -102,6 +118,8 @@ final class AppearanceSettings: ObservableObject {
     func resetHeadingColors() { customHeadingColors = Array(repeating: nil, count: 6) }
 
     private static let folderArrowsKey = "dev.stenglein.Heft.appearance.folderArrows"
+    private static let recentOrderKey = "dev.stenglein.Heft.sidebar.recentOrder"
+    private static let recentLayoutKey = "dev.stenglein.Heft.sidebar.recentLayout"
     private static let accentKey = "dev.stenglein.Heft.appearance.accentColor"
     private static let linkKey = "dev.stenglein.Heft.appearance.linkColor"
     private static let tagKey = "dev.stenglein.Heft.appearance.tagColor"
@@ -125,6 +143,8 @@ final class AppearanceSettings: ObservableObject {
             ? true
             : HeftDefaults.shared.bool(forKey: Self.colorfulFormattingKey)
         showsFolderArrows = HeftDefaults.shared.bool(forKey: Self.folderArrowsKey)
+        recentOrder = RecentOrder(rawValue: HeftDefaults.shared.string(forKey: Self.recentOrderKey) ?? "") ?? .edited
+        recentLayout = RecentLayout(rawValue: HeftDefaults.shared.string(forKey: Self.recentLayoutKey) ?? "") ?? .preview
     }
 
     private static func load(_ key: String) -> NSColor? {
@@ -206,6 +226,28 @@ extension View {
     /// Tints this scene with the user's accent colour. Belongs at a scene
     /// root; anywhere deeper and the views above it keep the system accent.
     func appAccentTint() -> some View { modifier(AppAccent()) }
+}
+
+enum RecentOrder: String, CaseIterable, Identifiable {
+    case edited, opened
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .edited: "Last Edited"
+        case .opened: "Last Opened"
+        }
+    }
+}
+
+enum RecentLayout: String, CaseIterable, Identifiable {
+    case preview, compact
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .preview: "Preview"
+        case .compact: "Compact"
+        }
+    }
 }
 
 /// One row per customisable colour: a picker plus a reset button that only
@@ -297,6 +339,25 @@ struct AppearanceSettingsView: View {
                         detail: "Adds a chevron beside each folder in the file tree."
                     )
                 }
+                Picker(selection: $appearance.recentOrder) {
+                    ForEach(RecentOrder.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "Recent Notes Are Ordered By",
+                        detail: "Last edited follows the files' dates, so a note changed "
+                            + "elsewhere rises too. Last opened is this Mac's own history."
+                    )
+                }
+                .defaultMenuTint()
+                Picker(selection: $appearance.recentLayout) {
+                    ForEach(RecentLayout.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "Recent Notes Show",
+                        detail: "Preview puts the date, first line and folder under each name."
+                    )
+                }
+                .defaultMenuTint()
             }
         }
         .formStyle(.grouped)

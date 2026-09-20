@@ -28,6 +28,15 @@ final class VaultSession: ObservableObject {
     /// starts from this one, so a note re-read for a save that changed no
     /// answer is not re-read again on every event after it.
     private(set) var latestIndex = VaultIndex.empty
+    /// Every note, the one written most recently first, from the newest
+    /// build. Sorted once per reload, off the main thread, rather than on
+    /// every draw of a sidebar that redraws on each keystroke.
+    private(set) var recentlyEdited: [NoteRef] = []
+    /// Fires after a reload that read a note or moved the tree: something
+    /// `latestIndex` says about a note's text or date is new. A subject for
+    /// the reason `diskChanges` is one, and because a prose save publishes
+    /// nothing else; the Recent list alone listens.
+    let contentChanges = PassthroughSubject<Void, Never>()
     @Published private(set) var recentPaths: [String] = []
     /// Fires on every interesting disk event, before the reload it schedules.
     ///
@@ -49,6 +58,8 @@ final class VaultSession: ObservableObject {
         self.cache = cache
         settings = ObsidianSettings.load(vaultRoot: self.root)
         recentPaths = HeftDefaults.shared.stringArray(forKey: recentsKey) ?? []
+        openedAt = (HeftDefaults.shared.dictionary(forKey: openedAtKey) as? [String: Double] ?? [:])
+            .mapValues(Date.init(timeIntervalSince1970:))
         reload()
         watcher = VaultWatcher(root: self.root) { [weak self] in
             self?.vaultDidChangeOnDisk()
@@ -78,6 +89,21 @@ final class VaultSession: ObservableObject {
         "dev.stenglein.Heft.recents.\(root.path)"
     }
 
+    private var openedAtKey: String {
+        "dev.stenglein.Heft.recentOpenedAt.\(root.path)"
+    }
+
+    /// When each note in `recentPaths` was last opened here.
+    ///
+    /// The order alone was kept until the Recent list started grouping by
+    /// day, which an opening had no date to answer. A note opened before
+    /// this was recorded has none and falls under no heading, which is the
+    /// truth about it rather than a guess from the file's own date.
+    private var openedAt: [String: Date] = [:]
+
+    /// When `relativePath` was last opened here, if that was recorded.
+    func lastOpened(_ relativePath: String) -> Date? { openedAt[relativePath] }
+
     /// How often each note is opened, discounted by how long ago.
     ///
     /// Kept alongside `recentPaths` rather than replacing it: the two answer
@@ -86,12 +112,22 @@ final class VaultSession: ObservableObject {
     /// every morning should outrank one opened once by accident an hour ago.
     private(set) lazy var noteFrecency = FrecencyStore.notes(forVaultAt: root.path)
 
-    func recordRecent(_ relativePath: String) {
+    func recordRecent(_ relativePath: String, at now: Date = Date()) {
         recentPaths.removeAll { $0 == relativePath }
         recentPaths.insert(relativePath, at: 0)
         if recentPaths.count > 40 { recentPaths.removeLast(recentPaths.count - 40) }
+        openedAt[relativePath] = now
+        // Only what the list still holds, so the dates cannot outlive it.
+        openedAt = openedAt.filter { recentPaths.contains($0.key) }
         HeftDefaults.shared.set(recentPaths, forKey: recentsKey)
+        saveOpeningDates()
         noteFrecency.record(relativePath)
+    }
+
+    private func saveOpeningDates() {
+        HeftDefaults.shared.set(
+            openedAt.mapValues(\.timeIntervalSince1970), forKey: openedAtKey
+        )
     }
 
     /// Reviewing an agent's proposal for a note, which is attention too.
@@ -115,7 +151,9 @@ final class VaultSession: ObservableObject {
     /// all follow it, since each is about the note and not the path.
     func replaceRecentPath(_ oldPath: String, with newPath: String) {
         recentPaths = recentPaths.map { $0 == oldPath ? newPath : $0 }
+        if let opened = openedAt.removeValue(forKey: oldPath) { openedAt[newPath] = opened }
         HeftDefaults.shared.set(recentPaths, forKey: recentsKey)
+        saveOpeningDates()
         noteFrecency.move(oldPath, to: newPath)
         FrecencyStore.agentNotes(forVaultAt: root.path).move(oldPath, to: newPath)
     }
@@ -139,18 +177,22 @@ final class VaultSession: ObservableObject {
         reloadTask = Task { [weak self] in
             if !immediately { try? await Task.sleep(for: .milliseconds(400)) }
             guard !Task.isCancelled else { return }
-            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings) in
+            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings, [NoteRef]) in
                 let tree = VaultScanner.scan(root: root)
                 // The first build of a process starts from what the last one
                 // left on disk, so a cold start reads only what changed since.
                 let base = previous.notes.isEmpty ? cache.load(vault: root) ?? previous : previous
                 let index = VaultIndex.build(root: tree, reusing: base)
                 if index.notesRead > 0 { cache.save(index, vault: root) }
-                return (tree, index, ObsidianSettings.load(vaultRoot: root))
+                return (tree, index, ObsidianSettings.load(vaultRoot: root), index.notesByLastEdit)
             }.value
             guard !Task.isCancelled, let self else { return }
             latestIndex = scanned.1
             let treeChanged = tree != scanned.0
+            if treeChanged || scanned.1.notesRead > 0 {
+                recentlyEdited = scanned.3
+                contentChanges.send()
+            }
             if treeChanged { tree = scanned.0 }
             if treeChanged || !scanned.1.answersMatch(index) { index = scanned.1 }
             if settings != scanned.2 { settings = scanned.2 }

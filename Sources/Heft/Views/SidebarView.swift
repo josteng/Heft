@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import HeftCore
 import SwiftUI
 
@@ -67,8 +68,29 @@ struct SidebarView: View {
     @Environment(\.appAccent) private var accent
 
     @EnvironmentObject private var model: AppModel
+    // Observed here, once, for the Recent list's order and layout; the rows
+    // read nothing from it. It publishes when a colour is picked, which is
+    // rare enough to redraw the sidebar for.
+    @ObservedObject private var appearance = AppearanceSettings.shared
     @State private var filter = ""
     @State private var mode: SidebarMode = .files
+    /// Bumped when the session has read a note again, so the Recent list
+    /// picks up a new date or first line that no published property carries.
+    @State private var contentGeneration = 0
+    /// The opening history as the list is showing it, which trails the real
+    /// one by `recentSettle`. See `recentList`.
+    @State private var settledOpenings: [String] = []
+    /// Whether the Recent list has scrolled at all, which is what decides
+    /// if the pinned title needs a band behind it. Set only when it changes,
+    /// so a scroll does not redraw the sidebar on every frame.
+    /// Where each Recent title sits in the scroll view, kept in a reference
+    /// so a scroll frame does not redraw the sidebar; only a change of which
+    /// title is at the top does.
+    @State private var recentTops = RecentHeaderTops()
+    @State private var pinnedSection: RecentSection?
+    /// A title's height, measured rather than assumed: it is where the list
+    /// is cut and where the scroll bar starts.
+    @State private var recentHeaderHeight: CGFloat = 33
     @State private var expandedTags: Set<String> = []
     @State private var inlineEdit: SidebarInlineEdit?
     /// A folder clicked in the file tree becomes the destination for the
@@ -121,6 +143,9 @@ struct SidebarView: View {
         .animation(.snappy(duration: 0.24), value: model.isCalendarVisible)
         .clipped()
         .background(.ultraThinMaterial)
+        .onReceive(model.session?.contentChanges.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()) {
+            if mode == .recent { contentGeneration &+= 1 }
+        }
         .onChange(of: model.scopePath) {
             selectedFolderPath = nil
             selection = SidebarSelection()
@@ -225,6 +250,27 @@ struct SidebarView: View {
                     .buttonBorderShape(.circle)
                     .controlSize(.large)
                     .help("Create in \(creationTargetName)")
+                }
+
+                if mode == .recent {
+                    Menu {
+                        Picker("Order", selection: $appearance.recentOrder) {
+                            ForEach(RecentOrder.allCases) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                        Picker("Show", selection: $appearance.recentLayout) {
+                            ForEach(RecentLayout.allCases) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .menuStyle(.button)
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .help("Order and layout of the Recent list")
                 }
             }
         }
@@ -513,46 +559,236 @@ struct SidebarView: View {
         return rows
     }
 
-    /// Notes in the order they were last opened, newest first.
+    /// Notes newest first: by when their file was last written, or by when
+    /// they were last opened here, as the reader has chosen.
+    ///
+    /// Dates and first lines come from the session's newest build rather
+    /// than the published index, because a prose save publishes nothing;
+    /// `contentGeneration` is what redraws this when that build changes.
     private var recentList: some View {
-        let notes = model.recentNotes.filter {
-            filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter)
+        let _ = contentGeneration
+        let order = appearance.recentOrder
+        let layout = appearance.recentLayout
+        let latest = model.session?.latestIndex ?? .empty
+        let source: [NoteRef] = switch order {
+        case .opened: settledOpenings
+            .compactMap { model.index.note(atRelativePath: $0) }
+            .filter(model.isInScope)
+        case .edited: (model.session?.recentlyEdited ?? []).filter(model.isInScope)
         }
-        return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 1) {
-                if notes.isEmpty {
-                    empty(filter.isEmpty ? "Nothing opened yet" : "No matching notes")
+        let notes = source.filter { note in
+            filter.isEmpty
+                || note.name.localizedCaseInsensitiveContains(filter)
+                || (latest.excerpt(of: note.relativePath) ?? "").localizedCaseInsensitiveContains(filter)
+        }
+        let dating = RecentDating()
+        // Each order is grouped and dated by its own clock: when the file
+        // was written, or when it was opened here. A note opened before the
+        // opening was recorded has no date and falls under no heading.
+        let when: (NoteRef) -> Date? = switch order {
+        case .edited: { latest.modificationDate(of: $0.relativePath) }
+        case .opened: { model.session?.lastOpened($0.relativePath) }
+        }
+        let groups = dating.grouped(notes, date: when)
+        // The title of the section at the top is a row of its own above the
+        // list, and the list begins under it, so a row scrolling away simply
+        // leaves the scroll view and the title needs no backing to hide it.
+        //
+        // Drawn over the list instead, it had to be masked out of, and a
+        // mask composites the whole list off screen: its text lost subpixel
+        // antialiasing and its hairline dividers disappeared, so the list
+        // read as greyed out. Giving the title a surface of its own was the
+        // other way, and no material could: each let a selected row's accent
+        // through as an even wash of colour over the whole title.
+        // The first section's until a later one reaches the top, which is
+        // also the answer before any title has been laid out to report its
+        // position, as in a list with one section and nothing to scroll.
+        let shown = pinnedSection ?? groups.first?.section
+        return VStack(spacing: 0) {
+            if let shown {
+                recentHeader(dating.title(of: shown))
+                    .padding(.horizontal, 6)
+                    .id(shown)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.12), value: shown)
+            }
+            list(
+                groups, dating: dating, dated: when, layout: layout,
+                order: order, empty: notes.isEmpty, latest: latest
+            )
+        }
+    }
+
+    private func list(
+        _ groups: [(section: RecentSection?, items: [NoteRef])],
+        dating: RecentDating,
+        dated when: @escaping (NoteRef) -> Date?,
+        layout: RecentLayout,
+        order: RecentOrder,
+        empty notesAreEmpty: Bool,
+        latest: VaultIndex
+    ) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: layout == .preview ? 0 : 1) {
+                if notesAreEmpty {
+                    let nothing = order == .opened ? "Nothing opened yet" : "No notes yet"
+                    empty(filter.isEmpty ? nothing : "No matching notes")
                 }
-                ForEach(notes) { note in
-                    let item = VaultItem(
-                        url: note.url, relativePath: note.relativePath,
-                        kind: note.kind, name: note.name
-                    )
-                    NoteRow(
-                        name: note.name,
-                        detail: note.folder,
-                        isSelected: model.current?.relativePath == note.relativePath,
-                        depth: 0,
-                        symbol: "doc.text",
-                        renameText: renameBinding(for: item),
-                        onRenameCommit: { commitRename(item) },
-                        onRenameCancel: cancelRename
-                    ) {
-                        selectedFolderPath = nil
-                        model.open(note)
+                // Keyed by section, not position, so a save that moves a note
+                // to the top slides it there and the sections around it stay
+                // themselves; keyed by position every row after a new
+                // section would be redrawn as a different one.
+                ForEach(Array(groups.enumerated()), id: \.element.section) { position, group in
+                    // Every title but the first one's, which the row above
+                    // the list always carries: rendered here as well, its
+                    // hidden twin held a title's worth of space at the top
+                    // of the list and left a gap under the real one.
+                    if let section = group.section, position > 0 {
+                        recentHeader(dating.title(of: section))
+                            .onGeometryChange(for: CGRect.self) { proxy in
+                                proxy.frame(in: .named(Self.recentScroll))
+                            } action: { frame in
+                                recentTops.set(section, top: frame.minY)
+                                if abs(recentHeaderHeight - frame.height) > 0.5 {
+                                    recentHeaderHeight = frame.height
+                                }
+                                updatePinnedSection(in: groups)
+                            }
                     }
-                    .contextMenu {
-                        FileMenu(
-                            item: item,
-                            onCreateNote: { beginCreatingNote(in: note.url.deletingLastPathComponent()) },
-                            onRename: { beginRename(item) }
+                    ForEach(group.items) { note in
+                        recentRow(
+                            note,
+                            preview: layout == .preview ? NotePreview(
+                                date: when(note).map(dating.label(for:)) ?? "",
+                                excerpt: latest.excerpt(of: note.relativePath) ?? "",
+                                location: .of(note, inVaultNamed: model.vaultName)
+                            ) : nil
                         )
+                        if layout == .preview, note != group.items.last {
+                            Divider().padding(.horizontal, 8)
+                        }
+                    }
+                    // The gap before the next title belongs to the list, not
+                    // to the title: inside it, it came along when the title
+                    // reached the top, and one up there stood taller than
+                    // one at rest.
+                    if position < groups.count - 1 {
+                        Color.clear.frame(height: 14)
                     }
                 }
             }
             .padding(.horizontal, 6)
-            .padding(.top, 8)
+            // Flush, so the title in the list sits where the one above it
+            // does. An order with no titles keeps the gap instead.
+            .padding(.top, groups.first?.section == nil ? Self.recentListTop : 0)
             .padding(.bottom, 8)
+            // A note that rises after a save slides up rather than jumping;
+            // the value is the order alone, so typing a first line does
+            // not animate the text.
+            .animation(
+                .snappy(duration: 0.3),
+                value: groups.flatMap { $0.items.map(\.relativePath) }
+            )
+        }
+        .coordinateSpace(name: Self.recentScroll)
+        .onChange(of: order) { pinnedSection = nil; recentTops.clear() }
+        .onChange(of: filter) { pinnedSection = nil; recentTops.clear() }
+        // The opening order settles rather than following the click that
+        // caused it: a note opened from this list would otherwise leap to
+        // the top from under the pointer, before the reader has seen the
+        // note they asked for. The first filling is immediate, since there
+        // is nothing on screen to move yet, and a further opening within
+        // the wait restarts it.
+        .task(id: model.session?.recentPaths ?? []) {
+            let opened = model.session?.recentPaths ?? []
+            // Only a reordering waits. A list that gained or lost a note has
+            // nothing to move, and a rename changes the path of one: shown
+            // late, the renamed note would vanish from the list until the
+            // wait was over.
+            guard !settledOpenings.isEmpty, Set(opened) == Set(settledOpenings) else {
+                settledOpenings = opened
+                return
+            }
+            try? await Task.sleep(for: .seconds(Self.recentSettle))
+            guard !Task.isCancelled else { return }
+            settledOpenings = opened
+        }
+    }
+
+    /// How long the opening order waits before it rearranges itself.
+    private static let recentSettle: TimeInterval = 0.8
+
+    /// The title that has reached the top of the list, or gone past it: the
+    /// last such is the one whose rows are showing, and the first section's
+    /// when none has. Set only when the answer changes, since a scroll
+    /// reports every frame.
+    ///
+    /// A title that has scrolled away keeps its last position rather than
+    /// being forgotten, because the list stops laying out what is far off
+    /// screen; forgetting it left a section with no title while its own rows
+    /// were still showing.
+    private func updatePinnedSection(in groups: [(section: RecentSection?, items: [NoteRef])]) {
+        // A title takes over above the list only once its own copy has
+        // left the top of the list entirely. Taking over as it arrives
+        // showed the same words twice, a line apart, and hiding the copy
+        // while it was still there left its empty place behind.
+        //
+        // Back at the top, none has passed and the first section is the one
+        // showing; its own title is not in the list to be measured.
+        let pinned = groups.compactMap(\.section).last { section in
+            (recentTops.top(of: section) ?? .infinity) <= -recentHeaderHeight + 0.5
+        } ?? groups.first?.section
+        if pinned != pinnedSection { pinnedSection = pinned }
+    }
+
+    static let recentScroll = "heft.recent.scroll"
+    /// Above the first row of an order that has no titles to sit there.
+    private static let recentListTop: CGFloat = 4
+    /// A title's own inset, which puts it over the rows' text rather than
+    /// over their left edge.
+    private static let recentTitleInset: CGFloat = 8
+    /// Between a title and the first row under it.
+    private static let recentBandGap: CGFloat = 4
+
+    /// One section title, in the list or drawn over it. Both are inset the
+    /// same, so the one takes over from the other without moving.
+    private func recentHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 14, weight: .bold))
+            // Brighter than the rest of the sidebar's labels, the way a date
+            // reads in Notes.
+            .foregroundStyle(.primary)
+            .padding(.horizontal, Self.recentTitleInset)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, Self.recentBandGap)
+    }
+
+    private func recentRow(_ note: NoteRef, preview: NotePreview?) -> some View {
+        let item = VaultItem(
+            url: note.url, relativePath: note.relativePath,
+            kind: note.kind, name: note.name
+        )
+        return NoteRow(
+            name: note.name,
+            detail: preview == nil ? note.folder : nil,
+            isSelected: model.current?.relativePath == note.relativePath,
+            depth: 0,
+            symbol: "doc.text",
+            preview: preview,
+            renameText: renameBinding(for: item),
+            onRenameCommit: { commitRename(item) },
+            onRenameCancel: cancelRename
+        ) {
+            selectedFolderPath = nil
+            model.open(note)
+        }
+        .contextMenu {
+            FileMenu(
+                item: item,
+                onCreateNote: { beginCreatingNote(in: note.url.deletingLastPathComponent()) },
+                onRename: { beginRename(item) }
+            )
         }
     }
 
@@ -1271,6 +1507,36 @@ private struct FolderMenu: View {
     }
 }
 
+/// Where each pinned Recent title sits; see `SidebarView.recentTops`.
+final class RecentHeaderTops {
+    private var tops: [RecentSection: CGFloat] = [:]
+    func set(_ section: RecentSection, top: CGFloat?) { tops[section] = top }
+    func top(of section: RecentSection) -> CGFloat? { tops[section] }
+    func clear() { tops = [:] }
+}
+
+/// What a Recent row shows under the name in the preview layout.
+struct NotePreview: Equatable {
+    struct Location: Equatable {
+        var name: String
+        var symbol: String
+
+        /// Every row names where it lives, so the rows stay one height and
+        /// the eye can run down them. A note in the vault's root names the
+        /// vault, under the vault's own symbol rather than a folder's, or
+        /// its row would claim there is a folder of that name.
+        static func of(_ note: NoteRef, inVaultNamed vault: String) -> Location {
+            note.folder.isEmpty
+                ? Location(name: vault, symbol: "books.vertical")
+                : Location(name: note.folder, symbol: "folder")
+        }
+    }
+
+    var date: String
+    var excerpt: String
+    var location: Location
+}
+
 /// Internal rather than private so a snapshot test can draw one. The rows
 /// are the one part of multi-select with no value to check: whether a
 /// selected row actually looks selected is a question about pixels.
@@ -1290,6 +1556,8 @@ struct NoteRow: View {
     let depth: Int
     let symbol: String
     var disclosure: Bool? = nil
+    /// The date, first line and folder under the name, or nil for one line.
+    var preview: NotePreview? = nil
     var isDimmed: Bool = false
     var isDropTargeted: Bool = false
     var renameText: Binding<String>? = nil
@@ -1329,7 +1597,65 @@ struct NoteRow: View {
         .onHover { isHovering = $0 }
     }
 
+    @ViewBuilder
     private func rowContents(renameText: Binding<String>?) -> some View {
+        if let preview {
+            previewContents(preview, renameText: renameText)
+        } else {
+            lineContents(renameText: renameText)
+        }
+    }
+
+    /// The name over its date and first line, then the folder: what Notes
+    /// shows, so a list of names becomes a list of what is in them. No icon,
+    /// since every row here is a note and the name is the biggest thing.
+    private func previewContents(_ preview: NotePreview, renameText: Binding<String>?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let renameText {
+                TextField("Name", text: renameText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, weight: .semibold))
+                    .focused($isRenameFocused)
+                    .onSubmit { finishRename(commit: true) }
+                    .onExitCommand { finishRename(commit: false) }
+            } else {
+                Text(name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            // On the accent fill the hierarchical greys sink into it, so a
+            // selected row's lines are white at two strengths instead.
+            let dateStyle = isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary)
+            let quietStyle = isSelected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.tertiary)
+            HStack(spacing: 6) {
+                if !preview.date.isEmpty {
+                    Text(preview.date)
+                        .foregroundStyle(dateStyle)
+                        .fixedSize()
+                }
+                Text(preview.excerpt.isEmpty ? "No additional text" : preview.excerpt)
+                    .foregroundStyle(quietStyle)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .font(.system(size: 12))
+            HStack(spacing: 4) {
+                Image(systemName: preview.location.symbol)
+                Text(preview.location.name).lineLimit(1).truncationMode(.middle)
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(quietStyle)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { rowBackground(cornerRadius: 8) }
+        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .contentShape(.rect)
+    }
+
+    private func lineContents(renameText: Binding<String>?) -> some View {
         HStack(spacing: 5) {
             Image(systemName: symbol)
                 .font(.system(size: 11))
@@ -1383,28 +1709,31 @@ struct NoteRow: View {
         .padding(.trailing, 6)
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if isDropTargeted {
-                // Outlined rather than filled, so it reads as "into here"
-                // rather than as a selection.
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(accent, lineWidth: 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.12))
-                    )
-            } else if isSelected {
-                RoundedRectangle(cornerRadius: 6).fill(accent)
-            } else if isKeyTarget {
-                // A tint rather than the accent itself, and the text keeps its
-                // own colour: this row is where the keys point, not something
-                // the reader has chosen.
-                RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.18))
-            } else if isHovering {
-                RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06))
-            }
-        }
+        .background { rowBackground(cornerRadius: 6) }
         .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
         .contentShape(.rect)
+    }
+
+    @ViewBuilder
+    private func rowBackground(cornerRadius: CGFloat) -> some View {
+        if isDropTargeted {
+            // Outlined rather than filled, so it reads as "into here"
+            // rather than as a selection.
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .strokeBorder(accent, lineWidth: 2)
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius).fill(accent.opacity(0.12))
+                )
+        } else if isSelected {
+            RoundedRectangle(cornerRadius: cornerRadius).fill(accent)
+        } else if isKeyTarget {
+            // A tint rather than the accent itself, and the text keeps its
+            // own colour: this row is where the keys point, not something
+            // the reader has chosen.
+            RoundedRectangle(cornerRadius: cornerRadius).fill(accent.opacity(0.18))
+        } else if isHovering {
+            RoundedRectangle(cornerRadius: cornerRadius).fill(Color.primary.opacity(0.06))
+        }
     }
 
     private func finishRename(commit: Bool) {

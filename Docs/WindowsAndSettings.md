@@ -124,8 +124,8 @@ HeftCore holds one Double and one date per item, a use adds one and the score
 halves every three days, with the decay applied on read. Recency alone puts a
 note opened once by accident above one opened every morning; frequency alone
 never lets go of last year's project. `VaultSession.recentPaths` stays as a
-history, because the sidebar's Recent list has to keep the order things
-happened.
+history, because the sidebar's Recent list in its "last opened" order has to
+keep the order things happened.
 
 A command that cannot run right now sinks below every command that can,
 keeping its rank among the others down there. Frecency alone put "Review
@@ -161,7 +161,9 @@ one, re-reading only files whose size or date changed; `tree` is assigned
 only when it differs, with `VaultItem`'s equality leaving the fingerprint
 out; and `index` only when `answersMatch` says the files or their links,
 tags and mentions changed. The unpublished build is kept as `latestIndex` and
-the next reload starts from it. The first build of a process starts from
+the next reload starts from it; the one view that needs what a prose save
+changed, the Recent list, listens to `contentChanges` instead. The first
+build of a process starts from
 `IndexCache`, the same per-note parses written to Application Support by the
 last build, so a cold start and every `heft` verb read only what changed
 since; a vault under the temporary directory is never written there.
@@ -177,6 +179,50 @@ flickering with every pause tells the reader nothing they can act on. It
 means the note cannot be written, a failed write or a conflict that has paused
 saving (`saveIsBlocked`), and it makes the window ask before closing, which
 is right for exactly that note.
+
+## The Recent list
+
+Two orders, chosen in the list's own menu or in Appearance: by last edit,
+the default, and by last opening. The edited order comes from the files'
+dates, so a note changed on another device rises too; the opened order is
+`recentPaths`, this Mac's history. Both are grouped into sections (Today,
+Yesterday, Previous 7 Days and on) and both date their rows, each by its own
+clock: when the file was written, or when the note was opened here. The
+session records that opening time beside the history, which until then kept
+the order things happened in but not when; a note opened before it did has
+no date and falls under no heading, which is the truth about it rather than
+a guess from the file's own date. `RecentDating` in HeftCore decides the
+section and the row's date label from a calendar, a locale and a `now`, so a
+test can fix all three.
+
+The section title stays at the top while its rows scroll, as a row of its
+own above the list rather than something drawn over it. The list begins
+under that row, so a row scrolling away simply leaves the scroll view and
+the title needs nothing to hide it. Drawn over the list it had to be masked
+out of, and a mask composites the whole list off screen: its text lost
+subpixel antialiasing and its hairline dividers disappeared, so the list
+read as greyed out. Giving the title a surface of its own was the other
+way, and no material could: each let a selected row's accent through as an
+even wash of colour over the whole title, and a behind-window one sampled
+the desktop and drifted with the wallpaper.
+
+The first section's title is left out of the list, since the row above
+always carries it; rendered in both, its hidden twin held a title's worth
+of space and left a gap under the real one. Every later title stays in the
+list and hides while the row above is showing it, so the rows keep their
+spacing as it scrolls away, and the title shown is the last one to have
+reached the top, or the first section's when none has. Each title's section
+spacing sits in the list rather than in the title, or one at the top stood
+taller than one at rest.
+
+The date and the first line under each name come from the index: the first
+line is parsed on the same read as the links and kept in the parse cache,
+so the list never reads a note of its own. Both are read from the session's
+`latestIndex`, not the published one, because a prose save publishes
+nothing; the session sends `contentChanges` after any reload that read a
+note, and the sidebar redraws the list on it. The edited order is sorted
+once per reload, off the main thread, because the sidebar redraws on every
+keystroke.
 
 ## Renaming, in one place
 
