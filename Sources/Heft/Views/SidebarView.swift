@@ -531,6 +531,7 @@ struct SidebarView: View {
                             selectedFolderPath = nil
                             model.open(note)
                         }
+                        .simultaneousGesture(fileDrag(note.url))
                         .contextMenu {
                             FileMenu(
                                 item: item,
@@ -783,6 +784,7 @@ struct SidebarView: View {
             selectedFolderPath = nil
             model.open(note)
         }
+        .simultaneousGesture(fileDrag(note.url))
         .contextMenu {
             FileMenu(
                 item: item,
@@ -822,6 +824,7 @@ struct SidebarView: View {
                         selectedFolderPath = nil
                         model.open(note)
                     }
+                    .simultaneousGesture(fileDrag(note.url))
                     // Search results get the same menu; the tree's `VaultItem`
                     // is not to hand here, so it is rebuilt from the hit.
                     .contextMenu {
@@ -838,6 +841,16 @@ struct SidebarView: View {
         }
         .contentShape(.rect)
         .contextMenu { rootContextActions }
+    }
+
+    /// Dragging a note out of a list that is not the tree.
+    ///
+    /// Simultaneous, so the row's button still gets its click: it only fires
+    /// once the pointer has actually travelled. The tree's rows carry their
+    /// own, which drags a whole selection; these lists have no selection to
+    /// drag, so a row drags itself.
+    private func fileDrag(_ url: URL) -> some Gesture {
+        DragGesture(minimumDistance: 6).onChanged { _ in beginFileDrag(for: url) }
     }
 
     private func renameBinding(for item: VaultItem) -> Binding<String>? {
