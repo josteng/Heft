@@ -94,6 +94,21 @@ struct PaletteReachTests {
         #expect(model.folderInHand?.lastPathComponent == "Work")
     }
 
+    /// A focus is felt in the tree, so the tree is where a reader looks to
+    /// undo it, rather than in the menu under the window's title.
+    @Test("The way out of a focused folder is in the tree's own menu")
+    func unfocusIsInTheTree() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/Heft/Views/SidebarView.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("MenuButton(\"Show the Entire Vault\""))
+        #expect(AppCommand.registry.contains { $0.id == "focusEntireVault" })
+    }
+
     /// The editor cannot be reached down the responder chain while the
     /// palette is open, so a format travels as a request on the model.
     @Test("A format asked for becomes a request the editor can answer")

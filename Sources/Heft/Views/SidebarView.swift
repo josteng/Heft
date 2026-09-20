@@ -420,6 +420,16 @@ struct SidebarView: View {
             ) {
                 model.revealInFinder(root)
             }
+            // The way back out of a focused folder, beside the verbs about
+            // that folder. It is in the title bar's own menu as well, which
+            // is where it was easy to walk past: the focus is felt in the
+            // tree, so the tree is where the reader looks to undo it.
+            if model.scopePath != nil {
+                Divider()
+                MenuButton("Show the Entire Vault", symbol: "books.vertical") {
+                    model.showEntireVault()
+                }
+            }
         }
     }
 
