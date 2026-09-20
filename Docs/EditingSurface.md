@@ -433,6 +433,16 @@ Grammar is not independent of spelling. A check asking for grammar alone
 returns nothing, whatever the flags say, which is what the Edit menu means by
 "Check Grammar with Spelling".
 
+`heft spell` is the same answer without a window: the same `SpellCheckScope`
+over the same decorations, so a word it reports is a word the editor
+underlines. It lives in the app target, since `NSSpellChecker` is AppKit. It
+asks with one `check(_:range:types:)` call rather than walking
+`checkSpelling(of:startingAt:)`, which takes a language and, given the nil a
+vault that mixes languages has to pass, stops after the first couple of words.
+That call is also the only one that reports grammar: the `checkGrammar` API
+answers almost nothing, which is what makes the setting look useless until it
+is tried in the editor.
+
 ## Completion
 
 `[[` and `> [!` share one panel, so `WikiCompletionItem` carries a title,

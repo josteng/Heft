@@ -142,6 +142,12 @@ enum HeftMain {
             )
             return
         }
+        // `spell <vault> [note]` is the editor's red underlines without a
+        // window. Here rather than in `AgentCLI` because `NSSpellChecker` is
+        // AppKit and `HeftCore` does not link it.
+        if arguments.first == "spell", arguments.count > 1 {
+            SpellCLI.run(vaultPath: arguments[1], arguments: Array(arguments.dropFirst(2)))
+        }
         // `export <vault> <note> <out.pdf>` writes the rendered note to PDF
         // without a window. The GUI's Export as PDF goes through exactly this,
         // so what a script produces is what the menu item produces.

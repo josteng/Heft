@@ -24,6 +24,9 @@ heft find <vault> <query>              # full-text search, path:line: preview
     --limit N                          # ...more than the first 40 lines
 heft read <vault> <note>               # a note's source, by name or by path
     --lines N-M                        # ...only that range; records no read
+heft spell <vault> [note]              # what the editor underlines, and why
+    --no-grammar                       # ...spelling only, without the blue
+    --limit N                          # ...stop after N; the whole vault is a lot
 heft files <vault>                     # every file, attachments included
     --notes                            # ...Markdown only
     --by-use                           # ...in the order the reader opens them
@@ -50,9 +53,17 @@ heft diff <vault> <proposal-id>        # what one of them would change
 heft drop <vault> <proposal-id>        # withdraw one, naming who left it
 ```
 
-`--json` on `find`, `files`, `outline`, `links`, `backlinks` and `tags`: a
+`--json` on `find`, `files`, `outline`, `links`, `backlinks`, `spell` and
+`tags`: a
 note's path can hold a quote or a colon, and the column form cannot say which.
 `find` says how many matching lines it withheld rather than stopping silently.
+
+`spell` reports what the editor would underline and nothing else: code,
+math, frontmatter, tags, link destinations and footnote labels are skipped, so
+a proofreading pass does not spend its findings on `thatIsNotAWord`. Each line
+is `path:line:column`, then `spelling` or `grammar`, then the word and its
+corrections or the clause and what is wrong with it. The suggestion is macOS's
+own, so acting on one is a `propose` like any other edit.
 
 An id is a name, taken from the `--summary`: `tighten-the-opening`, and
 `tighten-the-opening-2` for the next one like it. It was a bare UUID, which

@@ -21,6 +21,7 @@ swift run Heft proposals <vault>                # agent edits waiting for review
 swift run Heft backlinks|links|outline <vault> <note>   # the resolved link index
 swift run Heft tags|config <vault>              # tags with counts; settings as JSON
 swift run Heft find <vault> <query>             # --files for notes not lines, --limit N
+swift run Heft spell <vault> [note]             # misspellings and grammar; --no-grammar, --json
 swift run Heft read <vault> <note>              # --lines N-M reads a part, and records no read
 swift run Heft capture <vault> "text"           # one line to the inbox; --daily, --to <note>
 swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headless

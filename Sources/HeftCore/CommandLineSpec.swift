@@ -150,6 +150,13 @@ public enum CommandLineSpec {
             Flag("--dry-run", "Say what would change, and change nothing."),
             Flag("--now", "Rename immediately, unreviewed."),
         ], isReadOnly: false),
+        Verb("spell", "<vault> [note]",
+             "What the editor underlines: spelling and grammar, skipping code, math, "
+             + "tags and link destinations. The whole vault if no note is named.", flags: [
+            Flag("--limit", value: "N", "Stop after N findings."),
+            Flag("--no-grammar", "Spelling only, without the grammar pass."),
+            Flag("--json", "Machine-readable, one object per finding."),
+        ]),
         Verb("render", "<vault> <note> [caret]",
              "What the live surface would draw, fragment by fragment.",
              isDiagnostic: true),
