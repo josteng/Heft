@@ -46,6 +46,14 @@ if pgrep -x Heft >/dev/null; then
     done
 fi
 
+# And the capture extension, which the app does not own. `pluginkit` keeps it
+# alive between uses, so a copy launched from .build kept answering Shortcuts
+# for a day after this script had replaced the bundle: a new intent had no
+# parameter options and failed with "an internal error occurred", because the
+# type was genuinely missing from that process. Killing it costs nothing; it
+# is relaunched on demand from wherever it is now installed.
+pkill -f "HeftCapture.appex/Contents/MacOS/HeftCapture" >/dev/null 2>&1 || true
+
 rm -rf "$TARGET"
 cp -R "$BUILT_APP" "$TARGET"
 
@@ -130,6 +138,12 @@ if [[ -x "$LSREGISTER" ]]; then
         echo "Unregistered $forgotten other Heft.app $( [[ $forgotten -eq 1 ]] && echo copy || echo copies )"
     fi
 fi
+
+# No `killall siriactionsd` here, and it was here once. Registering the
+# bundle above makes Siri schedule a delta index of the app's actions, a
+# five-second job that starts at once; killing the daemon three seconds
+# into it lost the run, and Siri went on offering an intent the new build
+# had removed, failing every request with it. Left alone, it finishes.
 
 if [[ "$LAUNCH" -eq 1 ]]; then
     open "$TARGET"

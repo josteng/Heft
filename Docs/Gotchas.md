@@ -269,6 +269,21 @@ preferences or the icon.
   silhouette. `tintedSymbol` draws the template image and recolours it with
   `.sourceIn`, which keeps the detail.
 
+- **A capture extension left running serves the intents it was built with.**
+  `pluginkit` relaunches it on demand and then keeps it alive for days, so a
+  copy started from `.build` outlives every reinstall: Shortcuts offered no
+  options for a new action and failed it with "an internal error occurred",
+  because the type really was absent from that process. The app has no such
+  problem, since running it replaces it. After installing, `pkill -f
+  HeftCapture`; a new intent that Shortcuts cannot see is this first.
+
+- **Siri learns an app's actions from a delta index that runs seconds
+  after `lsregister`, and killing `siriactionsd` loses it.** `install.sh`
+  once restarted the daemon to "refresh" Siri; the log shows the index
+  starting on registration and the kill landing three seconds in, after
+  which Siri kept offering a removed intent and failed every request with
+  it (`WFActionErrorDomain 1`). Register, then leave the daemon alone.
+
 ## Known gaps
 
 Markdown Heft does not read, found by auditing the decorator against CommonMark:
