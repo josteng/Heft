@@ -74,10 +74,15 @@ struct ParsedNote: Codable, Sendable {
     let mentions: [Mention]
     let tags: [String]
     let attachmentNames: Set<String>
+    /// The first line of prose, taken on the same read as the links. The
+    /// Recent list shows it under every name, and reading each note again
+    /// for that would cost what the fingerprint saves.
+    let excerpt: String
 
     /// Whether the note would contribute the same links, tags and attachment
     /// mentions as `other`, whatever the file's date says. Most saves are
-    /// prose, and a prose save changes none of these.
+    /// prose, and a prose save changes none of these; the excerpt is left
+    /// out for the same reason, since it changes on every prose save.
     func sameContent(as other: ParsedNote) -> Bool {
         mentions == other.mentions && tags == other.tags && attachmentNames == other.attachmentNames
     }
@@ -97,7 +102,8 @@ struct ParsedNote: Codable, Sendable {
             fingerprint: fingerprint,
             mentions: mentions,
             tags: NoteTags.all(in: text),
-            attachmentNames: AttachmentNames.mentioned(in: text)
+            attachmentNames: AttachmentNames.mentioned(in: text),
+            excerpt: NoteText.excerpt(text)
         )
     }
 
@@ -106,7 +112,7 @@ struct ParsedNote: Codable, Sendable {
     /// same unreadable file again; the download that brings it back changes
     /// the fingerprint.
     static func unreadable(fingerprint: FileFingerprint?) -> ParsedNote {
-        ParsedNote(fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [])
+        ParsedNote(fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [], excerpt: "")
     }
 }
 
@@ -394,6 +400,29 @@ public final class VaultIndex: @unchecked Sendable {
         if let candidates = byName[withoutExt], let first = candidates.first { return first }
 
         return nil
+    }
+
+    /// When the note's file was last written, as the scan saw it. Nil for a
+    /// note the index was handed rather than scanned.
+    public func modificationDate(of path: String) -> Date? {
+        guard let nanoseconds = parsed[path]?.fingerprint?.modifiedNanoseconds else { return nil }
+        return Date(timeIntervalSince1970: Double(nanoseconds) / 1_000_000_000)
+    }
+
+    /// The note's first line of prose, or nil for a file the index never read.
+    public func excerpt(of path: String) -> String? {
+        parsed[path]?.excerpt
+    }
+
+    /// Every note, the one written most recently first. A note without a
+    /// date sorts last; ties keep path order so the list is stable.
+    public var notesByLastEdit: [NoteRef] {
+        notes.sorted { a, b in
+            let ma = parsed[a.relativePath]?.fingerprint?.modifiedNanoseconds ?? .min
+            let mb = parsed[b.relativePath]?.fingerprint?.modifiedNanoseconds ?? .min
+            if ma != mb { return ma > mb }
+            return a.relativePath < b.relativePath
+        }
     }
 
     public func note(atRelativePath path: String) -> NoteRef? {

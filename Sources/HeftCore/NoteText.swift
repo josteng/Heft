@@ -146,20 +146,44 @@ public enum NoteText {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// A short plain-text preview, with frontmatter, headings and markers removed.
+    /// A short plain-text preview: the first line of prose, with frontmatter,
+    /// headings, fences, embeds and markup out of the way.
+    ///
+    /// What the sidebar's Recent list shows under a name, so it reads the way
+    /// the note does: a task line gives its text, a link its alias, and a
+    /// note that is nothing but headings gives nothing rather than a `#`.
     public static func excerpt(_ source: String, limit: Int = 140) -> String {
         let body = splitFrontmatter(source).body
+        var inFence = false
         for line in body.components(separatedBy: "\n") {
-            var t = line.trimmingCharacters(in: .whitespaces)
-            guard !t.isEmpty, !t.hasPrefix("#"), !t.hasPrefix("---"), !t.hasPrefix("```") else { continue }
-            for marker in ["**", "*", "`", "> ", "- ", "==", "~~"] {
-                t = t.replacingOccurrences(of: marker, with: "")
-            }
-            t = t.trimmingCharacters(in: .whitespaces)
+            let raw = line.trimmingCharacters(in: .whitespaces)
+            if raw.hasPrefix("```") || raw.hasPrefix("~~~") { inFence.toggle(); continue }
+            guard !inFence, !raw.isEmpty, !raw.hasPrefix("#"), !raw.hasPrefix("---"),
+                  !raw.hasPrefix("![") else { continue }
+            let t = plainLine(raw)
             guard !t.isEmpty else { continue }
             return t.count > limit ? String(t.prefix(limit)).trimmingCharacters(in: .whitespaces) + "…" : t
         }
         return ""
+    }
+
+    /// One line with its Markdown stripped, for `excerpt`.
+    static func plainLine(_ line: String) -> String {
+        var t = line
+        // Quote, list and task markers, in the order they nest.
+        while let match = t.firstMatch(of: #/^>\s*/#) { t.removeSubrange(match.range) }
+        if let match = t.firstMatch(of: #/^(?:[-*+]|\d+[.)])\s+/#) { t.removeSubrange(match.range) }
+        if let match = t.firstMatch(of: #/^\[[ xX]\]\s*/#) { t.removeSubrange(match.range) }
+        // `[[Note|alias]]` reads as its alias, `[[Note]]` as its name, and a
+        // Markdown link as its text.
+        t = t.replacing(#/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/#) { match in
+            String(match.output.2 ?? match.output.1)
+        }
+        t = t.replacing(#/\[([^\]]*)\]\([^)]*\)/#) { match in String(match.output.1) }
+        for marker in ["**", "__", "*", "`", "==", "~~"] {
+            t = t.replacingOccurrences(of: marker, with: "")
+        }
+        return t.trimmingCharacters(in: .whitespaces)
     }
 
     /// Enumerates lines outside fenced code blocks, so link indexing does not
