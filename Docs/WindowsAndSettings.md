@@ -257,6 +257,29 @@ note, and the sidebar redraws the list on it. The edited order is sorted
 once per reload, off the main thread, because the sidebar redraws on every
 keystroke.
 
+Filtering the file tree matches folders as well as notes, and shows them
+first. The filter used to search the index, which knows about notes, so the
+one place a reader looks for a folder by name was the one place that could
+not answer. A matching folder is clicked to be shown where it lives: the
+filter clears, the tree opens down to it, opens the folder itself and
+leaves it chosen. Opened, because a folder searched for is a container
+rather than a destination, and showing it shut is showing the answer with
+the lid on. Chosen rather than merely shown, because that is what a new
+note goes into and what the palette's folder verbs act on; the reveal
+makes the choice once the row exists, since it clears the old one as it
+begins and a choice made at the click would not survive that.
+
+Revealing does not light a row unless it is asked to. Almost every
+revealed row is already marked by something steadier: an open note's row
+is lit while it is open, and a folder found by search is left chosen.
+Lighting those as well answers a question twice, and the light fades while
+the steady marks do not. What is left is the one row nothing else marks, a
+dropped or duplicated file that is not a note: it opens nothing and lands
+wherever its name sorts it, so that caller asks for the light. Either way
+the previous light goes out, since attention has moved. It is not focused
+by that click, since focusing a window on a folder is a large thing to do
+by accident; its own menu offers that, and so does the palette.
+
 ## Renaming, in one place
 
 `VaultRename` in HeftCore does the work; `AppModel` keeps only what a window

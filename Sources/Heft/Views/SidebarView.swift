@@ -348,13 +348,24 @@ struct SidebarView: View {
         // still has to build the rows inside the folders just expanded.
         .task(id: model.revealTarget) {
             guard let target = model.revealTarget else { return }
+            // Whatever was chosen before is not what is being shown now.
+            // What replaces it is decided once the row exists, below: a
+            // folder revealed becomes the chosen one, a note clears it.
             selectedFolderPath = nil
+            var revealed: VaultItem?
             for _ in 0..<60 {
-                if model.tree?.flattened().contains(where: { $0.relativePath == target }) == true {
-                    break
-                }
+                revealed = model.tree?.flattened().first { $0.relativePath == target }
+                if revealed != nil { break }
                 try? await Task.sleep(for: .milliseconds(25))
                 guard !Task.isCancelled else { return }
+            }
+            // A folder that was searched for is chosen as well as shown: it
+            // is where a new note goes, and what the palette's folder verbs
+            // act on. Setting this at the click did not survive, because
+            // this task clears the choice as the reveal begins.
+            if let revealed, revealed.isFolder {
+                selectedFolderPath = revealed.relativePath
+                model.sidebarKeyboardTarget = revealed.url
             }
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled else { return }
@@ -817,10 +828,61 @@ struct SidebarView: View {
             .frame(maxWidth: .infinity)
     }
 
+    /// Folders whose name matches the filter, nearest match first.
+    ///
+    /// The tree's own furniture, which the filter used to hide: it searched
+    /// the index, which knows about notes, so a folder could be typed in
+    /// full and nothing came back.
+    private func filteredFolders() -> [VaultItem] {
+        guard let tree = model.scopedTree else { return [] }
+        return FolderSearch.folders(matching: filter, in: tree)
+    }
+
     private var filteredList: some View {
+        let folders = filteredFolders()
         let matches = model.searchNotes(filter, limit: 200)
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
+                // Folders first: there are far fewer of them, and someone
+                // typing a folder's name is looking for the folder rather
+                // than for the notes whose names resemble it.
+                ForEach(folders) { folder in
+                    let parent = folder.relativePath
+                        .split(separator: "/").dropLast().joined(separator: "/")
+                    NoteRow(
+                        name: folder.name,
+                        detail: parent,
+                        isSelected: false,
+                        depth: 0,
+                        symbol: "folder",
+                        renameText: renameBinding(for: folder),
+                        onRenameCommit: { commitRename(folder) },
+                        onRenameCancel: cancelRename
+                    ) {
+                        // Found, then shown where it lives: the filter goes,
+                        // the tree opens down to it, opens it, and lights it.
+                        // A folder cannot be opened as a note, and focusing
+                        // the window on one by a single click would be a
+                        // large thing to do by accident; its menu offers
+                        // that.
+                        filter = ""
+                        selectedFolderPath = folder.relativePath
+                        // The reveal chooses it once its row exists, and
+                        // does not blink it: a folder searched for and then
+                        // marked as chosen needs no second, louder answer to
+                        // the same question.
+                        model.revealFolder(folder.relativePath)
+                    }
+                    .simultaneousGesture(fileDrag(folder.url))
+                    .contextMenu {
+                        FolderMenu(
+                            item: folder,
+                            onCreateNote: { beginCreatingNote(in: folder.url) },
+                            onCreateFolder: { beginCreatingFolder(in: folder.url) },
+                            onRename: { beginRename(folder) }
+                        )
+                    }
+                }
                 ForEach(matches) { note in
                     let item = VaultItem(
                         url: note.url, relativePath: note.relativePath,

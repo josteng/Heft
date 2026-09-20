@@ -193,3 +193,34 @@ public enum VaultScanner {
         return .other
     }
 }
+
+/// Finding a folder by name, which the note index cannot do: it knows about
+/// notes, and a folder holds them rather than being one.
+public enum FolderSearch {
+    /// Folders whose name contains `query`, nearest match first: a prefix
+    /// beats a substring, then the shallower one, then the path, so a search
+    /// for "Work" offers the folder before the one nested inside it.
+    ///
+    /// Case-insensitive and on the name alone. Matching the path as well
+    /// would make every folder in a matching folder a match too, which is
+    /// the opposite of narrowing.
+    public static func folders(matching query: String, in tree: VaultItem) -> [VaultItem] {
+        let query = query.lowercased()
+        // Belt and braces: Swift's `contains("")` is false, so an empty
+        // query matches nothing of its own accord. Said out loud because an
+        // empty filter means the whole tree, which is drawn elsewhere, and
+        // a search that quietly returned everything would double it.
+        guard !query.isEmpty else { return [] }
+        return tree.flattened()
+            .filter { $0.isFolder && $0.name.lowercased().contains(query) }
+            .sorted { a, b in
+                let ap = a.name.lowercased().hasPrefix(query)
+                let bp = b.name.lowercased().hasPrefix(query)
+                if ap != bp { return ap }
+                let ad = a.relativePath.count(where: { $0 == "/" })
+                let bd = b.relativePath.count(where: { $0 == "/" })
+                if ad != bd { return ad < bd }
+                return a.relativePath < b.relativePath
+            }
+    }
+}

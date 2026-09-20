@@ -1189,8 +1189,21 @@ struct VaultHostTests {
         let model = try await ready(model(root, ScriptedHost()))
         model.highlightDuration = .milliseconds(60)
 
+        // Not asked for, not lit: an open note and a folder found by search
+        // are marked already, and a light that fades would answer over them.
         model.reveal("Note.md")
+        #expect(model.highlightedPath == nil, "revealing does not light by itself")
+
+        // Asked for: a dropped file is the one row with nothing steadier of
+        // its own, and its caller is the only one that asks.
+        model.reveal("Note.md", lighting: true)
         #expect(model.highlightedPath == "Note.md")
+
+        // Revealing elsewhere takes the light off, rather than leaving it
+        // burning on a row nobody is looking at.
+        model.reveal("Other.md")
+        #expect(model.highlightedPath == nil)
+        model.reveal("Note.md", lighting: true)
         // Waited for rather than slept through: the whole suite runs in
         // parallel, and a fixed wait fails on a busy machine instead of on
         // a light that stayed on.

@@ -1111,9 +1111,26 @@ final class AppModel: ObservableObject {
     ///
     /// Every ancestor, so a note four deep is not revealed behind three closed
     /// folders. The path itself is not a folder and is what is scrolled to.
-    func reveal(_ relativePath: String) {
+    /// `lighting` is the brief light that says "here", and is asked for
+    /// rather than assumed, because almost every revealed row is already
+    /// marked by something steadier: an open note's row is lit for as long
+    /// as it is open, and a folder found by search is left chosen. Lighting
+    /// those as well is a second, louder answer to a question already
+    /// answered, and it fades, which the steady marks do not.
+    ///
+    /// What is left is the row nothing else marks: a file dropped or
+    /// duplicated that is not a note, which opens nothing and lands
+    /// wherever its name sorts it.
+    func reveal(_ relativePath: String, lighting: Bool = false) {
         if columnVisibility == .detailOnly { columnVisibility = .automatic }
-        light(relativePath)
+        // Either way the old light goes out: attention has moved to this
+        // row, and a light left burning on the last one points at nothing.
+        if lighting {
+            light(relativePath)
+        } else {
+            highlightTask?.cancel()
+            highlightedPath = nil
+        }
         let parts = relativePath.split(separator: "/").dropLast()
         var path = ""
         for part in parts {
@@ -1121,6 +1138,17 @@ final class AppModel: ObservableObject {
             expandedFolders.insert(path)
         }
         revealTarget = relativePath
+    }
+
+    /// Reveals a folder, and opens it.
+    ///
+    /// `reveal` opens everything above what it is given, which is right for
+    /// a note: the note is the destination. A folder searched for is not a
+    /// destination but a container, and showing it shut is showing the
+    /// answer with the lid on.
+    func revealFolder(_ relativePath: String) {
+        reveal(relativePath)
+        expandedFolders.insert(relativePath)
     }
 
     func finishReveal() {
@@ -1919,7 +1947,9 @@ final class AppModel: ObservableObject {
         // PDF dropped in lands halfway down a folder that may not even be
         // open. A note is opened as well.
         if made.count == 1 {
-            reveal(relativePath(of: made[0]))
+            // Lit, because a dropped PDF or image opens nothing: this is the
+            // one row with no steadier mark of its own.
+            reveal(relativePath(of: made[0]), lighting: true)
             if let ref = NoteRef(url: made[0], vaultRoot: vaultRoot), ref.kind == .markdown {
                 open(ref)
                 focusEditor()
