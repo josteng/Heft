@@ -211,6 +211,40 @@ struct AppCommand: Identifiable {
             action: { _ in AppearanceSettings.shared.colorfulFormattingEnabled.toggle() }
         ),
         Self(
+            id: "toggleSpelling",
+            title: "Toggle spell checking",
+            symbol: "textformat.abc.dottedunderline",
+            searchTerms: "spelling spell check dictionary misspelling typo underline proofread language",
+            displayTitle: { _ in TypingSettings.shared.checksSpelling
+                ? "Turn off spell checking"
+                : "Turn on spell checking" },
+            action: { _ in TypingSettings.shared.checksSpelling.toggle() }
+        ),
+        // Its own entry rather than a mode of the one above, because the two
+        // underlines mean different things and a note being proofread wants
+        // the red without the blue as often as it wants both.
+        Self(
+            id: "toggleGrammar",
+            title: "Toggle grammar checking",
+            symbol: "text.badge.checkmark",
+            searchTerms: "grammar check agreement doubled word article proofread language",
+            displayTitle: { _ in TypingSettings.shared.checksGrammar
+                ? "Turn off grammar checking"
+                : "Turn on grammar checking" },
+            enabled: { _ in TypingSettings.shared.checksSpelling },
+            action: { _ in TypingSettings.shared.checksGrammar.toggle() }
+        ),
+        Self(
+            id: "toggleAutocorrect",
+            title: "Toggle automatic spelling correction",
+            symbol: "wand.and.sparkles",
+            searchTerms: "autocorrect correct spelling automatically fix typo replace as you type",
+            displayTitle: { _ in TypingSettings.shared.correctsSpelling
+                ? "Turn off automatic spelling correction"
+                : "Turn on automatic spelling correction" },
+            action: { _ in TypingSettings.shared.correctsSpelling.toggle() }
+        ),
+        Self(
             id: "toggleVim",
             title: "Toggle Vim mode",
             symbol: "keyboard",

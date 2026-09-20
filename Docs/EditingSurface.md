@@ -377,6 +377,62 @@ Nothing fires inside code, maths, frontmatter, wiki links, link destinations,
 tags or URLs; `SmartTypography.allowsSubstitution` is a cheap own scan rather
 than a `LiveDecorator` pass because it runs on every keystroke.
 
+## Spell checking, and where it may not look
+
+The checking is AppKit's: `isContinuousSpellCheckingEnabled` on the text view
+gets the dictionary, the learned words, the grammar pass and the corrections
+in the context menu for two lines. What Heft decides is where it may look,
+because the buffer is the file and the checker reads `let recieve = …`,
+`#projekt` and `\alpha` as prose.
+
+AppKit reports every misspelling through `setSpellingState(_:range:)`, once per
+word, so overriding that is the whole suppression mechanism: the word is never
+marked rather than marked and then unmarked. Clearing the state afterwards was
+tried first and loses a race: the checker is asynchronous, so typing inside a
+fence flashed red on every keystroke. `textView(_:shouldCheckTextIn:…)` is not
+an option either; it serves the data-detector path and is never called for
+continuous checking.
+
+`SpellCheckScope` derives the excluded spans from the decorations the restyle
+already produced, so there is no second scan, and it sorts them because the
+decorator reports a tag after the code span that follows it. Prose inside
+markup stays checked: exclusion is by style, not by "has hidden syntax", or a
+typo in `**recieve**` would go unmarked. A clearing call is always let through,
+since wrapping a marked word in backticks makes it excluded and AppKit's own
+clear arrives afterwards.
+
+Grammar does not come through that veto. AppKit writes a grammar mark as its
+own family of rendering attributes rather than as a spelling state, so it has
+to be taken off after the fact, which is the approach rejected above for
+spelling. It is affordable here for the reason it was not there: grammar fires
+on a sentence it objects to rather than on every unknown word, so the same
+delay costs a rare flicker instead of a constant one. Clearing a spelling
+state does not remove it either, which is why switching grammar off sweeps the
+whole document rather than relying on the flag.
+
+Turning a setting on has to re-check what is already open. AppKit checks text
+as it is edited, so flipping the flag alone left the note as it was until it
+was next typed into. The re-check names `spelling` and `grammar` explicitly
+rather than calling `checkTextInDocument`, which runs whatever
+`enabledTextCheckingTypes` holds: that set includes quote, dash and
+replacement substitution, and those rewrite the text.
+
+Automatic correction is the one of the three that writes, so it may not reach
+source at all. It cannot be vetoed the way a mark can: a correction is a text
+change, and the continuous pass that makes one reaches neither
+`setSpellingState` nor the checking delegate. What makes it tractable is that
+it only ever rewrites the word being typed, so the flag AppKit reads follows
+the caret, and is off whenever the caret is inside an excluded span.
+
+`textView(_:didCheckTextIn:…)` filters a check Heft asks for by hand, which is
+how a settings toggle re-checks without ever putting a mark in code. It is not
+a general answer: neither it nor `willCheckTextIn` is called for the
+continuous pass behind typing, which is why the veto and the sweep remain.
+
+Grammar is not independent of spelling. A check asking for grammar alone
+returns nothing, whatever the flags say, which is what the Edit menu means by
+"Check Grammar with Spelling".
+
 ## Completion
 
 `[[` and `> [!` share one panel, so `WikiCompletionItem` carries a title,

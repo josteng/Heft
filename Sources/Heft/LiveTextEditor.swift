@@ -51,6 +51,7 @@ struct EditorInsertion: Equatable {
 /// TextKit 1's attribute vocabulary genuinely cannot express.
 struct LiveTextEditor: NSViewRepresentable {
     @ObservedObject private var vim = VimSettings.shared
+    @ObservedObject private var typing = TypingSettings.shared
     @Binding var text: String
     /// Which note is on screen. Separate from `generation`, which only says
     /// the buffer was replaced: opening a different note is a different
@@ -105,7 +106,11 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.correctsSpelling = typing.correctsSpelling
+        // Checking is AppKit's; which spans it may mark is not. See
+        // `setSpellingState`.
+        textView.isContinuousSpellCheckingEnabled = typing.checksSpelling
+        textView.isGrammarCheckingEnabled = typing.checksSpelling && typing.checksGrammar
         textView.isAutomaticTextCompletionEnabled = false
         // Named rather than inherited: the view defaults it off so that the
         // views a test builds offer nothing, and the editor is the one place
@@ -184,6 +189,8 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onSidebarPaste = onSidebarPaste
         textView.onEditorClaimed = onEditorClaimed
         textView.onVimSearch = onVimSearch
+        textView.checksSpelling(typing.checksSpelling, grammar: typing.checksGrammar)
+        textView.correctsSpelling = typing.correctsSpelling
         textView.completionIndex = context.index
         textView.vimCaretColor = context.accentColor
         // What `{{title}}` in a custom replacement expands to.
@@ -705,6 +712,11 @@ struct LiveTextEditor: NSViewRepresentable {
                     }
                 )
             }
+            // Before the early return below, not after it: "nothing changed"
+            // there means the same constructs, which have still *moved*, and
+            // an exclusion is a range.
+            (textView as? HeftTextKit2View)?.spellExclusions =
+                SpellCheckScope.exclusions(for: decorations, in: source)
             let snapshot = RestyleScope.Snapshot(
                 source: source, decorations: decorations, reveal: reveal
             )
@@ -890,6 +902,30 @@ struct LiveTextEditor: NSViewRepresentable {
                   let textRange = NSTextRange(location: start, end: end)
             else { return }
             manager.invalidateLayout(for: textRange)
+        }
+
+        /// Drops what the checker found in a span it should not have read.
+        ///
+        /// Only reached for a check Heft asks for by hand, never for the
+        /// continuous pass behind typing, which is why the veto in
+        /// `setSpellingState` and the grammar sweep both still exist. For the
+        /// re-check behind a settings toggle this is exact: the result is
+        /// thrown away before it is ever applied, so nothing has to be taken
+        /// back off afterwards.
+        ///
+        /// Orthography results are left alone whatever their range: they are
+        /// how the checker knows which language it is reading.
+        func textView(
+            _ view: NSTextView, didCheckTextIn range: NSRange, types: NSTextCheckingTypes,
+            options: [NSSpellChecker.OptionKey: Any] = [:], results: [NSTextCheckingResult],
+            orthography: NSOrthography, wordCount: Int
+        ) -> [NSTextCheckingResult] {
+            guard let view = view as? HeftTextKit2View else { return results }
+            let marking: [NSTextCheckingResult.CheckingType] = [.spelling, .grammar, .correction]
+            return results.filter { result in
+                guard marking.contains(result.resultType) else { return true }
+                return !SpellCheckScope.excludes(result.range, in: view.spellExclusions)
+            }
         }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at index: Int) -> Bool {
@@ -1081,6 +1117,186 @@ final class HeftTextKit2View: NSTextView {
     var onVimSearch: ((VimHostAction) -> Void)?
     var onFirstResponderChange: ((Bool) -> Void)?
     var completionIndex = VaultIndex.empty
+
+    /// The spans the spell checker may not mark, refreshed by every restyle.
+    var spellExclusions: [NSRange] = [] {
+        didSet {
+            scheduleGrammarSweep()
+            updateAutocorrect()
+        }
+    }
+
+    /// Whether macOS may fix a misspelling as it is typed.
+    ///
+    /// Kept apart from the flag AppKit reads, because that one also depends on
+    /// where the caret is: see `updateAutocorrect`.
+    var correctsSpelling = false {
+        didSet { updateAutocorrect() }
+    }
+
+    /// Autocorrect is the one checking feature that *writes*, and the buffer
+    /// is the file, so it may not reach source. The spelling veto cannot help
+    /// here: a correction is a text change rather than a mark, and neither
+    /// `setSpellingState` nor the checking delegate sees the continuous pass
+    /// that makes one.
+    ///
+    /// What makes it tractable is that a correction only ever rewrites the
+    /// word being typed, which is the word at the caret. So the flag follows
+    /// the caret: inside a code span, a tag or a formula there is nothing to
+    /// correct, and outside one it behaves as the setting says.
+    private func updateAutocorrect() {
+        let caret = NSRange(location: selectedRange().location, length: 0)
+        isAutomaticSpellingCorrectionEnabled =
+            correctsSpelling && !SpellCheckScope.excludes(caret, in: spellExclusions)
+    }
+
+    override func setSelectedRanges(
+        _ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool
+    ) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        updateAutocorrect()
+    }
+
+    private var grammarSweepTask: Task<Void, Never>?
+
+    /// The rendering attributes a grammar mark is made of.
+    ///
+    /// Grammar does not come through `setSpellingState`, so the veto there
+    /// never sees it: AppKit writes these straight onto the layout manager.
+    /// Removing them is the only way to take a blue underline off a fenced
+    /// block. Named by string because that is how they arrive; nothing
+    /// declares them as rendering-attribute keys.
+    private static let grammarAttributes: [NSAttributedString.Key] = [
+        "NSGrammarCorrections", "NSGrammarUserDescription", "NSGrammarIssueType",
+        "NSGrammarUUID", "NSGrammarConfidenceScore", "NSGrammarTargetPair",
+        "NSGrammarLeftOffset", "NSGrammarRightOffset", "NSGrammarUserCategory",
+        "NSGrammarSystemCategory", "NSSpellingState", "NSAccessibilitySpellingState",
+    ].map(NSAttributedString.Key.init(_:))
+
+    /// Takes the grammar marks back off the spans a dictionary has no business
+    /// in, once the checker has had time to put them there.
+    ///
+    /// After the fact, unlike the spelling veto, because there is no hook to
+    /// refuse them at: this is the approach that was rejected for spelling,
+    /// where it flashed red under every identifier on every keystroke. Grammar
+    /// fires on a sentence rather than a word, and only on one it objects to,
+    /// so the same delay costs a rare flicker rather than a constant one.
+    private func scheduleGrammarSweep() {
+        grammarSweepTask?.cancel()
+        guard isGrammarCheckingEnabled, !spellExclusions.isEmpty else { return }
+        // Swept more than once, at widening delays. The continuous checker is
+        // asynchronous and answers when it answers: a single sweep that fired
+        // first left the marks it was meant to remove, which showed up as a
+        // test that passed most of the time.
+        grammarSweepTask = Task { @MainActor [weak self] in
+            for delay in [120, 260, 500, 900] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard !Task.isCancelled else { return }
+                self?.sweepGrammar()
+            }
+        }
+    }
+
+    func sweepGrammar() {
+        for range in spellExclusions { clearGrammar(in: range) }
+    }
+
+    private func clearGrammar(in range: NSRange) {
+        guard let manager = textLayoutManager, let content = textContentStorage,
+              let start = content.location(content.documentRange.location, offsetBy: range.location),
+              let end = content.location(start, offsetBy: range.length),
+              let span = NSTextRange(location: start, end: end)
+        else { return }
+        for key in Self.grammarAttributes {
+            manager.removeRenderingAttribute(key, for: span)
+        }
+    }
+
+    /// Where a misspelling is allowed to be underlined.
+    ///
+    /// AppKit runs continuous checking over the whole buffer and reports each
+    /// misspelled word through this one method, so vetoing here is the entire
+    /// suppression mechanism: the word is never marked, rather than marked and
+    /// then unmarked. Clearing the state afterwards was the first attempt and
+    /// loses a race: the checker is asynchronous, so a fence being typed into
+    /// flashed red on every keystroke.
+    ///
+    /// The buffer is the file, so the checker reads `let recieve = …` and
+    /// `#projekt` as prose; `SpellCheckScope` is what knows they are not.
+    ///
+    /// Clearing is always let through. Switching checking off is AppKit
+    /// clearing the whole document through this same method, and a veto that
+    /// did not special-case it would leave the last underlines on screen: an
+    /// exclusion overlaps a document-length range like any other.
+    override func setSpellingState(_ value: Int, range charRange: NSRange) {
+        guard value == 0 || !SpellCheckScope.excludes(charRange, in: spellExclusions) else { return }
+        super.setSpellingState(value, range: charRange)
+    }
+
+    /// Grammar is only ever on alongside spelling, as the Edit menu has it.
+    ///
+    /// Flipping the flags is not enough on its own. AppKit checks text as it
+    /// is edited, so switching checking *on* left the note bare until it was
+    /// next typed into or reopened, and switching grammar *off* left its blue
+    /// underlines where they were. So the document is wiped and, if anything
+    /// is still on, checked again from scratch.
+    ///
+    /// Guarded on the values actually changing, because `updateNSView` runs on
+    /// every SwiftUI pass and re-checking a long note is not a per-keystroke
+    /// cost.
+    /// Answers whether it re-checked, which is what a test can hold on to.
+    @discardableResult
+    func checksSpelling(_ spelling: Bool, grammar: Bool) -> Bool {
+        let wantsGrammar = spelling && grammar
+        guard isContinuousSpellCheckingEnabled != spelling
+            || isGrammarCheckingEnabled != wantsGrammar
+        else { return false }
+        isContinuousSpellCheckingEnabled = spelling
+        isGrammarCheckingEnabled = wantsGrammar
+        recheck()
+        return true
+    }
+
+    /// Drop every mark and, if checking is on at all, ask for them again.
+    ///
+    /// The clear is what makes turning something *off* take effect, since a
+    /// check only ever adds.
+    ///
+    /// `checkText(in:types:)` and not `checkTextInDocument`, which is the Edit
+    /// menu's Check Document Now: that one runs whatever
+    /// `enabledTextCheckingTypes` holds, which is a set including quote, dash
+    /// and replacement substitution. Those rewrite the text, and the buffer is
+    /// the file. Naming the two types leaves no room for it.
+    private func recheck() {
+        let whole = NSRange(location: 0, length: (string as NSString).length)
+        setSpellingState(0, range: whole)
+        // Separately, because a grammar mark is not a spelling state and
+        // survives that call: switching grammar off has to take its blue
+        // underlines with it.
+        clearGrammar(in: whole)
+        guard isContinuousSpellCheckingEnabled else { return }
+        var types = NSTextCheckingResult.CheckingType.spelling.rawValue
+        if isGrammarCheckingEnabled { types |= NSTextCheckingResult.CheckingType.grammar.rawValue }
+        checkText(in: whole, types: types, options: [:])
+        scheduleGrammarSweep()
+    }
+
+    /// The Edit menu and the context menu toggle the text view directly, which
+    /// would leave the setting saying the opposite and the next SwiftUI update
+    /// putting it back. Both spellings of the command write through instead.
+    override func toggleContinuousSpellChecking(_ sender: Any?) {
+        TypingSettings.shared.checksSpelling.toggle()
+    }
+
+    override func toggleAutomaticSpellingCorrection(_ sender: Any?) {
+        TypingSettings.shared.correctsSpelling.toggle()
+    }
+
+    override func toggleGrammarChecking(_ sender: Any?) {
+        let settings = TypingSettings.shared
+        if !settings.checksSpelling { settings.checksSpelling = true }
+        settings.checksGrammar.toggle()
+    }
     /// Called when the usable width changes. Tables are measured against it, so
     /// a stale width leaves columns squeezed; the first layout in particular
     /// happens after the initial restyle, when the container is still zero.
@@ -1939,6 +2155,15 @@ final class HeftTextKit2View: NSTextView {
 
     override func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if let action = item.action, let table = validatesTableCommand(action) { return table }
+        // The flag AppKit would tick this from follows the caret, so with the
+        // caret in a code span the menu said automatic correction was off
+        // while the settings pane said it was on. The setting is the honest
+        // answer: the caret is why it is not firing *here*, not whether it is
+        // switched on.
+        if item.action == #selector(toggleAutomaticSpellingCorrection(_:)) {
+            item.state = correctsSpelling ? .on : .off
+            return true
+        }
         // A text view disables Copy while nothing is selected, and a disabled
         // Edit menu item swallows its own key equivalent: ⌘C beeped and never
         // reached `copy(_:)` at all. With no selection the file is what ⌘C

@@ -46,6 +46,34 @@ final class TypingSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(pairsMarkdown, forKey: Self.markdownKey) }
     }
 
+    /// Whether macOS underlines misspellings as they are typed.
+    ///
+    /// The checking itself is AppKit's: the dictionary, the learned words, the
+    /// corrections in the context menu. What Heft decides is *where*, and
+    /// that is `SpellCheckScope`: source is not prose and gets no underline.
+    @Published var checksSpelling: Bool {
+        didSet { HeftDefaults.shared.set(checksSpelling, forKey: Self.spellingKey) }
+    }
+
+    /// Grammar along with spelling, as the Edit menu's own pairing has it.
+    ///
+    /// On by default. The headless `checkGrammar` API answers almost nothing,
+    /// which is misleading: the text view's own pass marks subject-verb
+    /// disagreement, the wrong article and a doubled word, in blue rather than
+    /// the spelling red.
+    @Published var checksGrammar: Bool {
+        didSet { HeftDefaults.shared.set(checksGrammar, forKey: Self.grammarKey) }
+    }
+
+    /// Whether macOS fixes a misspelling as you type.
+    ///
+    /// Off by default, and the only one of the three that changes the file
+    /// rather than drawing on it. It never fires while the caret is in code,
+    /// a tag or a formula; see `HeftTextKit2View.updateAutocorrect`.
+    @Published var correctsSpelling: Bool {
+        didSet { HeftDefaults.shared.set(correctsSpelling, forKey: Self.correctionKey) }
+    }
+
     /// Whether pasting a copied list item onto a line that is already a
     /// bullet drops the pasted marker.
     ///
@@ -118,6 +146,9 @@ final class TypingSettings: ObservableObject {
     private static let bracketsKey = "dev.stenglein.Heft.typing.pairsBrackets"
     private static let markdownKey = "dev.stenglein.Heft.typing.pairsMarkdown"
     private static let pastedMarkerKey = "dev.stenglein.Heft.typing.trimsPastedListMarker"
+    private static let spellingKey = "dev.stenglein.Heft.typing.checksSpelling"
+    private static let grammarKey = "dev.stenglein.Heft.typing.checksGrammar"
+    private static let correctionKey = "dev.stenglein.Heft.typing.correctsSpelling"
 
     private static func persist(_ groups: Set<SmartTypographyGroup>) {
         let disabled = Set(SmartTypographyGroup.allCases).subtracting(groups)
@@ -138,6 +169,13 @@ final class TypingSettings: ObservableObject {
         trimsPastedListMarker = defaults.object(forKey: Self.pastedMarkerKey) == nil
             ? true
             : defaults.bool(forKey: Self.pastedMarkerKey)
+        checksSpelling = defaults.object(forKey: Self.spellingKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.spellingKey)
+        checksGrammar = defaults.object(forKey: Self.grammarKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.grammarKey)
+        correctsSpelling = defaults.bool(forKey: Self.correctionKey)
         let groups = Self.groups(
             disabled: defaults.array(forKey: Self.disabledGroupsKey) as? [String],
             legacyEnabled: defaults.array(forKey: Self.legacyGroupsKey) as? [String]
@@ -213,6 +251,42 @@ struct TypingSettingsView: View {
     /// row at its natural height inside the scrolled content.
     var body: some View {
         Form {
+            // First, because it is the one aid here that marks text rather
+            // than changing it, and the only one that is macOS's own work.
+            Section {
+                // The exclusions are stated here, for the three of them. They
+                // were repeated on the correction row in a shorter form, which
+                // read as though that one alone respected them.
+                Toggle(isOn: $settings.checksSpelling) {
+                    SettingLabel(
+                        "Check Spelling",
+                        detail: "A misspelling is underlined in red as you type, and clicking "
+                            + "it offers corrections. Nothing in this section reads code, math, "
+                            + "frontmatter, tags, link destinations, or footnote labels."
+                    )
+                }
+                Toggle(isOn: $settings.checksGrammar) {
+                    SettingLabel(
+                        "Check Grammar With Spelling",
+                        detail: "Adds a blue underline for a doubled word, a verb that does not "
+                            + "agree with its subject, and the wrong article. macOS cannot check "
+                            + "grammar on its own, which is why this follows the switch above."
+                    )
+                }
+                .disabled(!settings.checksSpelling)
+                Toggle(isOn: $settings.correctsSpelling) {
+                    SettingLabel(
+                        "Correct Spelling Automatically",
+                        detail: "Fixes a misspelling as you finish the word instead of only "
+                            + "marking it. The one setting here that edits the note, so it is "
+                            + "off unless you ask; a word macOS reads as the wrong language "
+                            + "gets replaced rather than underlined."
+                    )
+                }
+            } header: {
+                SectionHeading("Spelling")
+            }
+
             // Outside the substitutions group on purpose: pairing happens as
             // the key lands rather than after it, and switching substitutions
             // off is no reason to stop closing a bracket.
