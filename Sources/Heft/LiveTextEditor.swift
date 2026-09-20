@@ -66,6 +66,9 @@ struct LiveTextEditor: NSViewRepresentable {
     let findSelection: FindSelection?
     let insertion: EditorInsertion?
     var checklistToggle: Int = 0
+    /// A format the palette asked for, which cannot be sent down the
+    /// responder chain while the palette holds the keyboard.
+    var format: AppModel.PendingFormat? = nil
     /// Changes when the model asks the editor to take the keyboard.
     var focusRequest: Int = 0
     let context: RenderContext
@@ -222,6 +225,11 @@ struct LiveTextEditor: NSViewRepresentable {
             nsContext.coordinator.restyle(textView)
         }
 
+        if let format, format != nsContext.coordinator.lastFormat {
+            nsContext.coordinator.lastFormat = format
+            textView.applyFormat(format.format)
+        }
+
         if checklistToggle != nsContext.coordinator.lastChecklistToggle {
             nsContext.coordinator.lastChecklistToggle = checklistToggle
             // Zero is the value a fresh editor starts at, so it is not a
@@ -356,6 +364,7 @@ struct LiveTextEditor: NSViewRepresentable {
         var lastFindGeneration = -1
         var lastInsertionGeneration = -1
         var lastChecklistToggle = 0
+        var lastFormat: AppModel.PendingFormat?
         /// How far the text has moved since the widgets were computed.
         ///
         /// Only ever non-nil in the window between a storage edit and the

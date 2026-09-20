@@ -92,6 +92,183 @@ struct AppCommand: Identifiable {
     }
 
     static let registry: [Self] = [
+        // The panels that are otherwise only a key away, so a reader who has
+        // not learnt the keys can still find them.
+        Self(
+            id: "quickOpen",
+            title: "Quick Open…",
+            symbol: "magnifyingglass",
+            searchTerms: "open note jump go to switcher fuzzy find file",
+            shortcut: .quickOpen,
+            enabled: { $0.vaultRoot != nil },
+            action: { model in model.afterPalette { $0.isQuickOpenPresented = true } }
+        ),
+        Self(
+            id: "searchVault",
+            title: "Search the Vault…",
+            symbol: "text.magnifyingglass",
+            searchTerms: "find text across notes workspace grep contents everywhere",
+            shortcut: .searchVault,
+            enabled: { $0.vaultRoot != nil },
+            action: { model in model.afterPalette { $0.isVaultSearchPresented = true } }
+        ),
+        Self(
+            id: "findInNote",
+            title: "Find in Note…",
+            symbol: "doc.text.magnifyingglass",
+            searchTerms: "search this note text replace locate",
+            shortcut: .find,
+            enabled: { $0.current != nil },
+            action: { model in model.afterPalette { $0.showFind() } }
+        ),
+        // The formatting bar's own six, which it only offers over a
+        // selection and only where it can reach.
+        Self(
+            id: "formatBold",
+            title: "Bold",
+            symbol: "bold",
+            searchTerms: "strong emphasis format selection markup",
+            shortcut: .bold,
+            enabled: { $0.current != nil },
+            action: { $0.applyFormat(.bold) }
+        ),
+        Self(
+            id: "formatItalic",
+            title: "Italic",
+            symbol: "italic",
+            searchTerms: "emphasis slanted format selection markup",
+            shortcut: .italic,
+            enabled: { $0.current != nil },
+            action: { $0.applyFormat(.italic) }
+        ),
+        Self(
+            id: "formatStrikethrough",
+            title: "Strikethrough",
+            symbol: "strikethrough",
+            searchTerms: "struck crossed out format selection markup",
+            shortcut: .strikethrough,
+            enabled: { $0.current != nil },
+            action: { $0.applyFormat(.strikethrough) }
+        ),
+        Self(
+            id: "formatHighlight",
+            title: "Highlight",
+            symbol: "highlighter",
+            searchTerms: "mark marker format selection markup",
+            shortcut: .highlight,
+            enabled: { $0.current != nil },
+            action: { $0.applyFormat(.highlight) }
+        ),
+        Self(
+            id: "formatCode",
+            title: "Code",
+            symbol: "chevron.left.forwardslash.chevron.right",
+            searchTerms: "monospace inline backtick format selection markup",
+            shortcut: .code,
+            enabled: { $0.current != nil },
+            action: { $0.applyFormat(.code) }
+        ),
+        Self(
+            id: "formatLink",
+            title: "Link",
+            symbol: "link",
+            searchTerms: "url href markdown address format selection",
+            shortcut: .link,
+            enabled: { $0.current != nil },
+            action: { $0.applyFormat(nil) }
+        ),
+        // What the window's own menus offer and the palette did not.
+        Self(
+            id: "newNote",
+            title: "New Note",
+            symbol: "square.and.pencil",
+            searchTerms: "create make add write blank",
+            shortcut: .newNote,
+            enabled: { $0.vaultRoot != nil },
+            action: { $0.createNote() }
+        ),
+        Self(
+            id: "goToPath",
+            title: "Go to Path…",
+            symbol: "arrow.right.doc.on.clipboard",
+            searchTerms: "open file location absolute relative type navigate",
+            enabled: { $0.vaultRoot != nil },
+            action: { model in model.afterPalette { $0.promptToGoToPath() } }
+        ),
+        Self(
+            id: "newVault",
+            title: "New Vault…",
+            symbol: "folder.badge.plus",
+            searchTerms: "create make another library collection",
+            action: { model in model.afterPalette { $0.createVault() } }
+        ),
+        Self(
+            id: "saveNow",
+            title: "Save Now",
+            symbol: "arrow.down.doc",
+            searchTerms: "write flush pending edits disk",
+            shortcut: .save,
+            enabled: { $0.current != nil },
+            action: { _ = $0.flushPendingSave() }
+        ),
+        Self(
+            id: "settings",
+            title: "Settings…",
+            symbol: "gearshape",
+            searchTerms: "preferences options configure appearance",
+            shortcut: .settings,
+            action: { $0.presentSettings() }
+        ),
+        Self(
+            id: "agentAccess",
+            title: "Set Up Agent Access…",
+            symbol: "terminal",
+            searchTerms: "claude agents guide cli command line write access",
+            displayTitle: { $0.hasAgentGuide ? "Update Agent Access…" : "Set Up Agent Access…" },
+            enabled: { $0.vaultRoot != nil },
+            action: { $0.setUpAgentAccess() }
+        ),
+        // The focus menu in the title bar, which is easy to miss.
+        Self(
+            id: "focusEntireVault",
+            title: "Show the Entire Vault",
+            symbol: "books.vertical",
+            searchTerms: "scope focus unfocus all notes whole clear folder",
+            enabled: { $0.scopePath != nil },
+            action: { $0.showEntireVault() }
+        ),
+        Self(
+            id: "focusHighlightedFolder",
+            title: "Focus on This Folder",
+            symbol: "folder.badge.gearshape",
+            searchTerms: "scope narrow limit window selected highlighted sidebar",
+            displayTitle: { model in
+                model.highlightedFolder.map { "Focus on \($0)" } ?? "Focus on This Folder"
+            },
+            enabled: { $0.highlightedFolder != nil },
+            action: { $0.focusOnFolderInHand() }
+        ),
+        Self(
+            id: "focusFolder",
+            title: "Focus on a Folder…",
+            symbol: "folder",
+            searchTerms: "scope narrow limit window choose subfolder",
+            enabled: { $0.vaultRoot != nil },
+            action: { model in model.afterPalette { $0.promptForScope() } }
+        ),
+        Self(
+            id: "revealScopeInFinder",
+            title: "Reveal Folder in Finder",
+            symbol: "folder.badge.questionmark",
+            searchTerms: "show open enclosing directory scope selected highlighted",
+            // The folder in hand, which is the highlighted one or the one
+            // this window is focused on. Asking `scopeRoot` alone answered
+            // the vault itself whenever neither was true, which made this a
+            // second way to reveal the vault under a name that promised a
+            // folder.
+            enabled: { $0.folderInHand != nil },
+            action: { model in if let folder = model.folderInHand { model.revealInFinder(folder) } }
+        ),
         Self(
             id: "openInbox",
             title: "Open Inbox",

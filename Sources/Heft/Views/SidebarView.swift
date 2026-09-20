@@ -146,6 +146,11 @@ struct SidebarView: View {
         .onReceive(model.session?.contentChanges.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()) {
             if mode == .recent { contentGeneration &+= 1 }
         }
+        // Mirrored onto the model for the commands, which are run from a
+        // palette that has no row to ask. Through `onChange` rather than a
+        // `didSet`, since the tree writes this through its binding and a
+        // property observer never sees that.
+        .onChange(of: selectedFolderPath) { model.highlightedFolder = selectedFolderPath }
         .onChange(of: model.scopePath) {
             selectedFolderPath = nil
             selection = SidebarSelection()

@@ -408,6 +408,7 @@ struct EditorPane: View {
                 findSelection: findSelection,
                 insertion: model.pendingInsertion,
                 checklistToggle: model.pendingChecklistToggle,
+                format: model.pendingFormat,
                 focusRequest: model.editorFocusRequest,
                 context: context,
                 onAttachment: handleAttachment,

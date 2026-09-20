@@ -45,6 +45,29 @@ a palette must not be a faster way to lose a note. A test holds the two
 lists against each other, because the failure here is a verb added to the
 menu and forgotten in the palette.
 
+The palette also carries what was otherwise only a keystroke or a menu away:
+Quick Open, the vault search and Find in note; the formatting bar's own six,
+bold through link; and the window's verbs, from a new note to Settings and
+the focus menu in the title bar. What it deliberately leaves out is anything
+that needs a row or a folder to have been clicked first, since the palette
+opens over the editor and has no such target, and Undo and Redo, which
+belong to whatever holds the keyboard rather than to a list.
+
+A command that is about a folder takes the one in hand: the folder
+highlighted in the sidebar, else the one the window is focused on. The
+highlight lives in the list that draws it and is mirrored onto the model
+unpublished, because the palette covers the sidebar and has no row to ask,
+and because publishing it would redraw every view in the window for a
+click on a folder. Focusing and highlighting stay distinct: Show the
+Entire Vault undoes a focus, so a highlight does not offer it.
+
+Two mechanisms make those work from inside a sheet. A command that touches
+the text sets a request on the model, because the palette holds the keyboard
+and an action sent down the responder chain stops at its search field. A
+command that opens another panel waits for the palette to close, because
+both are sheets on one window and the second would be refused; `afterPalette`
+holds it until the dismissal the palette already reports.
+
 ## Selecting several rows
 
 `SidebarSelection` holds the picked rows and the three clicks that change

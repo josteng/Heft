@@ -114,6 +114,14 @@ final class AppModel: ObservableObject {
     /// Nil means the entire vault. A non-empty path is a view boundary only:
     /// link resolution and the underlying index remain vault-wide.
     @Published private(set) var scopePath: String?
+    /// The folder highlighted in the sidebar's tree, which is not the same
+    /// as the folder this window is focused on.
+    ///
+    /// Deliberately not published, and mirrored here rather than owned here:
+    /// it belongs to the list that draws it, and every view in the window
+    /// observes this model. What it is for is the commands, which are run
+    /// from a palette that has no row to ask.
+    var highlightedFolder: String?
 
     var scopeRoot: URL? {
         guard let root = vaultRoot else { return nil }
@@ -297,7 +305,7 @@ final class AppModel: ObservableObject {
     @Published var isCommandPalettePresented = false
     @Published var isVaultSearchPresented = false
     @Published var isDailyNotesSettingsPresented = false
-    private var shouldPresentDailyNotesSettingsAfterPalette = false
+    private var pendingAfterPalette: (@MainActor (AppModel) -> Void)?
     @Published var isFindPresented = false
     @Published private(set) var findFocusGeneration = 0
     @Published private(set) var findNavigationGeneration = 0
@@ -369,6 +377,13 @@ final class AppModel: ObservableObject {
     /// generation so the editor performs it exactly once, the way a find
     /// selection is applied.
     @Published private(set) var pendingInsertion: EditorInsertion?
+    /// One request to format the selection. The generation is what makes a
+    /// second request for the same format a second edit.
+    struct PendingFormat: Equatable {
+        var format: InlineFormat?
+        var generation: Int
+    }
+
     /// Bumped to ask the editor to toggle a checklist over its selection.
     ///
     /// A counter rather than an action sent down the responder chain: the
@@ -376,6 +391,13 @@ final class AppModel: ObservableObject {
     /// its search field and stops. Every other command that touches the text
     /// goes through the model for the same reason.
     @Published private(set) var pendingChecklistToggle = 0
+    /// The inline format the editor has been asked to toggle over its
+    /// selection, and which request it is, for the reason above: a command
+    /// run from the palette cannot reach the text view down the responder
+    /// chain, because the palette has the keyboard until it closes.
+    ///
+    /// Nil is the format that makes a link, as it is on the formatting bar.
+    @Published private(set) var pendingFormat: PendingFormat?
 
     var recentNotes: [NoteRef] {
         (session?.recentPaths ?? [])
@@ -2333,12 +2355,30 @@ final class AppModel: ObservableObject {
     }
 
     func presentDailyNotesSettings() {
+        afterPalette { $0.isDailyNotesSettingsPresented = true }
+    }
+
+    /// Runs `action` once the command palette has closed, or straight away
+    /// when it is not open.
+    ///
+    /// A palette command that opens a panel cannot open it while the palette
+    /// is up: both are sheets on the same window, and the second is refused.
+    /// So the palette is dismissed and the panel waits for the dismissal it
+    /// already reports.
+    func afterPalette(_ action: @escaping @MainActor (AppModel) -> Void) {
         if isCommandPalettePresented {
-            shouldPresentDailyNotesSettingsAfterPalette = true
+            pendingAfterPalette = action
             isCommandPalettePresented = false
         } else {
-            isDailyNotesSettingsPresented = true
+            action(self)
         }
+    }
+
+    /// Opens Settings, which is a window of its own rather than a sheet, but
+    /// waits for the palette all the same: raised from under it, it opens
+    /// behind the sheet that is still closing.
+    func presentSettings() {
+        afterPalette { SettingsWindowController.shared.show($0.registry) }
     }
 
     /// Types `text` at the caret, putting the caret `caretOffset` into it.
@@ -2364,13 +2404,21 @@ final class AppModel: ObservableObject {
         )
     }
 
+    /// Toggles an inline format over the selection, or makes a link when
+    /// `format` is nil, the way the formatting bar's own buttons do.
+    func applyFormat(_ format: InlineFormat?) {
+        formatGeneration &+= 1
+        pendingFormat = PendingFormat(format: format, generation: formatGeneration)
+    }
+
+    private var formatGeneration = 0
+
     func toggleChecklist() { pendingChecklistToggle += 1 }
 
     func commandPaletteDidDismiss() {
-        if shouldPresentDailyNotesSettingsAfterPalette {
-            shouldPresentDailyNotesSettingsAfterPalette = false
-            isDailyNotesSettingsPresented = true
-        }
+        guard let action = pendingAfterPalette else { return }
+        pendingAfterPalette = nil
+        action(self)
     }
 
     /// Opens the inbox note, the one the Capture to Inbox shortcut appends to
@@ -2723,6 +2771,31 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Tree helpers
+
+    /// The folder a command should act on: the one highlighted in the
+    /// sidebar, else the one this window is focused on.
+    ///
+    /// A command is run from the palette, which covers the sidebar, so the
+    /// highlight is the nearest thing it has to "this folder". Focus is the
+    /// fallback because a focused window is already about one folder.
+    var folderInHand: URL? {
+        guard let vaultRoot else { return nil }
+        if let highlightedFolder {
+            return vaultRoot.appendingPathComponent(highlightedFolder, isDirectory: true)
+        }
+        guard scopePath != nil else { return nil }
+        return scopeRoot
+    }
+
+    /// Focuses the window on `folderInHand`.
+    func focusOnFolderInHand() {
+        guard let highlightedFolder,
+              let item = tree?.flattened().first(where: {
+                  $0.isFolder && $0.relativePath == highlightedFolder
+              })
+        else { return }
+        setScope(to: item)
+    }
 
     func setScope(to folder: VaultItem?) {
         guard folder == nil || folder?.isFolder == true else { return }
