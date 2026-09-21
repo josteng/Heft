@@ -216,68 +216,13 @@ struct SidebarView: View {
             // so reading top to bottom matches what the controls do.
             modePicker
 
-            HStack(spacing: 6) {
-                // Hand-rolled rather than `NSSearchField`: its capsule bezel
-                // is the brightest thing in the sidebar and overhangs its
-                // frame, and without the bezel it lays its icon over the text.
-                // This one is the tab track's fill, height and shape.
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    TextField(model.scopePath == nil ? mode.filterPrompt : "\(mode.filterPrompt) in \(model.scopeName)", text: $filter)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                    if !filter.isEmpty {
-                        Button { filter = "" } label: {
-                            Image(systemName: "xmark.circle.fill").font(.system(size: 11))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(Color(nsColor: .quaternarySystemFill), in: .capsule)
-
-                if mode == .files, model.scopeRoot != nil {
-                    Menu {
-                        Button("New Note") { createNoteAtCreationTarget() }
-                        Button("New Folder") { createFolderAtCreationTarget() }
-                    } label: {
-                        // A plus, not the pencil: the menu makes folders as
-                        // well as notes.
-                        Image(systemName: "plus")
-                    }
-                    .menuStyle(.button)
-                    .menuIndicator(.hidden)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
-                    .help("Create in \(creationTargetName)")
-                }
-
-                if mode == .recent {
-                    Menu {
-                        Picker("Order", selection: $appearance.recentOrder) {
-                            ForEach(RecentOrder.allCases) { Text($0.title).tag($0) }
-                        }
-                        .pickerStyle(.inline)
-                        Picker("Show", selection: $appearance.recentLayout) {
-                            ForEach(RecentLayout.allCases) { Text($0.title).tag($0) }
-                        }
-                        .pickerStyle(.inline)
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                    }
-                    .menuStyle(.button)
-                    .menuIndicator(.hidden)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
-                    .help("Order and layout of the Recent list")
-                }
-            }
+            SidebarFilterRow(
+                mode: mode,
+                filter: $filter,
+                creationTargetName: creationTargetName,
+                onNewNote: createNoteAtCreationTarget,
+                onNewFolder: createFolderAtCreationTarget
+            )
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -978,6 +923,104 @@ struct SidebarView: View {
 /// namespace and leave which one is scrolled to up to SwiftUI.
 struct SidebarAnchor: Hashable {
     let path: String
+}
+
+/// The filter field and the menu beside it: the one row of the sidebar's
+/// header that differs between the three modes.
+///
+/// A view of its own so it can be laid out in each mode and measured, which
+/// is what keeps the field from growing and shrinking as the modes change.
+struct SidebarFilterRow: View {
+    /// The height of the field, and the size of the square the menu beside it
+    /// sits in. One number, so the two line up.
+    static let controlSize: CGFloat = 28
+
+    /// The gap between the field and that square.
+    static let spacing: CGFloat = 6
+
+    let mode: SidebarMode
+    @Binding var filter: String
+    let creationTargetName: String
+    let onNewNote: () -> Void
+    let onNewFolder: () -> Void
+
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var appearance = AppearanceSettings.shared
+
+    var body: some View {
+        HStack(spacing: Self.spacing) {
+            // Hand-rolled rather than `NSSearchField`: its capsule bezel
+            // is the brightest thing in the sidebar and overhangs its
+            // frame, and without the bezel it lays its icon over the text.
+            // This one is the tab track's fill, height and shape.
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                TextField(prompt, text: $filter)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                if !filter.isEmpty {
+                    Button { filter = "" } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: Self.controlSize)
+            .background(Color(nsColor: .quaternarySystemFill), in: .capsule)
+
+            // The field takes whatever the menu leaves, so a menu that sizes
+            // itself moves the field: the plus measured two points narrower
+            // than the Recent arrows, and the field grew and shrank between
+            // the two modes. Both now sit in a square of the field's own
+            // height. Tags keeps the whole row, having nothing to put there.
+            if mode == .files, model.scopeRoot != nil {
+                // A plus, not the pencil: the menu makes folders as well as
+                // notes.
+                menu("plus", help: "Create in \(creationTargetName)") {
+                    Button("New Note", action: onNewNote)
+                    Button("New Folder", action: onNewFolder)
+                }
+            } else if mode == .recent {
+                menu("arrow.up.arrow.down", help: "Order and layout of the Recent list") {
+                    Picker("Order", selection: $appearance.recentOrder) {
+                        ForEach(RecentOrder.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    Picker("Show", selection: $appearance.recentLayout) {
+                        ForEach(RecentLayout.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                }
+            }
+        }
+    }
+
+    private var prompt: String {
+        model.scopePath == nil ? mode.filterPrompt : "\(mode.filterPrompt) in \(model.scopeName)"
+    }
+
+    private func menu<Content: View>(
+        _ symbol: String, help: String, @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        Menu { content() } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 12))
+                // The glyphs are not the same width, and a circular glass
+                // button measures its label.
+                .frame(width: 14, height: 14)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
+        .frame(width: Self.controlSize, height: Self.controlSize)
+        .help(help)
+    }
 }
 
 private struct TreeRow: View {
