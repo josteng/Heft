@@ -217,7 +217,7 @@ struct AppCommand: Identifiable {
             symbol: "terminal",
             searchTerms: "claude agents guide cli command line write access",
             displayTitle: { $0.hasAgentGuide ? "Update Agent Access…" : "Set Up Agent Access…" },
-            enabled: { $0.vaultRoot != nil },
+            enabled: { $0.agentGuideNeedsWriting },
             action: { $0.setUpAgentAccess() }
         ),
         // The focus menu in the title bar, which is easy to miss.

@@ -2841,6 +2841,14 @@ final class AppModel: ObservableObject {
         agentGuideStatus != .absent
     }
 
+    /// Whether writing the guides would change anything: they are missing,
+    /// or they were written by an older Heft and name a command line that
+    /// has moved on. Offered while there is something to do and dimmed
+    /// otherwise, since rewriting a current guide is work with no result.
+    var agentGuideNeedsWriting: Bool {
+        vaultRoot != nil && agentGuideStatus != .current
+    }
+
     /// What the open vault's agent guides carry, so the banner can offer a
     /// refresh rather than only a first-time setup.
     var agentGuideStatus: AgentGuide.Status {

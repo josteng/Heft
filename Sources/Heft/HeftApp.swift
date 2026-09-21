@@ -176,7 +176,7 @@ struct HeftCommands: Commands {
                     ? "Update Agent Access…"
                     : "Set Up Agent Access…"
             ) { model?.setUpAgentAccess() }
-                .disabled(model?.vaultRoot == nil)
+                .disabled(model?.agentGuideNeedsWriting != true)
         }
         // `.importExport`, not `.saveItem`.
         //

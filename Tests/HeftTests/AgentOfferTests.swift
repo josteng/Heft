@@ -64,6 +64,36 @@ struct AgentOfferTests {
         }
     }
 
+    /// The menu item and the palette command both ask the model whether
+    /// writing the guides would change anything, so neither offers work
+    /// that would do nothing.
+    @Test("Agent access is offered only while there is something to write")
+    func agentAccessIsOfferedWhenItWouldDoSomething() async throws {
+        try await withVault { model, root in
+            #expect(model.agentGuideStatus == .absent)
+            #expect(model.agentGuideNeedsWriting, "a vault with no guides")
+
+            model.setUpAgentAccess()
+            #expect(model.agentGuideStatus == .current)
+            #expect(!model.agentGuideNeedsWriting, "rewriting a current guide does nothing")
+
+            for name in ["CLAUDE.md", "AGENTS.md"] {
+                let url = root.appendingPathComponent(name)
+                let aged = try String(contentsOf: url, encoding: .utf8).replacingOccurrences(
+                    of: "version: \(AgentGuide.version) -->",
+                    with: "version: \(AgentGuide.version - 1) -->"
+                )
+                try aged.write(to: url, atomically: true, encoding: .utf8)
+            }
+            #expect(model.agentGuideNeedsWriting, "a guide from an older Heft")
+
+            let command = try #require(AppCommand.registry.first { $0.id == "agentAccess" })
+            #expect(command.isEnabled(on: model))
+            model.setUpAgentAccess()
+            #expect(!command.isEnabled(on: model), "and the palette dims with it")
+        }
+    }
+
     @Test("A vault that opted in is told once per revision")
     func optedInVaultIsAskedPerRevision() async throws {
         try await withVault { model, root in
