@@ -19,10 +19,16 @@ import UniformTypeIdentifiers
 
 enum SiriSchemaError: LocalizedError {
     case attachmentsUnsupported
+    case renameUnsupported
 
     var errorDescription: String? {
-        "Heft cannot file attachments from Siri yet. Create the note without them, "
-            + "then drag the file into it."
+        switch self {
+        case .attachmentsUnsupported:
+            "Heft cannot file attachments from Siri yet. Create the note without them, "
+                + "then drag the file into it."
+        case .renameUnsupported:
+            "Heft cannot rename or move a note from Siri yet. Rename it in the sidebar."
+        }
     }
 }
 
@@ -89,5 +95,64 @@ struct SiriAppendTextIntent {
             return .result(value: target)
         }
         return .result(value: SiriNoteEntity(note, in: vault))
+    }
+}
+
+/// The schema's update, which proposes rather than writes.
+///
+/// Every other verb here only ever adds: a create makes a new note, an
+/// append puts a line at the end, and neither can lose a line already
+/// written. An update can, and nothing in the file would say so afterwards.
+/// The right-click is consent to attempt the edit, not sight of the result,
+/// and the moment Siri reaches for this verb is the moment the note is not
+/// on screen, which is when it can be judged least.
+///
+/// So it lands in the review centre with the note's current text as its
+/// base, which is a diff to read and one click to take or drop, and is what
+/// the proposal system exists for. Writing Tools rewriting a selection needs
+/// none of this: that suggestion is in front of you before you accept it.
+@available(macOS 27.0, *)
+@AppIntent(schema: .notes.updateNote)
+struct SiriUpdateNoteIntent {
+    static let isAssistantOnly = true
+
+    @Parameter(title: "Note") var target: SiriNoteEntity
+    @Parameter(title: "Content") var content: String?
+    /// Part of the schema, and refused rather than dropped, for the reason
+    /// `SiriCreateNoteIntent` refuses attachments. A rename moves the file
+    /// every wikilink in the vault points at, which is `rename`'s whole job
+    /// and needs its link rewriting; dropping the request silently would
+    /// leave somebody believing a note had been renamed.
+    @Parameter(title: "Name") var name: String?
+    @Parameter(title: "Folder") var folder: SiriFolderEntity?
+    /// Part of the schema and ignored: Heft has no pinning. Optional, unlike
+    /// the create schema's, because an update names only what it changes.
+    @Parameter(title: "Pinned") var isPinned: Bool?
+    @Parameter(title: "Attachments", supportedContentTypes: [.item])
+    var attachments: [IntentFile]?
+
+    func perform() async throws -> some IntentResult & ReturnsValue<SiriNoteEntity>
+        & ProvidesDialog
+    {
+        guard let vault = CaptureVaultPreference.url else {
+            throw InboxCaptureError.vaultUnavailable
+        }
+        guard attachments?.isEmpty != false else {
+            throw SiriSchemaError.attachmentsUnsupported
+        }
+        let renamed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard renamed.isEmpty || renamed == target.name, folder == nil else {
+            throw SiriSchemaError.renameUnsupported
+        }
+        // Nothing to review when the rewrite is what is already there.
+        guard let body = content,
+              try NoteUpdate.propose(body, to: target.id, in: vault, agent: "Siri") != nil
+        else {
+            return .result(value: target, dialog: "\(target.name) is already like that.")
+        }
+        return .result(
+            value: target,
+            dialog: "I put that up for review in Heft rather than writing it."
+        )
     }
 }

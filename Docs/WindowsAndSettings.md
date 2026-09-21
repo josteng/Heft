@@ -399,9 +399,14 @@ with the other two captures, and `OpenNoteIntent` is in the app with the other
 two openers. Both new ones only ever add: a name already taken gets a numbered
 sibling rather than being replaced, which is what lets them run unattended
 while every other edit that changes a line already written is a proposal.
-`UpdateNoteIntent` exists in the system's schema and is deliberately not
-adopted, because rewriting a note with no diff and no review is exactly what
-the proposal system is for.
+`UpdateNoteIntent` is adopted, and is the one verb here that writes nothing.
+It puts the rewrite in the review centre with the note's current text as its
+base, because a rewrite is the only one of these that can lose a line already
+written, and the person who asked for it has not read what came back. Asking
+is not seeing: Writing Tools rewriting a selection needs no proposal, since
+that suggestion is in front of the reader before it is taken, while a rewrite
+asked for by voice is read back by nobody and is worth asking for exactly when
+the note is not on screen.
 
 A note made this way lands in the folder named in the Capture pane, which is
 its own setting rather than the sidebar's `NewNoteLocation`. That one answers
