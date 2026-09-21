@@ -283,6 +283,11 @@ preferences or the icon.
   problem, since running it replaces it. After installing, `pkill -f
   HeftCapture`; a new intent that Shortcuts cannot see is this first.
 
+- **Siri saying "trouble with the connection" or "something's wrong" for
+  every request can be Siri's own per-device quota**, which a reboot does
+  not clear. `/usr/bin/log show --predicate 'process == "intelligenceflowd"'`
+  and look for `deniedDueToUserDeviceRateLimit` before touching Heft; Apple
+  Notes failing the same way settles it.
 - **Siri learns an app's actions from a delta index that runs seconds
   after `lsregister`, and killing `siriactionsd` loses it.** `install.sh`
   once restarted the daemon to "refresh" Siri; the log shows the index

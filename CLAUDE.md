@@ -86,6 +86,8 @@ Break one of these and something goes quietly wrong rather than failing.
 - **`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`** is needed for
   `xcodebuild`, `actool` and `swift test` wherever `xcode-select` points at the
   Command Line Tools. `Scripts/bundle.sh` sets it for itself.
+- **`log` is a zsh builtin, so `log show` prints nothing.** The unified log
+  is `/usr/bin/log show`; filter `runningboardd` out or it floods the dump.
 - **Launch the app detached** (`nohup … >/dev/null 2>&1 &` then `disown`), or a
   backgrounded GUI app holds the shell's stdout open and the caller blocks
   until it quits.
