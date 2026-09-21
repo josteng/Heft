@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import Combine
 import HeftCore
@@ -493,6 +494,7 @@ struct SidebarView: View {
                             name: note.name,
                             detail: note.folder,
                             isSelected: model.current?.relativePath == note.relativePath,
+                            siriEntity: model.siriEntity(note: note.relativePath),
                             depth: 1,
                             symbol: "doc.text",
                             renameText: renameBinding(for: item),
@@ -750,6 +752,7 @@ struct SidebarView: View {
             name: note.name,
             detail: preview == nil ? note.folder : nil,
             isSelected: model.current?.relativePath == note.relativePath,
+            siriEntity: model.siriEntity(note: note.relativePath),
             depth: 0,
             symbol: "doc.text",
             preview: preview,
@@ -803,6 +806,7 @@ struct SidebarView: View {
                         name: folder.name,
                         detail: parent,
                         isSelected: false,
+                        siriEntity: model.siriEntity(folder: folder.relativePath),
                         depth: 0,
                         symbol: "folder",
                         renameText: renameBinding(for: folder),
@@ -842,6 +846,7 @@ struct SidebarView: View {
                         name: note.name,
                         detail: note.folder,
                         isSelected: model.current?.relativePath == note.relativePath,
+                        siriEntity: model.siriEntity(note: note.relativePath),
                         depth: 0,
                         symbol: "doc.text",
                         renameText: renameBinding(for: item),
@@ -1120,6 +1125,7 @@ private struct TreeRow: View {
                 name: item.name,
                 detail: nil,
                 isSelected: isLit,
+                siriEntity: model.siriEntity(folder: item.relativePath),
                 isKeyTarget: isKeyTarget,
                 depth: depth,
                 symbol: isExpanded ? "folder.fill" : "folder",
@@ -1190,6 +1196,7 @@ private struct TreeRow: View {
                 name: item.name,
                 detail: nil,
                 isSelected: isLit,
+                siriEntity: model.siriEntity(note: item.relativePath),
                 isKeyTarget: isKeyTarget,
                 depth: depth,
                 symbol: symbol(for: item.kind),
@@ -1689,6 +1696,9 @@ struct NoteRow: View {
     let name: String
     let detail: String?
     let isSelected: Bool
+    /// The note or folder this row is showing, which is what the system's
+    /// Ask Siri reads off the view it was opened on. See `SiriContext`.
+    var siriEntity: EntityIdentifier? = nil
     /// The weaker mark: what a keystroke would act on, with nothing chosen.
     var isKeyTarget: Bool = false
     let depth: Int
@@ -1733,6 +1743,7 @@ struct NoteRow: View {
             }
         }
         .onHover { isHovering = $0 }
+        .namesForSiri(siriEntity)
     }
 
     @ViewBuilder

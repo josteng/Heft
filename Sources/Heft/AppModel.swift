@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import Combine
 import HeftCore
@@ -110,6 +111,41 @@ final class AppModel: ObservableObject {
     var settings: ObsidianSettings { session?.settings ?? ObsidianSettings() }
     var tree: VaultItem? { session?.tree }
     var index: VaultIndex { session?.index ?? .empty }
+
+    /// What a row hands the system's Ask Siri, which macOS 27 puts into every
+    /// context menu whether or not an app wants it there. `SiriContext` says
+    /// why a window onto another vault hands over nothing.
+    func siriEntity(note relativePath: String) -> EntityIdentifier? {
+        guard annotatesForSiri else { return nil }
+        return SiriContext.note(relativePath)
+    }
+
+    /// Folders are only a noun the system knows on macOS 27, where the Notes
+    /// schema exists; on 26 a folder row is left unannotated.
+    func siriEntity(folder relativePath: String) -> EntityIdentifier? {
+        guard annotatesForSiri, #available(macOS 27.0, *) else { return nil }
+        return SiriContext.folder(relativePath)
+    }
+
+    /// Whether this window's vault is the one Siri's entity queries read.
+    ///
+    /// Answering it reaches the file system, and every visible row asks once
+    /// per redraw, so the answer is kept until one of the preferences behind
+    /// it changes. Reading those is a dictionary lookup; a long list would
+    /// otherwise stat the vault hundreds of times a keystroke.
+    private var annotatesForSiri: Bool {
+        let key = [
+            vaultRoot?.path,
+            CaptureVaultPreference.chosenPath(),
+            HeftDefaults.shared.string(forKey: CaptureVaultPreference.defaultsKey)
+        ].map { $0 ?? "" }.joined(separator: "\n")
+        if let cached = siriAnnotation, cached.key == key { return cached.answer }
+        let answer = SiriContext.resolves(vaultRoot)
+        siriAnnotation = (key, answer)
+        return answer
+    }
+
+    private var siriAnnotation: (key: String, answer: Bool)?
 
     /// Nil means the entire vault. A non-empty path is a view boundary only:
     /// link resolution and the underlying index remain vault-wide.

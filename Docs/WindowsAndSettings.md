@@ -372,6 +372,44 @@ Daily captures have no setting: the log
 marker in the template is the placement control, and the pane offers it to
 copy.
 
+## Telling Siri what a view is showing
+
+macOS 27 puts an Ask Siri item into every context menu, an app's own rows
+included, and there is no API to take it out: the user can switch it off
+system wide, an app cannot. What an app can do is say which entity a view is
+showing, so the question arrives about the note that was right-clicked rather
+than about Heft in general. That is `SiriContext`, and it is the same
+annotation Siri reads when a conversation says "this note".
+
+A sidebar row carries its note or folder on an AppKit view of its own,
+`SiriEntityMarker`, and nothing else in the window is annotated. The
+identifier is a vault-relative path and the entity queries resolve one
+against the capture vault, so a window onto any other vault annotates
+nothing: one path in two vaults names two different notes, and a confident
+wrong note is worse than none.
+
+What the menu's Ask Siri does with those annotations was measured rather
+than read, through `HeftIntentTests`, a UI-testing target that asks the
+system what it currently sees the way Siri does. The item does not take the
+entity of the view it was opened on: a question from an annotated row, from
+the unannotated editor and from a window with nothing annotated all reached
+Siri with the same one identifier, and Siri answers about whichever
+annotated view it prefers with the screen in front of it, which was the open
+note every time. So a right-click leaves the row under the pointer as the
+only annotated view, and names it as the window's user activity as well,
+until a left-click in that window or a minute passes: `SiriPointer`. SwiftUI's
+own `appEntityIdentifier` was dropped from the rows because it reaches the
+system too, as a second copy of every row that the pointer could not take
+away. The detail column was annotated once and named the open note through
+the user activity once; both made every question about the open note.
+
+What goes over is the schema note, `SiriNoteEntity`, wherever it exists,
+because it carries the body: a question about what is *in* the note then has
+something to read, where `NoteEntity` would answer only where the note lives.
+Both are identified by the same vault-relative path, so macOS 26 falls back to
+the plain one. Folders are only a noun the system knows on macOS 27, where the
+Notes schema exists at all.
+
 ## Naming a note to Siri
 
 Heft's intents were four verbs with no nouns: open today's note, open the

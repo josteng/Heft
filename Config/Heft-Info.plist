@@ -36,6 +36,10 @@
     <string>NSApplication</string>
     <key>NSSupportsAutomaticTermination</key>
     <true/>
+    <key>NSUserActivityTypes</key>
+    <array>
+        <string>dev.stenglein.Heft.openNote</string>
+    </array>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

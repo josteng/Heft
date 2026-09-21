@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import HeftCore
 import SwiftUI

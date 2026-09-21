@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import HeftCore
 import SwiftUI
@@ -161,7 +162,10 @@ struct CalendarPanel: View {
                     isToday: calendar.isDateInToday(day.date),
                     marksMissing: settings.marksMissingToday,
                     isSelected: isOpen(day.date),
-                    note: note(for: day.date)
+                    note: note(for: day.date),
+                    siriEntity: note(for: day.date).flatMap {
+                        model.siriEntity(note: $0.relativePath)
+                    }
                 )
             },
             columns: columns
@@ -181,6 +185,11 @@ struct CalendarPanel: View {
         let marksMissing: Bool
         let isSelected: Bool
         let note: NoteRef?
+        /// The day's note, for the Ask Siri that macOS puts in every context
+        /// menu. Carried as a value rather than looked up in the cell: a cell
+        /// that observed the model would redraw with every keystroke, and a
+        /// day with no note has nothing to hand over. See `SiriContext`.
+        let siriEntity: EntityIdentifier?
         var id: Date { date }
     }
 
@@ -491,7 +500,8 @@ private struct CalendarGrid: View, Equatable {
                     marksMissing: day.marksMissing,
                     isSelected: day.isSelected,
                     note: day.note,
-                    isOutsideMonth: !day.isInMonth
+                    isOutsideMonth: !day.isInMonth,
+                    siriEntity: day.siriEntity
                 ) {
                     open(day)
                 }
@@ -511,6 +521,7 @@ private struct DayCell: View {
     let isSelected: Bool
     let note: NoteRef?
     var isOutsideMonth = false
+    var siriEntity: EntityIdentifier?
     let action: () -> Void
 
     @State private var isHovering = false
@@ -561,6 +572,11 @@ private struct DayCell: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(MomentFormat.format(date, pattern: "dddd, MMMM Do YYYY"))
+        // Carried the way the sidebar's rows carry theirs, inside the view
+        // the menu wraps. macOS still declines to put Ask Siri in this menu,
+        // which is its call and not ours; the day's note is named here so
+        // that a question asked any other way lands on the right one.
+        .namesForSiri(siriEntity)
         .contextMenu { DayMenu(date: date, note: note, onCreate: action) }
         // A day that has a note drags it out, the way its row in the file list
         // would. An empty day has nothing to drag: creating a note by dragging
