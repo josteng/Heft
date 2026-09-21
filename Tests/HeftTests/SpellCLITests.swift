@@ -10,6 +10,7 @@ import Testing
 /// The words here are ones a system dictionary has to reject to be a
 /// dictionary at all, so the suite does not turn on how strict this machine's
 /// is. Nothing asserts a particular *correction*, which does vary.
+@MainActor
 @Suite("Spell CLI")
 struct SpellCLITests {
 

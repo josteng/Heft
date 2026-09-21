@@ -13,6 +13,15 @@ import HeftCore
 /// What it skips is not a second opinion about markdown: it is
 /// `SpellCheckScope` over the same decorations the live surface styles with,
 /// so a word this reports is a word the editor underlines.
+///
+/// Main actor, because `NSSpellChecker.shared` is one object with one
+/// document tag table behind it and is no more thread-safe than any other
+/// AppKit singleton. Two callers on the concurrency pool segfaulted inside
+/// CoreNLP, under `NLTagger.setLanguage`, at a null pointer: a crash with no
+/// failing assertion, taking whichever test held the process down with it.
+/// The command line calls this from `main`, so the constraint costs nothing
+/// and says what was already true.
+@MainActor
 enum SpellCLI {
 
     struct Finding {
