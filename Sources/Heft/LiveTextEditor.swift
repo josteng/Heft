@@ -204,9 +204,17 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.vimShowsFormatBarInVisual = vim.showsFormatBarInVisual
         textView.updateLinkCompletion(allowStart: false)
 
+        // The reader opening a note outranks whatever the system is in the
+        // middle of, so this is ahead of every guard below it.
+        nsContext.coordinator.forgetWritingToolsSession(
+            ifDocumentChangedTo: documentIdentity, in: textView
+        )
+
         // `string` includes the input method's marked text, while the SwiftUI
         // binding only represents committed source. Comparing and replacing
-        // them mid-composition discards the next dead-key character.
+        // them mid-composition discards the next dead-key character. Nothing
+        // is held here for a Writing Tools session: what it proposes is
+        // published like any other change, so `text` already matches the view.
         guard !textView.hasMarkedText() else { return }
 
         if let insertion,
@@ -426,10 +434,134 @@ struct LiveTextEditor: NSViewRepresentable {
 
         init(_ parent: LiveTextEditor) { self.parent = parent }
 
+        /// True between `textViewWritingToolsWillBegin` and `…DidEnd`.
+        ///
+        /// Restyling under a session makes AppKit abandon it, which is the
+        /// suggestion showing up greyed at the caret and going at the next
+        /// click. Styling is held until the session ends, and only styling.
+        ///
+        /// An earlier version held the publish too, so that a sentence
+        /// nobody had accepted could not be saved. That traded a small wrong
+        /// for a large one: the promised end does not always come, asking
+        /// Siri a question about a note begins a session that never reports
+        /// one, and every keystroke after it then went unpublished and
+        /// unsaved. Text somebody typed is worth more than text the system
+        /// offered and they ignored, and a suggestion turned down publishes
+        /// itself away again when the view puts the original back.
+        ///
+        /// Two things end the hold besides the callback, because a session
+        /// that never ends would otherwise leave a note that no longer
+        /// styles itself: AppKit no longer calling it active, and the reader
+        /// opening another note. The reader wins over the session.
+        private var writingToolsBegan = false
+
+        /// Whether the view is in a session right now.
+        ///
+        /// The seam is here because a test cannot start a real session, and
+        /// the case worth testing is exactly the one where the end never
+        /// arrives.
+        var writingToolsIsActive: (NSTextView) -> Bool = { $0.isWritingToolsActive }
+
+        /// A suggestion belongs to the note it was made in, so opening
+        /// another note ends the session whether or not its end was ever
+        /// reported. Without this the hold outlived the document: the swap
+        /// below the guard in `updateNSView` was never reached, the note on
+        /// screen stopped changing, and no note could be opened again.
+        ///
+        /// Dropped rather than published, because the view is about to show
+        /// another note and this one's text would land in that note's
+        /// binding.
+        func forgetWritingToolsSession(ifDocumentChangedTo identity: String, in textView: NSTextView) {
+            guard lastIdentity != identity else { return }
+            writingToolsBegan = false
+            // Asked to stop, not merely let go of: a text view keeps its own
+            // session and goes on writing into whatever note replaced the one
+            // it started in.
+            textView.writingToolsCoordinator?.stopWritingTools()
+            // `unmarkText` is what ends a composition. Measured: a
+            // `discardMarkedText` on its own leaves `hasMarkedText` true, and
+            // the guard below then refuses to put the new note into the
+            // buffer, so the old note's text stayed on screen and was saved
+            // as the new note's own.
+            if textView.hasMarkedText() {
+                textView.inputContext?.discardMarkedText()
+                textView.unmarkText()
+            }
+        }
+
+        /// The note that was on screen when the session started.
+        ///
+        /// Ending the hold is not ending the session: AppKit goes on with it
+        /// against the same text view, which by then is showing another note,
+        /// and the rewrite of the old one arrives as an edit to the new one.
+        /// It was published and saved, so opening a note after asking Siri to
+        /// change one overwrote it. A change that belongs to a document no
+        /// longer on screen is refused, and the note put back.
+        private(set) var writingToolsDocument: String?
+
+        /// Whether a change arriving now belongs to a note that has gone.
+        ///
+        /// `isWritingToolsActive` is deliberately not consulted. It reads
+        /// false by the time the session's last write lands, so asking it
+        /// let exactly the write this exists to stop straight through.
+        ///
+        /// What ends the refusal instead is the session reporting its end, or
+        /// the reader pressing a key, which says plainly that the note on
+        /// screen is the one being edited. Until one of those, a change here
+        /// has no author: nobody has touched this note.
+        func writingToolsIsWritingIntoAnotherNote() -> Bool {
+            guard let writingToolsDocument else { return false }
+            return writingToolsDocument != lastIdentity
+        }
+
+        /// A keystroke is the reader taking the note back.
+        func readerTypedInto(_ textView: NSTextView) {
+            writingToolsDocument = nil
+        }
+
+        func isWritingToolsSession(_ textView: NSTextView) -> Bool {
+            guard writingToolsBegan else { return false }
+            guard writingToolsIsActive(textView) else {
+                // Dropped rather than published: by the time this is noticed
+                // the view may already be showing another note, and the text
+                // in it would be written into that note's binding.
+                writingToolsBegan = false
+                return false
+            }
+            return true
+        }
+
+        func textViewWritingToolsWillBegin(_ textView: NSTextView) {
+            writingToolsBegan = true
+            writingToolsDocument = lastIdentity
+            restyleTask?.cancel()
+        }
+
+        func textViewWritingToolsDidEnd(_ textView: NSTextView) {
+            writingToolsDocument = nil
+            guard writingToolsBegan else { return }
+            writingToolsBegan = false
+            // Whatever survived the session is an ordinary edit now: it is
+            // published once and styled once, which is what was held back.
+            parent.text = textView.string
+            restyle(textView)
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView,
                   textView.delegate === self
             else { return }
+            // A session that outlived its note, writing the old note's
+            // rewrite into whatever is on screen now. Put this note back and
+            // publish nothing: the alternative is saving one note's text as
+            // another's. See `writingToolsDocument`.
+            if writingToolsIsWritingIntoAnotherNote() {
+                if let view = textView as? HeftTextKit2View, view.string != parent.text {
+                    load(parent.text, into: view)
+                    restyle(view)
+                }
+                return
+            }
             let now = DispatchTime.now().uptimeNanoseconds
             editGap = lastEditAt.map { Double(now - $0) / 1_000_000 } ?? .infinity
             lastEditAt = now
@@ -652,6 +784,11 @@ struct LiveTextEditor: NSViewRepresentable {
         /// its layout.
         func restyle(_ textView: NSTextView) {
             guard let storage = textView.textStorage else { return }
+
+            // Proposed text belongs to the session until it ends. See
+            // `isWritingToolsSession`; `textViewWritingToolsDidEnd` styles
+            // whatever was kept.
+            if isWritingToolsSession(textView) { return }
 
             // Dead keys and IMEs keep an in-progress composition as marked
             // text. Rewriting attributes or invalidating layout during that
@@ -1413,6 +1550,9 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // The reader taking the note back from a session that has not
+        // reported its end. See `writingToolsIsWritingIntoAnotherNote`.
+        (delegate as? LiveTextEditor.Coordinator)?.readerTypedInto(self)
         if event.modifierFlags.intersection([.command, .control]).isEmpty { onEditorClaimed?() }
         guard vimEnabled,
               event.modifierFlags.intersection([.command, .option]).isEmpty,

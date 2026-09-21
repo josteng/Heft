@@ -153,6 +153,12 @@ preferences or the icon.
   subview, `drawInsertionPoint` is never called on macOS 26, and the only way
   to check it is to measure pixels in a key window.
 
+- **Restyling under a Writing Tools session makes AppKit abandon it**, so
+  the suggestion shows up greyed at the caret and goes at the next click.
+  Styling is held between `textViewWritingToolsWillBegin` and `DidEnd`, and
+  only styling: the promised end does not always come, so holding the
+  publish swallowed every later keystroke and holding `updateNSView` meant
+  no note could be opened again. The reader opening a note ends the hold.
 - **Writing an attribute discards TextKit's layout for that range, even when
   the value written is the one already there.** The whole reason restyling is
   scoped, and the trap before adding a "just set it again" write to
