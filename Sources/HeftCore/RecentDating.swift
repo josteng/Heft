@@ -11,6 +11,13 @@ public enum RecentSection: Hashable, Sendable {
     case month(Int)
     /// A whole earlier year.
     case year(Int)
+    /// Older than anything datable: a note whose date is not known at all.
+    ///
+    /// The opening history is a list in the order things happened, and
+    /// Heft only began recording the times partway through its life, so
+    /// every note opened before that is in the list with no time. They are
+    /// older than everything dated, because the list is in order.
+    case earlier
 }
 
 /// Dates for the Recent list: which section a note belongs to and what its
@@ -58,6 +65,7 @@ public struct RecentDating: Sendable {
             named.locale = locale
             return named.monthSymbols[max(0, min(month - 1, 11))]
         case .year(let year): return String(year)
+        case .earlier: return "Earlier"
         }
     }
 
@@ -83,7 +91,10 @@ public struct RecentDating: Sendable {
     public func grouped<Item>(_ items: [Item], date: (Item) -> Date?) -> [(section: RecentSection?, items: [Item])] {
         var groups: [(section: RecentSection?, items: [Item])] = []
         for item in items {
-            let section = date(item).map(section(for:))
+            // A missing date is its own section rather than none: a run of
+            // rows under no heading reads as something broken, and these
+            // are simply the part of the history that predates the times.
+            let section = date(item).map(section(for:)) ?? .earlier
             if let last = groups.indices.last, groups[last].section == section {
                 groups[last].items.append(item)
             } else {

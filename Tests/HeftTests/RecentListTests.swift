@@ -122,14 +122,15 @@ struct RecentListTests {
         #expect(de.label(for: daysAgo(20)) == "31.08.2026")
     }
 
-    @Test("Grouping keeps consecutive runs and leaves undated notes last, unsectioned")
+    @Test("Grouping keeps consecutive runs and files undated notes as Earlier")
     func groupingRuns() {
         let d = dating
         let items: [(String, Date?)] = [
             ("a", d.now), ("b", daysAgo(0, hour: 1)), ("c", daysAgo(3)), ("d", daysAgo(400)), ("e", nil),
         ]
         let groups = d.grouped(items) { $0.1 }
-        #expect(groups.map(\.section) == [.today, .previousSevenDays, .year(2025), nil])
+        #expect(groups.map(\.section) == [.today, .previousSevenDays, .year(2025), .earlier])
         #expect(groups.map { $0.items.map(\.0) } == [["a", "b"], ["c"], ["d"], ["e"]])
+        #expect(d.title(of: .earlier) == "Earlier")
     }
 }

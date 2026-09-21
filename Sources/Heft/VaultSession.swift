@@ -112,10 +112,19 @@ final class VaultSession: ObservableObject {
     /// every morning should outrank one opened once by accident an hour ago.
     private(set) lazy var noteFrecency = FrecencyStore.notes(forVaultAt: root.path)
 
+    /// How many openings the history keeps.
+    ///
+    /// Longer than it was, now that the list is grouped by day: forty was a
+    /// sensible length for a flat list one scrolls, and a short one for a
+    /// list where a reader looks for "that note from last week".
+    static let recentLimit = 100
+
     func recordRecent(_ relativePath: String, at now: Date = Date()) {
         recentPaths.removeAll { $0 == relativePath }
         recentPaths.insert(relativePath, at: 0)
-        if recentPaths.count > 40 { recentPaths.removeLast(recentPaths.count - 40) }
+        if recentPaths.count > Self.recentLimit {
+            recentPaths.removeLast(recentPaths.count - Self.recentLimit)
+        }
         openedAt[relativePath] = now
         // Only what the list still holds, so the dates cannot outlive it.
         openedAt = openedAt.filter { recentPaths.contains($0.key) }
