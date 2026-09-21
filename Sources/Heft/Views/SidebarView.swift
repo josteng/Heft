@@ -699,7 +699,12 @@ struct SidebarView: View {
                     // to the title: inside it, it came along when the title
                     // reached the top, and one up there stood taller than
                     // one at rest.
-                    if position < groups.count - 1 {
+                    //
+                    // Only before a title, though. Notes with no date fall
+                    // into a group with none — every note opened before
+                    // openings were recorded is one — and a gap in front of
+                    // that read as a blank row in the middle of the list.
+                    if position < groups.count - 1, groups[position + 1].section != nil {
                         Color.clear.frame(height: 14)
                     }
                 }
