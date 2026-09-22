@@ -178,7 +178,10 @@ private struct PieceStack: View {
                         .frame(maxWidth: fillWidth ? .infinity : nil, alignment: .leading)
 
                 case .image(let url, let width, let height, let alt):
-                    EmbeddedImage(url: url, width: width, height: height, alt: alt)
+                    EmbeddedImage(
+                        url: url, width: width, height: height, alt: alt,
+                        generation: context.imageGeneration
+                    )
 
                 case .mathBlock(let image, _):
                     // Display math gets its own centred line, as in LaTeX.
@@ -225,6 +228,9 @@ private struct EmbeddedImage: View {
     let width: CGFloat?
     let height: CGFloat?
     let alt: String
+    /// Never read. It is here so that SwiftUI, which skips a body whose
+    /// inputs are unchanged, re-runs this one when the file is replaced.
+    let generation: Int
 
     var body: some View {
         Group {

@@ -21,6 +21,10 @@ struct RenderContext {
     var italicColor: NSColor = AppearanceSettings.defaultItalicColor
     /// h1 through h6, in order.
     var headingColors: [NSColor] = AppearanceSettings.defaultHeadingColors
+    /// Which version of the pictures on disk this context draws. Read when
+    /// the context is built, so one built after a figure was replaced differs
+    /// from the one before and every view holding it draws again.
+    var imageGeneration: Int = ImageCache.generation
 
     /// - Parameter level: 1-based heading level, as written in Markdown (h1…h6+).
     func headingColor(_ level: Int) -> NSColor {
@@ -352,19 +356,78 @@ enum InlineText {
 
 /// Small NSImage cache so scrolling a note with several embeds does not hit
 /// the disk on every layout pass.
+///
+/// Each entry remembers the file's modification date and size, and a lookup
+/// that finds them moved reloads. Keyed on the path alone, a figure exported
+/// again with new numbers kept its first version until the app quit, even
+/// through deleting the embed and writing it again.
 enum ImageCache {
-    private static let cache: NSCache<NSURL, NSImage> = {
-        let c = NSCache<NSURL, NSImage>()
-        c.countLimit = 80
-        return c
-    }()
+    static let shared = Store()
 
-    static func image(at url: URL) -> NSImage? {
-        if let hit = cache.object(forKey: url as NSURL) { return hit }
-        guard url.isFileURL, let image = NSImage(contentsOf: url) else { return nil }
-        cache.setObject(image, forKey: url as NSURL)
-        return image
+    /// Moves whenever `refreshChanged()` finds a cached picture replaced on
+    /// disk, so a view that already drew it knows to draw again.
+    static var generation: Int { shared.generation }
+
+    static func image(at url: URL) -> NSImage? { shared.image(at: url) }
+
+    @discardableResult
+    static func refreshChanged() -> Bool { shared.refreshChanged() }
+
+    /// An instance so a test can own one; the app uses `shared`.
+    final class Store: @unchecked Sendable {
+        private struct Stamp: Equatable {
+            let modified: Date?
+            let size: Int?
+        }
+
+        private struct Entry {
+            let image: NSImage
+            let stamp: Stamp
+        }
+
+        /// Locked because styling also runs off the main thread, as `NSCache`,
+        /// which this replaced, never had to be.
+        private let lock = NSLock()
+        private var cache: [URL: Entry] = [:]
+        private var current = 0
+
+        var generation: Int { lock.withLock { current } }
+
+        func image(at url: URL) -> NSImage? {
+            guard url.isFileURL else { return nil }
+            let stamp = Self.stamp(of: url)
+            if let hit = lock.withLock({ cache[url] }), hit.stamp == stamp { return hit.image }
+            let image = NSImage(contentsOf: url)
+            lock.withLock {
+                // Plain eviction, as for embeds: a vault's pictures are not
+                // worth an LRU, only a bound.
+                if cache.count >= 80 { cache.removeAll(keepingCapacity: true) }
+                cache[url] = image.map { Entry(image: $0, stamp: stamp) }
+            }
+            return image
+        }
+
+        /// Drops every picture whose file changed or went away, and says
+        /// whether there was one. A stat per cached file; called on vault
+        /// disk events.
+        @discardableResult
+        func refreshChanged() -> Bool {
+            let cached = lock.withLock { cache }
+            let stale = cached.filter { Self.stamp(of: $0.key) != $0.value.stamp }.keys
+            guard !stale.isEmpty else { return false }
+            lock.withLock {
+                for url in stale { cache[url] = nil }
+                current += 1
+            }
+            return true
+        }
+
+        private static func stamp(of url: URL) -> Stamp {
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            return Stamp(
+                modified: attributes?[.modificationDate] as? Date,
+                size: (attributes?[.size] as? NSNumber)?.intValue
+            )
+        }
     }
-
-    static func clear() { cache.removeAllObjects() }
 }

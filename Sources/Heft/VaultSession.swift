@@ -238,6 +238,9 @@ final class VaultSession: ObservableObject {
     }
 
     private func vaultDidChangeOnDisk() {
+        // A figure exported again changes no note, so nothing else here would
+        // redraw it. Published only when one did, for the reason above.
+        if ImageCache.refreshChanged() { objectWillChange.send() }
         diskChanges.send()
         reload()
     }

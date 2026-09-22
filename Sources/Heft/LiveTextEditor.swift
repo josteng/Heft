@@ -269,7 +269,8 @@ struct LiveTextEditor: NSViewRepresentable {
         // unresolved orange filename instead of becoming a picture.
         let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
             + "\(context.colorfulFormatting)/\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
-            + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/\(context.headingColors)"
+            + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/\(context.headingColors)/"
+            + "\(context.imageGeneration)"
         if nsContext.coordinator.indexFingerprint != fingerprint {
             nsContext.coordinator.indexFingerprint = fingerprint
             nsContext.coordinator.restyle(textView)
@@ -369,6 +370,9 @@ struct LiveTextEditor: NSViewRepresentable {
         var lastIdentity: String?
         var layout = LiveLayout()
         var indexFingerprint = ""
+        /// `ImageCache.generation` as of the last full pass. A figure replaced
+        /// at the same size moves no widget, so the signature cannot say so.
+        var styledImageGeneration = ImageCache.generation
         var lastFindGeneration = -1
         var lastInsertionGeneration = -1
         var lastChecklistToggle = 0
@@ -870,6 +874,8 @@ struct LiveTextEditor: NSViewRepresentable {
             // link index, the usable width — invalidates the lot when it moves,
             // and no part of the previous pass can be kept.
             let comparable = styleKey == key ? styled : nil
+            let imagesReplaced = styledImageGeneration != context.imageGeneration
+            styledImageGeneration = context.imageGeneration
             let scope = comparable.map { RestyleScope.scope(from: $0, to: snapshot) }
             styleKey = key
             styled = snapshot
@@ -912,11 +918,12 @@ struct LiveTextEditor: NSViewRepresentable {
                 // manager comes back for a fragment whose *widget* changed
                 // while its text did not — a table gaining a row, say.
                 for range in scope.dirty { invalidate(range, in: textView) }
-            } else if layout.signature != previous,
+            } else if layout.signature != previous || imagesReplaced,
                       let manager = textView.textLayoutManager,
                       let content = manager.textContentManager {
                 // Editing inside a paragraph already invalidates it, so a full
-                // relayout is only needed when widgets appear or disappear.
+                // relayout is only needed when widgets appear or disappear, or
+                // a picture was replaced on disk.
                 manager.invalidateLayout(for: content.documentRange)
             }
 
@@ -948,7 +955,7 @@ struct LiveTextEditor: NSViewRepresentable {
                 + "\(context.appearance?.name.rawValue ?? "")/"
                 + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
                 + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/"
-                + "\(context.headingColors)"
+                + "\(context.headingColors)/\(context.imageGeneration)"
         }
 
         private func updateTypingAttributes(for selection: NSRange, in textView: NSTextView) {
