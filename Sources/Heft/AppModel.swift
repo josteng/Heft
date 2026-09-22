@@ -556,6 +556,8 @@ final class AppModel: ObservableObject {
                    isDirectory.boolValue {
                     scopePath = requestedScope
                     registry.updateFocus(root: launchVault, scopePath: requestedScope, for: workspaceID)
+                    // A folder opened in a new window is a focus too.
+                    session?.recordScope(requestedScope)
                 }
             }
         }
@@ -735,6 +737,7 @@ final class AppModel: ObservableObject {
         if let current { registry.release(current.url, for: workspaceID) }
         scopePath = requestedScope
         attach(to: registry.session(for: root))
+        if let requestedScope { session?.recordScope(requestedScope) }
 
         current = nil
         text = ""
@@ -2892,8 +2895,25 @@ final class AppModel: ObservableObject {
         guard folder == nil || folder?.isFolder == true else { return }
         scopePath = folder?.relativePath
         if let vaultRoot { registry.updateFocus(root: vaultRoot, scopePath: scopePath, for: workspaceID) }
+        if let scopePath { session?.recordScope(scopePath) }
         expandedFolders = []
         status = folder.map { "Focused on \($0.relativePath)" } ?? "Showing the entire vault"
+    }
+
+    /// Folders this vault's windows were focused on lately, for the scope
+    /// menu, without the one this window shows.
+    var recentScopes: [String] {
+        (session?.existingRecentScopes() ?? []).filter { $0 != scopePath }
+    }
+
+    /// Focuses on a folder named by its vault-relative path, as the scope
+    /// menu's recent folders are.
+    func focus(onFolderAt relativePath: String) {
+        guard let vaultRoot else { return }
+        setScope(to: VaultItem(
+            url: vaultRoot.appendingPathComponent(relativePath, isDirectory: true),
+            relativePath: relativePath, kind: .folder, name: (relativePath as NSString).lastPathComponent
+        ))
     }
 
     /// True when the vault has no agent guidance yet, so the menu can say

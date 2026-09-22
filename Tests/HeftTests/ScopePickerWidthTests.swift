@@ -163,3 +163,112 @@ struct ScopePickerDragTests {
         #expect(!ScopeMenuHandle.HandleView().mouseDownCanMoveWindow)
     }
 }
+
+/// Switching between a few folders is what the scope menu is for, so it
+/// lists the ones this vault's windows were focused on lately.
+@MainActor
+@Suite("The scope menu offers recent folders", .serialized)
+struct ScopeMenuRecentsTests {
+
+    static func vault(folders: [String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-scope-recents-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for folder in folders {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(folder, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+        try "Start".write(to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8)
+        return root
+    }
+
+    /// Each entry's title, ticked ones marked, separators as "—".
+    static func titles(_ entries: [ScopeMenuHandle.Entry]) -> [String] {
+        entries.map { entry in
+            switch entry {
+            case .separator: "—"
+            case .item(let title, _, let checked, _): checked ? "✓ \(title)" : title
+            }
+        }
+    }
+
+    static func run(_ title: String, in entries: [ScopeMenuHandle.Entry]) {
+        for case .item(let candidate, _, _, let action) in entries where candidate == title {
+            action()
+            return
+        }
+        Issue.record("no entry titled \(title)")
+    }
+
+    @Test("The latest focus comes first, once, and the list stays short")
+    func recordsInOrder() throws {
+        let root = try Self.vault(folders: [])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = VaultSession(root: root)
+        for index in 0..<8 { session.recordScope("Folder \(index)") }
+        session.recordScope("Folder 3")
+
+        #expect(session.recentScopes.first == "Folder 3")
+        #expect(session.recentScopes.filter { $0 == "Folder 3" }.count == 1)
+        #expect(session.recentScopes.count == VaultSession.recentScopeLimit)
+        #expect(VaultSession(root: root).recentScopes == session.recentScopes, "not kept across launches")
+    }
+
+    @Test("A folder that is gone is not offered")
+    func dropsMissingFolders() throws {
+        let root = try Self.vault(folders: ["Kept", "Removed"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = VaultSession(root: root)
+        session.recordScope("Kept")
+        session.recordScope("Removed")
+        try FileManager.default.removeItem(at: root.appendingPathComponent("Removed"))
+        #expect(session.existingRecentScopes() == ["Kept"])
+    }
+
+    @Test("The menu ticks the current folder, lists the others, and switches to one")
+    func menuListsAndSwitches() throws {
+        let root = try Self.vault(folders: ["Projects", "Teaching/Seminar"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+        defer { model.closeWorkspace() }
+
+        #expect(Self.titles(WorkspaceScopePicker.entries(for: model)).first == "✓ Entire Vault")
+
+        model.focus(onFolderAt: "Teaching/Seminar")
+        model.focus(onFolderAt: "Projects")
+        let entries = WorkspaceScopePicker.entries(for: model)
+        #expect(Self.titles(entries) == [
+            "✓ Projects", "Teaching/Seminar", "—",
+            "Entire Vault", "Choose Folder…", "—",
+            "Copy Absolute Path", "Reveal in Finder",
+        ])
+
+        Self.run("Teaching/Seminar", in: entries)
+        #expect(model.scopePath == "Teaching/Seminar")
+    }
+
+    @Test("A folder opened in a new window is remembered too")
+    func newWindowRecords() throws {
+        let root = try Self.vault(folders: ["Projects"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let registry = VaultRegistry()
+        let window = AppModel(
+            registry: registry,
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, scopePath: "Projects")
+        )
+        defer { window.closeWorkspace() }
+        #expect(window.scopePath == "Projects")
+
+        let other = AppModel(
+            registry: registry,
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+        defer { other.closeWorkspace() }
+        #expect(other.recentScopes == ["Projects"])
+    }
+}

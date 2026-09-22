@@ -343,7 +343,7 @@ struct WorkspaceScopePicker: View {
                 title: title,
                 help: model.scopePath.map { "\(model.vaultName) / \($0)" } ?? model.vaultName,
                 folder: model.scopeRoot,
-                entries: entries
+                entries: { [model] in Self.entries(for: model) }
             )
         }
         .onHover { isHovering = $0 }
@@ -354,16 +354,30 @@ struct WorkspaceScopePicker: View {
         .frame(maxWidth: column.scopePickerWidth)
     }
 
-    private var entries: [ScopeMenuHandle.Entry] {
-        var entries: [ScopeMenuHandle.Entry] = [
-            .item("Entire Vault", enabled: model.scopePath != nil) { model.showEntireVault() },
-            .item("Choose Folder…") { model.promptForScope() },
-        ]
-        if model.scopePath != nil {
+    /// The menu, built when it opens: the recent folders are read then
+    /// rather than published, so a focus change redraws nothing.
+    ///
+    /// Switching between a few folders is what this menu is for, so they come
+    /// first, the current one ticked; Choose Folder… is for the rest.
+    static func entries(for model: AppModel) -> [ScopeMenuHandle.Entry] {
+        var entries: [ScopeMenuHandle.Entry] = []
+        if let current = model.scopePath {
+            entries.append(.item(current, checked: true) {})
+        }
+        for path in model.recentScopes.prefix(5) {
+            entries.append(.item(path) { model.focus(onFolderAt: path) })
+        }
+        if !entries.isEmpty { entries.append(.separator) }
+        entries.append(.item("Entire Vault", checked: model.scopePath == nil) { model.showEntireVault() })
+        entries.append(.item("Choose Folder…") { model.promptForScope() })
+        if let root = model.scopeRoot {
             entries.append(.separator)
-            entries.append(.item("Reveal Focused Folder in Finder") {
-                if let root = model.scopeRoot { model.revealInFinder(root) }
+            // Absolute, like the sidebar's: the vault root has no relative
+            // path, and the agent or terminal it is for needs the whole one.
+            entries.append(.item("Copy Absolute Path") {
+                model.copyToPasteboard(root.path, describedAs: "absolute path")
             })
+            entries.append(.item("Reveal in Finder") { model.revealInFinder(root) })
         }
         return entries
     }
@@ -374,14 +388,14 @@ struct WorkspaceScopePicker: View {
 /// otherwise start moving the window.
 struct ScopeMenuHandle: NSViewRepresentable {
     enum Entry {
-        case item(String, enabled: Bool = true, action: () -> Void)
+        case item(String, enabled: Bool = true, checked: Bool = false, action: () -> Void)
         case separator
     }
 
     let title: String
     let help: String
     let folder: URL?
-    let entries: [Entry]
+    let entries: () -> [Entry]
 
     func makeNSView(context: Context) -> HandleView { HandleView() }
 
@@ -398,7 +412,7 @@ struct ScopeMenuHandle: NSViewRepresentable {
 
         var title = ""
         var folder: URL?
-        var entries: [Entry] = []
+        var entries: () -> [Entry] = { [] }
 
         /// What a press turned out to be. Replaced by a test, which cannot
         /// open a menu or run a drag session without a person at the mouse.
@@ -439,16 +453,17 @@ struct ScopeMenuHandle: NSViewRepresentable {
         func makeMenu() -> NSMenu {
             let menu = NSMenu()
             menu.autoenablesItems = false
-            for entry in entries {
+            for entry in entries() {
                 switch entry {
                 case .separator:
                     menu.addItem(.separator())
-                case .item(let title, let enabled, let action):
+                case .item(let title, let enabled, let checked, let action):
                     let item = NSMenuItem(title: title, action: #selector(MenuAction.run), keyEquivalent: "")
                     let target = MenuAction(action)
                     item.target = target
                     item.representedObject = target
                     item.isEnabled = enabled
+                    item.state = checked ? .on : .off
                     menu.addItem(item)
                 }
             }

@@ -61,6 +61,11 @@ because a note outside the folder looked as though it had left the index;
 the toggle, and a row offering the vault's matches when the folder has
 none, are what answer that now. A pasted path ignores the scope.
 
+The focus menu in the title bar lists the folders this vault's windows were
+focused on lately, since switching between a few is what it is for. The list
+is read when the menu opens rather than published, so a focus change redraws
+nothing, and a folder that has since moved simply drops out of it.
+
 The palette also carries what was otherwise only a keystroke or a menu away:
 Quick Open, the vault search and Find in note; the formatting bar's own six,
 bold through link; and the window's verbs, from a new note to Settings and

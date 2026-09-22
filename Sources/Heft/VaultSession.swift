@@ -101,6 +101,37 @@ final class VaultSession: ObservableObject {
     /// truth about it rather than a guess from the file's own date.
     private var openedAt: [String: Date] = [:]
 
+    private var recentScopesKey: String {
+        "dev.stenglein.Heft.recentScopes.\(root.path)"
+    }
+
+    static let recentScopeLimit = 6
+
+    /// Folders a window of this vault was focused on, the latest first.
+    ///
+    /// Not published: the scope menu reads it when it opens, and a focus
+    /// change must not redraw every window of the vault.
+    private(set) lazy var recentScopes: [String] =
+        HeftDefaults.shared.stringArray(forKey: recentScopesKey) ?? []
+
+    func recordScope(_ relativePath: String) {
+        recentScopes.removeAll { $0 == relativePath }
+        recentScopes.insert(relativePath, at: 0)
+        recentScopes = Array(recentScopes.prefix(Self.recentScopeLimit))
+        HeftDefaults.shared.set(recentScopes, forKey: recentScopesKey)
+    }
+
+    /// `recentScopes` less the folders no longer there. A renamed folder's
+    /// old path drops out here rather than being rewritten on every move.
+    func existingRecentScopes() -> [String] {
+        recentScopes.filter { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(
+                atPath: root.appendingPathComponent(path).path, isDirectory: &isDirectory
+            ) && isDirectory.boolValue
+        }
+    }
+
     /// When `relativePath` was last opened here, if that was recorded.
     func lastOpened(_ relativePath: String) -> Date? { openedAt[relativePath] }
 
