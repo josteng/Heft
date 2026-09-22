@@ -908,6 +908,66 @@ public enum LiveDecorator {
 
         result.append(contentsOf: quoteDecorations(text, protected: protected))
 
+        // Setext headings and thematic breaks are decided before list
+        // markers, because `- - -` matches both: a rule's line is protected
+        // here, and a bullet is what it became the moment the caret landed on
+        // it, the marker pass having claimed the line once the rule stopped
+        // hiding it.
+        // Setext headings: text with `===` under it is an H1 and text with
+        // `---` under it an H2. That is CommonMark, so it is what Obsidian
+        // shows, and without it a note written that way loses its headings and
+        // gains a rule across the page.
+        //
+        // Before the thematic break, which would otherwise claim the same
+        // `---`. CommonMark gives setext precedence for exactly this reason.
+        //
+        // One deliberate divergence: a single `-` is a valid underline to
+        // CommonMark, and honouring that would turn the line above into a
+        // heading the instant you typed the `-` of a list item, on every list
+        // started under a paragraph. Two are required.
+        for match in matches(#"(?m)^[ \t]{0,3}(?:=+|--+)[ \t]*$"#, text, excluding: protected) {
+            guard match.location > 0 else { continue }
+            let underline = text.substring(with: match).trimmingCharacters(in: .whitespaces)
+            let previous = text.lineRange(for: NSRange(location: match.location - 1, length: 0))
+            let content = text.substring(with: previous)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // The content has to be an ordinary paragraph line. A blank line
+            // means the `---` is a rule, and a line that opens a block of its
+            // own is that block, not a heading waiting for an underline.
+            guard !content.isEmpty else { continue }
+            // `<!--` is in the list because a comment is an HTML block, and
+            // CommonMark does not let one carry a setext underline. Without it
+            // a template whose blank line goes missing turns its own marker
+            // into the heading: both lines then collapse, one as the comment
+            // and one as the underline, and the note grows a tall empty band
+            // where the rule should have been.
+            let opensItsOwnBlock = #"^(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d+[.)](?:[ \t]|$)"#
+                + #"|```|~~~|\||<!--|=+[ \t]*$|-+[ \t]*$)"#
+            if firstMatch(opensItsOwnBlock, content as NSString) != nil { continue }
+
+            let range = NSRange(
+                location: previous.location,
+                length: NSMaxRange(match) - previous.location
+            )
+            result.append(MarkdownDecoration(
+                range: range,
+                // The underline collapses the way any other block marker does,
+                // and comes back when the caret is on either line.
+                syntax: [match],
+                style: .heading(level: underline.hasPrefix("=") ? 1 : 2)
+            ))
+            protected.insert(range)
+        }
+
+        for match in matches(#"(?m)^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$"#, text, excluding: protected) {
+            result.append(MarkdownDecoration(range: match, style: .thematicBreak))
+            // Protected, or the list marker pass claims `- - -` as a bullet as
+            // well, and the line turned into one the moment the caret revealed
+            // it and the rule stopped hiding the dashes.
+            protected.insert(match)
+        }
+
         // Any single character between the brackets, not just ` `, `x` and
         // `X`: Obsidian puts a checkbox on every `- [c]` and carries the
         // character through for a theme to style, which is where the `[/]`,
@@ -961,57 +1021,6 @@ public enum LiveDecorator {
                 revealRange: revealRange,
                 style: .listMarker(kind: kind, depth: depth)
             ))
-        }
-
-        // Setext headings: text with `===` under it is an H1 and text with
-        // `---` under it an H2. That is CommonMark, so it is what Obsidian
-        // shows, and without it a note written that way loses its headings and
-        // gains a rule across the page.
-        //
-        // Before the thematic break, which would otherwise claim the same
-        // `---`. CommonMark gives setext precedence for exactly this reason.
-        //
-        // One deliberate divergence: a single `-` is a valid underline to
-        // CommonMark, and honouring that would turn the line above into a
-        // heading the instant you typed the `-` of a list item, on every list
-        // started under a paragraph. Two are required.
-        for match in matches(#"(?m)^[ \t]{0,3}(?:=+|--+)[ \t]*$"#, text, excluding: protected) {
-            guard match.location > 0 else { continue }
-            let underline = text.substring(with: match).trimmingCharacters(in: .whitespaces)
-            let previous = text.lineRange(for: NSRange(location: match.location - 1, length: 0))
-            let content = text.substring(with: previous)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // The content has to be an ordinary paragraph line. A blank line
-            // means the `---` is a rule, and a line that opens a block of its
-            // own is that block, not a heading waiting for an underline.
-            guard !content.isEmpty else { continue }
-            // `<!--` is in the list because a comment is an HTML block, and
-            // CommonMark does not let one carry a setext underline. Without it
-            // a template whose blank line goes missing turns its own marker
-            // into the heading: both lines then collapse, one as the comment
-            // and one as the underline, and the note grows a tall empty band
-            // where the rule should have been.
-            let opensItsOwnBlock = #"^(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d+[.)](?:[ \t]|$)"#
-                + #"|```|~~~|\||<!--|=+[ \t]*$|-+[ \t]*$)"#
-            if firstMatch(opensItsOwnBlock, content as NSString) != nil { continue }
-
-            let range = NSRange(
-                location: previous.location,
-                length: NSMaxRange(match) - previous.location
-            )
-            result.append(MarkdownDecoration(
-                range: range,
-                // The underline collapses the way any other block marker does,
-                // and comes back when the caret is on either line.
-                syntax: [match],
-                style: .heading(level: underline.hasPrefix("=") ? 1 : 2)
-            ))
-            protected.insert(range)
-        }
-
-        for match in matches(#"(?m)^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$"#, text, excluding: protected) {
-            result.append(MarkdownDecoration(range: match, style: .thematicBreak))
         }
 
         result.append(contentsOf: listContinuations(text, protected: protected, blocks: result))
