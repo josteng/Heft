@@ -162,8 +162,13 @@ struct ProgressFill: NSViewRepresentable {
     }
 
     final class FillView: NSView {
+        static let stepDuration: CFTimeInterval = 0.42
+
         let fill = CALayer()
         private var value: Double?
+        /// Keys the running steps apart, so a new one joins them rather
+        /// than replacing one.
+        private var steps = 0
 
         var color: NSColor = .controlAccentColor {
             didSet { updateColor() }
@@ -186,16 +191,21 @@ struct ProgressFill: NSViewRepresentable {
                 place()
                 return
             }
-            // From where the bar is drawn now, not where the last change was
-            // heading, so a quick run of arrow presses never jumps backwards.
-            let from = fill.presentation()?.bounds.width ?? fill.bounds.width
+            // Additive: each change animates only its own step, from minus
+            // the step to nothing, on top of the ones still running. Replacing
+            // the running animation instead restarted an ease-in from rest on
+            // every key repeat, so a held arrow left the bar trembling where
+            // it started until the key was let go.
+            let from = fill.bounds.width
             place()
             let animation = CABasicAnimation(keyPath: "bounds.size.width")
-            animation.fromValue = from
-            animation.toValue = fill.bounds.width
-            animation.duration = 0.42
+            animation.isAdditive = true
+            animation.fromValue = from - fill.bounds.width
+            animation.toValue = 0
+            animation.duration = Self.stepDuration
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            fill.add(animation, forKey: "progress")
+            fill.add(animation, forKey: "progress-\(steps)")
+            steps += 1
         }
 
         override func layout() {

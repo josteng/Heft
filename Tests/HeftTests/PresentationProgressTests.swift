@@ -18,25 +18,46 @@ struct PresentationProgressTests {
         return view
     }
 
+    private func steps(_ view: ProgressFill.FillView) -> [CABasicAnimation] {
+        (view.fill.animationKeys() ?? []).sorted().compactMap {
+            view.fill.animation(forKey: $0) as? CABasicAnimation
+        }
+    }
+
     @Test("The first value is placed, not animated")
     func firstValueIsPlaced() {
         let view = view()
         view.setValue(0.25)
         #expect(view.fill.bounds.width == 100)
-        #expect(view.fill.animation(forKey: "progress") == nil)
+        #expect(steps(view).isEmpty)
     }
 
-    @Test("A change of slide animates the width to where it is going")
+    @Test("A change of slide animates its step onto the new width")
     func changeAnimates() throws {
         let view = view()
         view.setValue(0.25)
         view.setValue(0.5)
         #expect(view.fill.bounds.width == 200)
-        let animation = try #require(view.fill.animation(forKey: "progress") as? CABasicAnimation)
-        #expect(animation.keyPath == "bounds.size.width")
-        #expect(animation.fromValue as? CGFloat == 100)
-        #expect(animation.toValue as? CGFloat == 200)
-        #expect(animation.duration > 0.2)
+        let step = try #require(steps(view).first)
+        #expect(step.keyPath == "bounds.size.width")
+        #expect(step.isAdditive)
+        #expect(step.fromValue as? CGFloat == -100)
+        #expect(step.toValue as? CGFloat == 0)
+        #expect(step.duration > 0.2)
+    }
+
+    /// A held arrow: each repeat adds its step to the ones still running,
+    /// rather than replacing them with a curve that starts again from rest.
+    @Test("A quick run of changes stacks its steps")
+    func quickChangesStack() {
+        let view = view()
+        view.setValue(0.25)
+        view.setValue(0.5)
+        view.setValue(0.75)
+        #expect(view.fill.bounds.width == 300)
+        let running = steps(view)
+        #expect(running.count == 2)
+        #expect(running.allSatisfy { $0.isAdditive && $0.fromValue as? CGFloat == -100 })
     }
 }
 
