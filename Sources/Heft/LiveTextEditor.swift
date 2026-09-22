@@ -1,5 +1,6 @@
 import Dispatch
 import AppKit
+import os
 import HeftCore
 import HeftVimCore
 import SwiftUI
@@ -125,6 +126,9 @@ struct LiveTextEditor: NSViewRepresentable {
         // The editor is in a window and can host the affordance; the view
         // itself defaults it off for everything that is not.
         textView.writingToolsBehavior = .default
+        textView.refusesWritingTools = { [weak coordinator = nsContext.coordinator] in
+            coordinator?.awaitingWriteForAnotherNote ?? false
+        }
         textView.vimCaretColor = context.accentColor
         textView.textContainerInset = NSSize(width: 28, height: 28)
         textView.linkTextAttributes = [:]
@@ -503,24 +507,89 @@ struct LiveTextEditor: NSViewRepresentable {
         /// longer on screen is refused, and the note put back.
         private(set) var writingToolsDocument: String?
 
+        /// When `writingToolsDocument` came from Siri reading the note rather
+        /// than from a session beginning.
+        ///
+        /// Siri opens no session while it works. It reads the note through
+        /// `RequestEditingContext`, and seconds later a separate one-shot
+        /// intent, `PresentWritingToolsResult`, writes its answer into
+        /// whichever text view the window has focused. That intent names a
+        /// window and nothing else, so a note opened in between took the
+        /// rewrite, and stopping a session on the switch did nothing because
+        /// there was none. The read is what says which note it belongs to.
+        private var writingToolsReadAt: Date?
+
+        /// How long a read holds without a session: longer than Siri waits
+        /// for its own answer, which it abandons after 28 seconds.
+        static let siriWriteWindow: TimeInterval = 30
+
+        /// The clock, a seam so a test need not wait out the window.
+        var now: () -> Date = Date.init
+
+        private func readIsFresh() -> Bool {
+            guard let writingToolsReadAt else { return true }
+            return now().timeIntervalSince(writingToolsReadAt) < Self.siriWriteWindow
+        }
+
+        /// A read for another note that is still waiting on its write.
+        ///
+        /// Kept over whatever is on screen when AppKit reads again or begins a
+        /// session at the moment of the write, since by then that is already
+        /// the wrong note.
+        ///
+        /// While it holds, the view also reports Writing Tools as unavailable
+        /// (`HeftTextKit2View.refusesWritingTools`), so the write finds no
+        /// target rather than animating a rewrite into the note on screen.
+        var awaitingWriteForAnotherNote: Bool {
+            guard let writingToolsDocument, writingToolsDocument != lastIdentity else { return false }
+            return readIsFresh()
+        }
+
+        /// The system reading the note to rewrite it: Siri, or Writing Tools
+        /// gathering its context.
+        func writingToolsRead() {
+            if awaitingWriteForAnotherNote {
+                WritingToolsLog.event("read kept", note: writingToolsDocument, onScreen: lastIdentity)
+                return
+            }
+            writingToolsDocument = lastIdentity
+            writingToolsReadAt = now()
+            WritingToolsLog.event("read", note: lastIdentity)
+        }
+
+        func textView(
+            _ textView: NSTextView, writingToolsIgnoredRangesInEnclosingRange enclosingRange: NSRange
+        ) -> [NSValue] {
+            writingToolsRead()
+            return []
+        }
+
         /// Whether a change arriving now belongs to a note that has gone.
         ///
         /// `isWritingToolsActive` is deliberately not consulted. It reads
         /// false by the time the session's last write lands, so asking it
         /// let exactly the write this exists to stop straight through.
         ///
-        /// What ends the refusal instead is the session reporting its end, or
-        /// the reader pressing a key, which says plainly that the note on
-        /// screen is the one being edited. Until one of those, a change here
-        /// has no author: nobody has touched this note.
+        /// What ends the refusal instead is the session reporting its end, the
+        /// reader pressing a key, which says plainly that the note on screen
+        /// is the one being edited, or a read outliving any answer Siri would
+        /// still deliver. Until one of those, a change here has no author:
+        /// nobody has touched this note.
         func writingToolsIsWritingIntoAnotherNote() -> Bool {
-            guard let writingToolsDocument else { return false }
-            return writingToolsDocument != lastIdentity
+            guard let writingToolsDocument, writingToolsDocument != lastIdentity else { return false }
+            guard readIsFresh() else {
+                self.writingToolsDocument = nil
+                writingToolsReadAt = nil
+                return false
+            }
+            return true
         }
 
         /// A keystroke is the reader taking the note back.
         func readerTypedInto(_ textView: NSTextView) {
+            if writingToolsDocument != nil { WritingToolsLog.event("typed", note: lastIdentity) }
             writingToolsDocument = nil
+            writingToolsReadAt = nil
         }
 
         func isWritingToolsSession(_ textView: NSTextView) -> Bool {
@@ -537,12 +606,28 @@ struct LiveTextEditor: NSViewRepresentable {
 
         func textViewWritingToolsWillBegin(_ textView: NSTextView) {
             writingToolsBegan = true
-            writingToolsDocument = lastIdentity
+            if awaitingWriteForAnotherNote {
+                WritingToolsLog.event("begin kept", note: writingToolsDocument, onScreen: lastIdentity)
+                // Began anyway, on a note it was not asked about: stopped at
+                // once, so the rewrite is not animated over it while the
+                // refusal below throws each of its writes away. Not from
+                // inside the callback, which AppKit is still in the middle of.
+                DispatchQueue.main.async { [weak textView] in
+                    textView?.writingToolsCoordinator?.stopWritingTools()
+                }
+            } else {
+                // A session holds until it ends, however long that takes.
+                writingToolsDocument = lastIdentity
+                writingToolsReadAt = nil
+                WritingToolsLog.event("begin", note: lastIdentity)
+            }
             restyleTask?.cancel()
         }
 
         func textViewWritingToolsDidEnd(_ textView: NSTextView) {
+            WritingToolsLog.event("end", note: lastIdentity)
             writingToolsDocument = nil
+            writingToolsReadAt = nil
             guard writingToolsBegan else { return }
             writingToolsBegan = false
             // Whatever survived the session is an ordinary edit now: it is
@@ -560,6 +645,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // publish nothing: the alternative is saving one note's text as
             // another's. See `writingToolsDocument`.
             if writingToolsIsWritingIntoAnotherNote() {
+                WritingToolsLog.event("refused", note: writingToolsDocument, onScreen: lastIdentity)
                 if let view = textView as? HeftTextKit2View, view.string != parent.text {
                     load(parent.text, into: view)
                     restyle(view)
@@ -1181,9 +1267,14 @@ final class HeftTextKit2View: NSTextView {
     /// `makeNSView`, because only the view is common to both worlds.
     private var writingTools: NSWritingToolsBehavior = .none
     override var writingToolsBehavior: NSWritingToolsBehavior {
-        get { writingTools }
+        get { refusesWritingTools() ? .none : writingTools }
         set { writingTools = newValue }
     }
+
+    /// Whether Writing Tools must find nothing here right now: Siri read
+    /// another note and its answer is still due. Asked live, so the refusal
+    /// ends with the coordinator's hold and needs no timer of its own.
+    var refusesWritingTools: () -> Bool = { false }
 
     /// The other two affordances that draw through a UI service, defaulted off
     /// for the same reason and in the same place.
@@ -3482,3 +3573,22 @@ final class HeftTextKit2View: NSTextView {
     }
 }
 
+/// What the system's rewriting did to the editor, in the unified log under
+/// `dev.stenglein.Heft` / `writing-tools`. Siri cannot be driven from a test,
+/// so this is how a wrong-note write is traced: which hook fired, for which
+/// note, and whether the write was refused. Notes appear as a fingerprint
+/// that is stable within one run, never as a path or any of their text.
+enum WritingToolsLog {
+    private static let logger = Logger(subsystem: "dev.stenglein.Heft", category: "writing-tools")
+
+    static func event(_ name: String, note: String?, onScreen: String? = nil) {
+        let fingerprint = { (identity: String?) in
+            identity.map { String(UInt16(truncatingIfNeeded: $0.hashValue), radix: 16) } ?? "none"
+        }
+        if let onScreen {
+            logger.log("\(name, privacy: .public) note=\(fingerprint(note), privacy: .public) onScreen=\(fingerprint(onScreen), privacy: .public)")
+        } else {
+            logger.log("\(name, privacy: .public) note=\(fingerprint(note), privacy: .public)")
+        }
+    }
+}

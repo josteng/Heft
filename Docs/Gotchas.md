@@ -162,6 +162,10 @@ preferences or the icon.
   only styling: the promised end does not always come, so holding the
   publish swallowed every later keystroke and holding `updateNSView` meant
   no note could be opened again. The reader opening a note ends the hold.
+- **Siri's rewrite is not a session.** It reads the note, then a separate
+  intent writes into whatever the window has focused, seconds later. The
+  note read is remembered, and a write into another note refused, for
+  30 seconds; `writing-tools` in the unified log shows each step.
 - **Writing an attribute discards TextKit's layout for that range, even when
   the value written is the one already there.** The whole reason restyling is
   scoped, and the trap before adding a "just set it again" write to

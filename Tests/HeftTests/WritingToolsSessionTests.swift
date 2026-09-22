@@ -131,6 +131,82 @@ struct WritingToolsSessionTests {
         #expect(view.string == "A different note entirely.\n", "and left on screen as another")
     }
 
+    /// Siri's route: it reads the note, opens no session, and seconds later
+    /// a separate intent writes the answer into whatever the window shows.
+    /// AppKit may read again, and begin a session, at the moment of the
+    /// write, when the note on screen is already the wrong one.
+    @Test("Siri's answer for a note that has gone is refused")
+    func siriCannotWriteIntoTheNextNote() {
+        let (view, coordinator, box) = editor("The note Siri was asked to rewrite.\n")
+        coordinator.lastIdentity = "Asked.md"
+        _ = coordinator.textView(view, writingToolsIgnoredRangesInEnclosingRange: NSRange(location: 0, length: 10))
+
+        coordinator.forgetWritingToolsSession(ifDocumentChangedTo: "Other.md", in: view)
+        coordinator.lastIdentity = "Other.md"
+        box.text = "A different note entirely.\n"
+        coordinator.load(box.text, into: view)
+
+        _ = coordinator.textView(view, writingToolsIgnoredRangesInEnclosingRange: NSRange(location: 0, length: 10))
+        coordinator.writingToolsIsActive = { _ in true }
+        coordinator.textViewWritingToolsWillBegin(view)
+        view.string = "Siri's rewrite of the first note.\n"
+        coordinator.textDidChange(changed(view))
+
+        #expect(box.text == "A different note entirely.\n", "Siri's answer was saved into the next note")
+        #expect(view.string == "A different note entirely.\n", "and left on screen there")
+    }
+
+    @Test("The next note offers Siri no Writing Tools while the answer is due")
+    func theNextNoteRefusesWritingTools() {
+        let (view, coordinator, box) = editor("The note Siri was asked to rewrite.\n")
+        var clock = Date(timeIntervalSince1970: 1_000)
+        coordinator.now = { clock }
+        view.writingToolsBehavior = .default
+        view.refusesWritingTools = { [weak coordinator] in coordinator?.awaitingWriteForAnotherNote ?? false }
+        coordinator.lastIdentity = "Asked.md"
+        _ = coordinator.textView(view, writingToolsIgnoredRangesInEnclosingRange: NSRange(location: 0, length: 10))
+        #expect(view.writingToolsBehavior == .default, "the note Siri reads must still take its answer")
+
+        coordinator.forgetWritingToolsSession(ifDocumentChangedTo: "Other.md", in: view)
+        coordinator.lastIdentity = "Other.md"
+        box.text = "A different note entirely.\n"
+        coordinator.load(box.text, into: view)
+        #expect(view.writingToolsBehavior == .none, "the rewrite was animated into the next note")
+
+        clock += LiveTextEditor.Coordinator.siriWriteWindow + 1
+        #expect(view.writingToolsBehavior == .default, "Writing Tools stayed off after the answer could no longer come")
+    }
+
+    @Test("Siri's answer for the note on screen goes in")
+    func siriWritesIntoItsOwnNote() {
+        let (view, coordinator, box) = editor("The note Siri was asked to rewrite.\n")
+        coordinator.lastIdentity = "Asked.md"
+        _ = coordinator.textView(view, writingToolsIgnoredRangesInEnclosingRange: NSRange(location: 0, length: 10))
+
+        view.string = "Siri's rewrite.\n"
+        coordinator.textDidChange(changed(view))
+        #expect(box.text == "Siri's rewrite.\n")
+    }
+
+    @Test("A read Siri never answered stops holding once it could not come")
+    func anUnansweredReadExpires() {
+        let (view, coordinator, box) = editor("Asked about.\n")
+        var clock = Date(timeIntervalSince1970: 1_000)
+        coordinator.now = { clock }
+        coordinator.lastIdentity = "Asked.md"
+        _ = coordinator.textView(view, writingToolsIgnoredRangesInEnclosingRange: NSRange(location: 0, length: 5))
+
+        coordinator.forgetWritingToolsSession(ifDocumentChangedTo: "Other.md", in: view)
+        coordinator.lastIdentity = "Other.md"
+        box.text = "The other note.\n"
+        coordinator.load(box.text, into: view)
+
+        clock += LiveTextEditor.Coordinator.siriWriteWindow + 1
+        view.string = "The other note, edited from the format bar.\n"
+        coordinator.textDidChange(changed(view))
+        #expect(box.text == "The other note, edited from the format bar.\n", "a stale read refused the reader's edit")
+    }
+
     @Test("The refusal lifts the moment the reader types")
     func typingTakesTheNoteBack() {
         let (view, coordinator, box) = editor("Asked about.\n")
