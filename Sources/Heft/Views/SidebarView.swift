@@ -469,7 +469,10 @@ struct SidebarView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if rows.isEmpty {
-                    empty(filter.isEmpty ? "No tags in this vault" : "No matching tags")
+                    empty(Self.noTagsMessage(
+                        filtered: !filter.isEmpty,
+                        focusedFolder: model.scopePath == nil ? nil : model.scopeName
+                    ))
                 }
                 ForEach(rows) { row in
                     switch row {
@@ -519,6 +522,13 @@ struct SidebarView: View {
             .padding(.top, 8)
             .padding(.bottom, 8)
         }
+    }
+
+    /// Names the focused folder: the list holds only its tags, and "this
+    /// vault" there read as though the whole vault had none.
+    static func noTagsMessage(filtered: Bool, focusedFolder: String?) -> String {
+        if filtered { return "No matching tags" }
+        return focusedFolder.map { "No tags in \($0)" } ?? "No tags in this vault"
     }
 
     private var tagRows: [TagListRow] {
