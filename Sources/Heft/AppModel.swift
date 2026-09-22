@@ -219,6 +219,30 @@ final class AppModel: ObservableObject {
         return note.relativePath.hasPrefix(scopePath + "/")
     }
 
+    /// What Quick Open lists: the window's focused folder unless asked for
+    /// the entire vault, as vault search does.
+    ///
+    /// Ordered by what the reader actually opens. With nothing typed that is
+    /// the whole ranking; with something typed it is only a nudge within a
+    /// tier. The raw score, not a saturated one: `VaultIndex.search`
+    /// saturates for the typed case, where it belongs.
+    ///
+    /// A pasted path names one note wherever it is, so it is answered from
+    /// the whole vault and lands at the top of the list.
+    func quickOpenResults(_ query: String, entireVault: Bool, limit: Int = 60) -> [NoteRef] {
+        let frecency = noteFrecency
+        let scope: ((NoteRef) -> Bool)? = entireVault || scopePath == nil
+            ? nil
+            : { self.isInScope($0) }
+        let found = index.search(
+            query, limit: limit,
+            familiarity: { note in frecency?.score(note.relativePath) ?? 0 },
+            including: scope
+        )
+        guard let atPath = noteAtPath(query) else { return found }
+        return [atPath] + found.filter { $0.relativePath != atPath.relativePath }
+    }
+
     // MARK: Open document
     @Published private(set) var current: NoteRef? {
         didSet { if current?.url != oldValue?.url { updateProxyIcon() } }

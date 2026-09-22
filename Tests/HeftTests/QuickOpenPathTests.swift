@@ -13,7 +13,9 @@ import Testing
 @Suite("Quick Open takes a path", .serialized)
 struct QuickOpenPathTests {
 
-    private func model(_ files: [String: String]) async throws -> AppModel {
+    private func model(
+        _ files: [String: String], scope: String? = nil
+    ) async throws -> AppModel {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("heft-quickopen-\(UUID().uuidString)")
         for (path, contents) in files {
@@ -24,7 +26,8 @@ struct QuickOpenPathTests {
             try Data(contents.utf8).write(to: url)
         }
         let model = AppModel(
-            registry: VaultRegistry(), descriptor: WorkspaceDescriptor(vaultPath: root.path)
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, scopePath: scope)
         )
         for _ in 0..<600 where model.index.notes.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
@@ -77,12 +80,47 @@ struct QuickOpenPathTests {
             "Archive/Report.md": "old", "Report.md": "new", "Other.md": "x",
         ])
         defer { model.closeWorkspace() }
-        let query = "Archive/Report.md"
-        let found = model.index.search(query, limit: 60) { _ in 0 }
-        let atPath = try #require(model.noteAtPath(query))
-        let rows = [atPath] + found.filter { $0.relativePath != atPath.relativePath }
+        let rows = model.quickOpenResults("Archive/Report.md", entireVault: true)
 
         #expect(rows.first?.relativePath == "Archive/Report.md")
         #expect(rows.filter { $0.relativePath == "Archive/Report.md" }.count == 1)
+    }
+
+    /// A focused window lists its folder, as vault search does, and the
+    /// toggle brings back the rest.
+    @Test("A focused window lists its own folder unless asked for the vault")
+    func scopedByDefault() async throws {
+        let model = try await model([
+            "Thesis/Meeting.md": "a", "Thesis/Draft.md": "b", "Home/Meeting list.md": "c",
+        ], scope: "Thesis")
+        defer { model.closeWorkspace() }
+        let scoped = model.quickOpenResults("meeting", entireVault: false).map(\.relativePath)
+        let everywhere = model.quickOpenResults("meeting", entireVault: true).map(\.relativePath)
+        #expect(scoped == ["Thesis/Meeting.md"])
+        #expect(Set(everywhere) == ["Thesis/Meeting.md", "Home/Meeting list.md"])
+        #expect(model.quickOpenResults("", entireVault: false).allSatisfy {
+            $0.relativePath.hasPrefix("Thesis/")
+        })
+    }
+
+    /// Scope narrows what a name matches, not what a path names: a pasted
+    /// path is the reader saying exactly which note.
+    @Test("A pasted path opens its note from outside the folder")
+    func pathIgnoresScope() async throws {
+        let model = try await model(["Thesis/Draft.md": "a", "Home/List.md": "b"], scope: "Thesis")
+        defer { model.closeWorkspace() }
+        #expect(model.quickOpenResults("Home/List.md", entireVault: false).first?.relativePath
+            == "Home/List.md")
+    }
+
+    /// Filtered before the limit, not after: a folder's notes that rank
+    /// below the vault's first sixty must still be found.
+    @Test("The folder is not cut short by notes outside it")
+    func scopeAppliesBeforeLimit() async throws {
+        var files = ["Thesis/Zeta.md": "z"]
+        for i in 0..<5 { files["Home/Note \(i).md"] = "x" }
+        let model = try await model(files, scope: "Thesis")
+        defer { model.closeWorkspace() }
+        #expect(model.quickOpenResults("", entireVault: false, limit: 3).map(\.name) == ["Zeta"])
     }
 }

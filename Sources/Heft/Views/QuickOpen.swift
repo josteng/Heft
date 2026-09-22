@@ -10,34 +10,25 @@ struct QuickOpenView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var selection = 0
+    /// Scoped by default, like vault search. Scope used to be ignored here
+    /// because a note outside the folder then looked as though it had fallen
+    /// out of the index; the toggle and the row offering the rest of the
+    /// vault are what say why it is missing.
+    @State private var searchesEntireVault = false
     @FocusState private var isFocused: Bool
 
+    private var isScoped: Bool { model.scopePath != nil && !searchesEntireVault }
+
     private var results: [NoteRef] {
-        // Quick Open is a vault-wide switcher. Restricting it to a window's
-        // focused folder made existing notes look as though they had fallen
-        // out of the index, with no indication that scope was the reason.
-        //
-        // Ordered by what the reader actually opens. With nothing typed that
-        // is the whole ranking — an alphabetical list of every note in a vault
-        // is a directory listing, not a switcher, and the note wanted is
-        // almost always one of the last few. With something typed it is only a
-        // nudge within a tier: a better match always wins.
-        //
-        // The raw score, not a saturated one. Saturating here — which is what
-        // this used to do — made every note used four or more times tie, and
-        // the empty list then fell through to the alphabetical tiebreak.
-        // `VaultIndex.search` saturates for the typed case, where it belongs.
-        let frecency = model.noteFrecency
-        let found = model.index.search(query, limit: 60) { note in
-            frecency?.score(note.relativePath) ?? 0
-        }
-        // A pasted path is answered here rather than by a command of its
-        // own: it is the one thing a name search cannot do, since a path is
-        // matched by where a note is and a name by what it is called. An
-        // agent or a terminal hands over the long, escaped, quoted or
-        // file:// form, and it lands at the top of the list.
-        guard let atPath = model.noteAtPath(query) else { return found }
-        return [atPath] + found.filter { $0.relativePath != atPath.relativePath }
+        model.quickOpenResults(query, entireVault: searchesEntireVault)
+    }
+
+    /// Matches outside the focused folder, offered when none are inside it.
+    private var matchesElsewhere: Int {
+        guard isScoped, results.isEmpty,
+              !query.trimmingCharacters(in: .whitespaces).isEmpty
+        else { return 0 }
+        return model.quickOpenResults(query, entireVault: true).count
     }
 
     var body: some View {
@@ -53,6 +44,15 @@ struct QuickOpenView: View {
                     .onKeyPress(.downArrow) { move(1); return .handled }
                     .onChange(of: query) { selection = 0 }
                 PaletteDismissButton(query: $query) { dismiss() }
+                if model.scopePath != nil {
+                    Button { searchesEntireVault.toggle(); selection = 0 } label: {
+                        Image(systemName: searchesEntireVault ? "globe" : "scope")
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(searchesEntireVault ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .help(searchesEntireVault ? "Showing the entire vault" : "Showing \(model.scopeName)")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 13)
@@ -78,6 +78,24 @@ struct QuickOpenView: View {
                                         .onChanged { _ in beginFileDrag(for: note.url) }
                                 )
                         }
+                        if matchesElsewhere > 0 {
+                            Button {
+                                searchesEntireVault = true
+                                selection = 0
+                            } label: {
+                                Label(
+                                    "None in \(model.scopeName). Show \(matchesElsewhere) in the entire vault",
+                                    systemImage: "globe"
+                                )
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .padding(6)
                     #if os(macOS)
@@ -95,7 +113,7 @@ struct QuickOpenView: View {
             // while the query and surrounding controls update.
             // Give the result subtree query identity so filtering cannot show
             // stale empty-query rows.
-            .id(query)
+            .id("\(query)#\(searchesEntireVault)")
             .frame(height: PaletteMetrics.pickerListHeight)
         }
         .frame(width: PaletteMetrics.pickerWidth)

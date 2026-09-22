@@ -55,6 +55,12 @@ folder outside the vault as a vault, and the first two read as side effects
 of typing a path while the third is what choosing a folder outside the
 vault already offers.
 
+In a focused window Quick Open lists that folder, as vault search does,
+with the same toggle for the whole vault. It was vault-wide for a while
+because a note outside the folder looked as though it had left the index;
+the toggle, and a row offering the vault's matches when the folder has
+none, are what answer that now. A pasted path ignores the scope.
+
 The palette also carries what was otherwise only a keystroke or a menu away:
 Quick Open, the vault search and Find in note; the formatting bar's own six,
 bold through link; and the window's verbs, from a new note to Settings and

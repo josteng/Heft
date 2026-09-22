@@ -601,12 +601,16 @@ public final class VaultIndex: @unchecked Sendable {
     /// Uses within a half-life past which a note is simply "familiar".
     public static let wellUsed: Double = 4
 
+    /// - Parameter including: which notes may be returned, applied before
+    ///   the limit, so a narrower set is not cut short by notes outside it.
     public func search(
         _ query: String,
         limit: Int = 50,
-        familiarity: ((NoteRef) -> Double)? = nil
+        familiarity: ((NoteRef) -> Double)? = nil,
+        including: ((NoteRef) -> Bool)? = nil
     ) -> [NoteRef] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let notes = including.map { notes.filter($0) } ?? notes
         guard !q.isEmpty else {
             let alphabetical = notes.sorted {
                 $0.name.localizedStandardCompare($1.name) == .orderedAscending
