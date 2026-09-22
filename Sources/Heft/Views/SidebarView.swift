@@ -1359,12 +1359,16 @@ func beginFileDrag(for url: URL, allowsInternalMove: Bool = true) {
 /// Several rows travel as several dragging items, which is what lets one
 /// drop move all of them: the destination reads a list either way, and
 /// always could, since a drag out of the Finder can carry any number.
+/// `event` is for a caller tracking the mouse itself, whose drag event is not
+/// the application's current one.
 @MainActor
-func beginFileDrag(for urls: [URL], allowsInternalMove: Bool = true) {
+func beginFileDrag(
+    for urls: [URL], allowsInternalMove: Bool = true, event: NSEvent? = nil
+) {
     // `onChanged` repeats for the whole gesture; a session is already running.
     guard !FileDragSource.shared.isDragging,
           !urls.isEmpty,
-          let event = NSApp.currentEvent,
+          let event = event ?? NSApp.currentEvent,
           let view = event.window?.contentView
     else { return }
 

@@ -298,71 +298,184 @@ private struct WindowToolbarConfiguration: NSViewRepresentable {
 /// The window's browsing boundary belongs in the title bar: it describes the
 /// whole workspace, while the sidebar below is free to describe its contents.
 /// Internal, not private, so a test can measure what it costs the title bar.
+///
+/// A click opens the scope menu and a drag carries the window's root folder
+/// out as a file, so it can be dropped on an agent or a terminal. A SwiftUI
+/// `Menu` cannot do both: it opens on mouse-down and tracks the pointer
+/// itself, so no drag gesture on it ever starts. The label is SwiftUI and
+/// the mouse is handled by `ScopeMenuHandle` on top of it.
 struct WorkspaceScopePicker: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var column: SidebarColumn
     @State private var isHovering = false
 
+    private var title: String { model.scopePath == nil ? "All Notes" : model.scopeName }
+
     var body: some View {
-        // Wrapped so the toolbar hosts a view, not a menu. On macOS 27 a bare
-        // `Menu` here is turned into a native toolbar menu sized for an icon,
-        // and a text-only label drew as a lone chevron.
-        HStack(spacing: 0) { menu }
+        // Wrapped so the toolbar hosts a view, not a control it might turn
+        // into a native toolbar menu sized for an icon.
+        HStack(spacing: 0) { label }
     }
 
-    private var menu: some View {
-        Menu {
-            Button("Entire Vault") { model.showEntireVault() }
-                .disabled(model.scopePath == nil)
-            Button("Choose Folder…") { model.promptForScope() }
-            if model.scopePath != nil {
-                Divider()
-                Button("Reveal Focused Folder in Finder") {
-                    if let root = model.scopeRoot { model.revealInFinder(root) }
-                }
-            }
-        } label: {
-            // The chevron is drawn here because `.plain` has no indicator.
-            // A hand-drawn one used to be hoisted out as a leading menu icon
-            // in the accent colour, but only by the native toolbar menu that
-            // the wrapper above now keeps this from becoming.
-            HStack(spacing: 4) {
-                Text(model.scopePath == nil ? "All Notes" : model.scopeName)
-                    .lineLimit(1)
-                    .font(.system(size: 12, weight: .semibold))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            // The height is the toolbar's, not the text's: the hover fill
-            // sits in a row with the system's toolbar buttons, and a pill
-            // shorter than they are reads as a different kind of control.
-            .frame(minWidth: 76, minHeight: 28)
-            .padding(.horizontal, 10)
-            // Under the pointer only: the title bar says what this window is
-            // browsing, and a permanent bezel around it competes with the
-            // toolbar's own buttons. The fill is what says it can be clicked,
-            // the way the calendar's month arrows do.
-            .background {
-                if isHovering { Capsule().fill(Color(nsColor: .quaternarySystemFill)) }
-            }
-            // The whole label is the target: a plain button otherwise
-            // answers only clicks that land on the glyphs themselves.
-            .contentShape(.rect)
+    private var label: some View {
+        HStack(spacing: 4) {
+            Text(title)
+                .lineLimit(1)
+                .font(.system(size: 12, weight: .semibold))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        // The height is the toolbar's, not the text's: the hover fill
+        // sits in a row with the system's toolbar buttons, and a pill
+        // shorter than they are reads as a different kind of control.
+        .frame(minWidth: 76, minHeight: 28)
+        .padding(.horizontal, 10)
+        // Under the pointer only: the title bar says what this window is
+        // browsing, and a permanent bezel around it competes with the
+        // toolbar's own buttons. The fill is what says it can be clicked,
+        // the way the calendar's month arrows do.
+        .background {
+            if isHovering { Capsule().fill(Color(nsColor: .quaternarySystemFill)) }
+        }
+        .overlay {
+            ScopeMenuHandle(
+                title: title,
+                help: model.scopePath.map { "\(model.vaultName) / \($0)" } ?? model.vaultName,
+                folder: model.scopeRoot,
+                entries: entries
+            )
         }
         .onHover { isHovering = $0 }
-        .menuStyle(.button)
-        // Plain, in the label colour. Bordered drew a filled capsule, and
-        // borderless painted the label in the accent colour.
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .controlSize(.small)
         .fixedSize(horizontal: false, vertical: true)
         // Capped, so a long folder name or a narrow sidebar truncates the
         // name rather than sending the whole picker to the overflow menu.
         // See `SidebarColumn`.
         .frame(maxWidth: column.scopePickerWidth)
-        .help(model.scopePath.map { "\(model.vaultName) / \($0)" } ?? model.vaultName)
+    }
+
+    private var entries: [ScopeMenuHandle.Entry] {
+        var entries: [ScopeMenuHandle.Entry] = [
+            .item("Entire Vault", enabled: model.scopePath != nil) { model.showEntireVault() },
+            .item("Choose Folder…") { model.promptForScope() },
+        ]
+        if model.scopePath != nil {
+            entries.append(.separator)
+            entries.append(.item("Reveal Focused Folder in Finder") {
+                if let root = model.scopeRoot { model.revealInFinder(root) }
+            })
+        }
+        return entries
+    }
+}
+
+/// The scope picker's mouse: a click pops up the menu, a drag begins a file
+/// drag of `folder`. It also answers mouse-down, which in the title bar would
+/// otherwise start moving the window.
+struct ScopeMenuHandle: NSViewRepresentable {
+    enum Entry {
+        case item(String, enabled: Bool = true, action: () -> Void)
+        case separator
+    }
+
+    let title: String
+    let help: String
+    let folder: URL?
+    let entries: [Entry]
+
+    func makeNSView(context: Context) -> HandleView { HandleView() }
+
+    func updateNSView(_ view: HandleView, context: Context) {
+        view.title = title
+        view.toolTip = help
+        view.folder = folder
+        view.entries = entries
+    }
+
+    final class HandleView: NSView {
+        /// Past this many points the press is a drag, not a click.
+        static let dragThreshold: CGFloat = 4
+
+        var title = ""
+        var folder: URL?
+        var entries: [Entry] = []
+
+        /// What a press turned out to be. Replaced by a test, which cannot
+        /// open a menu or run a drag session without a person at the mouse.
+        lazy var clicked: () -> Void = { [unowned self] in self.showMenu() }
+        var dragged: (URL, NSEvent) -> Void = { folder, event in
+            // Not moved: dropping the vault root into one of its own folders
+            // is meaningless, and a focused folder is moved from the tree,
+            // where the move can be seen.
+            beginFileDrag(for: [folder], allowsInternalMove: false, event: event)
+        }
+
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            track(from: event) { window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) }
+        }
+
+        /// Follows one press to its end. The events are passed in because a
+        /// test cannot read the window's queue: the test process quit
+        /// silently after the first test that did.
+        func track(from event: NSEvent, next nextEvent: () -> NSEvent?) {
+            let start = event.locationInWindow
+            while let next = nextEvent() {
+                if next.type == .leftMouseUp {
+                    clicked()
+                    return
+                }
+                let point = next.locationInWindow
+                if hypot(point.x - start.x, point.y - start.y) >= Self.dragThreshold {
+                    if let folder { dragged(folder, next) }
+                    return
+                }
+            }
+        }
+
+        func makeMenu() -> NSMenu {
+            let menu = NSMenu()
+            menu.autoenablesItems = false
+            for entry in entries {
+                switch entry {
+                case .separator:
+                    menu.addItem(.separator())
+                case .item(let title, let enabled, let action):
+                    let item = NSMenuItem(title: title, action: #selector(MenuAction.run), keyEquivalent: "")
+                    let target = MenuAction(action)
+                    item.target = target
+                    item.representedObject = target
+                    item.isEnabled = enabled
+                    menu.addItem(item)
+                }
+            }
+            return menu
+        }
+
+        func showMenu() {
+            let below = NSPoint(x: 0, y: isFlipped ? bounds.maxY + 4 : bounds.minY - 4)
+            makeMenu().popUp(positioning: nil, at: below, in: self)
+        }
+
+        override func isAccessibilityElement() -> Bool { true }
+        override func accessibilityRole() -> NSAccessibility.Role? { .menuButton }
+        override func accessibilityLabel() -> String? { title }
+        override func accessibilityHelp() -> String? { toolTip }
+        override func accessibilityPerformPress() -> Bool {
+            showMenu()
+            return true
+        }
+    }
+
+    /// Holds a menu item's closure; the item keeps it alive through
+    /// `representedObject`, since `target` is weak.
+    final class MenuAction: NSObject {
+        let action: () -> Void
+        init(_ action: @escaping () -> Void) { self.action = action }
+        @objc func run() { action() }
     }
 }
 

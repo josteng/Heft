@@ -116,3 +116,50 @@ struct ScopePickerWidthTests {
         #expect(narrowest == unconstrained, "cut to \(narrowest) from \(unconstrained)")
     }
 }
+
+/// The scope picker is a menu on a click and the window's root folder on a
+/// drag. The press is fed its events directly; see `HandleView.track`.
+@MainActor
+@Suite("The scope picker drags out its folder")
+struct ScopePickerDragTests {
+
+    static func press(moving distance: CGFloat) -> (clicked: Bool, dragged: URL?) {
+        let handle = ScopeMenuHandle.HandleView(frame: NSRect(x: 0, y: 0, width: 96, height: 28))
+        handle.folder = URL(fileURLWithPath: "/tmp/Example Vault", isDirectory: true)
+        var result: (clicked: Bool, dragged: URL?) = (false, nil)
+        handle.clicked = { result.clicked = true }
+        handle.dragged = { folder, _ in result.dragged = folder }
+
+        func event(_ type: NSEvent.EventType, x: CGFloat) -> NSEvent {
+            NSEvent.mouseEvent(
+                with: type, location: NSPoint(x: x, y: 10), modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            )!
+        }
+        var queue = [event(.leftMouseUp, x: 20)]
+        if distance > 0 { queue.insert(event(.leftMouseDragged, x: 20 + distance), at: 0) }
+        handle.track(from: event(.leftMouseDown, x: 20)) { queue.isEmpty ? nil : queue.removeFirst() }
+        return result
+    }
+
+    @Test("A drag carries the window's root folder, not the menu")
+    func dragCarriesFolder() {
+        let result = Self.press(moving: 12)
+        #expect(result.dragged?.lastPathComponent == "Example Vault")
+        #expect(!result.clicked)
+    }
+
+    @Test("A click, or a press that barely moves, opens the menu")
+    func clickOpensMenu() {
+        for distance: CGFloat in [0, 2] {
+            let result = Self.press(moving: distance)
+            #expect(result.clicked, "moved \(distance)")
+            #expect(result.dragged == nil, "moved \(distance)")
+        }
+    }
+
+    @Test("Pressing the picker cannot move the window")
+    func doesNotMoveWindow() {
+        #expect(!ScopeMenuHandle.HandleView().mouseDownCanMoveWindow)
+    }
+}

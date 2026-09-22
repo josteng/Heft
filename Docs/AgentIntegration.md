@@ -18,6 +18,9 @@ from your own typing an hour later, and there is nothing left to review.
 from. What follows is the part of it this document is about, and it will be a
 subset — read the real list rather than trusting this one to have kept up.
 
+The folder name in a window's title bar drags out as that window's root, so
+its path can be dropped straight into an agent's prompt or a terminal.
+
 ```bash
 heft find <vault> <query>              # full-text search, path:line: preview
     --files                            # ...which notes matched, and how often
