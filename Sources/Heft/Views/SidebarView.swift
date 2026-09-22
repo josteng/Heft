@@ -1778,6 +1778,7 @@ struct NoteRow: View {
                 TextField("Name", text: renameText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .semibold))
+                    .modifier(RenameFieldStyle())
                     .focused($isRenameFocused)
                     .onSubmit { finishRename(commit: true) }
                     .onExitCommand { finishRename(commit: false) }
@@ -1828,6 +1829,7 @@ struct NoteRow: View {
                 TextField("Name", text: renameText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                    .modifier(RenameFieldStyle())
                     .focused($isRenameFocused)
                     .onSubmit { finishRename(commit: true) }
                     .onExitCommand { finishRename(commit: false) }
@@ -1907,5 +1909,27 @@ struct NoteRow: View {
         } else {
             onRenameCancel?()
         }
+    }
+}
+
+/// A name being edited sits on a field of its own, the way Finder's does.
+///
+/// Drawn straight onto a selected row, it was white text on the accent fill
+/// with a caret and a selection that AppKit also paints in the accent
+/// colour, so neither could be seen. The field is the text background with
+/// the text colour, and is set out by its own padding so the name does not
+/// move when editing starts.
+struct RenameFieldStyle: ViewModifier {
+    static let inset: CGFloat = 3
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(Color(nsColor: .textColor))
+            .padding(.horizontal, Self.inset)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .textBackgroundColor))
+            )
+            .padding(.horizontal, -Self.inset)
     }
 }
