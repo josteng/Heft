@@ -39,3 +39,18 @@ struct PresentationProgressTests {
         #expect(animation.duration > 0.2)
     }
 }
+
+/// Held or quickly tapped arrows change slide without stacking fades.
+@Suite("Slide changes fade only at a reading pace")
+struct SlidePacingTests {
+
+    @Test("A change sooner than the fade lasts is made at once")
+    func quickChangesAreInstant() {
+        var pacing = SlidePacing()
+        let start = Date()
+        #expect(pacing.animation(at: start) != nil, "the first change fades")
+        #expect(pacing.animation(at: start + 0.05) == nil, "a held key does not")
+        #expect(pacing.animation(at: start + 0.10) == nil)
+        #expect(pacing.animation(at: start + 0.10 + SlidePacing.fade) != nil, "a pause fades again")
+    }
+}

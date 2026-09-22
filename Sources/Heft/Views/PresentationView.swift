@@ -12,6 +12,10 @@ struct PresentationView: View {
     /// parse the whole note twice each time, including on the frame a slide
     /// change starts animating.
     @State private var slides: [[MDBlock]] = []
+    @State private var pacing = SlidePacing()
+    /// Counts changes, so the slide shown last is always drawn on top of one
+    /// still fading out, whichever way the reader went.
+    @State private var changes = 0
     @FocusState private var hasKeyboardFocus: Bool
 
     @Environment(\.colorScheme) private var colorScheme
@@ -30,12 +34,15 @@ struct PresentationView: View {
                 ZStack {
                     if slides.indices.contains(slideIndex) {
                         slide(at: slideIndex, viewport: viewport.size)
+                            // Opaque, so a slide still fading out underneath
+                            // never shows its text through this one.
+                            .background(Color(nsColor: .textBackgroundColor))
                             .id(slideIndex)
+                            .zIndex(Double(changes))
                             .transition(.opacity)
                     }
                 }
                 .clipped()
-                .animation(.easeInOut(duration: 0.20), value: slideIndex)
             }
 
             // Not before the deck is parsed, or the bar opens full and then
@@ -66,12 +73,21 @@ struct PresentationView: View {
 
     private func previous() {
         guard slideIndex > 0 else { return }
-        slideIndex -= 1
+        go(to: slideIndex - 1)
     }
 
     private func next() {
         guard slideIndex + 1 < slides.count else { return }
-        slideIndex += 1
+        go(to: slideIndex + 1)
+    }
+
+    private func go(to index: Int) {
+        var transaction = Transaction(animation: pacing.animation())
+        transaction.disablesAnimations = transaction.animation == nil
+        withTransaction(transaction) {
+            changes += 1
+            slideIndex = index
+        }
     }
 
     private func close() {
@@ -93,6 +109,23 @@ struct PresentationView: View {
                 )
         }
         .frame(width: viewport.width, height: viewport.height)
+    }
+}
+
+/// When a change of slide cross-fades.
+///
+/// Held or quickly tapped arrows used to start a fade on every press, so two
+/// or three half-faded slides were drawn at once and the text flickered. A
+/// change arriving before the last fade could finish is made at once; the
+/// progress bar still moves smoothly, since it animates from where it is.
+struct SlidePacing {
+    static let fade: TimeInterval = 0.20
+    private var lastChange = Date.distantPast
+
+    mutating func animation(at now: Date = Date()) -> Animation? {
+        defer { lastChange = now }
+        guard now.timeIntervalSince(lastChange) >= Self.fade else { return nil }
+        return .easeInOut(duration: Self.fade)
     }
 }
 
