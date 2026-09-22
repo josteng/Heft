@@ -545,6 +545,12 @@ place a `RenderContext` is built; three hand-written copies drifted, and a
 defaulted field in a struct built in several places is a bug waiting for its
 third copy.
 
+A picture on a slide is clicked to fill the screen, for a figure too small to
+read from the back of the room, and the next key of any kind puts it away
+rather than also moving the talk on. The click is offered through the
+environment, so only Presentation has it: in the editor a picture keeps its
+double click to the file.
+
 ## The sidebar: revealing, and naming a new note
 
 Opening a note does not rearrange the tree; `revealCurrentInSidebar` is the

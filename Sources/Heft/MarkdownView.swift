@@ -21,6 +21,18 @@ extension EnvironmentValues {
         get { self[MarkdownFontScaleKey.self] }
         set { self[MarkdownFontScaleKey.self] = newValue }
     }
+
+    /// What a click on an embedded picture does, where it does anything.
+    /// The presentation sets it to show the picture across the screen; left
+    /// nil, a double click opens the file as it always has.
+    var markdownImageZoom: ((URL) -> Void)? {
+        get { self[MarkdownImageZoomKey.self] }
+        set { self[MarkdownImageZoomKey.self] = newValue }
+    }
+}
+
+private struct MarkdownImageZoomKey: EnvironmentKey {
+    static let defaultValue: ((URL) -> Void)? = nil
 }
 
 private struct MarkdownFontScaleKey: EnvironmentKey {
@@ -241,6 +253,7 @@ private struct EmbeddedImage: View {
     /// Never read. It is here so that SwiftUI, which skips a body whose
     /// inputs are unchanged, re-runs this one when the file is replaced.
     let generation: Int
+    @Environment(\.markdownImageZoom) private var zoom
 
     var body: some View {
         Group {
@@ -263,7 +276,25 @@ private struct EmbeddedImage: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
+        .modifier(ImageClick(url: url, zoom: zoom))
+    }
+}
+
+/// One click zooms where zooming is offered; otherwise a double click opens
+/// the file. Never both: a view holding both waits out the double-click
+/// interval before a single click counts, and the zoom then lags every click.
+private struct ImageClick: ViewModifier {
+    let url: URL
+    let zoom: ((URL) -> Void)?
+
+    func body(content: Content) -> some View {
+        if let zoom {
+            content
+                .onTapGesture { zoom(url) }
+                .pointerStyle(.zoomIn)
+        } else {
+            content.onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
+        }
     }
 }
 

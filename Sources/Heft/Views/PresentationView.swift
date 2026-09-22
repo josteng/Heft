@@ -16,6 +16,8 @@ struct PresentationView: View {
     /// Counts changes, so the slide shown last is always drawn on top of one
     /// still fading out, whichever way the reader went.
     @State private var changes = 0
+    /// The picture shown across the screen, when one has been clicked.
+    @State private var zoomed: URL?
     @FocusState private var hasKeyboardFocus: Bool
 
     @Environment(\.colorScheme) private var colorScheme
@@ -55,6 +57,12 @@ struct PresentationView: View {
                 }
                 .ignoresSafeArea(edges: .bottom)
             }
+
+            if let zoomed {
+                ZoomedImage(url: zoomed) { closeZoom() }
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
         .background(PresentationWindowBridge())
         .focusable()
@@ -64,10 +72,18 @@ struct PresentationView: View {
             slides = PresentationDeck.slides(from: MarkdownModel.parse(text).blocks)
             slideIndex = min(slideIndex, max(slides.count - 1, 0))
         }
-        .onKeyPress(.leftArrow) { previous(); return .handled }
-        .onKeyPress(.rightArrow) { next(); return .handled }
-        .onKeyPress(.space) { next(); return .handled }
-        .onKeyPress(.escape) { close(); return .handled }
+        // A zoomed picture takes the first key, whatever it is, so an arrow
+        // pressed to put it away does not also skip a slide and Esc does not
+        // end the presentation.
+        .onKeyPress(phases: .down) { _ in
+            guard zoomed != nil else { return .ignored }
+            closeZoom()
+            return .handled
+        }
+        .onKeyPress(.leftArrow) { press(.previous) }
+        .onKeyPress(.rightArrow) { press(.next) }
+        .onKeyPress(.space) { press(.next) }
+        .onKeyPress(.escape) { press(.end) }
         .onDisappear { model.isPresentationPresented = false }
     }
 
@@ -90,6 +106,27 @@ struct PresentationView: View {
         }
     }
 
+    /// Asked by each handler rather than left to the catch-all above, whose
+    /// place in the order of several key handlers on one view SwiftUI does
+    /// not promise.
+    private func press(_ key: SlideKey) -> KeyPress.Result {
+        switch key.action(zoomed: zoomed != nil) {
+        case .closeZoom: closeZoom()
+        case .previous: previous()
+        case .next: next()
+        case .end: close()
+        }
+        return .handled
+    }
+
+    private func zoom(_ url: URL) {
+        withAnimation(.easeOut(duration: 0.18)) { zoomed = url }
+    }
+
+    private func closeZoom() {
+        withAnimation(.easeOut(duration: 0.18)) { zoomed = nil }
+    }
+
     private func close() {
         model.isPresentationPresented = false
         dismissWindow(id: "presentation")
@@ -99,6 +136,7 @@ struct PresentationView: View {
         ScrollView([.horizontal, .vertical], showsIndicators: false) {
             MarkdownView(blocks: slides[index], context: context)
                 .environment(\.markdownFontScale, 2)
+                .environment(\.markdownImageZoom, { zoom($0) })
                 .frame(maxWidth: 1050, alignment: .leading)
                 .padding(.horizontal, 88)
                 .padding(.vertical, 64)
@@ -109,6 +147,53 @@ struct PresentationView: View {
                 )
         }
         .frame(width: viewport.width, height: viewport.height)
+    }
+}
+
+/// The keys a presentation answers, and what each does.
+///
+/// A zoomed picture takes every key first: the arrow pressed to put it away
+/// must not also skip a slide, and Esc must not end the talk.
+enum SlideKey {
+    case previous, next, end
+
+    enum Action: Equatable { case closeZoom, previous, next, end }
+
+    func action(zoomed: Bool) -> Action {
+        guard !zoomed else { return .closeZoom }
+        switch self {
+        case .previous: return .previous
+        case .next: return .next
+        case .end: return .end
+        }
+    }
+}
+
+/// A picture from the slide across the whole screen, for a figure too small
+/// to read from the back of the room. Scaled up to fit, since that is the
+/// point. A click anywhere puts it away.
+struct ZoomedImage: View {
+    let url: URL
+    let close: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.9).ignoresSafeArea()
+            if let image = ImageCache.image(at: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .padding(32)
+            }
+        }
+        .contentShape(.rect)
+        .onTapGesture(perform: close)
+        .pointerStyle(.zoomOut)
+        .accessibilityElement()
+        .accessibilityLabel(url.deletingPathExtension().lastPathComponent)
+        .accessibilityAddTraits([.isImage, .isButton])
+        .accessibilityHint("Closes the enlarged picture")
     }
 }
 
