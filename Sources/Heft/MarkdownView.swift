@@ -134,7 +134,7 @@ private struct BlockView: View {
 
 // MARK: - Paragraph
 
-private struct ParagraphView: View {
+struct ParagraphView: View {
     let inlines: [MDInline]
     let context: RenderContext
     let font: Font
@@ -143,10 +143,22 @@ private struct ParagraphView: View {
 
     var body: some View {
         PieceStack(
-            pieces: InlineText.pieces(inlines, context: context, baseFont: font),
+            pieces: Self.pieces(inlines, context: context, font: font, fontScale: fontScale),
             context: context,
             embedDepth: embedDepth,
             fontScale: fontScale
+        )
+    }
+
+    /// The scale goes to the code and maths as well as the prose. Without it
+    /// a Presentation slide, drawn at twice the size, set inline code at the
+    /// reading size in a line twice as tall.
+    static func pieces(
+        _ inlines: [MDInline], context: RenderContext, font: Font, fontScale: CGFloat
+    ) -> [ParagraphPiece] {
+        InlineText.pieces(
+            inlines, context: context, baseFont: font,
+            mathPointSize: Theme.bodySize * fontScale, fontScale: fontScale
         )
     }
 }
