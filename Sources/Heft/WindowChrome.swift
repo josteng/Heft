@@ -22,3 +22,28 @@ final class WindowChrome: ObservableObject {
         if forward != canNavigateForward { canNavigateForward = forward }
     }
 }
+
+/// How wide the sidebar column is, for the scope picker above it.
+///
+/// A toolbar item is laid out at its ideal width and never squeezed: one
+/// wider than the room between the traffic lights and the sidebar toggle is
+/// moved to the overflow menu at the far end of the window, and the toggle
+/// slides left into the gap. So the picker is capped to what is left and
+/// truncates its name instead. Observed by the picker alone; `WorkspaceSplit`
+/// writes it without observing it, or a drag would rebuild the toolbars.
+@MainActor
+final class SidebarColumn: ObservableObject {
+    /// Wide enough for "All Notes" in full beside the window controls.
+    static let minWidth: CGFloat = 260
+    /// The traffic lights, the sidebar toggle and the margins around them,
+    /// measured from the toolbar's accessibility frames.
+    static let windowControlsWidth: CGFloat = 162
+
+    @Published private(set) var width: CGFloat = 270
+
+    var scopePickerWidth: CGFloat { max(0, width - Self.windowControlsWidth) }
+
+    func update(width new: CGFloat) {
+        if abs(new - width) > 0.5 { width = new }
+    }
+}

@@ -339,6 +339,7 @@ final class AppModel: ObservableObject {
     /// The window's frame state, observed by the view that owns the split
     /// view and its toolbars, and by nothing else. See `WindowChrome`.
     let chrome = WindowChrome()
+    let sidebarColumn = SidebarColumn()
 
     /// A note ⌘N wants created and named in the sidebar.
     ///

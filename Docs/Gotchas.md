@@ -118,6 +118,9 @@ preferences or the icon.
   zero-width, clipped, transparent item still pushed the sidebar toggle away
   from the traffic lights; the cost is the item's slot, which no hosting
   measurement can see. The only fix is not to contribute the item.
+- **A toolbar item is laid out at its ideal width and never squeezed.** One
+  wider than its room goes to the overflow menu instead, so the scope picker
+  is capped to the sidebar's width minus the window controls (`SidebarColumn`).
 - **No `fixedSize(vertical: true)` on text in the sidebar.** The split view
   probes its sidebar at zero width for a minimum and the window takes it; a
   vertically fixed text answers with one character per line, and a fresh

@@ -143,9 +143,15 @@ struct WorkspaceSplit: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $chrome.columnVisibility) {
             SidebarView()
+                // Inside the column width, never around it: wrapped, the
+                // minimum stopped reaching the split view and the sidebar
+                // could be dragged to 140.
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { width in
+                    model.sidebarColumn.update(width: width)
+                }
                 // The minimum has to clear the traffic lights and sidebar
                 // toggle, or the toolbar starts dropping items into overflow.
-                .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 380)
+                .navigationSplitViewColumnWidth(min: SidebarColumn.minWidth, ideal: 270, max: 380)
                 // A toolbar contributed by the sidebar lands in the title-bar
                 // region above that column, not in the detail pane.
                 .toolbar { sidebarToolbar }
@@ -176,7 +182,7 @@ struct WorkspaceSplit: View {
     private var sidebarToolbar: some ToolbarContent {
         if chrome.columnVisibility != .detailOnly {
             ToolbarSpacer(.flexible, placement: .status)
-            ToolbarItem(placement: .status) { WorkspaceScopePicker() }
+            ToolbarItem(placement: .status) { WorkspaceScopePicker(column: model.sidebarColumn) }
                 // A label in the title bar, not another glass button.
                 .sharedBackgroundVisibility(.hidden)
             ToolbarSpacer(.flexible, placement: .status)
@@ -294,6 +300,7 @@ private struct WindowToolbarConfiguration: NSViewRepresentable {
 /// Internal, not private, so a test can measure what it costs the title bar.
 struct WorkspaceScopePicker: View {
     @EnvironmentObject private var model: AppModel
+    @ObservedObject var column: SidebarColumn
     @State private var isHovering = false
 
     var body: some View {
@@ -350,7 +357,11 @@ struct WorkspaceScopePicker: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .controlSize(.small)
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
+        // Capped, so a long folder name or a narrow sidebar truncates the
+        // name rather than sending the whole picker to the overflow menu.
+        // See `SidebarColumn`.
+        .frame(maxWidth: column.scopePickerWidth)
         .help(model.scopePath.map { "\(model.vaultName) / \($0)" } ?? model.vaultName)
     }
 }
