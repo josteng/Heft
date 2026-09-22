@@ -52,9 +52,15 @@ let package = Package(
             path: "Sources/Heft",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // Gives the test process a preferences suite of its own before any
+        // test runs; see the source for why the runner's domain is not enough.
+        .target(
+            name: "HeftTestDefaults",
+            path: "Tests/HeftTestDefaults"
+        ),
         .testTarget(
             name: "HeftTests",
-            dependencies: ["Heft", "HeftCore", "HeftVimCore"],
+            dependencies: ["Heft", "HeftCore", "HeftVimCore", "HeftTestDefaults"],
             path: "Tests/HeftTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

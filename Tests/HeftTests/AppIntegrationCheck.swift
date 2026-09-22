@@ -280,7 +280,7 @@ enum AppIntegrationCheck {
         let manager = FileManager.default
         let root = manager.temporaryDirectory
             .appendingPathComponent("heft-integration-\(UUID().uuidString)", isDirectory: true)
-        let defaults = UserDefaults.standard
+        let defaults = HeftDefaults.shared
         let lastVaultKey = "dev.stenglein.Heft.vaultPath"
         let previousLastVault = defaults.object(forKey: lastVaultKey)
         // Recents are app-wide and persist, so a test run must put the real
@@ -837,7 +837,7 @@ enum AppIntegrationCheck {
 
         // The agent-setup offer. A vault with no guide asks once; both ways of
         // answering have to silence it, or the banner nags on every open.
-        let offerDefaults = UserDefaults.standard
+        let offerDefaults = HeftDefaults.shared
         let offerKey = "dev.stenglein.Heft.agentOfferDismissed"
         let previousDismissed = offerDefaults.object(forKey: offerKey)
         offerDefaults.removeObject(forKey: offerKey)

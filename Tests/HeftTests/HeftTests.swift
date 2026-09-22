@@ -2158,7 +2158,7 @@ struct PDFExportSettingsTests {
     @Test("The store actually writes to defaults")
     func writesToDefaults() {
         let key = "dev.stenglein.Heft.export.pdf.roundTripProbe"
-        let defaults = UserDefaults.standard
+        let defaults = HeftDefaults.shared
         let previous = defaults.data(forKey: key)
         defer {
             if let previous { defaults.set(previous, forKey: key) }
@@ -2409,7 +2409,7 @@ struct FrecencyStoreSeparationTests {
                 "dev.stenglein.Heft.frecency.notes.\(vault)",
                 "dev.stenglein.Heft.frecency.agent.\(vault)",
             ] {
-                UserDefaults.standard.removeObject(forKey: key)
+                HeftDefaults.shared.removeObject(forKey: key)
             }
         }
 
@@ -2442,7 +2442,7 @@ struct FrecencyStoreSeparationTests {
         let two = "/tmp/heft-vault-two-\(UUID().uuidString)"
         defer {
             for path in [one, two] {
-                UserDefaults.standard.removeObject(
+                HeftDefaults.shared.removeObject(
                     forKey: "dev.stenglein.Heft.frecency.notes.\(path)"
                 )
             }
@@ -2458,7 +2458,7 @@ struct FrecencyStoreSeparationTests {
     func persistsAcrossInstances() {
         let vault = "/tmp/heft-persist-\(UUID().uuidString)"
         defer {
-            UserDefaults.standard.removeObject(forKey: "dev.stenglein.Heft.frecency.notes.\(vault)")
+            HeftDefaults.shared.removeObject(forKey: "dev.stenglein.Heft.frecency.notes.\(vault)")
         }
         FrecencyStore.notes(forVaultAt: vault).record("note.md")
         #expect(FrecencyStore.notes(forVaultAt: vault).score("note.md") > 0)
@@ -2497,10 +2497,19 @@ struct HeftDefaultsTests {
 
     @Test("An empty or absent suite falls back to the real store")
     func fallsBackWithoutASuite() {
-        // The environment is not set in the test process, so this is the
-        // default path: sandboxing must be opt-in, never accidental.
-        #expect(!HeftDefaults.isSandboxed)
-        #expect(HeftDefaults.shared == UserDefaults.standard)
+        // Sandboxing must be opt-in, never accidental.
+        #expect(HeftDefaults.suiteName(environment: [:], info: [:]) == nil)
+        #expect(HeftDefaults.suiteName(environment: [HeftDefaults.suiteEnvironmentKey: ""], info: [:]) == nil)
+    }
+
+    /// The runner's own domain gains every disposable vault's recents, run
+    /// after run, until each write stalls the main thread. `swift test` gets
+    /// the suite from `Tests/HeftTestDefaults`, Xcode from the scheme.
+    @Test("The test process writes to a suite of its own")
+    func testsAreIsolated() {
+        #expect(HeftDefaults.isSandboxed)
+        #expect(HeftDefaults.shared != UserDefaults.standard)
+        #expect(ProcessInfo.processInfo.environment[HeftDefaults.suiteEnvironmentKey] == "com.example.heft.tests")
     }
 }
 
