@@ -47,6 +47,19 @@ enum Theme {
         ).capHeight
     }
 
+    /// The coloured bar beside a heading. All of it scales, not only its
+    /// height: at a presentation's 2x a 3pt bar 12pt away read as a hairline
+    /// pressed against a heading twice the size.
+    static func headingBar(
+        _ level: Int, scale: CGFloat = 1
+    ) -> (size: CGSize, gap: CGFloat, cornerRadius: CGFloat) {
+        (
+            CGSize(width: 3 * scale, height: headingCapHeight(level, scale: scale)),
+            12 * scale,
+            2 * scale
+        )
+    }
+
     static func headingTopPadding(_ level: Int) -> CGFloat {
         switch level {
         case 1: 18

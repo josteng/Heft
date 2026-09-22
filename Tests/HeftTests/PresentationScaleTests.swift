@@ -49,3 +49,19 @@ struct PresentationScaleTests {
         #expect(doubled > normal * 1.5)
     }
 }
+
+/// The bar beside a heading grows with the heading, in every dimension.
+@MainActor
+@Suite("Heading bars follow the font scale")
+struct HeadingBarScaleTests {
+
+    @Test("Width, gap and rounding double with the scale, as the height does")
+    func barScales() {
+        let normal = Theme.headingBar(2)
+        let doubled = Theme.headingBar(2, scale: 2)
+        #expect(doubled.size.width == normal.size.width * 2)
+        #expect(doubled.gap == normal.gap * 2)
+        #expect(doubled.cornerRadius == normal.cornerRadius * 2)
+        #expect(doubled.size.height > normal.size.height * 1.9)
+    }
+}

@@ -78,16 +78,14 @@ private struct BlockView: View {
             )
             .overlay(alignment: Alignment(horizontal: .leading, vertical: .headingBaseline)) {
                 if context.colorfulFormatting {
-                    RoundedRectangle(cornerRadius: 2)
+                    let bar = Theme.headingBar(level, scale: fontScale)
+                    RoundedRectangle(cornerRadius: bar.cornerRadius)
                         .fill(Color(nsColor: context.headingColor(level)))
-                        .frame(
-                            width: 3,
-                            height: Theme.headingCapHeight(level, scale: fontScale)
-                        )
+                        .frame(width: bar.size.width, height: bar.size.height)
                         .alignmentGuide(.headingBaseline) { dimensions in
                             dimensions[.bottom]
                         }
-                        .offset(x: -12)
+                        .offset(x: -bar.gap)
                 }
             }
             .padding(.top, Theme.headingTopPadding(level))
