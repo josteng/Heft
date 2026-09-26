@@ -152,18 +152,29 @@ public enum MarkdownEditing {
     /// marker. Pasting into the middle of a sentence keeps every character:
     /// `see - milk` is text somebody wrote, not a list marker to be tidied
     /// away, and stripping one there would silently eat a dash.
-    public static func pasted(_ text: String, afterLinePrefix prefix: String) -> String {
-        guard !text.isEmpty else { return text }
+    ///
+    /// A pasted box replaces one already on the line rather than going away:
+    /// dropping it wrote `- [ ] [ ] milk`, and dropping it instead unticked a
+    /// finished task on the way in. So the result can reach back before the
+    /// caret, by `replacingBeforeCaret` UTF-16 units.
+    public static func pasted(
+        _ text: String, afterLinePrefix prefix: String
+    ) -> (text: String, replacingBeforeCaret: Int) {
+        let unchanged = (text: text, replacingBeforeCaret: 0)
+        guard !text.isEmpty else { return unchanged }
         let line = ListLine(prefix + "x")
-        guard !line.marker.isEmpty, line.body == "x" else { return text }
+        guard !line.marker.isEmpty, line.body == "x" else { return unchanged }
 
         let incoming = ListLine(firstLine(of: text))
-        guard !incoming.marker.isEmpty, incoming.indent.isEmpty else { return text }
+        guard !incoming.marker.isEmpty, incoming.indent.isEmpty else { return unchanged }
 
         // The box comes through even though the marker does not: pasting a
         // task onto a bare bullet plainly means the task.
-        let dropped = incoming.marker.count
-        return String(text.dropFirst(dropped))
+        let rest = String(text.dropFirst(incoming.marker.count))
+        let replacing = line.hasCheckbox && incoming.hasCheckbox
+            ? (line.checkbox as NSString).length
+            : 0
+        return (rest, replacing)
     }
 
     private static func firstLine(of text: String) -> String {

@@ -2927,14 +2927,25 @@ final class HeftTextKit2View: NSTextView {
         // Read here rather than passed in, the way auto-pairing reads its own
         // switches: the setting is app-wide and a paste is not hot.
         if TypingSettings.shared.trimsPastedListMarker,
-           let text = NSPasteboard.general.string(forType: .string) {
-            let trimmed = MarkdownEditing.pasted(text, afterLinePrefix: lineBeforeCaret)
-            if trimmed != text {
-                insertText(trimmed, replacementRange: selectedRange())
-                return
-            }
+           let text = NSPasteboard.general.string(forType: .string),
+           insertTrimmingListMarker(text) {
+            return
         }
         pasteAsPlainText(sender)
+    }
+
+    /// Inserts `text` as a paste onto the list line at the caret, when that
+    /// changes anything, and says whether it did. Apart from `paste` so a
+    /// test can reach it without the real pasteboard.
+    func insertTrimmingListMarker(_ text: String) -> Bool {
+        let pasted = MarkdownEditing.pasted(text, afterLinePrefix: lineBeforeCaret)
+        guard pasted.text != text || pasted.replacingBeforeCaret > 0 else { return false }
+        let selection = selectedRange()
+        let back = min(pasted.replacingBeforeCaret, selection.location)
+        insertText(pasted.text, replacementRange: NSRange(
+            location: selection.location - back, length: selection.length + back
+        ))
+        return true
     }
 
     /// The current line up to the caret, which is what decides whether a

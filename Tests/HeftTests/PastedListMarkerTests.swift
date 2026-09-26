@@ -7,7 +7,15 @@ import Testing
 struct PastedListMarkerTests {
 
     private func paste(_ text: String, after prefix: String) -> String {
-        MarkdownEditing.pasted(text, afterLinePrefix: prefix)
+        MarkdownEditing.pasted(text, afterLinePrefix: prefix).text
+    }
+
+    /// The line as it reads afterwards, for the cases that reach back past
+    /// the caret.
+    private func line(pasting text: String, after prefix: String) -> String {
+        let result = MarkdownEditing.pasted(text, afterLinePrefix: prefix)
+        let kept = (prefix as NSString).length - result.replacingBeforeCaret
+        return (prefix as NSString).substring(to: kept) + result.text
     }
 
     @Test("A pasted marker is dropped when the line already has one")
@@ -30,6 +38,24 @@ struct PastedListMarkerTests {
     func tasksKeepTheirBox() {
         // Pasting a task onto a bare bullet plainly means the task.
         #expect(paste("- [ ] milk", after: "- ") == "[ ] milk")
+    }
+
+    @Test("A pasted task onto a task brings its own box")
+    func taskOntoTaskTakesThePastedBox() {
+        // Dropped, it wrote `- [ ] [ ] milk`; kept but not replacing, it
+        // unticked a finished task on the way in.
+        #expect(line(pasting: "- [ ] milk", after: "- [ ] ") == "- [ ] milk")
+        #expect(line(pasting: "- [x] milk", after: "- [ ] ") == "- [x] milk")
+        #expect(line(pasting: "- [ ] milk", after: "- [x] ") == "- [ ] milk")
+        #expect(
+            line(pasting: "- [x] milk\n- [ ] bread", after: "  - [ ] ")
+                == "  - [x] milk\n- [ ] bread"
+        )
+    }
+
+    @Test("A plain bullet pasted onto a task keeps its text")
+    func bulletOntoTask() {
+        #expect(line(pasting: "- milk", after: "- [ ] ") == "- [ ] milk")
     }
 
     @Test("Text pasted mid-sentence is untouched")
