@@ -89,6 +89,7 @@ struct SidebarView: View {
     /// title is at the top does.
     @State private var recentTops = RecentHeaderTops()
     @State private var pinnedSection: RecentSection?
+    @State private var recentScrollPosition = ScrollPosition(edge: .top)
     /// A title's height, measured rather than assumed: it is where the list
     /// is cut and where the scroll bar starts.
     @State private var recentHeaderHeight: CGFloat = 33
@@ -680,8 +681,12 @@ struct SidebarView: View {
             )
         }
         .coordinateSpace(name: Self.recentScroll)
-        .onChange(of: order) { pinnedSection = nil; recentTops.clear() }
-        .onChange(of: filter) { pinnedSection = nil; recentTops.clear() }
+        // A new filter or order is a new list, and it starts at its top.
+        // Left where the old one was scrolled, a shorter list sat at an
+        // offset it no longer had, under a title from the list before.
+        .scrollPosition($recentScrollPosition)
+        .onChange(of: order) { restartRecentList() }
+        .onChange(of: filter) { restartRecentList() }
         // The opening order settles rather than following the click that
         // caused it: a note opened from this list would otherwise leap to
         // the top from under the pointer, before the reader has seen the
@@ -702,6 +707,12 @@ struct SidebarView: View {
             guard !Task.isCancelled else { return }
             settledOpenings = opened
         }
+    }
+
+    private func restartRecentList() {
+        pinnedSection = nil
+        recentTops.clear()
+        recentScrollPosition.scrollTo(edge: .top)
     }
 
     /// How long the opening order waits before it rearranges itself.
