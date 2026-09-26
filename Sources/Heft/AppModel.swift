@@ -53,6 +53,8 @@ struct SaveConflict: Identifiable, Equatable {
 enum SaveConflictResolution {
     case keepMine
     case useDisk
+    /// Only for a note removed from disk: forget the buffer and close it.
+    case discardMine
     case cancel
 }
 
@@ -403,11 +405,24 @@ final class AppModel: ObservableObject {
     /// The proposal whose review sheet is open.
     @Published var reviewing: Proposal?
     @Published private(set) var saveConflict: SaveConflict? {
-        didSet { if (saveConflict == nil) != (oldValue == nil) { updateEditedMarker() } }
+        didSet {
+            if (saveConflict == nil) != (oldValue == nil) { updateEditedMarker() }
+            if saveConflict?.id != oldValue?.id { saveConflictAlertHidden = false }
+        }
+    }
+    /// Cancel hides the alert but leaves the conflict, and with it the pause.
+    /// Clearing the conflict instead let the once-a-second poll find the same
+    /// dirty buffer against the same disk and raise it again at once, so
+    /// Cancel could never be answered. Saving again (⌘S, switching notes,
+    /// closing the window) raises a fresh conflict, which shows it again.
+    @Published private(set) var saveConflictAlertHidden = false
+
+    var isSaveConflictAlertPresented: Bool {
+        saveConflict != nil && !saveConflictAlertHidden
     }
     /// The conflict currently open in the merge sheet. Held separately from
     /// `saveConflict`, because dismissing the alert to show the sheet resolves
-    /// the alert as `.cancel` and clears it.
+    /// the alert as `.cancel`, and the order of the two is not ours.
     @Published var reviewingConflict: SaveConflict?
     /// Set when `promptForScope()`'s folder panel returns a folder outside
     /// the current vault. That can't become a focus folder, so the picker
@@ -2768,9 +2783,22 @@ final class AppModel: ObservableObject {
             lastKnownModification = modificationDate(of: current.url)
             saveConflict = nil
             status = "Loaded the disk version of \(current.relativePath)"
-        case .cancel:
+        case .discardMine:
+            guard saveConflict?.diskVersionExists == false else { return }
+            saveTask?.cancel()
+            saveTask = nil
+            discardDraft()
+            registry.release(current.url, for: workspaceID)
+            self.current = nil
+            setText("")
+            isDirty = false
+            lastKnownDiskText = nil
+            lastKnownModification = nil
             saveConflict = nil
-            status = "Save still paused for \(current.relativePath)"
+            status = "Closed \(current.relativePath), which was removed from disk"
+        case .cancel:
+            saveConflictAlertHidden = true
+            status = "Save still paused for \(current.relativePath); Save asks again"
         }
     }
 

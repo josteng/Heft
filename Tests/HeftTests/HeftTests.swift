@@ -2867,6 +2867,78 @@ struct PrintColoursTests {
     }
 }
 
+@Suite("A removed note's conflict")
+@MainActor
+struct RemovedNoteConflictTests {
+
+    /// A vault whose open note has been edited and then deleted underneath.
+    private func removedWhileEdited() throws -> (URL, AppModel) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-removed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let note = root.appendingPathComponent("Note.md")
+        try "first version\n".write(to: note, atomically: true, encoding: .utf8)
+        let model = AppModel(
+            registry: VaultRegistry(),
+            descriptor: WorkspaceDescriptor(vaultPath: root.path, notePath: "Note.md")
+        )
+        model.text = "what I typed\n"
+        try FileManager.default.removeItem(at: note)
+        model.reloadCurrentIfChangedExternally()
+        return (root, model)
+    }
+
+    /// Cancel cleared the conflict, and the next poll found the same dirty
+    /// buffer against the same missing file and asked again at once.
+    @Test("Cancel is not undone by the next poll")
+    func cancelStays() throws {
+        let (root, model) = try removedWhileEdited()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        #expect(model.isSaveConflictAlertPresented, "no conflict was raised")
+
+        model.resolveSaveConflict(.cancel)
+        model.reloadCurrentIfChangedExternally()
+        #expect(!model.isSaveConflictAlertPresented, "the poll asked again")
+        #expect(model.saveIsBlocked, "Cancel let saving resume")
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+    }
+
+    @Test("Saving after Cancel asks again")
+    func saveAsksAgain() throws {
+        let (root, model) = try removedWhileEdited()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        model.resolveSaveConflict(.cancel)
+        #expect(!model.flushPendingSave())
+        #expect(model.isSaveConflictAlertPresented, "an explicit save stayed silent")
+    }
+
+    @Test("Discarding closes the note without recreating it")
+    func discardCloses() throws {
+        let (root, model) = try removedWhileEdited()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        // An attempted save is what leaves a draft behind.
+        #expect(!model.flushPendingSave())
+        #expect(DraftStore.draft(vault: root, relativePath: "Note.md") == "what I typed\n")
+
+        model.resolveSaveConflict(.discardMine)
+        #expect(model.current == nil)
+        #expect(model.saveConflict == nil)
+        #expect(!model.saveIsBlocked)
+        #expect(model.flushPendingSave())
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
+        #expect(DraftStore.draft(vault: root, relativePath: "Note.md") == nil, "the draft outlived it")
+    }
+}
+
 @Suite("Unsaved work survives")
 @MainActor
 struct DraftRecoveryTests {

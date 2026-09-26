@@ -41,9 +41,9 @@ struct ContentView: View {
                 ? "This Note Was Removed Outside Heft"
                 : "This Note Changed Outside Heft",
             isPresented: Binding(
-                get: { model.saveConflict != nil },
+                get: { model.isSaveConflictAlertPresented },
                 set: { presented in
-                    if !presented, model.saveConflict != nil {
+                    if !presented, model.isSaveConflictAlertPresented {
                         model.resolveSaveConflict(.cancel)
                     }
                 }
@@ -60,6 +60,10 @@ struct ContentView: View {
                 Button("Use Disk Version") {
                     model.resolveSaveConflict(.useDisk)
                 }
+            } else {
+                Button("Discard My Changes") {
+                    model.resolveSaveConflict(.discardMine)
+                }
             }
             Button("Cancel", role: .cancel) {
                 model.resolveSaveConflict(.cancel)
@@ -68,7 +72,7 @@ struct ContentView: View {
             Text(
                 conflict.diskVersionExists
                     ? "\(conflict.relativePath) was modified after Heft opened it. Choose which version to keep."
-                    : "\(conflict.relativePath) was removed after Heft opened it. Keeping your changes will recreate it."
+                    : "\(conflict.relativePath) was removed after Heft opened it. Keeping your changes will recreate it; discarding them closes the note."
             )
         }
         .alert(
