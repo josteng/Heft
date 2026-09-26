@@ -3161,6 +3161,22 @@ final class HeftTextKit2View: NSTextView {
     /// into never builds one.
     private(set) var formatBar: FormatBar?
 
+    /// While the context menu is open the bar stays hidden: it sat under the
+    /// menu, offering the same commands twice, one of them unreachable.
+    private var contextMenuIsOpen = false
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        contextMenuIsOpen = true
+        updateFormatBar()
+    }
+
+    override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {
+        super.didCloseMenu(menu, with: event)
+        contextMenuIsOpen = false
+        updateFormatBar()
+    }
+
     /// Shows or hides the formatting bar for the current selection.
     func updateFormatBar() {
         let selection = selectedRange()
@@ -3172,7 +3188,8 @@ final class HeftTextKit2View: NSTextView {
                 || (!vimShowsFormatBarInVisual
                     && (vimEngine.mode == .visual || vimEngine.mode == .visualLine))
         )
-        guard selection.length > 0, !vimHidesBar, window?.firstResponder === self else {
+        guard selection.length > 0, !vimHidesBar, !contextMenuIsOpen,
+              window?.firstResponder === self else {
             formatBar?.isHidden = true
             return
         }

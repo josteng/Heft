@@ -119,6 +119,33 @@ struct VimFormatBarTests {
         #expect(NSCursor.current == .arrow)
     }
 
+    /// Right-clicking a selection opened the context menu over the bar, which
+    /// stayed showing underneath it.
+    @Test("The bar hides while the context menu is open")
+    func contextMenuHidesBar() throws {
+        let (window, view) = editor("one two\nthree")
+        defer { window.close() }
+        view.vimEnabled = false
+        view.setSelectedRange(NSRange(location: 4, length: 3))
+        view.updateFormatBar()
+        try #require(view.formatBar?.isHidden == false)
+
+        let menu = NSMenu()
+        let click = try #require(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+            clickCount: 1, pressure: 1
+        ))
+        view.willOpenMenu(menu, with: click)
+        #expect(view.formatBar?.isHidden == true, "the bar showed under the menu")
+        // Nothing that refreshes the bar may bring it back meanwhile.
+        view.updateFormatBar()
+        #expect(view.formatBar?.isHidden == true)
+
+        view.didCloseMenu(menu, with: nil)
+        #expect(view.formatBar?.isHidden == false, "the bar did not come back")
+    }
+
     @Test("Visual Block keeps the bar hidden")
     func blockHidesBar() throws {
         let (window, view) = editor("one\ntwo")
