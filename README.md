@@ -31,11 +31,12 @@ Point it at any folder of Markdown files, or at an existing Obsidian vault,
 which opens unmodified: no import, no database, nothing to migrate out of. It
 stays a normal vault, so those same notes still open and edit in Obsidian on
 your phone. Starting from nothing instead, `File ▸ New Vault` makes the
-folder and opens it on one short note. Quick open (⌘O), a command palette (⌘P) and recents are where you
-would expect them.
+folder and opens it on one short note. Quick open (⌘O), a command palette (⌘P)
+and a Recent list that shows what is in each note are where you would expect
+them, and as many windows as you like can share one vault.
 
-Oh, and it has daily notes, capture from Spotlight, and a Vim mode (yes,
-really).
+Oh, and it has daily notes, capture from Spotlight and Siri, spelling and
+grammar checking, and a Vim mode (yes, really).
 
 ## Install
 
@@ -68,8 +69,9 @@ a vault, the six things worth trying first, daily notes and capture.
 - **It behaves like a Mac program.** `heft .` opens a folder the way `code .`
   does. Spotlight files a line into today's note or your inbox without
   launching the app or moving a window you had put away, because the capture
-  runs in an extension of its own. Dragging a note into Mail attaches the file
-  itself, because the path resolves and keeps resolving.
+  runs in an extension of its own. A note drags out of every list in the app,
+  and out of the title bar, into Mail, the Finder or a terminal as the file
+  itself.
 - **Agents read a resolved index, and write only by asking.** A text search
   finds the words in a link; it does not know what the link points at.
   `heft links` and `heft backlinks` do, aliases and headings and all, and they
@@ -145,6 +147,9 @@ four-space indented code, raw HTML and entity references;
   and time placeholders and a `{{caret}}` token, so one trigger can expand
   into a code fence with the caret inside it. Nothing fires inside code,
   maths, frontmatter, links, tags or URLs.
+- **Spelling and grammar** are checked as you type, leaving code, maths,
+  frontmatter, tags and link destinations alone. `heft spell` reports the
+  same to an agent.
 - **Vim mode**, experimental: an original modal engine, not an embedded
   Neovim. [`Docs/VimMode.md`](Docs/VimMode.md) has the command surface.
 
@@ -163,7 +168,12 @@ four-space indented code, raw HTML and entity references;
   on what you actually work in; a command that cannot run right now sinks to
   the bottom rather than disappearing. The palette carries the file tree's
   own verbs too, so a note's path or wikilink is a search away without
-  finding its row first. **Content search** is ⇧⌘F.
+  finding its row first. ⌘O also takes a path, vault-relative or absolute,
+  quoted or as a `file://` URL. **Content search** is ⇧⌘F.
+- **Recent** reads like your notes rather than a folder listing: each row
+  has its date, first line and folder, grouped under Today, Yesterday,
+  Previous 7 Days and by month. Order it by last edit, which follows notes
+  changed on your other devices, or by last opening on this Mac.
 - **Calendar** with a dot per daily note; clicking a day creates it from the
   vault's template. **Backlinks** panel with the referencing line as context.
 - **PDF export** (⇧⌘E) of the rendered note, tables, callouts and typeset
@@ -175,9 +185,15 @@ four-space indented code, raw HTML and entity references;
   nearby already keep theirs), where new notes go, and what opens on startup,
   per vault: nothing, the last note, today's daily note, a named note, or a
   path from the date, so `Weeks/{{date:GGGG-[W]WW}}.md` opens this week.
-- **Multiple windows** over the same or different vaults, with an optional
-  folder focus that scopes the tree, search and quick open. **Open Recent**
-  switches vaults.
+- **Multiple windows** over the same or different vaults. Windows on one
+  vault share a single index and file watcher, and each keeps its own note,
+  history and panels. A window can focus on a folder, which scopes the tree,
+  search and quick open; the folder menu in the title bar lists the folders
+  you focused on lately, and the folder name drags out as a path. **Open
+  Recent** switches vaults.
+- **Siri** can create notes, add to them, find them and open them, today's
+  daily note included, and right-clicking a note asks Siri about that one
+  (macOS 27).
 
 ## An agent proposes, you review
 
@@ -228,7 +244,7 @@ heft help [--json]             # every verb and flag
 
 Yours: `daily`, `rename`, `export`, `agent-setup`, `version`. An agent's, all
 read-only: `find`, `read`, `files`, `outline`, `links`, `backlinks`, `tags`,
-`config`, `attachment`, `changes`, `keys`; plus `propose`, `proposals`, `diff`,
+`config`, `attachment`, `changes`, `keys`, `spell`; plus `propose`, `proposals`, `diff`,
 `drop`, and `capture` for adding a line. Diagnostics about Heft's own
 rendering: `stats`, `render`.
 
