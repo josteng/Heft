@@ -61,6 +61,64 @@ struct VimFormatBarTests {
         #expect(view.formatBar?.isHidden == false)
     }
 
+    /// The bar is a subview of the text view, whose own cursor answer is the
+    /// I-beam everywhere, and that is what showed over the buttons.
+    @Test("The pointer over the bar is an arrow, and only while it shows")
+    func arrowOverBar() throws {
+        let (window, view) = editor("one two\nthree")
+        defer { window.close() }
+        view.vimEnabled = false
+        view.setSelectedRange(NSRange(location: 4, length: 3))
+        view.updateFormatBar()
+        let bar = try #require(view.formatBar)
+        try #require(!bar.isHidden)
+        let middle = CGPoint(x: bar.frame.midX, y: bar.frame.midY)
+        #expect(view.cursorOverride(at: middle, among: []) == .arrow)
+        #expect(view.cursorOverride(at: CGPoint(x: bar.frame.maxX + 40, y: middle.y), among: []) == nil)
+
+        view.setSelectedRange(NSRange(location: 4, length: 0))
+        view.updateFormatBar()
+        #expect(view.cursorOverride(at: middle, among: []) == nil, "a hidden bar kept the arrow")
+    }
+
+    /// A crossing inside the bar, the gap between two buttons, raises a
+    /// cursor update rather than a move. The text view answered it with the
+    /// I-beam, which flickered until the next move put the arrow back.
+    @Test("A cursor update over the bar leaves the arrow")
+    func cursorUpdateOverBar() throws {
+        let (window, view) = editor("one two\nthree")
+        defer { window.close() }
+        view.vimEnabled = false
+        view.setSelectedRange(NSRange(location: 4, length: 3))
+        view.updateFormatBar()
+        let bar = try #require(view.formatBar)
+        try #require(!bar.isHidden)
+
+        func update(at point: CGPoint) throws {
+            let event = try #require(NSEvent.enterExitEvent(
+                with: .cursorUpdate, location: view.convert(point, to: nil),
+                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+            ))
+            view.cursorUpdate(with: event)
+        }
+        NSCursor.iBeam.set()
+        try update(at: CGPoint(x: bar.frame.midX, y: bar.frame.midY))
+        #expect(NSCursor.current == .arrow, "the text view's I-beam won over the bar")
+
+        try update(at: CGPoint(x: bar.frame.maxX + 40, y: bar.frame.midY))
+        #expect(NSCursor.current != .arrow, "the arrow stayed off the bar")
+
+        // And the bar raises updates of its own, so entering it is answered.
+        bar.updateTrackingAreas()
+        #expect(bar.trackingAreas.contains {
+            $0.owner === bar && $0.options.contains(.cursorUpdate)
+        })
+        NSCursor.iBeam.set()
+        bar.cursorUpdate(with: NSEvent())
+        #expect(NSCursor.current == .arrow)
+    }
+
     @Test("Visual Block keeps the bar hidden")
     func blockHidesBar() throws {
         let (window, view) = editor("one\ntwo")

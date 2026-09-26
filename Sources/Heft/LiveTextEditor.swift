@@ -2606,9 +2606,34 @@ final class HeftTextKit2View: NSTextView {
         super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
         let rects = pointerRects()
-        let over = pointerTarget(at: point, among: rects) != nil
-        if over { NSCursor.pointingHand.set() }
-        Self.traceCursor(point: point, rects: rects, over: over)
+        let cursor = cursorOverride(at: point, among: rects)
+        cursor?.set()
+        Self.traceCursor(point: point, rects: rects, over: cursor == .pointingHand)
+    }
+
+    /// The other way AppKit sets the cursor, on crossing a tracking area's
+    /// edge. Inside the bar that is the gap between two buttons, and `super`
+    /// answered it with the I-beam until the next move put the arrow back:
+    /// a flicker. Only the bar is answered here; the hand keeps to
+    /// `mouseMoved`, which is where it was proven.
+    override func cursorUpdate(with event: NSEvent) {
+        super.cursorUpdate(with: event)
+        let point = convert(event.locationInWindow, from: nil)
+        if isOverFormatBar(point) { NSCursor.arrow.set() }
+    }
+
+    private func isOverFormatBar(_ point: CGPoint) -> Bool {
+        guard let bar = formatBar, !bar.isHidden else { return false }
+        return bar.frame.contains(point)
+    }
+
+    /// The cursor to put up over `super`'s, or nil to leave its answer.
+    ///
+    /// The formatting bar is a subview, so `super` answered for it too and
+    /// showed the I-beam over its buttons. Buttons take the arrow.
+    func cursorOverride(at point: CGPoint, among rects: [CGRect]) -> NSCursor? {
+        if isOverFormatBar(point) { return .arrow }
+        return pointerTarget(at: point, among: rects) != nil ? .pointingHand : nil
     }
 
     /// How far outside a target the pointer must go before it counts as having

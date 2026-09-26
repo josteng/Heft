@@ -72,6 +72,23 @@ final class FormatBar: NSView {
         glass.frame = bounds
     }
 
+    /// The arrow over the whole bar, gaps included. Without an area of its
+    /// own, entering the bar or crossing between buttons went to the text
+    /// view's area, which answers with the I-beam.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if !trackingAreas.contains(where: { $0.owner === self }) {
+            addTrackingArea(NSTrackingArea(
+                rect: .zero, options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+                owner: self, userInfo: nil
+            ))
+        }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
     /// The bar must never take focus: clicking a button has to leave the text
     /// view's selection exactly where it was.
     override var acceptsFirstResponder: Bool { false }
