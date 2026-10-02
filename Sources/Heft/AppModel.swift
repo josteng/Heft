@@ -232,17 +232,50 @@ final class AppModel: ObservableObject {
     /// A pasted path names one note wherever it is, so it is answered from
     /// the whole vault and lands at the top of the list.
     func quickOpenResults(_ query: String, entireVault: Bool, limit: Int = 60) -> [NoteRef] {
+        quickOpenList(query, entireVault: entireVault, limit: limit).all
+    }
+
+    /// The same list, split where Quick Open draws its heading. With nothing
+    /// typed, `QuickOpenOrder` puts a short block of recent or frequent notes
+    /// first; with something typed there is one list and no heading.
+    ///
+    /// - Parameter only: a heading the reader chose, which lists that order
+    ///   alone and in full while nothing is typed.
+    func quickOpenList(
+        _ query: String, entireVault: Bool, limit: Int = 60,
+        order: QuickOpenOrder = .current, only: QuickOpenOrder.Lead? = nil
+    ) -> QuickOpenOrder.Arranged {
         let frecency = noteFrecency
         let scope: ((NoteRef) -> Bool)? = entireVault || scopePath == nil
             ? nil
             : { self.isInScope($0) }
-        let found = index.search(
-            query, limit: limit,
-            familiarity: { note in frecency?.score(note.relativePath) ?? 0 },
-            including: scope
+        let familiarity: (NoteRef) -> Double = { frecency?.score($0.relativePath) ?? 0 }
+        let typed = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        guard typed else {
+            // Every note, so the block and the rest are cut from one ranking
+            // and a recent note ranked low by use is still found.
+            let byUse = index.search(
+                query, limit: .max, familiarity: familiarity, including: scope
+            )
+            if let only {
+                let notes = QuickOpenOrder.section(
+                    only, of: byUse, recent: session?.recentPaths ?? [],
+                    limit: VaultSession.recentLimit, isUsed: { familiarity($0) > 0 }
+                )
+                return QuickOpenOrder.Arranged(lead: notes, rest: [], heading: only)
+            }
+            return order.arrange(
+                byUse, recent: session?.recentPaths ?? [], limit: limit,
+                isUsed: { familiarity($0) > 0 }
+            )
+        }
+        var found = index.search(
+            query, limit: limit, familiarity: familiarity, including: scope
         )
-        guard let atPath = noteAtPath(query) else { return found }
-        return [atPath] + found.filter { $0.relativePath != atPath.relativePath }
+        if let atPath = noteAtPath(query) {
+            found = [atPath] + found.filter { $0.relativePath != atPath.relativePath }
+        }
+        return QuickOpenOrder.Arranged(lead: [], rest: found, heading: nil)
     }
 
     // MARK: Open document

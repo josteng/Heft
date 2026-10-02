@@ -179,7 +179,14 @@ teaches where a command lives, a missing one teaches nothing and shifts
 every row above what you were reaching for. Because it sinks, the first row
 is runnable whenever any row is.
 
-With nothing typed, frecency is the whole order. With something typed it is
+With nothing typed, Quick Open lists a short block first, by default the five
+notes opened last, then everything else by frecency (`QuickOpenOrder`; General
+settings can lead with the most used instead, then the rest by when opened, or
+turn the block off). Frecency alone ranked a note opened once today below one
+opened often last week, so a new note was the hardest to find; recency alone,
+which is Obsidian's answer, loses the notes opened every morning. Each part is
+headed by the order it follows, and a heading is a row: Return on it lists that
+order alone and in full, and Return again goes back. With something typed it is
 worth at most `VaultIndex.boostWeight`, less than the gap between match tiers,
 so familiarity reorders within a tier and never lifts a substring match above
 a prefix one. Both sorts carry the original index as a final tiebreak, since

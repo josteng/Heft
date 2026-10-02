@@ -113,6 +113,38 @@ struct QuickOpenPathTests {
             == "Home/List.md")
     }
 
+    /// The setting reaches the switcher: the opening history feeds the
+    /// block, and typing leaves it out.
+    @Test("With nothing typed the last opened note leads; typing drops the block")
+    func recentBlockFromHistory() async throws {
+        let model = try await model(["Alpha.md": "a", "Beta.md": "b", "Zulu.md": "z"])
+        defer { model.closeWorkspace() }
+        let session = try #require(model.session)
+        for _ in 0..<10 { session.recordRecent("Alpha.md") }
+        session.recordRecent("Zulu.md")
+
+        let off = model.quickOpenList("", entireVault: true, order: .init(lead: .recent, count: 0))
+        #expect(off.all.first?.name == "Alpha", "by use alone, the heavily used note leads")
+
+        let on = model.quickOpenList("", entireVault: true, order: .init(lead: .recent, count: 1))
+        #expect(on.lead.map(\.name) == ["Zulu"])
+        #expect(on.rest.map(\.name) == ["Alpha", "Beta"])
+
+        let typed = model.quickOpenList("a", entireVault: true, order: .init(lead: .recent, count: 1))
+        #expect(typed.lead.isEmpty && typed.heading == nil)
+
+        // A chosen heading: that order alone, past the block's size.
+        let recentOnly = model.quickOpenList(
+            "", entireVault: true, order: .init(lead: .recent, count: 1), only: .recent
+        )
+        #expect(recentOnly.all.map(\.name) == ["Zulu", "Alpha"])
+        #expect(recentOnly.rows.first == .heading(.recent))
+        let typedOnly = model.quickOpenList(
+            "a", entireVault: true, order: .init(lead: .recent, count: 1), only: .recent
+        )
+        #expect(typedOnly.heading == nil, "typing searches everything, as before")
+    }
+
     /// Filtered before the limit, not after: a folder's notes that rank
     /// below the vault's first sixty must still be found.
     @Test("The folder is not cut short by notes outside it")

@@ -43,7 +43,14 @@ final class GeneralSettings: ObservableObject {
         }
     }
 
+    /// What ⌘O lists before anything is typed. Stored by `QuickOpenOrder`
+    /// itself, which `AppModel` reads on every opening.
+    @Published var quickOpenOrder: QuickOpenOrder {
+        didSet { quickOpenOrder.save(in: HeftDefaults.shared) }
+    }
+
     private init() {
+        quickOpenOrder = QuickOpenOrder.current(in: HeftDefaults.shared)
         offersAgentSetup = HeftDefaults.shared.object(forKey: Self.agentOfferKey) == nil
             || HeftDefaults.shared.bool(forKey: Self.agentOfferKey)
         newNoteLocation = NewNoteLocation(
@@ -121,6 +128,17 @@ struct GeneralSettingsView: View {
         )
     }
 
+    /// Clamped by `QuickOpenOrder`, so a number typed out of range lands on
+    /// the nearest one allowed.
+    private var count: Binding<Int> {
+        Binding(
+            get: { settings.quickOpenOrder.count },
+            set: { settings.quickOpenOrder = QuickOpenOrder(
+                lead: settings.quickOpenOrder.lead, count: $0
+            ) }
+        )
+    }
+
     var body: some View {
         Form {
             Section {
@@ -173,6 +191,50 @@ struct GeneralSettingsView: View {
                     )
                 }
                 .defaultMenuTint()
+            }
+
+            Section {
+                Picker(selection: Binding(
+                    get: { settings.quickOpenOrder.lead },
+                    set: { settings.quickOpenOrder.lead = $0 }
+                )) {
+                    ForEach(QuickOpenOrder.Lead.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "Quick Open starts with",
+                        detail: settings.quickOpenOrder.lead == .recent
+                            ? "The notes you opened last, then everything else by how often you use it."
+                            : "The notes you use most, then everything else by when you last opened it."
+                    )
+                }
+                .defaultMenuTint()
+                // A number beside a stepper, as System Settings draws a
+                // count: the label says what is counted and the value sits
+                // on the right with the other controls, where a stepper
+                // labelled with its own value did not.
+                LabeledContent {
+                    HStack(spacing: 4) {
+                        TextField("", value: count, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.trailing)
+                            .monospacedDigit()
+                            .frame(width: 44)
+                            .labelsHidden()
+                        Stepper("", value: count, in: QuickOpenOrder.countRange)
+                            .labelsHidden()
+                    }
+                    .alignedWithTitle()
+                } label: {
+                    SettingLabel(
+                        "Notes listed first",
+                        detail: settings.quickOpenOrder.count == 0
+                            ? "Off: one list, ordered the other way. Typing always ranks by match."
+                            : "Before anything is typed. Choose a heading in the list to see only that kind. "
+                                + "Typing always ranks by match."
+                    )
+                }
+            } header: {
+                SectionHeading("Quick Open")
             }
 
             Section {
