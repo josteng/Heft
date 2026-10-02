@@ -290,6 +290,18 @@ preferences or the icon.
   problem, since running it replaces it. After installing, `pkill -f
   HeftCapture`; a new intent that Shortcuts cannot see is this first.
 
+- **The capture extension had no launch to refresh its own catalog from.**
+  `HeftApp.init()` calls `updateAppShortcutParameters()` for its own
+  provider, but `HeftCaptureShortcuts` lives in the extension, which the
+  system starts only to run or rediscover a request; nothing called it there.
+  A `brew upgrade` swaps the app bundle in place and macOS treats that as an
+  update rather than a fresh install, so Shortcuts/Spotlight kept whatever
+  catalog it already had and the capture actions went missing entirely,
+  for any user, not just a dev build over the cask. Fixed by giving
+  `HeftCaptureExtension` its own `init()` that updates `HeftCaptureShortcuts`,
+  the same idiom as the app's, so the one launch the extension does get is
+  put to use.
+
 - **Siri saying "trouble with the connection" or "something's wrong" for
   every request can be Siri's own per-device quota**, which a reboot does
   not clear. `/usr/bin/log show --predicate 'process == "intelligenceflowd"'`

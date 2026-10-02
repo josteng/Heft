@@ -16,4 +16,14 @@ import ExtensionFoundation
 /// keep out, the vault and the app's preferences, is let back in by the
 /// entitlements beside the Info.plist.
 @main
-struct HeftCaptureExtension: AppIntentsExtension {}
+struct HeftCaptureExtension: AppIntentsExtension {
+    // `HeftApp.init()` does this for its own shortcuts provider, but this
+    // extension has no equivalent launch to hook: the system starts it only
+    // to run a request or to rediscover one, so init() is the only place
+    // left to tell Shortcuts/Spotlight this provider's catalog is current.
+    // Without it, an app update can leave the capture actions missing until
+    // the extension happens to be reinstalled rather than just overwritten.
+    init() {
+        HeftCaptureShortcuts.updateAppShortcutParameters()
+    }
+}
