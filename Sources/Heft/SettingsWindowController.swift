@@ -66,6 +66,7 @@ final class SettingsWindowController: NSWindowController {
         }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        tabs.clearInitialFocus()
     }
 }
 
@@ -174,5 +175,19 @@ final class SettingsTabController: NSTabViewController {
     override func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
         super.tabView(tabView, didSelect: item)
         view.window?.title = item?.label ?? "Settings"
+        clearInitialFocus()
+    }
+
+    /// No field is typed into just because a pane opened. With no initial
+    /// first responder AppKit focuses a pane's first key view, so the one
+    /// text field in General showed a caret nobody asked for and took the
+    /// next keystroke. A click or Tab still reaches it. A turn later, since
+    /// the hosted pane claims its key view after it is laid out.
+    func clearInitialFocus() {
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.view.window,
+                  window.firstResponder is NSText else { return }
+            window.makeFirstResponder(nil)
+        }
     }
 }
