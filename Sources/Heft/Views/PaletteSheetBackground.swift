@@ -26,11 +26,12 @@ import SwiftUI
 /// lines and carry the matched line, which needs the width to be worth
 /// showing.
 enum PaletteMetrics {
-    static let pickerWidth: CGFloat = 560
-    static let pickerListHeight: CGFloat = 320
-
-    static let searchWidth: CGFloat = 680
-    static let searchListHeight: CGFloat = 420
+    /// One size for every scope, so entering one moves nothing but the rows:
+    /// wide enough for a line of note text, tall enough for a hit's two lines.
+    static let barWidth: CGFloat = 640
+    /// The whole sheet: field, chip row and a list of about nine rows. Fixed,
+    /// so that entering a scope moves what is inside and not the sheet.
+    static let barHeight: CGFloat = 460
 }
 
 struct PaletteSheetBackground: NSViewRepresentable {

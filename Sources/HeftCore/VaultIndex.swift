@@ -635,6 +635,23 @@ public final class VaultIndex: @unchecked Sendable {
             }
             return byFamiliarity.prefix(limit).map(\.note)
         }
+        return scoredSearch(query, limit: limit, familiarity: familiarity, including: including)
+            .map(\.note)
+    }
+
+    /// The typed half of `search`, with each note's score: its match tier
+    /// plus the familiarity nudge. Exposed so a list that mixes notes with
+    /// other things (`CommandMatch` uses the same tiers) can rank them
+    /// together. An empty query matches nothing here.
+    public func scoredSearch(
+        _ query: String,
+        limit: Int = 50,
+        familiarity: ((NoteRef) -> Double)? = nil,
+        including: ((NoteRef) -> Bool)? = nil
+    ) -> [(note: NoteRef, score: Int)] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return [] }
+        let notes = including.map { notes.filter($0) } ?? notes
         var scored: [(NoteRef, Int)] = []
         for note in notes {
             let name = note.name.lowercased()
@@ -662,7 +679,7 @@ public final class VaultIndex: @unchecked Sendable {
             }
             .map(\.element)
             .prefix(limit)
-            .map(\.0)
+            .map { (note: $0.0, score: $0.1) }
     }
 }
 

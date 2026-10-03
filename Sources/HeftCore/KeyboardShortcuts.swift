@@ -111,6 +111,9 @@ public enum KeyboardShortcuts {
         // is exactly the drift this table exists to prevent.
         .init(id: "settings", title: "Settings", key: ",", modifiers: [.command], group: .file),
 
+        // ⌘T as in a browser's address bar, which is the shape this bar has;
+        // ⌘K is Link here, as in every editor.
+        .init(id: "searchBar", title: "Search everything", key: "t", modifiers: [.command], group: .navigate, isNotable: true),
         .init(id: "quickOpen", title: "Quick open", key: "o", modifiers: [.command], group: .navigate, isNotable: true),
         .init(id: "commandPalette", title: "Command palette", key: "p", modifiers: [.command], group: .navigate, isNotable: true),
         // ⇧⌘J is Xcode's Reveal in Project Navigator, which is this exactly.

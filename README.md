@@ -31,7 +31,8 @@ Point it at any folder of Markdown files, or at an existing Obsidian vault,
 which opens unmodified: no import, no database, nothing to migrate out of. It
 stays a normal vault, so those same notes still open and edit in Obsidian on
 your phone. Starting from nothing instead, `File ▸ New Vault` makes the
-folder and opens it on one short note. Quick open (⌘O), a command palette (⌘P)
+folder and opens it on one short note. One search bar (⌘T) for notes,
+commands, tags and text, also opened as quick open (⌘O) or a command palette (⌘P),
 and a Recent list that shows what is in each note are where you would expect
 them, and as many windows as you like can share one vault.
 
@@ -163,13 +164,19 @@ four-space indented code, raw HTML and entity references;
   Move to Trash all act on the whole selection. **⌘Z** puts back the last
   move, rename, paste or delete, and still undoes typing when the caret is in
   a note.
-- **Quick open** (⌘O) and the **command palette** (⌘P) rank by how often you
-  use something, discounted by how long ago, so with nothing typed they open
-  on what you actually work in; a command that cannot run right now sinks to
-  the bottom rather than disappearing. The palette carries the file tree's
-  own verbs too, so a note's path or wikilink is a search away without
-  finding its row first. ⌘O also takes a path, vault-relative or absolute,
-  quoted or as a `file://` URL. **Content search** is ⇧⌘F.
+- **One search bar** (⌘T) lists notes and commands together, what you
+  opened last and what you use most first. Typing `@`, `>`, `#` or `/`
+  narrows it to notes, commands, tags or text in notes, shown as a chip at
+  the start of the field, and Backspace widens it again. A scope or a tag can
+  also be typed by name: "rec" offers Recent, and Space or Tab makes it the
+  chip. Choosing a tag or a folder searches only its notes, by name first
+  and then by the text inside them. **Quick open** (⌘O), the **command palette** (⌘P) and **content
+  search** (⇧⌘F) are the same bar, already narrowed. Results rank by how
+  often you use something, discounted by how long ago; a command that cannot
+  run right now sinks to the bottom rather than disappearing. The palette
+  carries the file tree's own verbs too, so a note's path or wikilink is a
+  search away without finding its row first. ⌘O also takes a path,
+  vault-relative or absolute, quoted or as a `file://` URL.
 - **Recent** reads like your notes rather than a folder listing: each row
   has its date, first line and folder, grouped under Today, Yesterday,
   Previous 7 Days and by month. Order it by last edit, which follows notes
@@ -293,6 +300,7 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | ⇧⌘E | Export as PDF |
 | ⌘S | Save pending edits now |
 | ⇧⌘F | Search the vault |
+| ⌘T | Search everything |
 | ⌘O | Quick open |
 | ⌘P | Command palette |
 | ⌘L | Toggle checkbox |

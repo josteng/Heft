@@ -71,18 +71,21 @@ struct PaletteOrderTests {
         #expect(order(rows) == ["a", "b"])
     }
 
+    /// The commands scope must go through the rule, or the suite above
+    /// tests a function nothing calls. With no note open the note verbs
+    /// cannot run, so there are both kinds to order.
     @Test("The palette asks the model whether a command can run")
+    @MainActor
     func paletteUsesTheRule() throws {
-        // The registry itself must go through the rule, or the suite above
-        // tests a function nothing calls.
-        let source = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/Heft/Views/AppCommands.swift"),
-            encoding: .utf8
-        )
-        #expect(source.contains("sinkingDisabled(ranked) { $0.isEnabled(on: model) }"))
+        let model = AppModel(registry: VaultRegistry(), descriptor: WorkspaceDescriptor())
+        let enabled = model.barRows(scope: .commands, query: "", entireVault: true).map { row in
+            guard case .command(let command) = row else {
+                Issue.record("a commands scope listed \(row.id)")
+                return false
+            }
+            return command.isEnabled(on: model)
+        }
+        #expect(enabled.contains(true) && enabled.contains(false), "both kinds are listed")
+        #expect(enabled == enabled.sorted { $0 && !$1 }, "every enabled command comes first")
     }
 }

@@ -140,7 +140,7 @@ struct PaletteReachTests {
         #expect(!ran, "it must not run while the palette is up")
         #expect(!model.isCommandPalettePresented, "the palette is asked to close")
 
-        model.commandPaletteDidDismiss()
+        model.barDidDismiss()
         #expect(ran)
 
         // With no palette open it runs at once.

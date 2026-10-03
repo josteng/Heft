@@ -91,6 +91,7 @@ private struct WorkspaceWindow: View {
             .environmentObject(model)
             .focusedSceneValue(\.workspaceModel, model)
             .focusedSceneObject(model.sidebarKeys)
+            .focusedSceneObject(model.barPresence)
             .onAppear {
                 descriptor = model.restorationDescriptor
                 registry.register(model: model) { descriptor in
@@ -112,6 +113,11 @@ struct HeftCommands: Commands {
     /// Watched, not merely read: see `AppModel.sidebarKeys`. Without this the
     /// Trash item below keeps the enabled state it was built with.
     @FocusedObject private var sidebarKeys: SidebarKeyTarget?
+    /// Watched for the same reason. While the search bar is up, a shortcut
+    /// that acts on the note or the window behind it is off: ⌘N made a note
+    /// under the sheet, and ⌘⌫ would have trashed one.
+    @FocusedObject private var barPresence: BarPresence?
+    private var behindBar: Bool { barPresence?.isOpen == true }
 
     /// Named after what it would put back, so the menu says whether ⌘Z is
     /// about to touch the tree or the text.
@@ -132,26 +138,26 @@ struct HeftCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Note…") { model?.createNote() }
                 .keyboardShortcut(.newNote)
-                .disabled(model == nil)
+                .disabled(model == nil || behindBar)
             Button("New Window") {
                 openWindow(value: model?.descriptor(scopePath: model?.scopePath) ?? WorkspaceDescriptor())
             }
             .keyboardShortcut(.newWindow)
             Divider()
             Button("Open Inbox") { model?.openInbox() }
-                .disabled(model?.vaultRoot == nil)
+                .disabled(model?.vaultRoot == nil || behindBar)
             if model?.dailyNotesAreInScope != false {
                 Button("Today's Daily Note") { model?.openDailyNote(for: Date()) }
                     .keyboardShortcut(.openToday)
-                    .disabled(model == nil)
+                    .disabled(model == nil || behindBar)
             }
             Button("Daily Note Settings…") {
                 model?.presentDailyNotesSettings()
             }
-            .disabled(model?.vaultRoot == nil)
+            .disabled(model?.vaultRoot == nil || behindBar)
             Divider()
             Button("New Vault…") { model?.createVault() }
-                .disabled(model == nil)
+                .disabled(model == nil || behindBar)
             Button("Open Vault in New Window…") { openVaultInNewWindow() }
                 .keyboardShortcut(.openVaultInNewWindow)
             Menu("Open Recent") {
@@ -176,7 +182,7 @@ struct HeftCommands: Commands {
                     ? "Update Agent Access…"
                     : "Set Up Agent Access…"
             ) { model?.setUpAgentAccess() }
-                .disabled(model?.agentGuideNeedsWriting != true)
+                .disabled(model?.agentGuideNeedsWriting != true || behindBar)
         }
         // `.importExport`, not `.saveItem`.
         //
@@ -204,6 +210,7 @@ struct HeftCommands: Commands {
                 .disabled(
                     (sidebarKeys?.url == nil && sidebarKeys?.selection.isEmpty != false)
                         || model?.canDeleteFromSidebar != true
+                        || behindBar
                 )
             Divider()
             Button("Export as PDF…") { model?.exportPDF() }
@@ -211,7 +218,7 @@ struct HeftCommands: Commands {
                 // On the model, not on the open note: `exportPDF` already says
                 // "No note to export", and a shortcut that reports why it did
                 // nothing beats one that silently does nothing.
-                .disabled(model == nil)
+                .disabled(model == nil || behindBar)
         }
         // One Undo, replacing the system pair rather than sitting beside it.
         //
@@ -223,8 +230,9 @@ struct HeftCommands: Commands {
         // responder chain, which is where the text view's own undo lives.
         CommandGroup(replacing: .undoRedo) {
             Button(undoTitle) {
+                // The bar's own text, never the tree behind it.
                 switch UndoRouting.target(
-                    sidebarOwnsKeys: sidebarKeys?.url != nil,
+                    sidebarOwnsKeys: sidebarKeys?.url != nil && !behindBar,
                     sidebarHasStep: model?.sidebarUndoName != nil
                 ) {
                 case .sidebar: model?.undoSidebarOperation()
@@ -260,21 +268,26 @@ struct HeftCommands: Commands {
                     NSApp.sendAction(#selector(HeftTextKit2View.formatChecklist), to: nil, from: nil)
                 }
                 .keyboardShortcut(.toggleCheckbox)
-                .disabled(model?.current == nil)
+                .disabled(model?.current == nil || behindBar)
             }
             Divider()
             Menu("Find") {
                 Button("Find…") { model?.showFind() }
                     .keyboardShortcut(.find)
+                    .disabled(behindBar)
                 Button("Find Next") { model?.findNext() }
                     .keyboardShortcut(.findNext)
+                    .disabled(behindBar)
                 Button("Find Previous") { model?.findPrevious() }
                     .keyboardShortcut(.findPrevious)
+                    .disabled(behindBar)
                 Divider()
                 Button("Search Workspace…") { model?.isVaultSearchPresented = true }
                     .keyboardShortcut(.searchVault)
             }
             Divider()
+            Button("Search Everything…") { model?.openBar(nil) }
+                .keyboardShortcut(.searchBar)
             Button("Quick Open…") { model?.isQuickOpenPresented = true }
                 .keyboardShortcut(.quickOpen)
             Button("Command Palette…") { model?.isCommandPalettePresented = true }
@@ -290,17 +303,20 @@ struct HeftCommands: Commands {
                 model?.toggleSidebar()
             }
             .keyboardShortcut(.toggleSidebar)
+            .disabled(behindBar)
             Toggle("Show Calendar", isOn: binding(\.isCalendarVisible))
                 .keyboardShortcut(.toggleCalendar)
+                .disabled(behindBar)
             // Quick Open and a wikilink both open a note without touching the
             // tree, so after either the sidebar is showing somewhere else and
             // where the note actually lives is a guess.
             Button("Reveal in Sidebar") { model?.revealCurrentInSidebar() }
                 .keyboardShortcut(.revealInSidebar)
-                .disabled(model?.current == nil)
+                .disabled(model?.current == nil || behindBar)
             Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
             Toggle("Show Backlinks", isOn: binding(\.isInspectorVisible))
                 .keyboardShortcut(.toggleBacklinks)
+                .disabled(behindBar)
         }
     }
 

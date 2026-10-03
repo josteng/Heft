@@ -15,12 +15,9 @@ struct ContentView: View {
             workspaceID: model.workspaceID,
             topChromeHeight: $windowTopChromeHeight
         ))
-        .sheet(isPresented: $model.isQuickOpenPresented) { QuickOpenView() }
-        .sheet(
-            isPresented: $model.isCommandPalettePresented,
-            onDismiss: { model.commandPaletteDidDismiss() }
-        ) { CommandPaletteView() }
-        .sheet(isPresented: $model.isVaultSearchPresented) { VaultSearchView() }
+        .sheet(item: $model.bar, onDismiss: { model.barDidDismiss() }) { request in
+            SearchBarView(scope: request.scope)
+        }
         .sheet(isPresented: $model.isDailyNotesSettingsPresented) {
             DailyNotesSettingsView()
         }

@@ -194,6 +194,20 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle(isOn: Binding(
+                    get: { settings.offersAgentSetup },
+                    set: { settings.offersAgentSetup = $0 }
+                )) {
+                    SettingLabel(
+                        "Offer agent setup for new vaults",
+                        detail: settings.offersAgentSetup
+                            ? "A vault without agent instructions is asked once whether to add them. "
+                                + "Not Now is remembered for that vault."
+                            : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them."
+                    )
+                }
+            }
+            Section {
                 Picker(selection: Binding(
                     get: { settings.quickOpenOrder.lead },
                     set: { settings.quickOpenOrder.lead = $0 }
@@ -237,20 +251,6 @@ struct GeneralSettingsView: View {
                 SectionHeading("Quick Open")
             }
 
-            Section {
-                Toggle(isOn: Binding(
-                    get: { settings.offersAgentSetup },
-                    set: { settings.offersAgentSetup = $0 }
-                )) {
-                    SettingLabel(
-                        "Offer agent setup for new vaults",
-                        detail: settings.offersAgentSetup
-                            ? "A vault without agent instructions is asked once whether to add them. "
-                                + "Not Now is remembered for that vault."
-                            : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them."
-                    )
-                }
-            }
         }
         .formStyle(.grouped)
     }

@@ -161,6 +161,39 @@ destroys a file. Undoing a trash uses the URL the Trash reported, because the
 Trash renames on a collision and the file is not necessarily where its name
 says.
 
+## One search bar
+
+Quick Open, the command palette and vault search are one sheet,
+`SearchBarView`, opened in a scope (`BarScope`): ⌘O names, ⌘P commands, ⇧⌘F
+text in notes, and ⌘T none. The scope is a chip at the start of the field.
+Typing `@`, `>`, `#` or `/` alone into the bar with no scope enters notes,
+commands, tags or text; Backspace in an empty field leaves, a single tag back
+to the tags. Scopes and tags are also rows found by name and ranked by use.
+Space on one enters it only when the query starts its name or the arrows
+chose the row, as Chrome's keyword mode wants the keyword itself; otherwise
+Space is a space. Tab always enters.
+A shortcut pressed with the bar open narrows it in place rather than closing
+it, which is why the three old flags are now names for `AppModel.bar`, and
+what was typed comes along selected, so ⌘O then ⇧⌘F searches the text for
+the same words and the next key can still replace them.
+
+The bar with no scope ranks notes and commands together on one ladder
+(`CommandMatch` mirrors the name tiers of `VaultIndex.scoredSearch`), and a
+command that cannot run still sinks. Text inside notes is never mixed in. A
+combined palette was tried once and removed for exactly that: content hits
+made jumping to a note by name slower and noisier. Here the text search is
+one row, "Search text in notes for …", which enters its own scope. A tag or a
+folder chip also searches its notes' text (`searchesTextToo`), and so does
+the bar with no scope, but only while names leave room in the list, under
+about ten matches (`barWantsText`). The lines follow the names under "Text",
+so a note found by name stays first, and once shown they stay until the field
+is cleared, or they blink as the count crosses the line. A folder chip
+ignores the window's focus, since choosing it is the more specific request.
+
+Rows are identified by what they show, not their position, so entering a
+scope keeps the rows both lists share and fades the rest; the list is keyed
+on the query only, against a sheet keeping stale children.
+
 ## Ranking the switchers
 
 Quick Open and the command palette order by **frecency**: `Frecency` in
@@ -185,8 +218,8 @@ settings can lead with the most used instead, then the rest by when opened, or
 turn the block off). Frecency alone ranked a note opened once today below one
 opened often last week, so a new note was the hardest to find; recency alone,
 which is Obsidian's answer, loses the notes opened every morning. Each part is
-headed by the order it follows, and a heading is a row: Return on it lists that
-order alone and in full, and Return again goes back. With something typed it is
+headed by the order it follows, and a heading is a row: Return on it enters
+that order as a scope, alone and in full. With something typed it is
 worth at most `VaultIndex.boostWeight`, less than the gap between match tiers,
 so familiarity reorders within a tier and never lifts a substring match above
 a prefix one. Both sorts carry the original index as a final tiebreak, since

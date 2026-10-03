@@ -90,6 +90,15 @@ final class SidebarKeyTarget: ObservableObject {
     @Published var selection = SidebarSelection()
 }
 
+/// Whether this window's search bar is open, mirrored for the menu bar.
+///
+/// The menu reads the model as a focused value and does not observe it, so a
+/// menu item disabled on `bar` would keep whatever state it was built with;
+/// this one is watched, as `SidebarKeyTarget` is.
+final class BarPresence: ObservableObject {
+    @Published var isOpen = false
+}
+
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -393,13 +402,20 @@ final class AppModel: ObservableObject {
         get { chrome.isInspectorVisible }
         set { chrome.isInspectorVisible = newValue }
     }
-    /// Three narrow pickers rather than one that does everything. A combined
-    /// palette was tried and removed: mixing content hits into a note switcher
-    /// made the common case — jump to a note by name — slower and noisier,
-    /// which is the opposite of what a switcher is for.
-    @Published var isQuickOpenPresented = false
-    @Published var isCommandPalettePresented = false
-    @Published var isVaultSearchPresented = false
+    /// The search bar, when it is open, and what it is narrowed to.
+    ///
+    /// One sheet with scopes, where there were three pickers. A combined
+    /// palette was tried once and removed because it mixed content hits into
+    /// the note switcher, which made jumping to a note by name slower and
+    /// noisier. The scopes keep that apart: ⌘O is still names only, and text
+    /// inside notes is searched only in its own scope, never in the mix.
+    @Published var bar: BarRequest? {
+        didSet {
+            let open = bar != nil
+            if barPresence.isOpen != open { barPresence.isOpen = open }
+        }
+    }
+    let barPresence = BarPresence()
     @Published var isDailyNotesSettingsPresented = false
     private var pendingAfterPalette: (@MainActor (AppModel) -> Void)?
     @Published var isFindPresented = false
@@ -2500,17 +2516,17 @@ final class AppModel: ObservableObject {
         afterPalette { $0.isDailyNotesSettingsPresented = true }
     }
 
-    /// Runs `action` once the command palette has closed, or straight away
-    /// when it is not open.
+    /// Runs `action` once the search bar has closed, or straight away when
+    /// it is not open.
     ///
     /// A palette command that opens a panel cannot open it while the palette
     /// is up: both are sheets on the same window, and the second is refused.
     /// So the palette is dismissed and the panel waits for the dismissal it
     /// already reports.
     func afterPalette(_ action: @escaping @MainActor (AppModel) -> Void) {
-        if isCommandPalettePresented {
+        if bar != nil {
             pendingAfterPalette = action
-            isCommandPalettePresented = false
+            bar = nil
         } else {
             action(self)
         }
@@ -2557,7 +2573,7 @@ final class AppModel: ObservableObject {
 
     func toggleChecklist() { pendingChecklistToggle += 1 }
 
-    func commandPaletteDidDismiss() {
+    func barDidDismiss() {
         guard let action = pendingAfterPalette else { return }
         pendingAfterPalette = nil
         action(self)
