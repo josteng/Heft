@@ -73,7 +73,9 @@ public enum CommandLineSpec {
         // Reading a vault
         Verb("files", "<vault>", "Every file in the vault, attachments included.", flags: [
             Flag("--notes", "Markdown only."),
-            Flag("--by-use", "Most-used first, the order Quick Open opens on."),
+            Flag("--by-use", "Most-used first, the order Quick Open opens on. As --sort used."),
+            Flag("--sort", value: "used|recent|edited|name",
+                 "Most used, last opened in Heft, last edited, or by name."),
             Flag("--by-agent", "What an agent has proposed changes to."),
             Flag("--scores", "Show each note's score."),
             Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
@@ -97,6 +99,17 @@ public enum CommandLineSpec {
         ]),
         Verb("backlinks", "<vault> <note>", "Notes linking to this one, with context.", flags: [
             Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
+        ]),
+        Verb("search", "<vault> <query>",
+             "Notes, folders and tags by name, ranked as ⌘T ranks them. Text is `find`.", flags: [
+            Flag("--kinds", value: "notes,folders,tags", "Only these kinds."),
+            Flag("--limit", value: "N", "Stop after N. Default 30."),
+            Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),
+        ]),
+        Verb("chats", "<vault> [query]", "Past Ask chats, the latest first, or those mentioning the query.", flags: [
+            Flag("--read", value: "id", "That chat's questions and answers."),
+            Flag("--limit", value: "N", "Stop after N. Default 20."),
+            Flag("--json", "The same answer as JSON."),
         ]),
         Verb("tags", "<vault> [tag]", "Tags with counts, or the notes carrying one.", flags: [
             Flag("--json", "The same answer as JSON, so a path with a quote in it still parses."),

@@ -41,7 +41,7 @@ public enum AgentGuide {
     /// reach it — so a vault set up a year ago goes on telling its agent about
     /// a command line that no longer exists. The version is what lets the
     /// commands notice and say so.
-    public static let version = 22
+    public static let version = 23
     static let versionMarker = "<!-- heft:agent-guide version:"
 
     /// What a vault's `CLAUDE.md` currently carries.
@@ -321,7 +321,11 @@ public enum AgentGuide {
         heft find . <query>      # full-text search across the vault
         heft files .             # every file, attachments included
         heft files . --notes     # Markdown only
-        heft files . --by-use    # ordered by what this person actually opens
+        heft files . --sort used     # by what this person actually opens
+        heft files . --sort recent   # last opened in Heft first: what they are working on
+        heft files . --sort edited   # last changed first
+        heft search . <words>    # notes, folders and tags by name, ranked as ⌘T ranks them
+        heft chats . [words]     # past Ask chats; --read <id> for one in full
         heft proposals .         # what is already waiting for review
         heft diff . <id>         # what one of them would change
         heft changes . "Note"    # what moved since you last read it

@@ -15,7 +15,7 @@ public enum AgentCLI {
 
     public static let verbs: Set<String> = [
         "propose", "proposals", "diff", "drop", "read", "find", "changes", "attachment",
-        "capture",
+        "capture", "search", "chats",
     ]
 
     /// The folder an agent asked from Heft's search bar is limited to,
@@ -79,6 +79,8 @@ public enum AgentCLI {
         case "changes": changes(root: root, arguments: rest)
         case "attachment": attachment(root: root, arguments: rest)
         case "capture": capture(root: root, arguments: rest)
+        case "search": search(root: root, arguments: rest)
+        case "chats": chats(root: root, arguments: rest)
         default: return false
         }
         return true
@@ -664,6 +666,121 @@ public enum AgentCLI {
     /// and was the most expensive: logging one line meant reading the whole
     /// note and proposing a whole body back, and since the read guard, having
     /// read it first as well.
+    /// Notes, folders and tags by name, ranked as the search bar ranks
+    /// them: a prefix above a word start above a match inside, and use and
+    /// pins nudging within that. What is inside the notes is `find`.
+    private static func search(root: URL, arguments: [String]) {
+        let options = Options(arguments[...])
+        let words = CommandLineSpec.split(arguments, forVerb: "search").positional
+        let query = words.joined(separator: " ")
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            fail("usage: heft search <vault> <query> [--kinds notes,folders,tags]")
+        }
+        let limit = options["limit"].flatMap(Int.init) ?? 30
+        let kinds = Set((options["kinds"] ?? "notes,folders,tags").split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces).lowercased()
+        })
+        let scope = agentScope
+        let index = VaultIndex.open(vaultAt: root)
+        let frecency = FrecencyStore.notes(forVaultAt: root.standardizedFileURL.path)
+        let pinned = Set(Pins.load(from: root).values(of: .note))
+        var found: [(kind: String, name: String, score: Int)] = []
+        if kinds.contains("notes") {
+            for hit in index.scoredSearch(
+                query, limit: limit, familiarity: { frecency.score($0.relativePath) },
+                pinned: { pinned.contains($0.relativePath) },
+                including: { isInScope($0.relativePath, scope: scope) }
+            ) {
+                found.append(("note", hit.note.relativePath, hit.score))
+            }
+        }
+        if kinds.contains("folders") {
+            var folders = Set<String>()
+            for note in index.notes {
+                var parts = note.relativePath.split(separator: "/").dropLast()
+                while !parts.isEmpty {
+                    folders.insert(parts.joined(separator: "/"))
+                    parts = parts.dropLast()
+                }
+            }
+            for folder in folders where isInScope(folder, scope: scope) {
+                let name = (folder as NSString).lastPathComponent
+                if let tier = CommandMatch.score(query: query, title: name, terms: folder) {
+                    found.append(("folder", folder, tier))
+                }
+            }
+        }
+        if kinds.contains("tags") {
+            for tag in index.allTags {
+                if let tier = CommandMatch.score(query: query, title: tag, terms: "") {
+                    found.append(("tag", "#" + tag, tier))
+                }
+            }
+        }
+        // Folders and tags before notes on a tie, as in the bar: there are
+        // fewer of them, so one that loses a tie is likelier never seen.
+        let order = ["folder": 0, "tag": 1, "note": 2]
+        let ranked = found.enumerated().sorted { a, b in
+            if a.element.score != b.element.score { return a.element.score > b.element.score }
+            if a.element.kind != b.element.kind { return order[a.element.kind]! < order[b.element.kind]! }
+            return a.offset < b.offset
+        }.map(\.element).prefix(limit)
+        guard !ranked.isEmpty else {
+            print("no matches")
+            exit(0)
+        }
+        if options.flag("json") {
+            JSONOutput.emit(ranked.map { ["kind": $0.kind, "name": $0.name] })
+        }
+        for entry in ranked { print("\(entry.kind.padding(toLength: 7, withPad: " ", startingAt: 0))\(entry.name)") }
+        exit(0)
+    }
+
+    /// Past Ask chats: the latest first, those mentioning the query, or one
+    /// read whole. In a run limited to a folder, only chats asked inside it.
+    private static func chats(root: URL, arguments: [String]) {
+        let options = Options(arguments[...])
+        let query = CommandLineSpec.split(arguments, forVerb: "chats").positional.joined(separator: " ")
+        let scope = agentScope
+        let all = AgentChatStore.all(in: root).filter { chat in
+            guard let scope else { return true }
+            return isInScope(chat.scope, scope: scope)
+        }
+        if let id = options["read"] {
+            guard let chat = all.first(where: { $0.id == id || $0.id.hasPrefix(id) }) else {
+                fail("no chat \(id)")
+            }
+            if options.flag("json") {
+                JSONOutput.emit(["id": chat.id, "title": chat.title, "turns": chat.turns.map {
+                    ["question": $0.question, "answer": $0.answer]
+                }])
+            }
+            print("# \(chat.title)")
+            for turn in chat.turns {
+                print("\nReader: \(turn.question)\n\nAgent: \(turn.answer)")
+            }
+            exit(0)
+        }
+        let limit = options["limit"].flatMap(Int.init) ?? 20
+        let listed = all.filter { $0.matches(query) }.prefix(limit)
+        guard !listed.isEmpty else {
+            print("no chats")
+            exit(0)
+        }
+        if options.flag("json") {
+            JSONOutput.emit(listed.map { chat -> [String: Any] in
+                ["id": chat.id, "title": chat.title, "updated": ISO8601DateFormatter().string(from: chat.updatedAt),
+                 "turns": chat.turns.count]
+            })
+        }
+        let day = DateFormatter()
+        day.dateFormat = "yyyy-MM-dd"
+        for chat in listed {
+            print("\(chat.id.prefix(8))  \(day.string(from: chat.updatedAt))  \(chat.title)  (\(chat.turns.count))")
+        }
+        exit(0)
+    }
+
     private static func capture(root: URL, arguments: [String]) {
         let options = Options(arguments[...])
         let words = CommandLineSpec.split(arguments, forVerb: "capture").positional

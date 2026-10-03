@@ -195,7 +195,16 @@ enum HeftMain {
             let root = URL(fileURLWithPath: (arguments[1] as NSString).expandingTildeInPath)
                 .standardizedFileURL
             let flags = Array(arguments.dropFirst(2))
-            let byUse = flags.contains("--by-use")
+            // `--sort used|recent|edited|name`, the orders the search bar
+            // offers. `--by-use` is `--sort used`, kept for the guides that
+            // name it.
+            var sort = flags.firstIndex(of: "--sort").flatMap { flags.indices.contains($0 + 1) ? flags[$0 + 1] : nil }
+            if flags.contains("--by-use") { sort = "used" }
+            if let sort, !["used", "recent", "edited", "name"].contains(sort) {
+                FileHandle.standardError.write(Data("--sort takes used, recent, edited or name, not \(sort)\n".utf8))
+                exit(1)
+            }
+            let byUse = sort == "used"
             let byAgent = flags.contains("--by-agent")
             let showScores = flags.contains("--scores")
             var limit = Int.max
@@ -211,8 +220,39 @@ enum HeftMain {
             // `--notes` is for the caller who wanted only the Markdown, which
             // the summary used to promise and the listing never delivered.
             let onlyNotes = flags.contains("--notes")
-            let notes = VaultScanner.scan(root: root).flattened()
+            // An agent asked in a folder lists that folder.
+            let scope = ProcessInfo.processInfo.environment[AgentCLI.scopeVariable].flatMap { $0.isEmpty ? nil : $0 }
+            var notes = VaultScanner.scan(root: root).flattened()
                 .filter { !$0.isFolder && (!onlyNotes || $0.relativePath.hasSuffix(".md")) }
+                .filter { AgentCLI.isInScope($0.relativePath, scope: scope) }
+            switch sort {
+            case "name":
+                notes.sort { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+            case "edited":
+                // Newest first, from the files themselves: an edit made
+                // anywhere, in Heft or not, counts.
+                let dates = Dictionary(uniqueKeysWithValues: notes.map { item in
+                    (item.relativePath, (try? item.url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                        .contentModificationDate ?? .distantPast)
+                })
+                notes.sort { dates[$0.relativePath]! > dates[$1.relativePath]! }
+            case "recent":
+                // As opened in Heft, the last first; then the rest by name.
+                let order = Dictionary(
+                    VaultUse.recentPaths(forVaultAt: root.path).enumerated().map { ($0.element, $0.offset) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+                notes.sort { a, b in
+                    switch (order[a.relativePath], order[b.relativePath]) {
+                    case let (x?, y?): return x < y
+                    case (.some, nil): return true
+                    case (nil, .some): return false
+                    default: return a.relativePath.localizedStandardCompare(b.relativePath) == .orderedAscending
+                    }
+                }
+            default:
+                break
+            }
             guard byUse || byAgent || showScores else {
                 if asJSON {
                     JSONOutput.emit(notes.prefix(limit).map { ["path": $0.relativePath] })

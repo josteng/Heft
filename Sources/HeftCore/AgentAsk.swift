@@ -61,7 +61,7 @@ public struct AgentInvocation: Equatable, Sendable {
     /// `propose`, `drop` and `capture`, which here only ever leave a change
     /// for review.
     public static let heftVerbs = [
-        "help", "read", "find", "files", "tags", "backlinks", "links", "outline",
+        "help", "read", "find", "files", "search", "chats", "tags", "backlinks", "links", "outline",
         "spell", "attachment", "config", "changes", "proposals", "diff", "propose", "drop",
         "capture",
     ]
@@ -70,7 +70,8 @@ public struct AgentInvocation: Equatable, Sendable {
     /// answer about the whole vault, so a run limited to a folder goes
     /// without them; its own Glob and Grep cover the folder.
     public static let scopedHeftVerbs = [
-        "help", "read", "find", "config", "changes", "proposals", "diff", "propose", "drop", "capture",
+        "help", "read", "find", "files", "search", "chats", "config", "changes", "proposals", "diff",
+        "propose", "drop", "capture",
     ]
 
     /// Other names the agent may call this app's `heft` by: a vault's guide
@@ -154,6 +155,11 @@ public struct AgentInvocation: Equatable, Sendable {
         edits. Use this plain form, never JSON: JSON here is refused.
         - heft propose "\(vaultRoot.path)" "<path>" --delete    or    --move "<to>"
         - heft find "\(vaultRoot.path)" "<words>"   searches the text of every note
+        - heft search "\(vaultRoot.path)" "<words>"   notes, folders and tags by name, best first
+        - heft files "\(vaultRoot.path)" --sort recent|edited|used|name   notes in that order: \
+        recent is what the reader last opened in Heft, the way to answer what they are working on
+        - heft chats "\(vaultRoot.path)" ["<words>"]   the reader's past chats with you; \
+        --read <id> for one
         - heft capture "\(vaultRoot.path)" "<one line>" --daily   adds a line to today's note \
         (or --to "<path>"); here it becomes a proposal too
         Paths are relative to the vault. A new note is a propose to a path that does not exist \

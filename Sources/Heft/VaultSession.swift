@@ -85,8 +85,9 @@ final class VaultSession: ObservableObject {
         }
     }
 
+    /// Kept in HeftCore, so `heft files --sort recent` reads the same list.
     private var recentsKey: String {
-        "dev.stenglein.Heft.recents.\(root.path)"
+        VaultUse.recentsKey(forVaultAt: root.path)
     }
 
     private var openedAtKey: String {

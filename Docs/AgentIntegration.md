@@ -32,8 +32,14 @@ heft spell <vault> [note]              # what the editor underlines, and why
     --limit N                          # ...stop after N; the whole vault is a lot
 heft files <vault>                     # every file, attachments included
     --notes                            # ...Markdown only
-    --by-use                           # ...in the order the reader opens them
+    --sort used|recent|edited|name     # ...the search bar's orders; recent is
+                                       #    what the reader last opened in Heft
+    --by-use                           # ...as --sort used
     --by-agent                         # ...what an agent has already proposed to
+heft search <vault> <query>            # notes, folders and tags by name, ranked
+    --kinds notes,folders,tags         #    as ⌘T ranks them; text is `find`
+heft chats <vault> [query]             # past Ask chats, latest first
+    --read <id>                        # ...one of them in full
 
 heft capture <vault> "text"            # add one timestamped line to the inbox
     --daily                            # ...to today's log marker instead

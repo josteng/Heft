@@ -159,6 +159,53 @@ struct AgentCLITests {
         #expect(try run(["read", root.path, "Home/Secret.md"]).status == 0)
     }
 
+    /// What the search bar knows, as an agent can ask it: names ranked as
+    /// ⌘T ranks them, the notes in the bar's orders, and the past chats.
+    @Test("search ranks names by kind, files sorts as the bar does, chats lists and reads")
+    func findingThings() throws {
+        let root = try vault([
+            "Work/Plan.md": "# Plan\n#work\n",
+            "Work/Thesis/Parser notes.md": "# Parser\n#work\n",
+            "Home/Groceries.md": "milk\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let old = Date(timeIntervalSince1970: 1_000_000)
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: root.appendingPathComponent("Home/Groceries.md").path)
+
+        let names = try run(["search", root.path, "par"])
+        #expect(names.text.contains("note   Work/Thesis/Parser notes.md"), "got \(names.text)")
+        let tagsAndFolders = try run(["search", root.path, "work", "--kinds", "tags,folders"])
+        #expect(tagsAndFolders.text.hasPrefix("folder Work\n"), "got \(tagsAndFolders.text)")
+        #expect(tagsAndFolders.text.contains("tag    #work") && !tagsAndFolders.text.contains("note"))
+        #expect(try run(["search", root.path, "groc"], scope: "Work").text == "no matches\n", "kept to the folder")
+
+        let edited = try run(["files", root.path, "--notes", "--sort", "edited"])
+        #expect(edited.text.split(separator: "\n").last == "Home/Groceries.md", "the old one last; got \(edited.text)")
+        let named = try run(["files", root.path, "--notes", "--sort", "name"], scope: "Work")
+        #expect(named.text == "Work/Plan.md\nWork/Thesis/Parser notes.md\n", "got \(named.text)")
+        #expect(try run(["files", root.path, "--sort", "weird"]).status != 0)
+
+        // Recent is what Heft saw opened, kept in its preferences.
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { Self.discardSuite(suite) }
+        UserDefaults(suiteName: suite)?.set(
+            ["Home/Groceries.md", "Work/Plan.md"],
+            forKey: VaultUse.recentsKey(forVaultAt: root.standardizedFileURL.path)
+        )
+        let recent = try run(["files", root.path, "--notes", "--sort", "recent"], defaultsSuite: suite)
+        #expect(recent.text == "Home/Groceries.md\nWork/Plan.md\nWork/Thesis/Parser notes.md\n", "got \(recent.text)")
+
+        var chat = AgentChat(question: "When is the parser due?", scope: "Work")
+        chat.turns[0].answer = "Friday."
+        try AgentChatStore.save(chat, in: root)
+        try AgentChatStore.save(AgentChat(question: "Groceries?", scope: "Home"), in: root)
+        let listed = try run(["chats", root.path, "parser"])
+        #expect(listed.text.contains("When is the parser due?") && !listed.text.contains("Groceries"), "got \(listed.text)")
+        #expect(!(try run(["chats", root.path], scope: "Work")).text.contains("Groceries"), "kept to the folder")
+        let read = try run(["chats", root.path, "--read", String(chat.id.prefix(8))])
+        #expect(read.text.contains("Reader: When is the parser due?") && read.text.contains("Agent: Friday."))
+    }
+
     @Test("A path is in a scope when it is the folder or under it")
     func scopeMembership() {
         #expect(AgentCLI.isInScope("Work/Plan.md", scope: "Work"))

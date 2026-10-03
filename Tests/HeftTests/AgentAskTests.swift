@@ -56,7 +56,8 @@ struct AgentInvocationTests {
         // Limited to a folder, only the verbs that keep to one.
         let scoped = invocation().arguments.filter { $0.hasPrefix("Bash(") }
         #expect(scoped.contains("Bash(heft read *)") && scoped.contains("Bash(heft propose *)"))
-        #expect(!scoped.contains("Bash(heft backlinks *)") && !scoped.contains("Bash(heft files *)"))
+        #expect(!scoped.contains("Bash(heft backlinks *)"), "answers about the whole vault")
+        #expect(scoped.contains("Bash(heft files *)") && scoped.contains("Bash(heft search *)"), "keep to the folder")
     }
 
     /// A vault's guide names `heft` by its full path, and the agent follows

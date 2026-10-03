@@ -21,6 +21,9 @@ swift run Heft proposals <vault>                # agent edits waiting for review
 swift run Heft backlinks|links|outline <vault> <note>   # the resolved link index
 swift run Heft tags|config <vault>              # tags with counts; settings as JSON
 swift run Heft find <vault> <query>             # --files for notes not lines, --limit N
+swift run Heft search <vault> <query>           # names ranked as ⌘T ranks them
+swift run Heft files <vault> --sort recent      # also used, edited, name
+swift run Heft chats <vault> [query]            # past Ask chats; --read <id>
 swift run Heft spell <vault> [note]             # misspellings and grammar; --no-grammar, --json
 swift run Heft read <vault> <note>              # --lines N-M reads a part, and records no read
 swift run Heft capture <vault> "text"           # one line to the inbox; --daily, --to <note>
