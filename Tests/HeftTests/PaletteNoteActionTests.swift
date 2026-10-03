@@ -235,6 +235,16 @@ struct PaletteNoteActionTests {
                 .appendingPathComponent("Sources/Heft/Views/SidebarView.swift"),
             encoding: .utf8
         )
+        // The search bar's rows use the tree's own menus, so the two cannot
+        // come to offer different things.
+        let bar = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Heft/Views/SearchBar.swift"),
+            encoding: .utf8
+        )
+        #expect(bar.contains("FileMenu(item: item"), "the bar's note rows have their own menu")
+        #expect(bar.contains("FolderMenu("), "the bar's folder rows have their own menu")
         // Pinning is offered on notes and folders, and from the palette.
         #expect(source.contains("PinMenuButton(pin: .init(.note"), "the note menu offers no pin")
         #expect(source.contains("PinMenuButton(pin: .init(.folder"), "the folder menu offers no pin")

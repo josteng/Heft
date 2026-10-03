@@ -514,6 +514,8 @@ extension AppModel {
     func pin(for row: BarRow) -> Pins.Pin? {
         switch row {
         case .note(let note): Pins.Pin(.note, note.relativePath)
+        // A matching line pins the note it is in.
+        case .hit(let hit): Pins.Pin(.note, hit.note.relativePath)
         case .command(let command): Pins.Pin(.command, command.id)
         case .tag(let name, _): Pins.Pin(.tag, name)
         case .folder(let path, _): Pins.Pin(.folder, path)

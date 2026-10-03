@@ -630,6 +630,14 @@ struct SearchBarRowTests {
         #expect(Pins.load(from: root).items.map(\.value) == ["Alpha.md", "toggleBacklinks"])
     }
 
+    @Test("A matching line pins the note it is in")
+    func hitPinsItsNote() {
+        let model = AppModel(registry: VaultRegistry(), descriptor: WorkspaceDescriptor())
+        let note = NoteRef(relativePath: "Work/Plan.md", url: URL(fileURLWithPath: "/v/Work/Plan.md"), name: "Plan", kind: .markdown)
+        let hit = ContentMatch(note: note, line: 3, preview: "x", occurrences: 1)
+        #expect(model.pin(for: .hit(hit)) == Pins.Pin(.note, "Work/Plan.md"))
+    }
+
     @Test("A pinned note followed when it moves")
     func pinFollowsRename() async throws {
         let model = try await model(["Plan.md": "a"])

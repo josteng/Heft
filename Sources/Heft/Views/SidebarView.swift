@@ -1584,7 +1584,7 @@ private struct TreeViewportHeightKey: PreferenceKey {
 /// Pins a note or folder for the search bar, or unpins it. Named "in
 /// Search" so it is not taken for a place in this sidebar: a pin comes first
 /// in ⌘O, ⌘T and the folders scope, and nowhere here.
-private struct PinMenuButton: View {
+struct PinMenuButton: View {
     @EnvironmentObject private var model: AppModel
     let pin: Pins.Pin
 
@@ -1597,7 +1597,7 @@ private struct PinMenuButton: View {
     }
 }
 
-private struct FileMenu: View {
+struct FileMenu: View {
     @EnvironmentObject private var model: AppModel
     let item: VaultItem
     /// The rows this menu acts on: the whole selection when the clicked row
@@ -1607,6 +1607,12 @@ private struct FileMenu: View {
     var selected: [String] = []
     var onCreateNote: (() -> Void)? = nil
     var onRename: (() -> Void)? = nil
+    /// Run after Open, for a menu shown somewhere that should then get out
+    /// of the way, as the search bar does.
+    var onOpened: (() -> Void)? = nil
+    /// Whether Pin sits here among the file verbs. The search bar puts its
+    /// own first instead, with ⌘D beside it.
+    var showsPin = true
 
     private var items: [VaultItem] { model.items(for: selected) }
     private var many: Bool { items.count > 1 }
@@ -1614,7 +1620,7 @@ private struct FileMenu: View {
     var body: some View {
         // Every item carries a symbol: macOS 26 draws them in menus, and a
         // menu this long is read by shape before it is read by word.
-        MenuButton("Open", symbol: "doc.text") { model.open(item: item) }
+        MenuButton("Open", symbol: "doc.text") { model.open(item: item); onOpened?() }
         if !item.isMarkdown {
             MenuButton("Open in Default App", symbol: "arrow.up.forward.app") {
                 NSWorkspace.shared.open(item.url)
@@ -1633,7 +1639,7 @@ private struct FileMenu: View {
             many ? model.promptToMove(items) : model.promptToMove(item)
         }
         MenuButton("Duplicate", symbol: "plus.square.on.square") { model.duplicate(item) }
-        if !many { PinMenuButton(pin: .init(.note, item.relativePath)) }
+        if !many, showsPin { PinMenuButton(pin: .init(.note, item.relativePath)) }
         Divider()
         // The file itself, for pasting into a folder here or in the Finder.
         // The vault-relative path is what a link needs; the absolute one is
@@ -1680,20 +1686,28 @@ private struct FileMenu: View {
 
 /// Actions on a folder. `New Note` here is how a note gets created inside a
 /// specific folder rather than beside whatever happens to be open.
-private struct FolderMenu: View {
+struct FolderMenu: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
     let item: VaultItem
     let onCreateNote: () -> Void
     let onCreateFolder: () -> Void
     let onRename: () -> Void
+    /// Run after an action that takes the reader elsewhere, focusing this
+    /// window or opening another, for a menu that should then get out of the
+    /// way, as the search bar does.
+    var onLeave: (() -> Void)? = nil
+    /// As in `FileMenu`: the search bar puts Pin first instead.
+    var showsPin = true
 
     var body: some View {
         MenuButton("Focus This Window on \"\(item.name)\"", symbol: "scope") {
             model.setScope(to: item)
+            onLeave?()
         }
         MenuButton("Open \"\(item.name)\" in New Window", symbol: "plus.rectangle.on.rectangle") {
             openWindow(value: model.descriptor(scopePath: item.relativePath))
+            onLeave?()
         }
         Divider()
         MenuButton("New Note", symbol: "square.and.pencil") { onCreateNote() }
@@ -1702,7 +1716,7 @@ private struct FolderMenu: View {
         MenuButton("Rename", symbol: "pencil") { onRename() }
         MenuButton("Move to…", symbol: "folder") { model.promptToMove(item) }
         MenuButton("Duplicate", symbol: "plus.square.on.square") { model.duplicate(item) }
-        PinMenuButton(pin: .init(.folder, item.relativePath))
+        if showsPin { PinMenuButton(pin: .init(.folder, item.relativePath)) }
         Divider()
         MenuButton("Copy", symbol: "doc.on.doc") { model.copy(item) }
             .keyboardShortcut("c", modifiers: .command)

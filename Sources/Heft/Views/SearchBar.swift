@@ -1,3 +1,4 @@
+import Combine
 import HeftCore
 import SwiftUI
 #if os(macOS)
@@ -113,6 +114,10 @@ struct SearchBarView: View {
         // A bar opened before the vault finished loading fills in when it
         // has, rather than staying empty until something is typed.
         .onChange(of: model.index.notes.count) { refreshRows(); selectFirst() }
+        // A rename, move or new note from a row's menu, or anything else on
+        // disk, reaches the list without a keystroke.
+        .onReceive(model.session?.contentChanges.eraseToAnyPublisher()
+            ?? Empty().eraseToAnyPublisher()) { _ in refreshRows() }
         .onChange(of: model.bar?.generation) {
             // A shortcut pressed with the bar already open narrows it.
             guard let request = model.bar else { return }
@@ -290,15 +295,10 @@ struct SearchBarView: View {
                                     choose(at: index)
                                 }
                                 // Right-click is where a Mac reader looks for
-                                // what can be done to a row.
-                                .contextMenu {
-                                    if let pin = model.pin(for: row) {
-                                        let pinned = model.isPinned(row)
-                                        Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
-                                            togglePin(pin, keeping: row.id)
-                                        }
-                                    }
-                                }
+                                // what can be done to a row: for a note or a
+                                // folder, the sidebar's own menu, so the two
+                                // can never offer different things.
+                                .contextMenu { rowMenu(row) }
                         }
                     }
                     .padding(6)
@@ -414,6 +414,59 @@ struct SearchBarView: View {
 
     /// Pins the selected row, or unpins it, and keeps it selected wherever
     /// the list now puts it.
+    /// A row's right-click menu. Notes, text matches and folders get the
+    /// file tree's menus themselves; the inline actions the tree performs in
+    /// place, renaming and new notes or folders, are the window's own here.
+    @ViewBuilder
+    private func rowMenu(_ row: BarRow) -> some View {
+        switch row {
+        case .note(let note):
+            noteMenu(note.relativePath, row: row)
+        case .hit(let hit):
+            noteMenu(hit.note.relativePath, row: row)
+        case .folder(let path, _):
+            pinItem(row)
+            if let item = model.items(for: [path]).first {
+                Divider()
+                FolderMenu(
+                    item: item,
+                    onCreateNote: { model.createNote(in: item.url) },
+                    onCreateFolder: { model.createFolder(in: item.url) },
+                    onRename: { _ = model.rename(item) },
+                    onLeave: { dismiss() },
+                    showsPin: false
+                )
+            }
+        default:
+            pinItem(row)
+        }
+    }
+
+    @ViewBuilder
+    private func noteMenu(_ path: String, row: BarRow) -> some View {
+        pinItem(row)
+        if let item = model.items(for: [path]).first {
+            Divider()
+            // Opening a note from here closes the bar, as choosing its row does.
+            FileMenu(item: item, onOpened: { dismiss() }, showsPin: false)
+        }
+    }
+
+    /// Pin or unpin, first in every row's menu: it is what the bar's pins
+    /// are for, so it leads, plainly named, with the key that does it shown.
+    /// The key is drawn, not bound: a context menu is built as it opens, and
+    /// ⌘D is the bar's own.
+    @ViewBuilder
+    private func pinItem(_ row: BarRow) -> some View {
+        if let pin = model.pin(for: row) {
+            let pinned = model.isPinned(row)
+            Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+                togglePin(pin, keeping: row.id)
+            }
+            .keyboardShortcut("d", modifiers: .command)
+        }
+    }
+
     private func togglePinOfSelection() {
         guard rows.indices.contains(selection), let pin = model.pin(for: rows[selection]) else { return }
         togglePin(pin, keeping: rows[selection].id)
