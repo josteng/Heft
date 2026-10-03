@@ -559,6 +559,22 @@ final class AppModel: ObservableObject {
     /// Nil is the format that makes a link, as it is on the formatting bar.
     @Published private(set) var pendingFormat: PendingFormat?
 
+    /// A list command for the caret's line or the selection, sent through
+    /// the model for the same reason as `pendingFormat`.
+    struct PendingListCommand: Equatable {
+        enum Kind: Equatable { case indent, outdent, bullets, numbers }
+        var kind: Kind
+        var generation: Int
+    }
+
+    @Published private(set) var pendingListCommand: PendingListCommand?
+
+    func runListCommand(_ kind: PendingListCommand.Kind) {
+        pendingListCommand = PendingListCommand(
+            kind: kind, generation: (pendingListCommand?.generation ?? 0) + 1
+        )
+    }
+
     var recentNotes: [NoteRef] {
         (session?.recentPaths ?? [])
             .compactMap { index.note(atRelativePath: $0) }
@@ -2623,6 +2639,20 @@ final class AppModel: ObservableObject {
         pendingInsertion = EditorInsertion(
             text: table.text, caretOffset: table.caretOffset, startsBlock: true,
             generation: (pendingInsertion?.generation ?? 0) + 1
+        )
+    }
+
+    /// Types `> [!` on a line of its own, which opens the callout menu just as
+    /// typing it does, so nobody has to remember the spelling.
+    func insertCallout() {
+        pendingInsertion = Self.callout(generation: (pendingInsertion?.generation ?? 0) + 1)
+    }
+
+    static func callout(generation: Int) -> EditorInsertion {
+        let opener = "> [!"
+        return EditorInsertion(
+            text: opener, caretOffset: (opener as NSString).length,
+            startsBlock: true, generation: generation
         )
     }
 

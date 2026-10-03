@@ -361,6 +361,46 @@ struct AppCommand: Identifiable {
             action: { $0.insertTable() }
         ),
         Self(
+            id: "insertCallout",
+            title: "Insert callout",
+            symbol: "quote.bubble",
+            searchTerms: "callout admonition note tip warning info important quote block insert add",
+            enabled: { $0.current != nil },
+            action: { $0.insertCallout() }
+        ),
+        Self(
+            id: "indentListItem",
+            title: "Indent list item",
+            symbol: "increase.indent",
+            searchTerms: "indent nest deeper list item bullet tab",
+            enabled: { $0.current != nil },
+            action: { $0.runListCommand(.indent) }
+        ),
+        Self(
+            id: "unindentListItem",
+            title: "Unindent list item",
+            symbol: "decrease.indent",
+            searchTerms: "unindent outdent dedent unnest shallower list item bullet",
+            enabled: { $0.current != nil },
+            action: { $0.runListCommand(.outdent) }
+        ),
+        Self(
+            id: "toggleBulletList",
+            title: "Toggle bullet list",
+            symbol: "list.bullet",
+            searchTerms: "bullet list unordered dash markdown toggle",
+            enabled: { $0.current != nil },
+            action: { $0.runListCommand(.bullets) }
+        ),
+        Self(
+            id: "toggleNumberedList",
+            title: "Toggle numbered list",
+            symbol: "list.number",
+            searchTerms: "numbered list ordered numbers markdown toggle",
+            enabled: { $0.current != nil },
+            action: { $0.runListCommand(.numbers) }
+        ),
+        Self(
             id: "dailyNoteSettings",
             title: "Daily note settings",
             symbol: "gearshape",

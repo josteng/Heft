@@ -138,8 +138,12 @@ four-space indented code, raw HTML and entity references;
   finished. **⌘L** advances the selected lines a step, the way Obsidian's
   "Toggle checkbox status" does: a plain line gains an empty box, an empty
   box is ticked, a ticked one is cleared.
+- **List commands** in the palette, named as in Obsidian: *Toggle bullet list*
+  and *Toggle numbered list* over the selected lines, *Indent* and *Unindent
+  list item* on the caret's item, as Tab and ⇧Tab do.
 - **Completion** for `[[` (filenames) and `> [!` (the callout kinds, by any of
-  their Obsidian spellings).
+  their Obsidian spellings). *Insert callout* in the command palette types the
+  `> [!` for you.
 - **Auto-pairing** of `(` `[` `{` and `*` `_`, with two switches matching
   Obsidian's. Typing the closing half steps over the one already there.
 - **Typing substitutions**: `->` becomes an arrow, `--` an en dash, quotes

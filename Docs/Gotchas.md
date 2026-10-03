@@ -162,6 +162,12 @@ preferences or the icon.
 
 ## TextKit and the editing surface
 
+- **Never replace a block of lines whole.** The new text takes the first
+  replaced character's attributes, and a line whose text is unchanged keeps
+  them, because the restyle redoes only what changed: prose under an indented
+  bullet vanished in a tab's hairline font. `applyByLine` replaces only the
+  spans that differ.
+
 - **AppKit draws the caret the height of the empty paragraph's line box, so
   `lineSpacing` on one lands in the caret.** A blank line therefore takes its
   spacing as `paragraphSpacingBefore` and pins `minimum`/`maximumLineHeight`

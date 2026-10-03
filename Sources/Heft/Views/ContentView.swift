@@ -582,6 +582,7 @@ struct EditorPane: View {
                 insertion: model.pendingInsertion,
                 checklistToggle: model.pendingChecklistToggle,
                 format: model.pendingFormat,
+                listCommand: model.pendingListCommand,
                 focusRequest: model.editorFocusRequest,
                 context: context,
                 onAttachment: handleAttachment,

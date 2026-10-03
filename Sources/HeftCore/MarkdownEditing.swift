@@ -254,6 +254,94 @@ public enum MarkdownEditing {
         )
     }
 
+    public enum ListKind: Sendable {
+        case bullet, numbered
+    }
+
+    /// Makes the selected lines a bullet or numbered list, or plain lines
+    /// again when every one already is that kind, as Obsidian's two toggles do.
+    ///
+    /// A checkbox is kept on the way in and leaves with its marker on the way
+    /// out, since a box with no marker in front of it is no task. Numbers
+    /// count from one at each indent, restarting under a shallower item.
+    public static func toggleList(_ kind: ListKind, in source: String, range: NSRange) -> Edit {
+        let text = source as NSString
+        guard range.location != NSNotFound, NSMaxRange(range) <= text.length
+        else { return .nothing(keeping: range) }
+
+        let block = text.lineRange(for: range)
+        var lines: [NSRange] = []
+        var cursor = block.location
+        while cursor < NSMaxRange(block) {
+            let line = text.lineRange(for: NSRange(location: cursor, length: 0))
+            lines.append(line)
+            cursor = NSMaxRange(line)
+            if line.length == 0 { break }
+        }
+        let items = lines.map { line -> ListLine? in
+            let raw = text.substring(with: line)
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : ListLine(raw)
+        }
+        guard items.contains(where: { $0 != nil }) else { return .nothing(keeping: range) }
+
+        func isKind(_ item: ListLine) -> Bool {
+            guard let first = item.marker.first else { return false }
+            return kind == .bullet ? "-*+".contains(first) : first.isNumber
+        }
+        let removing = items.compactMap { $0 }.allSatisfy(isKind)
+
+        // Where each line's marker and box sit, before and after, so the caret
+        // can stay on the same words.
+        var changes: [(start: Int, oldPrefix: Int, newPrefix: Int)] = []
+        var counters: [String: Int] = [:]
+        var replacement = ""
+        for (line, item) in zip(lines, items) {
+            guard let item else {
+                replacement += text.substring(with: line)
+                continue
+            }
+            let prefix: String
+            if removing {
+                prefix = ""
+            } else if kind == .bullet {
+                prefix = (isKind(item) ? item.marker : "- ") + item.checkbox
+            } else {
+                counters = counters.filter { $0.key.count <= item.indent.count }
+                let number = counters[item.indent, default: 0] + 1
+                counters[item.indent] = number
+                prefix = "\(number). " + item.checkbox
+            }
+            replacement += item.indent + prefix + item.body
+            changes.append((
+                start: line.location + (item.indent as NSString).length,
+                oldPrefix: ((item.marker + item.checkbox) as NSString).length,
+                newPrefix: (prefix as NSString).length
+            ))
+        }
+        guard replacement != text.substring(with: block) else { return .nothing(keeping: range) }
+
+        func moved(_ position: Int) -> Int {
+            var shift = 0
+            for change in changes {
+                if position >= change.start + change.oldPrefix {
+                    shift += change.newPrefix - change.oldPrefix
+                } else if position > change.start {
+                    // Inside a marker that changed: just after the new one.
+                    return change.start + shift + change.newPrefix
+                } else {
+                    break
+                }
+            }
+            return position + shift
+        }
+        let start = moved(range.location)
+        return Edit(
+            range: block,
+            replacement: replacement,
+            selection: NSRange(location: start, length: max(0, moved(NSMaxRange(range)) - start))
+        )
+    }
+
     /// Where a character position ends up once the lines above it have grown.
     ///
     /// A position shifts by a line's growth only when it sits at or after the

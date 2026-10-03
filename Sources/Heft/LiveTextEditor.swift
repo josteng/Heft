@@ -70,6 +70,7 @@ struct LiveTextEditor: NSViewRepresentable {
     /// A format the palette asked for, which cannot be sent down the
     /// responder chain while the palette holds the keyboard.
     var format: AppModel.PendingFormat? = nil
+    var listCommand: AppModel.PendingListCommand? = nil
     /// Changes when the model asks the editor to take the keyboard.
     var focusRequest: Int = 0
     let context: RenderContext
@@ -229,32 +230,40 @@ struct LiveTextEditor: NSViewRepresentable {
         // published like any other change, so `text` already matches the view.
         guard !textView.hasMarkedText() else { return }
 
+        // An edit made below is newer than `text`, which holds the binding's
+        // value from before this pass. Compared against it at the end, the
+        // edit was undone, and only came back, caret lost and completion
+        // closed, on the next publish.
+        var editedHere = false
+
         if let insertion,
            nsContext.coordinator.lastInsertionGeneration != insertion.generation {
             nsContext.coordinator.lastInsertionGeneration = insertion.generation
-            let lead = insertion.startsBlock
-                ? String(repeating: "\n", count: TableEditing.newlinesNeededForBlock(
-                    in: textView.string as NSString, at: textView.selectedRange().location
-                ))
-                : ""
-            let typed = lead + insertion.text
-            textView.insertText(typed, replacementRange: textView.selectedRange())
-            let caret = textView.selectedRange().location
-                - (typed as NSString).length + lead.count + insertion.caretOffset
-            textView.setSelectedRange(NSRange(location: max(0, caret), length: 0))
+            textView.type(insertion)
             nsContext.coordinator.restyle(textView)
+            editedHere = true
         }
 
         if let format, format != nsContext.coordinator.lastFormat {
             nsContext.coordinator.lastFormat = format
             textView.applyFormat(format.format)
+            editedHere = true
+        }
+
+        if let listCommand, listCommand != nsContext.coordinator.lastListCommand {
+            nsContext.coordinator.lastListCommand = listCommand
+            textView.runListCommand(listCommand.kind)
+            editedHere = true
         }
 
         if checklistToggle != nsContext.coordinator.lastChecklistToggle {
             nsContext.coordinator.lastChecklistToggle = checklistToggle
             // Zero is the value a fresh editor starts at, so it is not a
             // request: it would convert the note the moment one was opened.
-            if checklistToggle > 0 { textView.formatChecklist() }
+            if checklistToggle > 0 {
+                textView.formatChecklist()
+                editedHere = true
+            }
         }
 
         if focusRequest != nsContext.coordinator.lastFocusRequest {
@@ -317,7 +326,7 @@ struct LiveTextEditor: NSViewRepresentable {
                 textView.scrollToDocumentTop()
             }
             nsContext.coordinator.restyle(textView)
-        } else if textView.string != text {
+        } else if !editedHere, textView.string != text {
             let selection = textView.selectedRange()
             nsContext.coordinator.load(text, into: textView)
             textView.setSelectedRange(NSRange(
@@ -389,6 +398,7 @@ struct LiveTextEditor: NSViewRepresentable {
         var lastInsertionGeneration = -1
         var lastChecklistToggle = 0
         var lastFormat: AppModel.PendingFormat?
+        var lastListCommand: AppModel.PendingListCommand?
         /// How far the text has moved since the widgets were computed.
         ///
         /// Only ever non-nil in the window between a storage edit and the
@@ -1646,6 +1656,38 @@ final class HeftTextKit2View: NSTextView {
             if vimEnabled { dismissLinkCompletion() }
             updateVimCursor()
         }
+    }
+
+    /// Types a command's text at the caret as if typed by hand, which with
+    /// Vim on means in insert mode: left in normal mode, the next key went to
+    /// Vim, and the callout menu that `> [!` opens closed on it.
+    func type(_ insertion: EditorInsertion) {
+        if vimEnabled, vimEngine.mode != .insert {
+            if insertion.startsBlock {
+                // A Normal-mode cursor is a character, not a gap, so a block
+                // goes below its line, as `o` opens one, rather than
+                // splitting the line before that character.
+                let text = string as NSString
+                let line = text.lineRange(for: NSRange(location: min(selectedRange().location, text.length), length: 0))
+                setSelectedRange(NSRange(location: NSMaxRange(Self.lineContentRange(line, in: text)), length: 0))
+            }
+            vimEngine.reset(mode: .insert)
+            vimPreferredX = nil
+            vimPendingRepeatKeys = []
+            vimInsertBaseline = (string, selectedRange().location)
+            VimSettings.shared.report(mode: .insert)
+        }
+        let lead = insertion.startsBlock
+            ? String(repeating: "\n", count: TableEditing.newlinesNeededForBlock(
+                in: string as NSString, at: selectedRange().location
+            ))
+            : ""
+        let typed = lead + insertion.text
+        insertText(typed, replacementRange: selectedRange())
+        let caret = selectedRange().location
+            - (typed as NSString).length + lead.count + insertion.caretOffset
+        setSelectedRange(NSRange(location: max(0, caret), length: 0))
+        updateVimCursor()
     }
 
     func resetVim() {
@@ -3295,7 +3337,74 @@ final class HeftTextKit2View: NSTextView {
     /// A block command rather than an inline one, so it goes through its own
     /// entry point instead of `InlineFormat`.
     @objc func formatChecklist() {
-        apply(MarkdownEditing.toggleChecklist(in: string, range: selectedRange()))
+        applyByLine(MarkdownEditing.toggleChecklist(in: string, range: selectedRange()))
+    }
+
+    /// Indenting works on the caret's item, as Tab does; the toggles on every
+    /// selected line.
+    func runListCommand(_ kind: AppModel.PendingListCommand.Kind) {
+        // A list's shape is drawn, not styled.
+        defer { restyleNow() }
+        switch kind {
+        case .indent: _ = adjustListIndent(outdent: false)
+        case .outdent: _ = adjustListIndent(outdent: true)
+        case .bullets: applyByLine(MarkdownEditing.toggleList(.bullet, in: string, range: selectedRange()))
+        case .numbers: applyByLine(MarkdownEditing.toggleList(.numbered, in: string, range: selectedRange()))
+        }
+    }
+
+    /// Puts a planned edit over several lines into the buffer as only the
+    /// spans that differ, one change and one undo step.
+    ///
+    /// Replaced whole, every character in the block took the attributes of
+    /// the first one, and a line whose text had not changed kept them, since
+    /// the restyle redoes only what changed: prose under a bullet took the
+    /// bullet's indent, and under a second indent the tab's hairline font,
+    /// and vanished.
+    private func applyByLine(_ edit: MarkdownEditing.Edit) {
+        guard !edit.isEmpty else { return }
+        let old = (string as NSString).substring(with: edit.range).components(separatedBy: "\n")
+        let new = edit.replacement.components(separatedBy: "\n")
+        guard old.count == new.count else {
+            apply(edit)
+            return
+        }
+        var ranges: [NSValue] = []
+        var replacements: [String] = []
+        var lineStart = edit.range.location
+        for (before, after) in zip(old, new) {
+            let was = before as NSString
+            let now = after as NSString
+            if before != after {
+                var prefix = 0
+                while prefix < was.length, prefix < now.length,
+                      was.character(at: prefix) == now.character(at: prefix) { prefix += 1 }
+                var suffix = 0
+                while suffix < was.length - prefix, suffix < now.length - prefix,
+                      was.character(at: was.length - 1 - suffix) == now.character(at: now.length - 1 - suffix) {
+                    suffix += 1
+                }
+                ranges.append(NSValue(range: NSRange(
+                    location: lineStart + prefix, length: was.length - prefix - suffix
+                )))
+                replacements.append(now.substring(with: NSRange(
+                    location: prefix, length: now.length - prefix - suffix
+                )))
+            }
+            lineStart += was.length + 1
+        }
+        guard !ranges.isEmpty else {
+            setSelectedRange(edit.selection)
+            return
+        }
+        guard shouldChangeText(inRanges: ranges, replacementStrings: replacements) else { return }
+        textStorage?.beginEditing()
+        for (range, replacement) in zip(ranges, replacements).reversed() {
+            textStorage?.replaceCharacters(in: range.rangeValue, with: replacement)
+        }
+        textStorage?.endEditing()
+        didChangeText()
+        setSelectedRange(edit.selection)
     }
 
     func applyFormat(_ format: InlineFormat?) {
@@ -3548,11 +3657,11 @@ final class HeftTextKit2View: NSTextView {
         let selection = selectedRange()
         let location = min(selection.location, source.length)
         let line = source.lineRange(for: NSRange(location: location, length: 0))
+        if NSMaxRange(selection) > NSMaxRange(line) {
+            return adjustListIndent(spanning: selection, outdent: outdent)
+        }
         let value = source.substring(with: line)
-        guard value.range(
-            of: #"^[ \t]*([-*+]|\d+[.)])[ \t]+(\[[ xX]\][ \t]+)?"#,
-            options: .regularExpression
-        ) != nil else { return false }
+        guard Self.isListItem(value) else { return false }
 
         let leading = value.prefix { $0 == " " || $0 == "\t" }
         let depth = Self.listDepth(of: value)
@@ -3610,6 +3719,60 @@ final class HeftTextKit2View: NSTextView {
         setSelectedRange(NSRange(
             location: max(line.location, selection.location + delta),
             length: selection.length
+        ))
+        return true
+    }
+
+    private static func isListItem(_ line: String) -> Bool {
+        line.range(of: #"^[ \t]*([-*+]|\d+[.)])[ \t]+(\[[ xX]\][ \t]+)?"#, options: .regularExpression) != nil
+    }
+
+    /// Every item in a selection over several lines moves one level, in one
+    /// undoable step, by the same rule as a single item. Other lines stay.
+    private func adjustListIndent(spanning selection: NSRange, outdent: Bool) -> Bool {
+        let source = string as NSString
+        let block = source.lineRange(for: selection)
+        var replacement = ""
+        var firstDelta = 0
+        var totalDelta = 0
+        var anyItem = false
+        var cursor = block.location
+        while cursor < NSMaxRange(block) {
+            let line = source.lineRange(for: NSRange(location: cursor, length: 0))
+            cursor = NSMaxRange(line)
+            let value = source.substring(with: line)
+            guard Self.isListItem(value) else {
+                replacement += value
+                continue
+            }
+            anyItem = true
+            let leading = value.prefix { $0 == " " || $0 == "\t" }
+            let depth = Self.listDepth(of: value)
+            let newDepth = outdent ? max(0, depth - 1) : depth + 1
+            let newLeading: String
+            if newDepth == depth {
+                newLeading = String(leading)
+            } else if leading.allSatisfy({ $0 == "\t" }) {
+                newLeading = outdent ? String(leading.dropLast()) : leading + "\t"
+            } else {
+                newLeading = String(repeating: "\t", count: newDepth)
+            }
+            let delta = newLeading.utf16.count - leading.utf16.count
+            if line.location == block.location { firstDelta = delta }
+            totalDelta += delta
+            replacement += newLeading + value.dropFirst(leading.count)
+        }
+        guard anyItem else { return false }
+        guard replacement != source.substring(with: block) else { return true }
+
+        // As for one item: undo puts the selection back once the lines are.
+        undoManager?.registerUndo(withTarget: self) { view in
+            view.setSelectedRange(selection)
+        }
+        let start = max(block.location, selection.location + firstDelta)
+        applyByLine(MarkdownEditing.Edit(
+            range: block, replacement: replacement,
+            selection: NSRange(location: start, length: max(0, NSMaxRange(selection) + totalDelta - start))
         ))
         return true
     }
