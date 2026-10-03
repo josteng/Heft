@@ -2629,8 +2629,14 @@ final class HeftTextKit2View: NSTextView {
     /// elsewhere: that is `super`'s answer to give, and overriding it would
     /// take the hand off links.
     override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
         let point = convert(event.locationInWindow, from: nil)
+        // `super` puts up the I-beam on every move, and over the menu that
+        // alternated with the arrow set after it: a flicker.
+        if isOverCompletionMenu(point) {
+            NSCursor.arrow.set()
+            return
+        }
+        super.mouseMoved(with: event)
         let rects = pointerRects()
         let cursor = cursorOverride(at: point, among: rects)
         cursor?.set()
@@ -2643,9 +2649,20 @@ final class HeftTextKit2View: NSTextView {
     /// a flicker. Only the bar is answered here; the hand keeps to
     /// `mouseMoved`, which is where it was proven.
     override func cursorUpdate(with event: NSEvent) {
-        super.cursorUpdate(with: event)
         let point = convert(event.locationInWindow, from: nil)
+        if isOverCompletionMenu(point) {
+            NSCursor.arrow.set()
+            return
+        }
+        super.cursorUpdate(with: event)
         if isOverFormatBar(point) { NSCursor.arrow.set() }
+    }
+
+    /// The completion menu is a subview too, and is a menu: the arrow, not
+    /// the I-beam of the text under it.
+    private func isOverCompletionMenu(_ point: CGPoint) -> Bool {
+        guard let panel = completionPanel, !panel.listRect.isEmpty else { return false }
+        return panel.convert(panel.listRect, to: self).contains(point)
     }
 
     private func isOverFormatBar(_ point: CGPoint) -> Bool {
@@ -2658,7 +2675,7 @@ final class HeftTextKit2View: NSTextView {
     /// The formatting bar is a subview, so `super` answered for it too and
     /// showed the I-beam over its buttons. Buttons take the arrow.
     func cursorOverride(at point: CGPoint, among rects: [CGRect]) -> NSCursor? {
-        if isOverFormatBar(point) { return .arrow }
+        if isOverFormatBar(point) || isOverCompletionMenu(point) { return .arrow }
         return pointerTarget(at: point, among: rects) != nil ? .pointingHand : nil
     }
 

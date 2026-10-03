@@ -456,28 +456,29 @@ enum AppIntegrationCheck {
             expect(false, "a divergent note produces a reviewable conflict")
         }
 
-        // A completion row must give the folder hint the width the field
-        // actually needs. Four points short is enough for AppKit to render
-        // "Daily" as "…ily", which tells the reader less than nothing.
+        // A completion row must give the folder hint the width the text
+        // actually needs. A few points short renders "Daily" as "…ily", which
+        // tells the reader less than nothing.
         if let hintRef = NoteRef(
             url: root.appendingPathComponent("Daily/2026-09-02.md"), vaultRoot: root
         ) {
-            let row = WikiCompletionRow(
-                item: WikiCompletionItem(ref: hintRef, destination: "x"), selected: false
-            )
+            var columns: CompletionColumns.Split = (0, 0)
+            let row = NSHostingView(rootView: WikiCompletionRowView(
+                item: WikiCompletionItem(ref: hintRef, destination: "x"), selected: false,
+                accent: .accentColor, onColumns: { columns = $0 }
+            ))
             row.frame = NSRect(x: 0, y: 0, width: 382, height: 34)
             row.layoutSubtreeIfNeeded()
-            let reference = NSTextField(labelWithString: hintRef.folder)
-            reference.font = .systemFont(ofSize: 11)
-            let needed = reference.cell?.cellSize.width ?? 0
+            let reference = NSHostingView(rootView: Text(hintRef.folder).font(.system(size: 11)))
+            let needed = reference.fittingSize.width
             expect(hintRef.folder == "Daily", "the hint row is measuring a real folder")
             expect(needed > 0, "the folder hint has a measurable width")
             expect(
-                row.measuredColumns.detail >= needed,
+                columns.detail >= needed,
                 "a completion row shows the whole folder, not a truncated fragment"
             )
             expect(
-                row.measuredColumns.title > 200,
+                columns.title > 200,
                 "the folder hint does not crowd out the note name"
             )
         } else {
