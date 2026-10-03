@@ -118,4 +118,14 @@ struct InspectorLayoutTests {
                                       start: .first).offering { $0 != .chats }
         #expect(neither.visible == [.backlinks])
     }
+
+    @Test("The last view ticked keeps its box")
+    func lastTicked() {
+        let both = InspectorLayout.standard
+        #expect(!PanelLayoutRows.isLastShown(.backlinks, in: both))
+        var onlyAsk = both
+        onlyAsk.entries[0].isShown = false
+        #expect(PanelLayoutRows.isLastShown(.chats, in: onlyAsk))
+        #expect(!PanelLayoutRows.isLastShown(.backlinks, in: onlyAsk), "already off")
+    }
 }

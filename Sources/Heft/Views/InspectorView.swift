@@ -13,18 +13,20 @@ enum InspectorMode: String, PanelMode {
     var title: String {
         switch self {
         case .backlinks: "Backlinks"
-        case .chats: "Chats"
+        // Ask, as in the bar and in Settings: one name for the feature, and
+        // "chat" only for one conversation in it. Stored as `chats`.
+        case .chats: "Ask"
         }
     }
 
     var symbol: String {
         switch self {
         case .backlinks: "link"
-        case .chats: "bubble.left.and.text.bubble.right"
+        case .chats: BarScope.ask.symbol
         }
     }
 
-    /// Chats only while Ask is turned on.
+    /// Ask only while it is turned on.
     @MainActor var isAvailable: Bool { self != .chats || BarScope.asksAgent }
 }
 
@@ -42,11 +44,11 @@ extension PanelLayout {
 }
 
 extension PanelLayout where Mode == InspectorMode {
-    /// What the right side can show: Chats leaves while Ask is off.
+    /// What the right side can show: Ask leaves while it is off.
     @MainActor var usable: Self { offering { $0.isAvailable } }
 }
 
-/// The right sidebar: Backlinks, and Chats with the agent beside the note
+/// The right sidebar: Backlinks, and Ask with its chats beside the note
 /// they are about.
 struct InspectorView: View {
     @EnvironmentObject private var model: AppModel
@@ -61,7 +63,7 @@ struct InspectorView: View {
         VStack(spacing: 0) {
             // Hidden when one view is all there is, as on the left.
             if layout.visible.count > 1 {
-                SegmentedModePicker(mode: $mode, modes: layout.visible, drawsAsSidebar: true)
+                SegmentedModePicker(mode: $mode, modes: layout.visible, hasEqualSegments: true)
                     .frame(height: 20)
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
@@ -89,77 +91,170 @@ struct InspectorView: View {
     }
 }
 
-/// Chats with the agent: the list of them, or the one open, with a field
-/// under it to ask or reply in.
+/// A chat with the agent, the open one or an empty one, with a field under
+/// it to ask or reply in, and its title a menu of the others.
 ///
 /// The same chat the search bar has open, from the same runner: a question
 /// asked in ⌘T carries on here, beside the note it changes.
 struct ChatsPanel: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var runner: AgentRunner
+    @ObservedObject private var settings = GeneralSettings.shared
     @State private var draft = ""
-    @FocusState private var fieldFocused: Bool
+    /// Bumped by New Chat, to put the keyboard in the field.
+    @State private var focusRequest = 0
+    /// A file dragged over the view, which takes it anywhere: the field is
+    /// at the bottom, out of reach of a drag from the Dock.
+    @State private var isDropTarget = false
+    /// The chats in the chat's place, opened from the title.
+    @State private var showsHistory = false
 
     /// Where a new chat reads: the window's focused folder, or the vault.
     private var newChatScope: String { model.scopePath ?? "" }
 
     var body: some View {
+        // Chat first: the view is always a chat, an empty one when nothing
+        // is open. Its title opens the others in its place, and + starts a
+        // new one: no menu, and nothing opening out of one.
         VStack(spacing: 0) {
-            if let chat = runner.chat {
-                header(chat)
-                Divider()
-                AgentConversationView(runner: runner, onLeave: {})
-            } else {
-                chatList
-            }
+            header
             Divider()
-            field
+            if showsHistory {
+                ChatHistory(runner: runner, current: runner.chat?.id, open: open, close: { showsHistory = false }) {
+                    chatMenu($0)
+                }
+            } else {
+                if runner.chat != nil {
+                    AgentConversationView(runner: runner, onLeave: {})
+                } else {
+                    emptyChat
+                }
+                Divider()
+                field
+            }
         }
-        .onAppear { runner.load(vaultRoot: model.vaultRoot) }
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(.tint, lineWidth: 2)
+                    .padding(3)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTarget) { providers in
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
+                    Task { @MainActor in addDropped(url) }
+                }
+            }
+            return true
+        }
+        .onAppear {
+            runner.load(vaultRoot: model.vaultRoot)
+            takeAskInsert()
+        }
+        .onChange(of: model.askInsertRequest) { takeAskInsert() }
     }
 
-    private func header(_ chat: AgentChat) -> some View {
-        HStack(spacing: 6) {
-            Button { runner.close() } label: {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.borderless)
-            .help("All chats")
-            Text(chat.title)
+    /// Ask About's item, into the field with the caret after it.
+    private func takeAskInsert() {
+        guard let text = model.askInsertRequest else { return }
+        model.askInsertRequest = nil
+        showsHistory = false
+        draft = AppModel.appending(text, to: draft)
+        focusRequest += 1
+    }
+
+    /// A dropped file's path, added to what is being written, as the bar
+    /// adds it.
+    private func addDropped(_ url: URL) {
+        draft = AppModel.appending(model.askText(forDropped: url), to: draft)
+        focusRequest += 1
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(showsHistory ? "Chats" : runner.chat.map { AnswerText.shownTitle($0.title) } ?? "New chat")
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .help(chat.title)
+                .help(runner.chat?.title ?? "")
+                // The open chat's own menu, as its row in the history has
+                // it; deleting it leaves a new chat in its place.
+                .contextMenu {
+                    if let chat = runner.chat, !showsHistory { chatMenu(chat) }
+                }
             Spacer(minLength: 4)
+            // A button for the history rather than the title: a title with
+            // a chevron promised a menu and opened a panel.
+            headerButton(showsHistory ? "xmark" : "clock.arrow.circlepath",
+                         help: showsHistory ? "Back to the chat" : "Chats") { showsHistory.toggle() }
+            headerButton("plus", help: "New chat") {
+                runner.close()
+                showsHistory = false
+                focusRequest += 1
+            }
         }
+        .frame(minHeight: 28)
         .padding(.horizontal, 10)
         // Clear of the switch above, which it would otherwise read as part of.
-        .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 6)
     }
 
-    private var chatList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 1) {
-                if runner.chats.isEmpty {
-                    Text("No chats yet. Ask about your notes below, or with ⌘T.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                }
-                ForEach(runner.chats) { chat in
-                    ChatListRow(chat: chat, isAnswering: runner.isRunning(chat.id)) {
-                        runner.open(chat)
-                        model.recordChatUse(chat.id)
+    private func open(_ chat: AgentChat) {
+        runner.open(chat)
+        model.recordChatUse(chat.id)
+        showsHistory = false
+    }
+
+    /// A plain icon button, grey like the view's other marks, lit under the
+    /// pointer. Glass circles stood out beside the left's, and out of the
+    /// sidebar's glass they drew their icon off centre.
+    private func headerButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        HeaderIconButton(symbol: symbol, help: help, action: action)
+    }
+
+
+    /// An empty chat: things to ask at the bottom, beside the field they
+    /// go into, until the first question. Not generated, so they are there
+    /// at once and the same every time; off in Settings ▸ Ask.
+    private var emptyChat: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Spacer(minLength: 0)
+            if settings.suggestsQuestions {
+                sectionTitle("Try")
+                ForEach(Self.suggestions(note: model.current?.name), id: \.self) { question in
+                    SuggestionButton(text: question) {
+                        model.startChat(question, scope: newChatScope)
                     }
-                    .contextMenu { chatMenu(chat) }
                 }
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
         }
-        .frame(maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+    }
+
+    static func suggestions(note: String?) -> [String] {
+        var questions: [String] = []
+        if let note {
+            questions.append("What is \u{201C}\(note)\u{201D} about?")
+            questions.append("Which notes relate to \u{201C}\(note)\u{201D}?")
+        }
+        questions.append("What have I been working on lately?")
+        questions.append("Which tasks are still open?")
+        return questions
     }
 
     @ViewBuilder
@@ -176,17 +271,26 @@ struct ChatsPanel: View {
     }
 
     private var field: some View {
-        HStack(alignment: .bottom, spacing: 6) {
-            TextField(
-                runner.chat == nil
+        // Centred, so the placeholder and the button share a middle; along
+        // the bottom the text sat lower than the button.
+        HStack(alignment: .center, spacing: 6) {
+            // The bar's own field at the sidebar's size: it grows to eight
+            // lines, then scrolls under a fade, as ⌘T's does.
+            BarField(
+                text: $draft,
+                placeholder: runner.chat == nil
                     ? (newChatScope.isEmpty ? "Ask about your notes" : "Ask about \(model.scopeName)")
                     : "Reply",
-                text: $draft, axis: .vertical
+                onSubmit: send,
+                onMove: { _ in },
+                onCancel: {},
+                onTab: { true },
+                onBackspaceWhenEmpty: { false },
+                selectAllRequest: 0,
+                metrics: .sidebar,
+                focusRequest: focusRequest,
+                focusesOnAppear: false
             )
-            .textFieldStyle(.plain)
-            .lineLimit(1...8)
-            .focused($fieldFocused)
-            .onSubmit(send)
             Button(action: send) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 18))
@@ -197,7 +301,6 @@ struct ChatsPanel: View {
             .help(runner.chat == nil ? "Ask" : "Reply")
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
     }
 
     private var canSend: Bool {
@@ -212,7 +315,148 @@ struct ChatsPanel: View {
         } else if model.replyToChat(draft, newChatScope: newChatScope) {
             draft = ""
         }
-        fieldFocused = true
+    }
+}
+
+/// Every chat in the chat's place: a filter on top, then the chats by when
+/// they were last answered. Right-click renames or deletes one; Esc in the
+/// filter goes back to the chat.
+struct ChatHistory<RowMenu: View>: View {
+    @ObservedObject var runner: AgentRunner
+    let current: String?
+    let open: (AgentChat) -> Void
+    let close: () -> Void
+    @ViewBuilder let rowMenu: (AgentChat) -> RowMenu
+    @State private var filter = ""
+    @FocusState private var filterFocused: Bool
+
+    private var groups: [(title: String, chats: [AgentChat])] {
+        let query = filter.trimmingCharacters(in: .whitespaces)
+        let chats = query.isEmpty ? runner.chats
+            : runner.chats.filter { $0.title.localizedCaseInsensitiveContains(query) }
+        return Self.grouped(chats)
+    }
+
+    /// Today, Yesterday, the week before and the rest, as Recent groups
+    /// notes; empty groups are left out.
+    static func grouped(_ chats: [AgentChat], now: Date = Date(), calendar: Calendar = .current) -> [(title: String, chats: [AgentChat])] {
+        let today = calendar.startOfDay(for: now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let week = calendar.date(byAdding: .day, value: -7, to: today)!
+        let buckets: [(String, (Date) -> Bool)] = [
+            ("Today", { $0 >= today }),
+            ("Yesterday", { $0 >= yesterday && $0 < today }),
+            ("Previous 7 Days", { $0 >= week && $0 < yesterday }),
+            ("Earlier", { $0 < week }),
+        ]
+        return buckets.compactMap { title, contains in
+            let found = chats.filter { contains($0.updatedAt) }
+            return found.isEmpty ? nil : (title, found)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Filter chats", text: $filter)
+                    .textFieldStyle(.plain)
+                    .focused($filterFocused)
+                    .onExitCommand(perform: close)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(Color.primary.opacity(0.06), in: .capsule)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    if groups.isEmpty {
+                        Text(runner.chats.isEmpty ? "No chats yet." : "No chat is called that.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                    }
+                    ForEach(groups, id: \.title) { group in
+                        Text(group.title.uppercased())
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 8)
+                            .padding(.bottom, 2)
+                        ForEach(group.chats) { chat in
+                            ChatListRow(chat: chat, isAnswering: runner.isRunning(chat.id), isCurrent: chat.id == current) {
+                                open(chat)
+                            }
+                            .contextMenu { rowMenu(chat) }
+                        }
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 8)
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .onAppear { filterFocused = true }
+    }
+}
+
+/// An icon in a header, as a button: the symbol in grey, a soft circle
+/// behind it under the pointer, centred by SwiftUI.
+private struct HeaderIconButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(isHovering ? AnyShapeStyle(Color.primary.opacity(0.08)) : AnyShapeStyle(.clear)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// A question to ask with one click, lit under the pointer.
+private struct SuggestionButton: View {
+    let text: String
+    let ask: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: ask) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: BarScope.ask.symbol)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                // Two lines at most, never its full height: fixed to it,
+                // outside a scroll view, its height measured at no width
+                // was a letter a line, and the window grew to the screen.
+                Text(text)
+                    .font(.system(size: 12))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isHovering ? AnyShapeStyle(Color.primary.opacity(0.06)) : AnyShapeStyle(.clear))
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -220,14 +464,15 @@ struct ChatsPanel: View {
 private struct ChatListRow: View {
     let chat: AgentChat
     let isAnswering: Bool
+    var isCurrent = false
     let open: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(chat.title)
-                    .font(.system(size: 12))
+                Text(AnswerText.shownTitle(chat.title))
+                    .font(.system(size: 12, weight: isCurrent ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(isAnswering ? "Answering…" : chat.updatedAt.formatted(.relative(presentation: .named)))
@@ -239,11 +484,13 @@ private struct ChatListRow: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovering ? AnyShapeStyle(Color.primary.opacity(0.06)) : AnyShapeStyle(.clear))
+                    .fill(isCurrent ? AnyShapeStyle(Color.primary.opacity(0.1))
+                        : isHovering ? AnyShapeStyle(Color.primary.opacity(0.06)) : AnyShapeStyle(.clear))
             )
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .help(chat.title)
     }
 }

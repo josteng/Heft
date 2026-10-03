@@ -107,6 +107,13 @@ final class GeneralSettings: ObservableObject {
     }
     static let namesChatsKey = "dev.stenglein.Heft.agent.namesChats"
 
+    /// Whether an empty chat in the right sidebar offers questions to ask
+    /// about what is open. On by default.
+    @Published var suggestsQuestions: Bool {
+        didSet { HeftDefaults.shared.set(suggestsQuestions, forKey: Self.suggestsQuestionsKey) }
+    }
+    static let suggestsQuestionsKey = "dev.stenglein.Heft.agent.suggestsQuestions"
+
     /// Whether renaming a note offers names Apple's on-device model
     /// suggests from what is in it, as Finder does. On by default.
     @Published var suggestsNames: Bool {
@@ -140,6 +147,8 @@ final class GeneralSettings: ObservableObject {
             || HeftDefaults.shared.bool(forKey: Self.suggestsNamesKey)
         namesChats = HeftDefaults.shared.object(forKey: Self.namesChatsKey) == nil
             || HeftDefaults.shared.bool(forKey: Self.namesChatsKey)
+        suggestsQuestions = HeftDefaults.shared.object(forKey: Self.suggestsQuestionsKey) == nil
+            || HeftDefaults.shared.bool(forKey: Self.suggestsQuestionsKey)
         askFirst = HeftDefaults.shared.string(forKey: Self.askFirstKey)
             .flatMap(AskFirst.init(rawValue:)) ?? .forQuestions
         agentCommand = HeftDefaults.shared.string(forKey: Self.agentCommandKey)
@@ -319,12 +328,21 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                PanelLayoutRows(
-                    layout: $settings.inspectorLayout, shortcutPrefix: "⌥⌘", shortcutCount: 2,
-                    isAvailable: { $0.isAvailable },
-                    unavailableHelp: "Chats show while Ask is on, in Settings ▸ Ask",
-                    opensOnDetail: "The view a new window's right sidebar starts in. ⌥⌘0 shows and hides it."
-                )
+                // With Ask off there is one view and nothing to arrange; a
+                // list with Ask ticked but off, and Backlinks unticked but
+                // showing, said the opposite of what the sidebar did.
+                if settings.asksAgent {
+                    PanelLayoutRows(
+                        layout: $settings.inspectorLayout, shortcutPrefix: "⌥⌘", shortcutCount: 2,
+                        opensOnDetail: "The view a new window's right sidebar starts in. ⌥⌘0 shows and hides it."
+                    )
+                } else {
+                    Text("Ask is off, so the right sidebar shows Backlinks. Turn Ask on in Settings ▸ Ask "
+                        + "to have both, and choose their order here.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } header: {
                 SectionHeading(
                     "Right Sidebar",
@@ -344,42 +362,39 @@ struct PanelLayoutRows<Mode: PanelMode>: View {
     /// The shortcut's modifiers as shown before its number: ⌘ or ⌥⌘.
     let shortcutPrefix: String
     let shortcutCount: Int
-    /// Whether a view can be shown right now; one that cannot keeps its
-    /// place and its box, dimmed, until it can.
-    var isAvailable: (Mode) -> Bool = { _ in true }
-    var unavailableHelp = ""
     let opensOnDetail: String
     private static var rowHeight: CGFloat { 32 }
 
+    /// Whether `mode` is the last view ticked, which stays: a side with none
+    /// would be an empty column.
+    static func isLastShown(_ mode: Mode, in layout: PanelLayout<Mode>) -> Bool {
+        layout.entries.contains { $0.mode == mode && $0.isShown } && !layout.canHide(mode)
+    }
+
     var body: some View {
-        let usable = layout.offering(isAvailable)
         List {
             ForEach(Array(layout.entries.enumerated()), id: \.element.id) { index, entry in
-                let available = isAvailable(entry.mode)
                 HStack(spacing: 10) {
                     // The handle says the row drags, as in the other
                     // ordered lists here.
                     Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-                    let isLast = entry.isShown && available && !usable.canHide(entry.mode)
+                    let isLast = Self.isLastShown(entry.mode, in: layout)
+                    // The last one ticked stays ticked, unticking it does
+                    // nothing, and it looks like the others: disabled, it
+                    // read as switched off along with everything else.
                     Toggle("", isOn: Binding(
                         get: { entry.isShown },
-                        set: { layout.entries[index].isShown = $0 }
+                        set: { if $0 || !isLast { layout.entries[index].isShown = $0 } }
                     ))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
-                    // The last view shown stays: a side with none would be
-                    // an empty column. Only the box is disabled, so the
-                    // view's name does not dim as if it were the one
-                    // switched off.
-                    .disabled(isLast || !available)
-                    .help(!available ? unavailableHelp : isLast ? "At least one view stays in the sidebar" : "")
+                    .help(isLast ? "At least one view stays in the sidebar" : "")
                     Label(entry.mode.title, systemImage: entry.mode.symbol)
-                        .foregroundStyle(entry.isShown && available ? .primary : .secondary)
-                        .help(available ? "" : unavailableHelp)
+                        .foregroundStyle(entry.isShown ? .primary : .secondary)
                     Spacer()
                     // No number with one view: there is nothing to switch to.
-                    if let number = usable.visible.firstIndex(of: entry.mode),
-                       entry.isShown, available, number < shortcutCount, usable.visible.count > 1 {
+                    if let number = layout.visible.firstIndex(of: entry.mode),
+                       entry.isShown, number < shortcutCount, layout.visible.count > 1 {
                         Text("\(shortcutPrefix)\(number + 1)").foregroundStyle(.secondary).monospacedDigit()
                     }
                 }
@@ -395,7 +410,7 @@ struct PanelLayoutRows<Mode: PanelMode>: View {
         .alternatingRowBackgrounds()
 
         // With one view there is nothing to open on but it.
-        if usable.visible.count > 1 {
+        if layout.visible.count > 1 {
             Picker(selection: $layout.start) {
                 ForEach(PanelLayout<Mode>.Start.allCases.prefix(2)) { Text($0.title).tag($0) }
                 Divider()

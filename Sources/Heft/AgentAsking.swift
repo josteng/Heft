@@ -28,6 +28,50 @@ extension AppModel {
         return true
     }
 
+    /// What a file dropped on Ask writes into the question: a note in the
+    /// vault as its wikilink, as notes are named everywhere here, and with
+    /// its folder only when the name alone is not unique; anything else as
+    /// its path, which the agent needs to read it.
+    func askText(forDropped url: URL) -> String {
+        if let vaultRoot, let note = NoteRef(url: url, vaultRoot: vaultRoot), url.pathExtension == "md" {
+            let sameName = index.notes.filter { $0.name.caseInsensitiveCompare(note.name) == .orderedSame }
+            let target = sameName.count > 1 ? String(note.relativePath.dropLast(3)) : note.name
+            return "[[\(target)]]"
+        }
+        return url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+    }
+
+    /// Ask About, from a file's or folder's menu: the right sidebar on Ask,
+    /// with the item added to what is being written there and the caret
+    /// after it, as a drop would add it.
+    func askAbout(_ url: URL) {
+        askInsertRequest = askText(forDropped: url)
+        showInspector(.chats)
+    }
+
+    /// Where a link in a chat leads, as a vault item: a note by its name,
+    /// a folder or file by its path in the vault. Nil for anything outside.
+    func vaultItem(forLink url: URL) -> VaultItem? {
+        if url.scheme == AnswerText.noteScheme {
+            let name = url.host(percentEncoded: false) ?? ""
+            let target = name.removingPercentEncoding ?? name
+            if let note = VaultIndex.match(target, among: index.notes) {
+                return items(for: [note.relativePath]).first
+            }
+            return items(for: [target.trimmingCharacters(in: CharacterSet(charactersIn: "/"))]).first
+        }
+        guard url.isFileURL, let vaultRoot else { return nil }
+        let root = vaultRoot.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(root + "/") else { return nil }
+        return items(for: [String(path.dropFirst(root.count + 1))]).first
+    }
+
+    /// `addition` after `text`, a space either side.
+    static func appending(_ addition: String, to text: String) -> String {
+        text.isEmpty ? addition + " " : text.trimmingCharacters(in: .whitespaces) + " " + addition + " "
+    }
+
     /// The question with what the reader is looking at, so "what is this
     /// note about?" has an answer: the open note and any selection in it,
     /// as they are when the question is asked, since a reply can come from

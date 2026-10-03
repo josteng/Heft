@@ -410,6 +410,8 @@ final class AppModel: ObservableObject {
     @Published var sidebarModeRequest: SidebarMode?
     /// The same for the right side's views, answered by `InspectorView`.
     @Published var inspectorModeRequest: InspectorMode?
+    /// Text Ask About adds to the right sidebar's field, taken by `ChatsPanel`.
+    @Published var askInsertRequest: String?
     private var inlineNoteSequence = 0
     var isInspectorVisible: Bool {
         get { chrome.isInspectorVisible }

@@ -304,6 +304,9 @@ struct SearchBarView: View {
                 Image(systemName: "sidebar.trailing")
             }
             .buttonStyle(.borderless)
+            // Grey as the bar's other marks are; the accent made it the
+            // loudest thing in the header.
+            .foregroundStyle(.secondary)
             .help("Continue in the right sidebar (⌘J)")
         }
         .padding(.horizontal, 16)
@@ -660,7 +663,9 @@ struct SearchBarView: View {
                 .help("Continue this chat in the right sidebar, beside the note")
             }
             if chatting || (scope != nil && trimmed.isEmpty) {
-                KeyHint(key: chatting ? "⌘↑" : "⌫", label: chatting ? "Chats" : "Back")
+                // Backspace goes back while there is nothing to delete, in a
+                // chat as anywhere; once something is typed, ⌘↑ still does.
+                KeyHint(key: chatting && !trimmed.isEmpty ? "⌘↑" : "⌫", label: chatting ? "Chats" : "Back")
             }
             Spacer(minLength: 8)
             KeyHint(key: "⌘1–\(BarScope.shownChips.count)", label: "Scopes")
@@ -783,8 +788,7 @@ struct SearchBarView: View {
             enter(.ask, carrying: query)
             setInChat(model.agent.chat != nil)
         }
-        let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-        query = query.isEmpty ? path + " " : query.trimmingCharacters(in: .whitespaces) + " " + path + " "
+        query = AppModel.appending(model.askText(forDropped: url), to: query)
     }
 
     /// The field's text as the next turn of the open chat.
@@ -924,52 +928,86 @@ struct BarField: NSViewRepresentable {
     /// ← in an empty field; false leaves it to the text view.
     var onLeftWhenEmpty: () -> Bool = { false }
     let selectAllRequest: Int
+    /// The bar's sizes, or the right sidebar's smaller ones.
+    var metrics: Metrics = .bar
+    /// Bumped to put the keyboard in the field with the caret at the end,
+    /// after what was just added, rather than selecting it all.
+    var focusRequest = 0
+    @Environment(\.colorScheme) private var colorScheme
+    /// Whether it takes the keyboard on appearing, as the bar's field does;
+    /// the sidebar's would take it from the note every time it opened.
+    var focusesOnAppear = true
 
-    static let font = NSFont.systemFont(ofSize: 16)
-    /// Lines the field grows to before it scrolls, as Siri's prompt does.
-    static let maximumLines = 5
-    /// The row everything beside the field is centred on; one line of text
-    /// is centred in it by the inset.
-    static let rowHeight: CGFloat = 22
+    /// A field's type and room. The bar's and the right sidebar's reply
+    /// field are the same field at two sizes.
+    struct Metrics {
+        let font: NSFont
+        /// The row everything beside the field is centred on; one line of
+        /// text is centred in it by the inset.
+        let rowHeight: CGFloat
+        /// The padding above and below the field. The field reaches into it
+        /// and insets its text by as much, so text scrolled out of the way
+        /// goes on to the edge and the divider, under a fade, instead of
+        /// stopping short of them, while at rest it sits where it did.
+        let edge: CGFloat
+        /// Lines the field grows to before it scrolls, as Siri's prompt does.
+        var maximumLines = 5
 
-    static var lineHeight: CGFloat {
-        let layout = NSLayoutManager()
-        return ceil(layout.defaultLineHeight(for: font))
+        static let bar = Metrics(font: .systemFont(ofSize: 16), rowHeight: 22, edge: 13)
+        static let sidebar = Metrics(font: .systemFont(ofSize: NSFont.systemFontSize), rowHeight: 20, edge: 10, maximumLines: 8)
+
+        var lineHeight: CGFloat { ceil(NSLayoutManager().defaultLineHeight(for: font)) }
+        var inset: CGFloat { max(0, (rowHeight - lineHeight) / 2) }
+
+        /// How tall the field is for `text` at `width`: one line at least,
+        /// and at most `maximumLines`, past which it scrolls within itself.
+        /// Laid out the way the text view lays it out, so the two agree on
+        /// every wrap.
+        func height(for text: String, width: CGFloat) -> CGFloat {
+            height(for: NSAttributedString(string: text, attributes: [.font: font]), width: width)
+        }
+
+        /// The same for text as the field draws it, a collapsed path and all.
+        func height(for text: NSAttributedString, width: CGFloat) -> CGFloat {
+            let storage = NSTextStorage(attributedString: text.length == 0
+                ? NSAttributedString(string: " ", attributes: [.font: font]) : text)
+            let layout = NSLayoutManager()
+            let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+            container.lineFragmentPadding = 0
+            layout.addTextContainer(container)
+            storage.addLayoutManager(layout)
+            layout.ensureLayout(for: container)
+            let used = ceil(layout.usedRect(for: container).height)
+            let lines = min(max(used, lineHeight), lineHeight * CGFloat(maximumLines))
+            return lines + inset * 2
+        }
     }
 
-    static var inset: CGFloat { max(0, (rowHeight - lineHeight) / 2) }
-    /// The header's padding above and below the field. The field reaches
-    /// into it and insets its text by as much, so text scrolled out of the
-    /// way goes on to the sheet's edge and the divider instead of stopping
-    /// short of them, while at rest it sits exactly where it did.
-    static let edge: CGFloat = 13
+    static var font: NSFont { Metrics.bar.font }
+    static var rowHeight: CGFloat { Metrics.bar.rowHeight }
+    static var lineHeight: CGFloat { Metrics.bar.lineHeight }
+    static var inset: CGFloat { Metrics.bar.inset }
+    static var edge: CGFloat { Metrics.bar.edge }
 
-    /// How tall the field is for `text` at `width`: one line at least, and
-    /// at most `maximumLines`, past which it scrolls within itself. Laid out
-    /// the way the text view lays it out, so the two agree on every wrap.
     static func height(for text: String, width: CGFloat) -> CGFloat {
-        let storage = NSTextStorage(string: text.isEmpty ? " " : text, attributes: [.font: font])
-        let layout = NSLayoutManager()
-        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
-        container.lineFragmentPadding = 0
-        layout.addTextContainer(container)
-        storage.addLayoutManager(layout)
-        layout.ensureLayout(for: container)
-        let used = ceil(layout.usedRect(for: container).height)
-        let lines = min(max(used, lineHeight), lineHeight * CGFloat(maximumLines))
-        return lines + inset * 2
+        Metrics.bar.height(for: text, width: width)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
         let width = proposal.width ?? 400
-        return CGSize(width: width, height: Self.height(for: text, width: width) + Self.edge * 2)
+        // Measured as drawn, so a path collapsed to its name does not hold
+        // the field open to the lines it would take spelled out.
+        let drawn = (nsView.documentView as? NSTextView)?.textStorage
+        let height = drawn.flatMap { $0.string == text ? metrics.height(for: $0, width: width) : nil }
+            ?? metrics.height(for: text, width: width)
+        return CGSize(width: width, height: height + metrics.edge * 2)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = FadingScrollView()
-        scroll.fade = Self.edge
+        scroll.fade = metrics.edge
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true
@@ -977,13 +1015,13 @@ struct BarField: NSViewRepresentable {
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
         scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsets(top: Self.edge, left: 0, bottom: Self.edge, right: 0)
-        scroll.scrollerInsets = NSEdgeInsets(top: Self.edge, left: 0, bottom: Self.edge, right: 0)
+        scroll.contentInsets = NSEdgeInsets(top: metrics.edge, left: 0, bottom: metrics.edge, right: 0)
+        scroll.scrollerInsets = NSEdgeInsets(top: metrics.edge, left: 0, bottom: metrics.edge, right: 0)
 
         // TextKit 1, as `height(for:width:)` measures with it, so the frame
         // and the lines it holds cannot disagree by a wrap.
         let view = NSTextView(usingTextLayoutManager: false)
-        view.font = Self.font
+        view.font = metrics.font
         view.textColor = .labelColor
         view.drawsBackground = false
         view.isRichText = false
@@ -997,7 +1035,7 @@ struct BarField: NSViewRepresentable {
         // A query is not prose to rewrite: as a multi-line text view the
         // field drew the Writing Tools button beside its first line.
         view.writingToolsBehavior = .none
-        view.textContainerInset = NSSize(width: 0, height: Self.inset)
+        view.textContainerInset = NSSize(width: 0, height: metrics.inset)
         view.textContainer?.lineFragmentPadding = 0
         view.textContainer?.widthTracksTextView = true
         view.isVerticallyResizable = true
@@ -1010,9 +1048,12 @@ struct BarField: NSViewRepresentable {
         view.setAccessibilityPlaceholderValue(placeholder)
         scroll.documentView = view
         context.coordinator.view = view
-        DispatchQueue.main.async { [weak view] in
-            guard let view else { return }
-            view.window?.makeFirstResponder(view)
+        context.coordinator.placeholder.font = metrics.font
+        if focusesOnAppear {
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                view.window?.makeFirstResponder(view)
+            }
         }
         return scroll
     }
@@ -1020,14 +1061,23 @@ struct BarField: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let view = context.coordinator.view else { return }
+        view.appearance = NSAppearance.plain(dark: colorScheme == .dark)
         if view.string != text {
             view.string = text
             view.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
         }
+        context.coordinator.highlightPaths()
         context.coordinator.placeholder.stringValue = placeholder
         context.coordinator.placeholder.isHidden = !text.isEmpty
         context.coordinator.attachPlaceholder()
         view.setAccessibilityPlaceholderValue(placeholder)
+        if focusRequest != context.coordinator.focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            DispatchQueue.main.async {
+                view.window?.makeFirstResponder(view)
+                view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+            }
+        }
         if selectAllRequest != context.coordinator.selectAllRequest {
             context.coordinator.selectAllRequest = selectAllRequest
             DispatchQueue.main.async { view.selectAll(nil) }
@@ -1038,6 +1088,7 @@ struct BarField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: BarField
         var selectAllRequest = 0
+        var focusRequest = 0
         weak var view: NSTextView?
         /// Drawn as a label inside the text view, where a text field draws its
         /// own; a text view has none.
@@ -1052,6 +1103,7 @@ struct BarField: NSViewRepresentable {
         init(_ parent: BarField) {
             self.parent = parent
             selectAllRequest = parent.selectAllRequest
+            focusRequest = parent.focusRequest
         }
 
         func attachPlaceholder() {
@@ -1061,7 +1113,7 @@ struct BarField: NSViewRepresentable {
             NSLayoutConstraint.activate([
                 placeholder.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                 placeholder.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
-                placeholder.topAnchor.constraint(equalTo: view.topAnchor, constant: BarField.inset),
+                placeholder.topAnchor.constraint(equalTo: view.topAnchor, constant: parent.metrics.inset),
             ])
         }
 
@@ -1070,6 +1122,43 @@ struct BarField: NSViewRepresentable {
                   parent.text != view.string
             else { return }
             parent.text = view.string
+            highlightPaths()
+        }
+
+        /// A path to a file in the text, dropped or typed, drawn as its
+        /// name in the link colour, as the chat shows it once sent. The
+        /// folders before the name keep their place in the text, which the
+        /// agent is sent whole, and are drawn collapsed, the way the editor
+        /// hides markup: a hairline font, no colour.
+        func highlightPaths() {
+            guard let view, let storage = view.textStorage, !view.hasMarkedText() else { return }
+            let font = parent.metrics.font
+            let text = view.string as NSString
+            let link = AppearanceSettings.shared.linkColor
+            storage.beginEditing()
+            storage.setAttributes([.font: font, .foregroundColor: NSColor.labelColor],
+                                  range: NSRange(location: 0, length: storage.length))
+            for found in AgentFiles.occurrences(in: view.string) {
+                storage.addAttribute(.foregroundColor, value: link, range: found.range)
+                var path = text.substring(with: found.range)
+                if path.hasSuffix("/") { path.removeLast() }
+                let slash = (path as NSString).range(of: "/", options: .backwards)
+                guard slash.location != NSNotFound else { continue }
+                storage.addAttributes(
+                    [.font: NSFont.systemFont(ofSize: 0.01), .foregroundColor: NSColor.clear],
+                    range: NSRange(location: found.range.location, length: slash.location + 1)
+                )
+            }
+            // A wikilink as its name, the brackets collapsed the same way.
+            let hidden: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 0.01), .foregroundColor: NSColor.clear]
+            for range in AnswerText.wikilinkRanges(in: view.string) {
+                storage.addAttribute(.foregroundColor, value: link, range: range)
+                storage.addAttributes(hidden, range: NSRange(location: range.location, length: 2))
+                storage.addAttributes(hidden, range: NSRange(location: NSMaxRange(range) - 2, length: 2))
+            }
+            storage.endEditing()
+            // What is typed next is plain, whatever it follows.
+            view.typingAttributes = [.font: font, .foregroundColor: NSColor.labelColor]
         }
 
         /// A query is one line of meaning however many it is shown on, so a

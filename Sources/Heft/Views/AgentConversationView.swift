@@ -109,6 +109,7 @@ struct AgentConversationView: View {
 
 private struct TurnView: View {
     @ObservedObject var runner: AgentRunner
+    @Environment(\.appAccent) private var accent
     @EnvironmentObject private var model: AppModel
     let turn: AgentChat.Turn
     let isLast: Bool
@@ -148,8 +149,17 @@ private struct TurnView: View {
             // The question on the right, as the reader's side of a chat.
             HStack {
                 Spacer(minLength: 60)
-                Text(turn.question)
-                    .textSelection(.enabled)
+                // Drawn as an answer is, so its links show the pointing
+                // hand and their own menu; as a selectable `Text` they had
+                // the text cursor and the text's menu.
+                SelectableAnswer(
+                    text: AnswerText.question(turn.question, vaultRoot: model.vaultRoot),
+                    linkColor: NSColor(accent),
+                    hugsText: true,
+                    menu: { AnswerText.menu(for: $0, model: model) }
+                ) { url in
+                    AnswerText.open(url, model: model, onLeave: onLeave)
+                }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
                     .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary))
@@ -158,14 +168,19 @@ private struct TurnView: View {
                 AnswerText(text: turn.answer, onLeave: onLeave)
             }
             if isAnswering {
-                HStack(spacing: 8) {
+                // Along the top, so a status that wraps grows downwards and
+                // the spinner and Stop stay where they were.
+                HStack(alignment: .top, spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(runner.activity ?? "Thinking")
                         .foregroundStyle(.secondary)
                         .contentTransition(.opacity)
                     Spacer()
+                    // Quiet, as the rest of the line is: a filled button in the
+                    // accent was the loudest thing on screen while it worked.
                     Button("Stop") { runner.cancel() }
-                        .controlSize(.small)
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
                         .keyboardShortcut(".", modifiers: .command)
                 }
                 .font(.callout)
@@ -199,34 +214,143 @@ private struct TurnView: View {
 /// An AppKit text view rather than a selectable SwiftUI `Text`: that one
 /// showed the text cursor over a link and the pointing hand below it, its
 /// link areas drawn off where the words are.
-private struct AnswerText: View {
+struct AnswerText: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.appAccent) private var accent
     let text: String
     let onLeave: () -> Void
 
     var body: some View {
-        SelectableAnswer(text: Self.attributed(text), linkColor: NSColor(accent)) { url in
-            guard url.scheme == Self.noteScheme else {
-                NSWorkspace.shared.open(url)
-                return
-            }
-            let name = url.host(percentEncoded: false) ?? ""
-            let target = name.removingPercentEncoding ?? name
-            if let note = VaultIndex.match(target, among: model.index.notes) {
-                model.open(note)
-                onLeave()
-            }
+        SelectableAnswer(text: Self.attributed(text), linkColor: NSColor(accent), menu: { Self.menu(for: $0, model: model) }) { url in
+            Self.open(url, model: model, onLeave: onLeave)
         }
     }
 
     static let noteScheme = "heft-note"
 
+    /// A link in a chat: a note or file in the vault opens here, a folder
+    /// in it is revealed in Files, and only what is outside goes to the
+    /// Finder, a folder shown there and a file opened.
+    @MainActor
+    static func open(_ url: URL, model: AppModel, onLeave: () -> Void) {
+        if let item = model.vaultItem(forLink: url) {
+            if item.isFolder {
+                model.revealFolder(item.relativePath)
+            } else {
+                model.open(item: item)
+            }
+            onLeave()
+            return
+        }
+        guard url.scheme != noteScheme else { return }
+        var isFolder: ObjCBool = false
+        if url.isFileURL, FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), isFolder.boolValue {
+            model.revealInFinder(url)
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// A link's right-click menu: the one its file or folder has in Files.
+    @MainActor
+    static func menu(for url: URL, model: AppModel) -> NSMenu? {
+        guard let item = model.vaultItem(forLink: url) else { return nil }
+        if item.isFolder {
+            return NSHostingMenu(rootView: FolderMenu(
+                item: item,
+                onCreateNote: { model.createNote(in: item.url) },
+                onCreateFolder: { model.createFolder(in: item.url) },
+                onRename: { _ = model.rename(item) }
+            ).environmentObject(model))
+        }
+        return NSHostingMenu(rootView: FileMenu(item: item).environmentObject(model))
+    }
+
+    /// The reader's question with each path in it shown by its name, as a
+    /// link: a note in the vault opens as one, any other file as the Mac
+    /// opens it. The agent was sent the whole path; the chat need not show
+    /// a run of folders.
+    static func question(_ text: String, vaultRoot: URL?) -> AttributedString {
+        var result = AttributedString()
+        var rest = text.startIndex
+        // Paths and wikilinks, in the order they come.
+        let wikilinks = wikilinkRanges(in: text).map { (url: URL?.none, range: $0) }
+        let paths = AgentFiles.occurrences(in: text).map { (url: Optional($0.url), range: $0.range) }
+        for found in (paths + wikilinks).sorted(by: { $0.range.location < $1.range.location }) {
+            guard let range = Range(found.range, in: text), range.lowerBound >= rest else { continue }
+            result += AttributedString(String(text[rest..<range.lowerBound]))
+            guard let url = found.url else {
+                // `[[Note]]` as an answer draws it: the name, a link to it.
+                result += attributed(String(text[range]))
+                rest = range.upperBound
+                continue
+            }
+            let file = url.standardizedFileURL
+            var name = AttributedString(file.pathExtension == "md" ? file.deletingPathExtension().lastPathComponent : file.lastPathComponent)
+            let root = vaultRoot?.standardizedFileURL.path
+            if let root, file.path.hasPrefix(root + "/"), file.pathExtension == "md" {
+                let relative = String(file.path.dropFirst(root.count + 1))
+                let encoded = relative.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? relative
+                name.link = URL(string: "\(noteScheme)://\(encoded)")
+            } else {
+                name.link = file
+            }
+            result += name
+            rest = range.upperBound
+        }
+        return result + AttributedString(String(text[rest...]))
+    }
+
     /// Inline Markdown, with `[[Note]]` and `[[Note|shown]]` as links.
     static func attributed(_ text: String) -> AttributedString {
-        let linked = linkingWikilinks(text)
+        let linked = linkingWikilinks(blocks(text))
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: linked, options: options)) ?? AttributedString(text)
+    }
+
+    /// The block Markdown an answer often has, in the inline Markdown the
+    /// view draws: a heading as a bold line, a task as ☐ or ☑, a list item
+    /// as a bullet, and a rule left out. Left as typed, `##` and `- [ ]`
+    /// showed. Code fences are kept as they are, and so is what is in them.
+    static func blocks(_ text: String) -> String {
+        var inFence = false
+        var lines: [String] = []
+        for line in text.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") { inFence.toggle() }
+            guard !inFence, !trimmed.hasPrefix("```") else {
+                lines.append(line)
+                continue
+            }
+            let indent = String(line.prefix { $0 == " " || $0 == "\t" })
+            if trimmed.range(of: #"^(-{3,}|\*{3,}|_{3,})$"#, options: .regularExpression) != nil {
+                continue
+            }
+            if let heading = trimmed.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
+                let title = trimmed[heading.upperBound...]
+                lines.append(indent + (title.contains("**") ? String(title) : "**\(title)**"))
+            } else if let task = trimmed.range(of: #"^[-*+]\s+\[[ xX]\]\s+"#, options: .regularExpression) {
+                let done = trimmed[task].contains { $0 == "x" || $0 == "X" }
+                lines.append(indent + (done ? "☑ " : "☐ ") + trimmed[task.upperBound...])
+            } else if let bullet = trimmed.range(of: #"^[-*+]\s+"#, options: .regularExpression) {
+                lines.append(indent + "• " + trimmed[bullet.upperBound...])
+            } else {
+                lines.append(line)
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// A chat's name with any path in it shown by its file's name, as the
+    /// question it came from shows it.
+    static func shownTitle(_ title: String) -> String {
+        String(question(title, vaultRoot: nil).characters)
+    }
+
+    /// Where each `[[…]]` is in `text`.
+    static func wikilinkRanges(in text: String) -> [NSRange] {
+        let pattern = try! NSRegularExpression(pattern: #"\[\[[^\[\]\n]+\]\]"#)
+        return pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).map(\.range)
     }
 
     static func linkingWikilinks(_ text: String) -> String {
@@ -472,11 +596,17 @@ private struct FailureView: View {
 
 /// Inline Markdown in a non-editable, selectable text view, sized to its
 /// width, with real link cursors and clicks.
-private struct SelectableAnswer: NSViewRepresentable {
+struct SelectableAnswer: NSViewRepresentable {
     let text: AttributedString
     /// Heft's own accent, as links are drawn in notes.
     let linkColor: NSColor
+    /// As wide as its text, up to the width offered, as a question's bubble
+    /// is; an answer takes the whole width.
+    var hugsText = false
+    /// A right-clicked link's own menu, or nil for the text's.
+    var menu: (URL) -> NSMenu? = { _ in nil }
     let open: (URL) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> NSTextView {
         let view = NSTextView(usingTextLayoutManager: false)
@@ -494,6 +624,8 @@ private struct SelectableAnswer: NSViewRepresentable {
 
     func updateNSView(_ view: NSTextView, context: Context) {
         context.coordinator.open = open
+        context.coordinator.linkMenu = menu
+        view.appearance = NSAppearance.plain(dark: colorScheme == .dark)
         view.linkTextAttributes = [.foregroundColor: linkColor, .cursor: NSCursor.pointingHand]
         let shown = Self.appKit(text)
         if view.textStorage?.isEqual(to: shown) != true {
@@ -506,7 +638,9 @@ private struct SelectableAnswer: NSViewRepresentable {
         // width, and the answer fills whatever it is given.
         let width = proposal.width ?? 150
         guard let text = view.textStorage else { return nil }
-        return CGSize(width: width, height: Self.height(of: text, width: width))
+        guard hugsText else { return CGSize(width: width, height: Self.height(of: text, width: width)) }
+        let used = Self.size(of: text, width: width)
+        return CGSize(width: min(width, used.width), height: used.height)
     }
 
     /// How tall `text` is at `width`, laid out on its own. Measuring in the
@@ -514,6 +648,11 @@ private struct SelectableAnswer: NSViewRepresentable {
     /// tries several of: the text drawn ran past the column, its height was
     /// another width's, and an answer being written flickered between them.
     static func height(of text: NSAttributedString, width: CGFloat) -> CGFloat {
+        size(of: text, width: width).height
+    }
+
+    /// The room `text` takes at most `width` wide, laid out on its own.
+    static func size(of text: NSAttributedString, width: CGFloat) -> CGSize {
         let storage = NSTextStorage(attributedString: text)
         let layout = NSLayoutManager()
         let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
@@ -521,14 +660,23 @@ private struct SelectableAnswer: NSViewRepresentable {
         layout.addTextContainer(container)
         storage.addLayoutManager(layout)
         layout.ensureLayout(for: container)
-        return ceil(layout.usedRect(for: container).height)
+        let used = layout.usedRect(for: container)
+        return CGSize(width: ceil(used.width), height: ceil(used.height))
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(open: open) }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var open: (URL) -> Void
+        var linkMenu: (URL) -> NSMenu? = { _ in nil }
         init(open: @escaping (URL) -> Void) { self.open = open }
+
+        func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            guard let storage = view.textStorage, charIndex < storage.length else { return menu }
+            let link = storage.attribute(.link, at: charIndex, effectiveRange: nil)
+            let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+            return url.flatMap(linkMenu) ?? menu
+        }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             if let url = link as? URL {
@@ -565,6 +713,27 @@ private struct SelectableAnswer: NSViewRepresentable {
             if let link = run.link { attributes[.link] = link }
             result.append(NSAttributedString(string: String(text[run.range].characters), attributes: attributes))
         }
+        // A list item's lines after its first start under its text, not
+        // under its bullet.
+        let string = result.string as NSString
+        let marker = try! NSRegularExpression(pattern: #"^[ \t]*(•|☐|☑|\d+[.)]) "#)
+        string.enumerateSubstrings(in: NSRange(location: 0, length: string.length), options: .byParagraphs) { line, range, _, _ in
+            guard let line, let found = marker.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length))
+            else { return }
+            let prefix = (line as NSString).substring(with: found.range)
+            let style = paragraph.mutableCopy() as! NSMutableParagraphStyle
+            style.headIndent = ceil(NSAttributedString(string: prefix, attributes: [.font: base]).size().width)
+            result.addAttribute(.paragraphStyle, value: style, range: range)
+        }
         return result
+    }
+}
+
+extension NSAppearance {
+    /// Aqua or Dark Aqua, never their vibrant forms. The right sidebar hands
+    /// its views a vibrant appearance, and a text view's selection drawn in
+    /// it blended into the material until it was barely there.
+    static func plain(dark: Bool) -> NSAppearance? {
+        NSAppearance(named: dark ? .darkAqua : .aqua)
     }
 }

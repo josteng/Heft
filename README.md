@@ -184,7 +184,7 @@ four-space indented code, raw HTML and entity references;
 - **The sidebar's views**, Files, Recent and Tags, can be hidden and put in
   any order in Settings ▸ General; ⌘1 to ⌘3 follow them, and a window can open
   on the first, the last used, or one in particular. The right sidebar (⌥⌘0)
-  is about the open note, Backlinks and Chats, set up the same way, with ⌥⌘1
+  is about the open note, Backlinks and Ask, set up the same way, with ⌥⌘1
   and ⌥⌘2.
 - **Recent** reads like your notes rather than a folder listing: each row
   has its date, first line and folder, grouped under Today, Yesterday,
@@ -256,9 +256,11 @@ a new note for you to accept. Its use counts against your Claude plan. Each
 run may read only the focused folder or the whole vault and may only propose
 changes, under permission rules Heft sets for Claude Code (not a separate
 sandbox), and every change it wants is a card in the chat: accept it, reject it with a word back to the agent, or open it in
-review. ⌘J carries a chat from the bar into the right sidebar's Chats, to go
-on beside the note it is changing. Chats are kept in `.heft/chats/` to read
-again and continue.
+review. In the right sidebar (⌥⌘0) Ask goes on beside the note it is
+changing: ⌘J carries a chat there from the bar, the clock lists past chats,
++ starts a new one with a few questions about the open note, and Ask About
+on any file or folder's menu, or dropping one, puts it in the question.
+Chats are kept in `.heft/chats/` to read again and continue.
 
 ## The `heft` command
 

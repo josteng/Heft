@@ -16,16 +16,13 @@ struct SegmentedModePicker<Mode: PanelMode>: NSViewRepresentable {
     var filter: Binding<String>? = nil
     /// The views shown, in the reader's order.
     var modes: [Mode]
-    /// Drawn as in a sidebar where none is behind it. The left side's
-    /// column is a sidebar's material, and AppKit draws a control inside one
-    /// vibrant; the right side's is not, and the same control there read as
-    /// disabled, its unchosen labels faint and its chosen one too bright.
-    /// The left's material is the sidebar's Liquid Glass, so the control sits
-    /// in glass of its own; a vibrant appearance or a sidebar
-    /// `NSVisualEffectView` changed the labels but not the track.
-    var drawsAsSidebar = false
+    /// Every segment as wide as the widest, as Calendar's are, rather than
+    /// each as wide as its label. The right side's two fit even at its
+    /// narrowest (200pt of 200); the left's three would need 254 of 240,
+    /// and look near enough equal as they are.
+    var hasEqualSegments = false
 
-    func makeNSView(context: Context) -> NSView {
+    func makeNSView(context: Context) -> NSSegmentedControl {
         let control = NSSegmentedControl()
         control.trackingMode = .selectOne
         control.controlSize = .small
@@ -48,7 +45,6 @@ struct SegmentedModePicker<Mode: PanelMode>: NSViewRepresentable {
         }
         Self.configure(control, for: modes)
         context.coordinator.modes = modes
-        context.coordinator.control = control
         // AppKit draws the track for a toolbar, where the surface behind it is
         // lighter than this sidebar, so at full strength it is the brightest
         // thing here and louder than the filter field below it. There is no
@@ -61,14 +57,8 @@ struct SegmentedModePicker<Mode: PanelMode>: NSViewRepresentable {
         // size and the segments stop short of the field below.
         control.setContentHuggingPriority(.defaultLow, for: .horizontal)
         control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        guard drawsAsSidebar else { return control }
-        let glass = NSGlassEffectView()
-        glass.style = .clear
-        glass.cornerRadius = 10
-        glass.contentView = control
-        glass.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        glass.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return glass
+        if hasEqualSegments { control.segmentDistribution = .fillEqually }
+        return control
     }
 
     /// One segment per view shown, rebuilt when the reader changes which.
@@ -84,8 +74,7 @@ struct SegmentedModePicker<Mode: PanelMode>: NSViewRepresentable {
         }
     }
 
-    func updateNSView(_ view: NSView, context: Context) {
-        guard let control = context.coordinator.control else { return }
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
         context.coordinator.parent = self
         if context.coordinator.modes != modes {
             context.coordinator.modes = modes
@@ -104,8 +93,6 @@ struct SegmentedModePicker<Mode: PanelMode>: NSViewRepresentable {
     final class Coordinator: NSObject {
         var parent: SegmentedModePicker
         var modes: [Mode] = []
-        /// The control itself, which on the right is inside its glass.
-        weak var control: NSSegmentedControl?
 
         init(_ parent: SegmentedModePicker) { self.parent = parent }
 

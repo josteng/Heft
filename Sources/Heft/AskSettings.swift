@@ -12,6 +12,7 @@ struct AskSettingsView: View {
     /// Where the agent command was found, looked up off the main thread:
     /// failing the usual places, it asks a login shell.
     @State private var agentStatus = " "
+    @State private var showsDetails = false
 
     var body: some View {
         Form {
@@ -22,10 +23,21 @@ struct AskSettingsView: View {
                             Text("Ask about your notes")
                             ExperimentalBadge()
                             // The rest of what it is and what keeps it in
-                            // check, on hover, so the pane is not a page.
-                            Image(systemName: "info.circle")
-                                .foregroundStyle(.secondary)
-                                .help(Self.details)
+                            // check, a click away, so the pane is not a page.
+                            // A tooltip inside a toggle's label never showed.
+                            Button { showsDetails.toggle() } label: {
+                                Image(systemName: "info.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .help("What Ask is, and what keeps it in check")
+                            .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
+                                Text(Self.details)
+                                    .font(.callout)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(width: 320)
+                                    .padding(14)
+                            }
                         }
                         Text("In the search bar (⌘6, or ? in ⌘T) and the right sidebar. "
                             + "Runs your own Claude Code, on your Claude plan.")
@@ -74,6 +86,13 @@ struct AskSettingsView: View {
                     )
                 }
                 .disabled(unavailable != nil)
+                Toggle(isOn: $settings.suggestsQuestions) {
+                    SettingLabel(
+                        "Suggest questions",
+                        detail: "A new chat in the right sidebar offers a few things to ask about the note "
+                            + "that is open. They go once you ask."
+                    )
+                }
                 Picker(selection: $settings.askFirst) {
                     ForEach(GeneralSettings.AskFirst.allCases) { Text($0.title).tag($0) }
                 } label: {

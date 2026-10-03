@@ -310,6 +310,19 @@ struct AgentFilesTests {
         #expect(AgentFiles.paths(in: "Look in \"\(root.appendingPathComponent("Some Folder").path)\"").count == 1, "a folder too")
     }
 
+    /// Where each path is, so a field can draw it and a chat can name it.
+    @Test("Each path comes with its range, trailing punctuation left out")
+    func ranges() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let draft = root.appendingPathComponent("Some Folder/the draft.pdf")
+        let text = "Compare \(draft.path), please"
+        let found = AgentFiles.occurrences(in: text)
+        try #require(found.count == 1)
+        #expect((text as NSString).substring(with: found[0].range) == draft.path)
+        #expect(found[0].url == draft)
+    }
+
     @Test("Text that only looks like a path is not one")
     func notFound() {
         #expect(AgentFiles.paths(in: "Is 1/2 of the plan done?").isEmpty)

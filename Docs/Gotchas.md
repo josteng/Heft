@@ -127,11 +127,19 @@ preferences or the icon.
 - **A toolbar item is laid out at its ideal width and never squeezed.** One
   wider than its room goes to the overflow menu instead, so the scope picker
   is capped to the sidebar's width minus the window controls (`SidebarColumn`).
-- **No `fixedSize(vertical: true)` on text in the sidebar.** The split view
-  probes its sidebar at zero width for a minimum and the window takes it; a
+- **No `fixedSize(vertical: true)` on text in either sidebar** outside a
+  scroll view. The split view probes its columns at zero width for a minimum
+  and the window takes it; a
   vertically fixed text answers with one character per line, and a fresh
   vault opened a window taller than the screen. Inside a popover or a sheet
   it is harmless.
+- **The right sidebar hands its views a vibrant appearance.** A text view's
+  selection drawn in it blends into the material until it is barely there;
+  text views there set `NSAppearance.plain(dark:)`. The same column draws
+  glass circle buttons with their icon off centre, so its buttons are plain.
+- **A property holding a closure that captures nothing never changes to
+  SwiftUI.** A view given `{ $0.isAvailable }` was not redrawn when what the
+  closure read changed; pass the answer as data (`PanelLayoutRows`).
 - **`.tint()` does not reach `Color.accentColor`.** A view filling a shape
   with it keeps the system accent. Views painting their own highlight read
   `@Environment(\.appAccent)`; AppKit views read `AppearanceSettings.shared`.

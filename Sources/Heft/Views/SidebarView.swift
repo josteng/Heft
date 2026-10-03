@@ -1645,6 +1645,12 @@ struct FileMenu: View {
                 NSWorkspace.shared.open(item.url)
             }
         }
+        if BarScope.asksAgent, !many {
+            MenuButton("Ask About \"\(item.name)\"", symbol: BarScope.ask.symbol) {
+                model.askAbout(item.url)
+                onOpened?()
+            }
+        }
         Divider()
         MenuButton("New Note Here", symbol: "square.and.pencil") {
             if let onCreateNote { onCreateNote() }
@@ -1727,6 +1733,12 @@ struct FolderMenu: View {
         MenuButton("Open \"\(item.name)\" in New Window", symbol: "plus.rectangle.on.rectangle") {
             openWindow(value: model.descriptor(scopePath: item.relativePath))
             onLeave?()
+        }
+        if BarScope.asksAgent {
+            MenuButton("Ask About \"\(item.name)\"", symbol: BarScope.ask.symbol) {
+                model.askAbout(item.url)
+                onLeave?()
+            }
         }
         Divider()
         MenuButton("New Note", symbol: "square.and.pencil") { onCreateNote() }

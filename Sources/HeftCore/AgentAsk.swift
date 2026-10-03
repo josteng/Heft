@@ -461,8 +461,14 @@ public enum AgentFiles {
     /// URLs. A path may hold spaces, as a dropped one often does, so each
     /// is taken as the longest run that names something on disk.
     public static func paths(in text: String, home: String = NSHomeDirectory()) -> [URL] {
+        occurrences(in: text, home: home).map(\.url).uniqued()
+    }
+
+    /// Each path in `text` with where it is, as `paths(in:)` finds them, so
+    /// a field or a chat can show it as a name rather than spelled out.
+    public static func occurrences(in text: String, home: String = NSHomeDirectory()) -> [(url: URL, range: NSRange)] {
         let characters = Array(text)
-        var found: [URL] = []
+        var found: [(URL, NSRange)] = []
         var index = 0
         while index < characters.count {
             let startsHere = index == 0 || " \t\n\"'(<[".contains(characters[index - 1])
@@ -470,7 +476,7 @@ public enum AgentFiles {
                 index += 1
                 continue
             }
-            var best: (url: URL, end: Int)?
+            var best: (url: URL, end: Int, length: Int)?
             var end = start.body
             while end <= characters.count {
                 if end == characters.count || " \t\n\"')>]".contains(characters[end]) {
@@ -478,13 +484,15 @@ public enum AgentFiles {
                     let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?"))
                     if let url = resolve(trimmed, kind: start.kind, home: home),
                        FileManager.default.fileExists(atPath: url.path) {
-                        best = (url, end)
+                        best = (url, end, trimmed.count)
                     }
                 }
                 end += 1
             }
             if let best {
-                if !found.contains(best.url) { found.append(best.url) }
+                let from = text.index(text.startIndex, offsetBy: start.body)
+                let to = text.index(from, offsetBy: best.length)
+                found.append((best.url, NSRange(from..<to, in: text)))
                 index = best.end
             } else {
                 index += 1
