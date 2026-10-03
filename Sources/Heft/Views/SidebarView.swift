@@ -507,7 +507,11 @@ struct SidebarView: View {
                             disclosure: isExpanded
                         ) {
                             if isExpanded { expandedTags.remove(name) }
-                            else { expandedTags.insert(name) }
+                            else {
+                                expandedTags.insert(name)
+                                // Counted as entering it in the search bar is.
+                                model.recordScopeUse(.tag(name))
+                            }
                         }
                     case .note(let note, _):
                         let item = VaultItem(
@@ -1182,7 +1186,12 @@ private struct TreeRow: View {
                 guard plain else { return }
                 selectedFolderPath = item.relativePath
                 if isExpanded { model.expandedFolders.remove(item.relativePath) }
-                else { model.expandedFolders.insert(item.relativePath) }
+                else {
+                    model.expandedFolders.insert(item.relativePath)
+                    // Opening a folder is using it, as entering it in the
+                    // search bar is; closing one is putting it away.
+                    model.recordScopeUse(.folder(item.relativePath))
+                }
             }
             .id(SidebarAnchor(path: item.relativePath))
             .background { revealProbe }

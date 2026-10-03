@@ -214,6 +214,32 @@ struct SearchBarRowTests {
             == ["heading:Notes", "note:Alpha.md", "note:Beta.md"])
     }
 
+    /// Focusing a window on a folder is using it, as entering it in the bar
+    /// is, so it ranks among recent and frequent folders.
+    @Test("Focusing a folder counts as using it")
+    func focusCounts() async throws {
+        let model = try await model(["Work/Plan.md": "a"])
+        defer { model.closeWorkspace() }
+        let before = FrecencyStore.commands.score(BarScope.folder("Work").useKey)
+        let item = try #require(model.tree?.children.first { $0.name == "Work" })
+        model.setScope(to: item)
+        #expect(FrecencyStore.commands.score(BarScope.folder("Work").useKey) > before)
+        #expect(RecentUses.dates()[BarScope.folder("Work").useKey] != nil)
+    }
+
+    /// The sidebar's own openings count too, from the clicks that open them.
+    @Test("Opening a folder or a tag in the sidebar counts as using it")
+    func sidebarCounts() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Heft/Views/SidebarView.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("model.recordScopeUse(.folder(item.relativePath))"))
+        #expect(source.contains("model.recordScopeUse(.tag(name))"))
+    }
+
     /// Recent rows are only as good as their history: running a command and
     /// entering a scope both record when.
     @Test("Running a command or entering a scope records when")

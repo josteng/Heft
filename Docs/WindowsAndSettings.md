@@ -249,7 +249,10 @@ Swift's sort is not stable. Both rules live in `VaultIndex.search`: the caller
 passes the raw score, because saturating it before handing it over is right
 for the typed case and wrong for the empty one.
 
-**What counts as a use:** the reader's own opens, reached from `AppModel.open`
+**What counts as a use:** for folders and tags, entering them in the search
+bar, opening them in the sidebar (not closing them, nor a folder springing
+open under a drag) and focusing a window on a folder. For notes, the
+reader's own opens, reached from `AppModel.open`
 and nowhere else, so `heft open` counts and the agent verbs do not; and the
 reader's reviews, through `VaultSession.recordReview`, once per proposal, in
 the ranking only. The store models one person's attention, and a `heft

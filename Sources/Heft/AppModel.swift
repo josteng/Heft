@@ -2987,7 +2987,11 @@ final class AppModel: ObservableObject {
         guard folder == nil || folder?.isFolder == true else { return }
         scopePath = folder?.relativePath
         if let vaultRoot { registry.updateFocus(root: vaultRoot, scopePath: scopePath, for: workspaceID) }
-        if let scopePath { session?.recordScope(scopePath) }
+        if let scopePath {
+            session?.recordScope(scopePath)
+            // A focus is the strongest use of a folder there is.
+            recordScopeUse(.folder(scopePath))
+        }
         expandedFolders = []
         status = folder.map { "Focused on \($0.relativePath)" } ?? "Showing the entire vault"
     }
