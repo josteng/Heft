@@ -287,7 +287,7 @@ final class AppModel: ObservableObject {
             )
         }
         var found = index.search(
-            query, limit: limit, familiarity: familiarity, including: scope
+            query, limit: limit, familiarity: familiarity, pinned: isNotePinned, including: scope
         )
         if let atPath = noteAtPath(query) {
             found = [atPath] + found.filter { $0.relativePath != atPath.relativePath }

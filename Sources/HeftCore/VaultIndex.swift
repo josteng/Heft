@@ -581,11 +581,13 @@ public final class VaultIndex: @unchecked Sendable {
     /// - Parameter familiarity: a note's raw frecency score, which this uses
     ///   two different ways.
     ///
-    ///   With something typed it is a tie-break worth at most `boostWeight`,
-    ///   which is less than the gap between any two match tiers: familiarity
-    ///   reorders results *within* a tier and can never lift a substring match
-    ///   above a prefix one, so an unfamiliar note that matches better still
-    ///   wins and typing stays predictable. It saturates at `wellUsed`,
+    ///   With something typed it is a nudge worth at most `boostWeight`,
+    ///   which is less than the gap between whole tiers: familiarity can
+    ///   never lift a substring match above a prefix one, so an unfamiliar
+    ///   note that matches clearly better still wins and typing stays
+    ///   predictable. The word-start tier sits half way between the two, so
+    ///   a used note can cross it either way: "0." finds the familiar "v0.7"
+    ///   before an unopened "0.3.0 Post". It saturates at `wellUsed`,
     ///   because past that point one heavily-used note would sit at the top of
     ///   every search it matched at all.
     ///
@@ -607,6 +609,7 @@ public final class VaultIndex: @unchecked Sendable {
         _ query: String,
         limit: Int = 50,
         familiarity: ((NoteRef) -> Double)? = nil,
+        pinned: ((NoteRef) -> Bool)? = nil,
         including: ((NoteRef) -> Bool)? = nil
     ) -> [NoteRef] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -635,51 +638,88 @@ public final class VaultIndex: @unchecked Sendable {
             }
             return byFamiliarity.prefix(limit).map(\.note)
         }
-        return scoredSearch(query, limit: limit, familiarity: familiarity, including: including)
-            .map(\.note)
+        return scoredSearch(
+            query, limit: limit, familiarity: familiarity, pinned: pinned, including: including
+        )
+        .map(\.note)
     }
 
     /// The typed half of `search`, with each note's score: its match tier
     /// plus the familiarity nudge. Exposed so a list that mixes notes with
     /// other things (`CommandMatch` uses the same tiers) can rank them
     /// together. An empty query matches nothing here.
+    ///
+    /// - Parameter pinned: a pinned note counts as fully familiar, the
+    ///   reader having said so outright, and wins a tie.
     public func scoredSearch(
         _ query: String,
         limit: Int = 50,
         familiarity: ((NoteRef) -> Double)? = nil,
+        pinned: ((NoteRef) -> Bool)? = nil,
         including: ((NoteRef) -> Bool)? = nil
     ) -> [(note: NoteRef, score: Int)] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return [] }
         let notes = including.map { notes.filter($0) } ?? notes
-        var scored: [(NoteRef, Int)] = []
+        var scored: [Scored] = []
         for note in notes {
             let name = note.name.lowercased()
             let score: Int
             if name == q { score = 400 }
             else if name.hasPrefix(q) { score = 300 }
+            else if Self.matchesWordStart(q, in: name) { score = 250 }
             else if name.contains(q) { score = 200 }
             else if let fuzzy = FuzzyMatch.score(query: q, candidate: name),
                     fuzzy >= max(36, q.count * 16) {
                 score = 100 + fuzzy
             }
             else { continue }
-            let known = familiarity.map {
-                Int(($0(note) / Self.wellUsed).clamped(to: 0...1) * Double(Self.boostWeight))
-            } ?? 0
-            scored.append((note, score + known))
+            let raw = familiarity?(note) ?? 0
+            let isPinned = pinned?(note) ?? false
+            let known = isPinned
+                ? Self.boostWeight
+                : Int((raw / Self.wellUsed).clamped(to: 0...1) * Double(Self.boostWeight))
+            scored.append(Scored(note: note, score: score + known, raw: raw, pinned: isPinned))
         }
-        return scored.enumerated()
+        return scored
             .sorted { a, b in
-                if a.element.1 != b.element.1 { return a.element.1 > b.element.1 }
-                if a.element.0.name.count != b.element.0.name.count {
-                    return a.element.0.name.count < b.element.0.name.count
-                }
-                return a.offset < b.offset
+                if a.score != b.score { return a.score > b.score }
+                if a.pinned != b.pinned { return a.pinned }
+                // Past the cap two notes tie on the boost; the one used more
+                // is still the likelier, as the cap is only there to keep use
+                // from jumping a tier.
+                if a.raw != b.raw { return a.raw > b.raw }
+                if a.note.name.count != b.note.name.count { return a.note.name.count < b.note.name.count }
+                return a.note.relativePath.localizedStandardCompare(b.note.relativePath) == .orderedAscending
             }
-            .map(\.element)
             .prefix(limit)
-            .map { (note: $0.0, score: $0.1) }
+            .map { (note: $0.note, score: $0.score) }
+    }
+
+    private struct Scored {
+        let note: NoteRef
+        let score: Int
+        let raw: Double
+        let pinned: Bool
+    }
+
+    /// Whether `query` starts a word somewhere inside `name`: after a space
+    /// or punctuation, or where letters turn into digits or back, so "0."
+    /// starts a word in "v0.7" and "plan" one in "q3plan". Ranked between a
+    /// prefix and a match anywhere, as `CommandMatch` ranks commands.
+    public static func matchesWordStart(_ query: String, in name: String) -> Bool {
+        guard let first = query.first else { return false }
+        var searchFrom = name.startIndex
+        while let range = name.range(of: query, range: searchFrom..<name.endIndex) {
+            if range.lowerBound > name.startIndex {
+                let before = name[name.index(before: range.lowerBound)]
+                let separated = !before.isLetter && !before.isNumber
+                let kindChanges = (before.isLetter && first.isNumber) || (before.isNumber && first.isLetter)
+                if separated || kindChanges { return true }
+            }
+            searchFrom = name.index(after: range.lowerBound)
+        }
+        return false
     }
 }
 

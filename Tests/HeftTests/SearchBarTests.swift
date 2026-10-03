@@ -133,6 +133,46 @@ struct ScoredSearchTests {
         #expect(scored.first?.score == 300, "a prefix match")
         #expect(index.scoredSearch("", limit: 10).isEmpty)
     }
+
+    /// The search that prompted this: "0." listed three never-opened notes
+    /// that start with it above the version note in daily use, which only
+    /// contains it, and the two version notes in scan order.
+    @Test("A familiar word start beats an unused prefix, and use past the cap breaks ties")
+    func versionSearch() {
+        let index = index([
+            "0.3.0 Post", "v0.6", "v0.7", "OpenAI Interview 01.10.2026", "Release 0.1.0 next steps",
+        ])
+        let use: [String: Double] = ["v0.7": 20, "v0.6": 5, "OpenAI Interview 01.10.2026": 8]
+        let found = index.search("0.", limit: 10, familiarity: { use[$0.name] ?? 0 }).map(\.name)
+        #expect(found == [
+            "v0.7", "v0.6", "0.3.0 Post", "OpenAI Interview 01.10.2026", "Release 0.1.0 next steps",
+        ], "familiarity crosses the half step either way; got \(found)")
+        let scores = Dictionary(uniqueKeysWithValues: index.scoredSearch("0.", limit: 10).map { ($0.note.name, $0.score) })
+        #expect(scores["Release 0.1.0 next steps"] == 250, "a word start, after a space")
+        #expect(scores["v0.7"] == 250, "a word start, where letters turn into digits")
+        #expect(scores["OpenAI Interview 01.10.2026"] == 200, "inside a number is only contained")
+    }
+
+    @Test("A pin counts as fully familiar and wins a tie")
+    func pinsBoost() {
+        let index = index(["v0.5", "v0.7", "0.3.0 Post"])
+        let use: [String: Double] = ["v0.7": 20]
+        let found = index.search(
+            "0.", limit: 10, familiarity: { use[$0.name] ?? 0 }, pinned: { $0.name == "v0.5" }
+        ).map(\.name)
+        #expect(found == ["v0.5", "v0.7", "0.3.0 Post"], "got \(found)")
+    }
+
+    @Test("A word starts after a separator or where letters and digits meet")
+    func wordStarts() {
+        #expect(VaultIndex.matchesWordStart("plan", in: "weekly plan"))
+        #expect(VaultIndex.matchesWordStart("plan", in: "q3plan"))
+        #expect(VaultIndex.matchesWordStart("2", in: "draft2"))
+        #expect(VaultIndex.matchesWordStart("plan", in: "a-plan"))
+        #expect(!VaultIndex.matchesWordStart("lan", in: "weekly plan"))
+        #expect(!VaultIndex.matchesWordStart("plan", in: "plan"), "a prefix is its own tier")
+        #expect(VaultIndex.matchesWordStart("an", in: "banana an"), "a later occurrence counts")
+    }
 }
 
 /// What each scope lists, from a real vault on disk.

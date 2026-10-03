@@ -2311,21 +2311,27 @@ struct SwitcherRankingTests {
         #expect(ranked.suffix(2) == ["Alpha", "Beta"])
     }
 
-    /// Familiarity is a nudge inside a tier, never across one. A note you have
-    /// never opened that matches better still wins, which is what keeps typing
-    /// predictable.
+    /// Familiarity never crosses a whole tier. A note you have never opened
+    /// whose name starts with the query still beats a familiar one that only
+    /// has it inside a word, which is what keeps typing predictable. A word
+    /// start further in is half a tier down, and use may carry a note across
+    /// that: the reader looking for "meet" in daily use wants that one.
     @Test("A better match beats a more familiar one")
     func matchQualityWins() {
-        let index = index(["Meeting", "Weekly Meeting Notes"])
+        let index = index(["Meeting", "Premeeting Notes", "Weekly Meeting Notes"])
         var frecency = Frecency()
-        for _ in 1...50 { frecency.record("Weekly Meeting Notes.md") }
+        for _ in 1...50 {
+            frecency.record("Premeeting Notes.md")
+            frecency.record("Weekly Meeting Notes.md")
+        }
 
         let ranked = index.search("meet", limit: 10) {
             frecency.score($0.relativePath)
         }.map(\.name)
-        // "Meeting" is a prefix match, the other only contains it. No amount
-        // of use may reorder that.
-        #expect(ranked.first == "Meeting", "got \(ranked)")
+        // Inside a word: no amount of use lifts it above the prefix.
+        #expect(ranked.firstIndex(of: "Meeting")! < ranked.firstIndex(of: "Premeeting Notes")!, "got \(ranked)")
+        // A later word's start: use carries it across the half tier.
+        #expect(ranked.first == "Weekly Meeting Notes", "got \(ranked)")
     }
 
     /// Within one tier, though, familiarity should decide.

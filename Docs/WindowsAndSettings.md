@@ -244,10 +244,11 @@ opened often last week, so a new note was the hardest to find; recency alone,
 which is Obsidian's answer, loses the notes opened every morning. Each part is
 headed by the order it follows; a heading is a label the arrows pass over.
 With something typed it is
-worth at most `VaultIndex.boostWeight`, less than the gap between match tiers,
-so familiarity reorders within a tier and never lifts a substring match above
-a prefix one. Both sorts carry the original index as a final tiebreak, since
-Swift's sort is not stable. Both rules live in `VaultIndex.search`: the caller
+worth at most `VaultIndex.boostWeight`, less than the gap between whole tiers,
+so it never lifts a match inside a word above a prefix one; a word start
+further in sits half a tier down, and use may carry a note across that, so
+"0." finds the version note in daily use before an unopened one starting with
+it. A pin counts as fully used, and past the cap the raw score breaks ties. Both rules live in `VaultIndex.search`: the caller
 passes the raw score, because saturating it before handing it over is right
 for the typed case and wrong for the empty one.
 

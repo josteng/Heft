@@ -483,7 +483,8 @@ extension AppModel {
             noteFrecency?.score($0.relativePath) ?? 0
         }
         let notes = index.scoredSearch(
-            query, limit: 60, familiarity: familiarity, including: folderFilter(entireVault, .notes)
+            query, limit: 60, familiarity: familiarity, pinned: isNotePinned,
+            including: folderFilter(entireVault, .notes)
         ).map { (row: BarRow.note($0.note), score: $0.score, enabled: true) }
         // The commands that only open a scope are left out: the scope's own
         // row is the same choice, listed once.
@@ -543,6 +544,12 @@ extension AppModel {
     // MARK: Pins
 
     var pins: Pins { session?.pins ?? Pins() }
+
+    /// Whether a note is pinned, read once for a whole search.
+    var isNotePinned: (NoteRef) -> Bool {
+        let pinned = Set(pins.values(of: .note))
+        return { pinned.contains($0.relativePath) }
+    }
 
     /// What pinning `row` would pin, if it is something that can be.
     func pin(for row: BarRow) -> Pins.Pin? {
@@ -685,7 +692,7 @@ extension AppModel {
             noteFrecency?.score($0.relativePath) ?? 0
         }
         return index.search(
-            query, limit: 200, familiarity: familiarity,
+            query, limit: 200, familiarity: familiarity, pinned: isNotePinned,
             including: { allowed.contains($0.relativePath) }
         )
     }
