@@ -31,6 +31,12 @@ enum BarRow: Identifiable {
     case searchText(String, matches: Int? = nil)
     /// Matches outside the focused folder, offered when none are inside it.
     case elsewhere(Int)
+    /// The typed text as a question for the agent.
+    case ask(String)
+    /// The typed text as a note for the agent to draft and propose.
+    case draftNote(String)
+    /// A chat already had, to read again and continue.
+    case chat(id: String, title: String, updatedAt: Date)
 
     var id: String {
         switch self {
@@ -43,6 +49,9 @@ enum BarRow: Identifiable {
         case .hit(let hit): "hit:\(hit.id)"
         case .searchText: "searchText"
         case .elsewhere: "elsewhere"
+        case .ask: "ask"
+        case .draftNote: "draftNote"
+        case .chat(let id, _, _): "chat:\(id)"
         }
     }
 
@@ -63,6 +72,18 @@ enum BarRow: Identifiable {
         default: nil
         }
     }
+}
+
+@MainActor
+extension BarScope {
+    /// Whether Ask is turned on in Settings ▸ Search.
+    static var asksAgent: Bool { GeneralSettings.shared.asksAgent }
+
+    /// The chips under the field: Ask only when it is turned on.
+    static var shownChips: [BarScope] { asksAgent ? chips : chips.filter { $0 != .ask } }
+
+    /// The scopes found by name in the bar with no scope, likewise.
+    static var offeredScopes: [BarScope] { asksAgent ? searchable : searchable.filter { $0 != .ask } }
 }
 
 extension AppCommand {
@@ -165,6 +186,10 @@ extension AppModel {
         )
         let hits = (text?.matches ?? []).prefix(Self.barTextRowLimit).map(BarRow.hit)
         if scope == .contents { return hits }
+        // Last of all in the bar with no scope, under every search: whatever
+        // was typed can also be asked.
+        let asking: [BarRow] = scope == nil && BarScope.asksAgent
+            && !query.trimmingCharacters(in: .whitespaces).isEmpty ? [.ask(query)] : []
         if scope == nil, let text, !hits.isEmpty {
             // The first few lines under the names, and the row into the
             // text scope saying how many more there are.
@@ -173,9 +198,9 @@ extension AppModel {
             // carrying the query.
             return names + [.heading("Text")]
                 + hits.prefix(Self.barTextPreview)
-                + [.searchText(query, matches: text.totalMatches)]
+                + [.searchText(query, matches: text.totalMatches)] + asking
         }
-        guard scope?.searchesTextToo == true, !hits.isEmpty else { return rows }
+        guard scope?.searchesTextToo == true, !hits.isEmpty else { return rows + asking }
         // The names stay first and unlabelled, so a note found by name is
         // still one Return away and nothing above it moves when the text
         // arrives; a "Names" heading appearing over them pushed the list down.
@@ -265,6 +290,12 @@ extension AppModel {
             return commandRows(query)
         case .contents:
             return []
+        case .ask:
+            let chats = agent.chats.filter { $0.matches(query) }.map {
+                BarRow.chat(id: $0.id, title: $0.title, updatedAt: $0.updatedAt)
+            }
+            guard typed else { return chats.isEmpty ? [] : [.heading("Chats")] + chats }
+            return [.ask(query), .draftNote(query)] + (chats.isEmpty ? [] : [.heading("Chats")] + chats)
         }
     }
 
@@ -437,7 +468,7 @@ extension AppModel {
             }
         }
         if row.kinds.contains(.scopes) {
-            for scope in BarScope.searchable {
+            for scope in BarScope.offeredScopes {
                 if let found = value(scope.useKey) { candidates.append((.scope(scope), found)) }
             }
         }
@@ -497,7 +528,7 @@ extension AppModel {
         }
         // The scopes by name or synonym, so "rec" offers Recent, and tags by
         // name without their hash. Both learn from use as commands do.
-        let scopes = BarScope.searchable.compactMap { scope -> (row: BarRow, score: Int, enabled: Bool)? in
+        let scopes = BarScope.offeredScopes.compactMap { scope -> (row: BarRow, score: Int, enabled: Bool)? in
             guard let tier = CommandMatch.score(query: query, title: scope.title, terms: scope.aliases)
             else { return nil }
             return (.scope(scope), tier + Self.useBoost(scope.useKey), true)
@@ -518,7 +549,16 @@ extension AppModel {
         // Scopes, then commands, tags and folders, then notes on a tie: the
         // fewer there are of a kind, the likelier a tie lost is a row never
         // seen.
-        let ranked = (scopes + commands + tags + folders + notes).enumerated().sorted { left, right in
+        // Chats by their title, as any other name; one that only mentions the
+        // words inside comes after every name, as text matches do.
+        let chats: [(row: BarRow, score: Int, enabled: Bool)] = !BarScope.asksAgent ? [] : agent.chats.compactMap { chat in
+            let row = BarRow.chat(id: chat.id, title: chat.title, updatedAt: chat.updatedAt)
+            if let tier = CommandMatch.score(query: query, title: chat.title, terms: "") {
+                return (row, tier, true)
+            }
+            return chat.matches(query) ? (row, 50, true) : nil
+        }
+        let ranked = (scopes + commands + tags + folders + notes + chats).enumerated().sorted { left, right in
             if left.element.score != right.element.score {
                 return left.element.score > right.element.score
             }

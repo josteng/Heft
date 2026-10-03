@@ -41,6 +41,9 @@ struct SearchBarView: View {
     /// moved to whatever they typed; one that is merely first needs the
     /// query to be the start of its name.
     @State private var isSelectionChosen = false
+    /// Whether a chat with the agent fills the bar, rather than the list of
+    /// chats. The field is its reply box then.
+    @State private var inChat = false
 
     init(scope: BarScope?) {
         _scope = State(initialValue: scope)
@@ -95,7 +98,11 @@ struct SearchBarView: View {
             field
             if scope == nil { scopeStrip }
             Divider()
-            list(rows)
+            if inChat, scope == .ask {
+                AgentConversationView(runner: model.agent, onLeave: { dismiss() })
+            } else {
+                list(rows)
+            }
             if settings.showsKeyHints {
                 Divider()
                 footer
@@ -110,7 +117,27 @@ struct SearchBarView: View {
         .background { chipShortcuts }
         .background(PaletteSheetBackground())
         .presentationBackground(.clear)
-        .onAppear { refreshRows(); selectFirst() }
+        .onAppear {
+            model.agent.load(vaultRoot: model.vaultRoot)
+            // Back in the chat it was left in, if the bar opens on Ask.
+            inChat = scope == .ask && model.agent.chat != nil
+            refreshRows()
+            selectFirst()
+        }
+        // A finished run, or one deleted, changes the list of chats.
+        .onReceive(model.agent.$chats) { _ in refreshRows() }
+        // A file dropped anywhere on the bar is something to ask about: its
+        // path goes into the question, which lets the agent read it.
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard BarScope.asksAgent else { return false }
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
+                    Task { @MainActor in addDropped(url) }
+                }
+            }
+            return true
+        }
         // A bar opened before the vault finished loading fills in when it
         // has, rather than staying empty until something is typed.
         .onChange(of: model.index.notes.count) { refreshRows(); selectFirst() }
@@ -169,8 +196,9 @@ struct SearchBarView: View {
             }
             BarField(
                 text: $query,
-                placeholder: scope?.placeholder ?? BarScope.unscopedPlaceholder,
-                onSubmit: { choose(at: selection) },
+                placeholder: inChat && scope == .ask
+                    ? "Reply" : scope?.placeholder ?? BarScope.unscopedPlaceholder,
+                onSubmit: { inChat && scope == .ask ? reply() : choose(at: selection) },
                 onMove: move,
                 onCancel: { dismiss() },
                 onTab: goIntoSelection,
@@ -179,7 +207,8 @@ struct SearchBarView: View {
             )
             .padding(.vertical, -BarField.edge)
             .onChange(of: query) { old, new in
-                if scope == nil, let entered = BarScope.entered(byTyping: new) {
+                if scope == nil, let entered = BarScope.entered(byTyping: new),
+                   entered != .ask || BarScope.asksAgent {
                     enter(entered, carrying: "")
                 } else if new == old + " ", let target = spaceTarget(after: old) {
                     enter(target, carrying: "")
@@ -233,7 +262,7 @@ struct SearchBarView: View {
 
     private var scopeChips: some View {
         HStack(spacing: 6) {
-            ForEach(BarScope.chips, id: \.self) { candidate in
+            ForEach(BarScope.shownChips, id: \.self) { candidate in
                 Button {
                     enter(candidate, carrying: "")
                 } label: {
@@ -392,12 +421,42 @@ struct SearchBarView: View {
                 title: "None in \(model.scopeName). Show \(count) in the entire vault",
                 detail: nil, isSelected: isSelected
             )
+        case .ask(let text):
+            ActionRow(
+                symbol: "sparkles",
+                title: "Ask \u{201C}\(text.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}",
+                detail: askScopeName, isSelected: isSelected
+            )
+        case .draftNote(let text):
+            ActionRow(
+                symbol: "square.and.pencil",
+                title: "Draft a note from \u{201C}\(text.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}",
+                detail: "Proposed for review", isSelected: isSelected
+            )
+        case .chat(let id, let title, let updatedAt):
+            ActionRow(
+                symbol: "bubble.left.and.text.bubble.right", title: title,
+                detail: model.agent.isRunning(id)
+                    ? "Answering…" : updatedAt.formatted(.relative(presentation: .named)),
+                isSelected: isSelected
+            )
         }
+    }
+
+    /// Where a new chat would read, as the Ask row says it.
+    private var askScopeName: String {
+        newChatScope.isEmpty ? "Whole vault" : "In \(newChatScope)"
+    }
+
+    /// The folder a new chat reads in: the window's focus, unless the bar
+    /// was widened to the whole vault.
+    private var newChatScope: String {
+        searchesEntireVault ? "" : (model.scopePath ?? "")
     }
 
     private var chipShortcuts: some View {
         ZStack {
-            ForEach(BarScope.chips, id: \.self) { chip in
+            ForEach(BarScope.shownChips, id: \.self) { chip in
                 if let number = chip.chipNumber {
                     Button("") { switchToChip(chip) }
                         .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .command)
@@ -406,6 +465,10 @@ struct SearchBarView: View {
             // ⌘D pins or unpins the selected row, as it bookmarks in Safari.
             Button("") { togglePinOfSelection() }
                 .keyboardShortcut("d", modifiers: .command)
+            // ⌘N in Ask starts a new chat; the app's own ⌘N waits while the
+            // bar is open.
+            Button("") { newChat() }
+                .keyboardShortcut("n", modifiers: .command)
         }
         .frame(width: 0, height: 0)
         .opacity(0)
@@ -436,6 +499,11 @@ struct SearchBarView: View {
                     onLeave: { dismiss() },
                     showsPin: false
                 )
+            }
+        case .chat(let id, _, _):
+            Button("Delete Chat", systemImage: "trash", role: .destructive) {
+                guard let chat = model.agent.chats.first(where: { $0.id == id }) else { return }
+                model.agent.delete(chat)
             }
         default:
             pinItem(row)
@@ -485,7 +553,9 @@ struct SearchBarView: View {
     /// was ⌘D and nothing else, which nobody would find; the hint is also a
     /// button.
     private var footer: some View {
-        let row = rows.indices.contains(selection) ? rows[selection] : nil
+        // In a chat the list is not on screen, so nothing about its rows is.
+        let chatting = inChat && scope == .ask
+        let row = !chatting && rows.indices.contains(selection) ? rows[selection] : nil
         return HStack(spacing: 14) {
             if let row, let action = returnHint(for: row) {
                 KeyHint(key: "↵", label: action)
@@ -497,11 +567,16 @@ struct SearchBarView: View {
                 .buttonStyle(.plain)
                 .help(model.isPinned(row) ? "Unpin, so it no longer comes first" : "Pin, so it comes first here and in ⌘T")
             }
+            if chatting {
+                KeyHint(key: "↵", label: "Reply")
+                if model.agent.isRunning { KeyHint(key: "⌘.", label: "Stop") }
+                KeyHint(key: "⌘N", label: "New chat")
+            }
             if scope != nil, trimmed.isEmpty {
-                KeyHint(key: "⌫", label: "Back")
+                KeyHint(key: "⌫", label: chatting ? "Chats" : "Back")
             }
             Spacer(minLength: 8)
-            KeyHint(key: "⌘1–5", label: "Scopes")
+            KeyHint(key: "⌘1–\(BarScope.shownChips.count)", label: "Scopes")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
@@ -514,6 +589,9 @@ struct SearchBarView: View {
         case .heading: nil
         case .tag, .folder, .scope, .searchText: "Search in"
         case .elsewhere: "Show"
+        case .ask: "Ask"
+        case .draftNote: "Draft"
+        case .chat: "Open"
         }
     }
 
@@ -586,9 +664,119 @@ struct SearchBarView: View {
         case .elsewhere:
             searchesEntireVault = true
             selectFirst()
+        case .ask(let text):
+            startChat(text)
+        case .draftNote(let text):
+            let shown = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            startChat("Draft a note from \u{201C}\(shown)\u{201D}", instruction: Self.draftPrompt(text))
+        case .chat(let id, _, _):
+            guard let chat = model.agent.chats.first(where: { $0.id == id }) else { return }
+            model.agent.open(chat)
+            enter(.ask, carrying: "")
+            inChat = true
         default:
             break
         }
+    }
+
+    // MARK: Ask
+
+    /// A new chat with `question`, in the bar's place for its list.
+    private func startChat(_ question: String, instruction: String? = nil) {
+        guard let vaultRoot = model.vaultRoot else { return }
+        model.agent.close()
+        model.agent.ask(
+            question, instruction: withContext(instruction ?? question),
+            files: AgentFiles.paths(in: question), vaultRoot: vaultRoot, scope: newChatScope
+        )
+        enter(.ask, carrying: "")
+        inChat = true
+    }
+
+    /// A dropped file's path, added to what is being asked.
+    private func addDropped(_ url: URL) {
+        if scope != .ask {
+            enter(.ask, carrying: query)
+            inChat = model.agent.chat != nil
+        }
+        let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        query = query.isEmpty ? path + " " : query.trimmingCharacters(in: .whitespaces) + " " + path + " "
+    }
+
+    /// The field's text as the next turn of the open chat.
+    private func reply() {
+        guard let vaultRoot = model.vaultRoot, !trimmed.isEmpty, !model.agent.isRunning else { return }
+        model.agent.ask(
+            query, instruction: withContext(query), files: AgentFiles.paths(in: query),
+            vaultRoot: vaultRoot, scope: model.agent.chat?.scope ?? newChatScope
+        )
+        query = ""
+    }
+
+    private func newChat() {
+        guard scope == .ask else { return }
+        model.agent.close()
+        inChat = false
+        refreshRows()
+        selectFirst()
+    }
+
+    /// The question with what the reader is looking at, so "what is this
+    /// note about?" has an answer: the open note and any selection in it,
+    /// as they are when the question is asked, since a reply can come from
+    /// another note.
+    private func withContext(_ text: String) -> String {
+        var lines: [String] = []
+        if let note = model.current {
+            lines.append("The reader has \(note.relativePath) open.")
+            if let selected = Self.editorSelection(), !selected.isEmpty {
+                let shown = selected.count > 2000 ? String(selected.prefix(2000)) + "…" : selected
+                lines.append("They have selected this text in it:\n\"\"\"\n\(shown)\n\"\"\"")
+            }
+        }
+        // Today's note, so "today", "this week" and "add to my daily note"
+        // need no search to find where the reader keeps it.
+        if let vaultRoot = model.vaultRoot {
+            let daily = DailyNotes(vaultRoot: vaultRoot, settings: model.settings)
+            let today = Date()
+            let path = daily.relativePath(for: today)
+            lines.append(daily.exists(for: today)
+                ? "Today's daily note is \(path)."
+                : "Today's daily note would be \(path); it does not exist yet.")
+        }
+        lines.append("Today is \(Date().formatted(.iso8601.year().month().day())).")
+        return "(Context from Heft, not part of the question: " + lines.joined(separator: " ") + ")\n\n" + text
+    }
+
+    /// What is selected in the editor under the bar, which keeps its
+    /// selection while the sheet has the keyboard.
+    private static func editorSelection() -> String? {
+        let window = NSApp.keyWindow?.sheetParent ?? NSApp.mainWindow
+        guard let content = window?.contentView, let editor = findEditor(in: content) else { return nil }
+        let range = editor.selectedRange()
+        guard range.length > 0, NSMaxRange(range) <= (editor.string as NSString).length else { return nil }
+        return (editor.string as NSString).substring(with: range)
+    }
+
+    private static func findEditor(in view: NSView) -> HeftTextKit2View? {
+        if let editor = view as? HeftTextKit2View { return editor }
+        for child in view.subviews {
+            if let found = findEditor(in: child) { return found }
+        }
+        return nil
+    }
+
+    /// What "Draft a note from" asks: a whole note, named and filed by the
+    /// agent, as a proposal to accept or reject like any other.
+    static func draftPrompt(_ text: String) -> String {
+        """
+        Draft a new note from this: \u{201C}\(text.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}
+
+        Choose a short, fitting title and the folder it belongs in, from how the vault is already \
+        organised. Write it the way the vault's other notes are written, with links to related \
+        notes where they help. Propose it as a new note rather than asking me anything, then say \
+        in one line where you put it.
+        """
     }
 
     /// Tab goes into whatever the selected row is a way into, and does
@@ -603,6 +791,12 @@ struct SearchBarView: View {
     /// Backspace in an empty field leaves the scope: a tag for the list of
     /// tags, anything else for the bar with none.
     private func leaveScope() -> Bool {
+        // In a chat, Backspace goes back to the list of chats first; the run
+        // carries on.
+        if inChat, scope == .ask {
+            newChat()
+            return true
+        }
         guard let scope else { return false }
         enter(scope.parent, carrying: "", isLeaving: true)
         return true
@@ -612,6 +806,7 @@ struct SearchBarView: View {
         // Eased, not sprung: a bounce made the chip, the text and the clear
         // button all wobble, where sliding them aside is the whole effect.
         let animation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.22)
+        if target != .ask { inChat = false }
         withAnimation(animation) {
             scope = target
             query = text

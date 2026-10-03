@@ -20,6 +20,62 @@ public struct AnchoredEdit: Sendable, Equatable, Codable {
         self.old = old
         self.new = new
     }
+
+    /// The separators of the plain form, each alone on its line.
+    public static let oldMarker = "--- old"
+    public static let newMarker = "--- new"
+
+    /// Edits as `--replace` reads them: JSON when the input starts with `[`,
+    /// otherwise the plain form, each edit an `--- old` line, the text, a
+    /// `--- new` line and its replacement.
+    ///
+    /// The plain form exists because JSON is what Claude Code's permission
+    /// check refuses: `{"old": "…", "new": "…"}` has a comma inside braces,
+    /// which reads as shell brace expansion even inside a quoted heredoc, so
+    /// an agent allowed `heft propose` still could not send one. It needs no
+    /// escaping either, so an anchor spanning lines is just those lines.
+    public static func parse(_ input: String) throws -> [AnchoredEdit] {
+        if input.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[") {
+            return try JSONDecoder().decode([AnchoredEdit].self, from: Data(input.utf8))
+        }
+        var edits: [AnchoredEdit] = []
+        var old: [String]?
+        var new: [String]?
+        func close() {
+            if let old, let new { edits.append(AnchoredEdit(old: old.joined(separator: "\n"), new: new.joined(separator: "\n"))) }
+        }
+        var lines = input.components(separatedBy: "\n")
+        if lines.last == "" { lines.removeLast() }
+        for line in lines {
+            if line == oldMarker {
+                close()
+                old = []
+                new = nil
+            } else if line == newMarker, old != nil, new == nil {
+                new = []
+            } else if new != nil {
+                new?.append(line)
+            } else if old != nil {
+                old?.append(line)
+            } else if !line.trimmingCharacters(in: .whitespaces).isEmpty {
+                throw PlainFormError.textBeforeFirstEdit
+            }
+        }
+        if old != nil, new == nil { throw PlainFormError.missingNew }
+        close()
+        return edits
+    }
+
+    public enum PlainFormError: LocalizedError {
+        case textBeforeFirstEdit, missingNew
+
+        public var errorDescription: String? {
+            switch self {
+            case .textBeforeFirstEdit: "text before the first \(AnchoredEdit.oldMarker) line"
+            case .missingNew: "an \(AnchoredEdit.oldMarker) with no \(AnchoredEdit.newMarker) after it"
+            }
+        }
+    }
 }
 
 public enum AnchoredEditError: LocalizedError, Equatable {

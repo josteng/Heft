@@ -167,7 +167,7 @@ four-space indented code, raw HTML and entity references;
 - **One search bar** (⌘T) lists notes and commands together, what you
   opened last and what you use most first. Typing `@`, `>`, `#` or `/`
   narrows it to notes, commands, tags or text in notes, shown as a chip at
-  the start of the field, and Backspace widens it again; ⌘1 to ⌘5 jump to
+  the start of the field, and Backspace widens it again; ⌘1 to ⌘6 jump to
   the chips, as in Spotlight. ⌘D, right-click or the hint along the bottom of
   the bar pins the highlighted note, folder, tag or command, as does Pin in
   Search on a note or folder in the sidebar: pins come first in their scope and in ⌘T, in the order pinned,
@@ -244,6 +244,15 @@ that denies editing files inside the vault and allows `heft` without a
 prompt. It is a guardrail rather than a sandbox: the point is that the easy
 path and the correct path are the same path.
 [`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the verbs in full.
+
+**Ask** (⌘6, or `?` in the search bar), once turned on in Settings ▸ Search,
+puts the same agent one keystroke away. It runs your own Claude Code, signed in with your own account, headless
+and on Haiku by default, and streams its answer into the bar; anything typed
+in ⌘T can be asked from the last row, and "Draft a note from…" has it write
+a new note for you to accept. It reads the focused folder or the whole vault,
+cannot write or run anything but `heft`, and every change it wants is a card
+in the chat: accept it, reject it with a word back to the agent, or open it in
+review. Chats are kept in `.heft/chats/` to read again and continue.
 
 ## The `heft` command
 

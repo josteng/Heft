@@ -30,6 +30,12 @@ preferences or the icon.
 
 ## Preferences and processes
 
+- **Claude Code's read-only shell commands read outside its working folder.**
+  `cat ../Other/note.md` needs no permission even in `dontAsk` mode, so a
+  headless run limited to a folder is not limited until
+  `permissions.blockReadsOutsideWorkingDirectories` is set; `--add-dir` then
+  lets one folder back in.
+
 - **Everything goes through `HeftDefaults.shared`, never `UserDefaults.standard`.**
   `Scripts/run.sh --sandbox` puts every preference in its own suite so a test
   launch cannot rewrite `vaultPath`, Open Recent or the rankings; one call site

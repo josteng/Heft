@@ -11,7 +11,11 @@ import Foundation
 public struct AgentChat: Codable, Equatable, Identifiable, Sendable {
 
     public struct Turn: Codable, Equatable, Sendable {
+        /// What the reader asked, as the chat shows it.
         public var question: String
+        /// What the agent is sent instead, when that is longer than what the
+        /// reader should see: the full instructions behind "Draft a note".
+        public var instruction: String?
         public var answer: String
         /// The proposals this turn left, by id, with enough to show them
         /// after they have been accepted or rejected and are gone.
@@ -22,15 +26,30 @@ public struct AgentChat: Codable, Equatable, Identifiable, Sendable {
         public var askedAt: Date
 
         public init(
-            question: String, answer: String = "", proposals: [ProposalNote] = [],
-            denials: [AgentDenial] = [], failure: String? = nil, askedAt: Date = Date()
+            question: String, instruction: String? = nil, answer: String = "",
+            proposals: [ProposalNote] = [], denials: [AgentDenial] = [],
+            failure: String? = nil, askedAt: Date = Date()
         ) {
             self.question = question
+            self.instruction = instruction
             self.answer = answer
             self.proposals = proposals
             self.denials = denials
             self.failure = failure
             self.askedAt = askedAt
+        }
+
+        /// Tolerant, as `Proposal` is: a stored chat is a format, and one
+        /// written before a field existed must still open.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            question = try container.decode(String.self, forKey: .question)
+            instruction = try container.decodeIfPresent(String.self, forKey: .instruction)
+            answer = try container.decodeIfPresent(String.self, forKey: .answer) ?? ""
+            proposals = try container.decodeIfPresent([ProposalNote].self, forKey: .proposals) ?? []
+            denials = try container.decodeIfPresent([AgentDenial].self, forKey: .denials) ?? []
+            failure = try container.decodeIfPresent(String.self, forKey: .failure)
+            askedAt = try container.decodeIfPresent(Date.self, forKey: .askedAt) ?? Date(timeIntervalSince1970: 0)
         }
     }
 
@@ -39,11 +58,18 @@ public struct AgentChat: Codable, Equatable, Identifiable, Sendable {
         public var id: String
         public var notePath: String
         public var headline: String
+        /// What became of it, when it was decided from the chat.
+        public var outcome: Outcome?
 
-        public init(id: String, notePath: String, headline: String) {
+        public enum Outcome: String, Codable, Sendable {
+            case accepted, rejected
+        }
+
+        public init(id: String, notePath: String, headline: String, outcome: Outcome? = nil) {
             self.id = id
             self.notePath = notePath
             self.headline = headline
+            self.outcome = outcome
         }
     }
 
@@ -56,21 +82,39 @@ public struct AgentChat: Codable, Equatable, Identifiable, Sendable {
     /// Which Mac's agent holds `session`.
     public var host: String?
     public var turns: [Turn]
+    /// Folders the reader allowed it to read after a refusal, kept for every
+    /// later run of this chat, since each run is a new process.
+    public var allowed: [String]
     public var createdAt: Date
     public var updatedAt: Date
 
     public init(
-        id: String = UUID().uuidString, question: String, scope: String,
-        createdAt: Date = Date()
+        id: String = UUID().uuidString, question: String, instruction: String? = nil,
+        scope: String, createdAt: Date = Date()
     ) {
         self.id = id
         self.title = Self.title(for: question)
         self.scope = scope
         self.session = nil
         self.host = nil
-        self.turns = [Turn(question: question, askedAt: createdAt)]
+        self.turns = [Turn(question: question, instruction: instruction, askedAt: createdAt)]
+        self.allowed = []
         self.createdAt = createdAt
         self.updatedAt = createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        turns = try container.decode([Turn].self, forKey: .turns)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+            ?? Self.title(for: turns.first?.question ?? "")
+        scope = try container.decodeIfPresent(String.self, forKey: .scope) ?? ""
+        session = try container.decodeIfPresent(String.self, forKey: .session)
+        host = try container.decodeIfPresent(String.self, forKey: .host)
+        allowed = try container.decodeIfPresent([String].self, forKey: .allowed) ?? []
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(timeIntervalSince1970: 0)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }
 
     static func title(for question: String) -> String {
@@ -83,7 +127,7 @@ public struct AgentChat: Codable, Equatable, Identifiable, Sendable {
     /// another Mac or gone: the conversation so far, then the new question.
     public func prompt(continuing question: String) -> String {
         let earlier = turns.dropLast().map { turn in
-            "Reader: \(turn.question)\n\nYou: \(turn.answer)"
+            "Reader: \(turn.instruction ?? turn.question)\n\nYou: \(turn.answer)"
         }
         guard !earlier.isEmpty else { return question }
         return "This continues an earlier conversation about these notes.\n\n"

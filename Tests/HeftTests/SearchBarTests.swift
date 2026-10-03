@@ -407,6 +407,9 @@ struct SearchBarRowTests {
     /// text search offered last rather than mixed in.
     @Test("Typed: notes and commands ranked together, text search last")
     func everything() async throws {
+        let asked = GeneralSettings.shared.asksAgent
+        GeneralSettings.shared.asksAgent = true
+        defer { GeneralSettings.shared.asksAgent = asked }
         let model = try await model(["Bold ideas.md": "x", "Plan.md": "y"])
         defer { model.closeWorkspace() }
         // With no note open, Bold cannot run, so it sinks below the note
@@ -424,7 +427,8 @@ struct SearchBarRowTests {
         // The command's title is the query exactly; the note's only starts
         // with it.
         #expect(command < note)
-        #expect(rows.last == "searchText")
+        // Text search, then asking the agent, last.
+        #expect(Array(rows.suffix(2)) == ["searchText", "ask"])
         #expect(!rows.contains("note:Plan.md"))
         // The contents of a note are never searched here.
         #expect(!rows.contains { $0.hasPrefix("hit:") })
@@ -481,7 +485,10 @@ struct SearchBarRowTests {
             return "\(name):\(count)"
         }
         #expect(Set(counts) == ["work:2", "home:2"])
-        #expect(tags.first?.scope == .tag("work") || tags.first?.scope == .tag("home"))
+        // The first tag, past any Recent heading another test's recorded use
+        // of #work puts above it: uses are kept across tests.
+        let first = tags.first { $0.isSelectable }
+        #expect(first?.scope == .tag("work") || first?.scope == .tag("home"))
 
         #expect(Set(ids(model.barRows(scope: .tag("work"), query: "", entireVault: true)))
             == ["note:Plan.md", "note:Report.md"])
@@ -562,6 +569,9 @@ struct SearchBarRowTests {
     /// there are in all and leads to them.
     @Test("With no scope, a few matching lines follow the names")
     func textPreview() async throws {
+        let asked = GeneralSettings.shared.asksAgent
+        GeneralSettings.shared.asksAgent = true
+        defer { GeneralSettings.shared.asksAgent = asked }
         var files = ["Zebra notes.md": "zebra"]
         for i in 0..<12 { files["Day \(i).md"] = "saw a zebra today" }
         let model = try await model(files)
@@ -573,8 +583,9 @@ struct SearchBarRowTests {
         #expect(!rows[heading].isSelectable, "a label, like every heading")
         #expect(rowIDs.firstIndex(of: "note:Zebra notes.md")! < heading, "names first")
         #expect(rowIDs.filter { $0.hasPrefix("hit:") }.count == AppModel.barTextPreview)
-        guard case .searchText(_, let matches) = try #require(rows.last) else {
-            Issue.record("the last row leads to the text scope"); return
+        #expect(rowIDs.last == "ask", "asking comes after everything")
+        guard case .searchText(_, let matches) = try #require(rows.dropLast().last) else {
+            Issue.record("the row before it leads to the text scope"); return
         }
         #expect(matches == 13)
     }
@@ -671,12 +682,56 @@ struct SearchBarRowTests {
                 "a pin outside the folder stays out; got \(byEdit)")
     }
 
+    /// Ask lists the chats already had, latest first; typing offers the
+    /// question and a drafted note first, then the chats that mention it.
+    @Test("Ask lists its chats, and typed text becomes a question or a draft")
+    func askRows() async throws {
+        let asked = GeneralSettings.shared.asksAgent
+        GeneralSettings.shared.asksAgent = true
+        defer { GeneralSettings.shared.asksAgent = asked }
+        let model = try await model(["Plan.md": "a"])
+        defer { model.closeWorkspace() }
+        let root = try #require(model.vaultRoot)
+        var parser = AgentChat(question: "When is the parser due?", scope: "", createdAt: Date(timeIntervalSince1970: 100))
+        parser.turns[0].answer = "Friday."
+        let sidebar = AgentChat(question: "Ideas for the sidebar", scope: "", createdAt: Date(timeIntervalSince1970: 200))
+        try AgentChatStore.save(parser, in: root)
+        try AgentChatStore.save(sidebar, in: root)
+        model.agent.load(vaultRoot: root)
+
+        let empty = ids(model.barRows(scope: .ask, query: "", entireVault: true))
+        #expect(empty == ["heading:Chats", "chat:\(sidebar.id)", "chat:\(parser.id)"], "got \(empty)")
+        let typed = ids(model.barRows(scope: .ask, query: "friday", entireVault: true))
+        #expect(typed == ["ask", "draftNote", "heading:Chats", "chat:\(parser.id)"], "got \(typed)")
+
+        let unscoped = ids(model.barRows(scope: nil, query: "plan", entireVault: true))
+        #expect(unscoped.last == "ask")
+        #expect(!ids(model.barRows(scope: nil, query: "", entireVault: true)).contains("ask"))
+
+        // A chat is found in ⌘T by its title, and by what was said in it
+        // after every name.
+        let byTitle = ids(model.barRows(scope: nil, query: "sidebar", entireVault: true))
+        #expect(byTitle.contains("chat:\(sidebar.id)"))
+        let byAnswer = ids(model.barRows(scope: nil, query: "friday", entireVault: true))
+        #expect(byAnswer.contains("chat:\(parser.id)"), "got \(byAnswer)")
+
+        // Off, which it is until turned on: no row, no chip, not found by name.
+        GeneralSettings.shared.asksAgent = false
+        #expect(!ids(model.barRows(scope: nil, query: "plan", entireVault: true)).contains("ask"))
+        #expect(!BarScope.shownChips.contains(.ask))
+        #expect(!ids(model.barRows(scope: nil, query: "sidebar", entireVault: true)).contains("chat:\(sidebar.id)"))
+        #expect(!ids(model.barRows(scope: nil, query: "ask", entireVault: true)).contains("scope:Ask"))
+        GeneralSettings.shared.asksAgent = true
+        #expect(BarScope.shownChips.last == .ask)
+    }
+
     /// ⌘1 is the first chip, as Spotlight numbers its categories.
     @Test("The chips are numbered by their place")
     func chipNumbers() {
         #expect(BarScope.chip(number: 1) == .notes)
         #expect(BarScope.chip(number: 5) == .contents)
-        #expect(BarScope.chip(number: 6) == nil)
+        #expect(BarScope.chip(number: 6) == .ask)
+        #expect(BarScope.chip(number: 7) == nil)
         #expect(BarScope.chip(number: 0) == nil)
         #expect(BarScope.tags.chipNumber == 3)
         #expect(BarScope.recent.chipNumber == nil)
@@ -737,9 +792,10 @@ struct SearchBarRowTests {
         #expect(model.pins.values(of: .note) == ["Work/Plan.md"])
     }
 
-    @Test("The chips are the scopes with something to list, Text last")
+    @Test("The chips are the scopes with something to list, Text last of the searches, then Ask")
     func chips() {
-        #expect(BarScope.chips == [.notes, .commands, .tags, .folders, .contents])
+        #expect(BarScope.chips == [.notes, .commands, .tags, .folders, .contents, .ask])
+        #expect(BarScope.entered(byTyping: "?") == .ask)
         #expect(!BarScope.chips.contains(.recent) && !BarScope.chips.contains(.frequent))
         #expect(BarScope.recent.title == "Recent notes")
     }

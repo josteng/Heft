@@ -298,6 +298,44 @@ your own proposal.
 The last paragraph earns its place: without it an agent tends to propose a
 change and then "helpfully" write the file as well.
 
+## Asking from the search bar
+
+Ask (⌘6) runs the reader's own `claude -p` headless and reads its
+`stream-json`. Heft never calls a model itself: the login stays in Claude
+Code, where its terms want it, and a Heft that called the API would need a key
+of its own. What Heft decides is what the run may touch, and it decides it
+with flags alone (`AgentInvocation`), so nothing in the vault or the reader's
+setup can widen it:
+
+- Only Read, Grep, Glob and Bash exist; Bash gets Claude Code's read-only
+  commands and the `heft` verbs that read or propose. No setting sources, no
+  MCP servers: a vault's `.claude/settings.json` allow rule would otherwise
+  reopen what the flags close, so its CLAUDE.md and AGENTS.md are handed over
+  as text instead.
+- `blockReadsOutsideWorkingDirectories` is set, because the read-only shell
+  commands otherwise read anywhere on the disk: a run limited to `Work/`
+  printed `../Home/` with `cat` before it was.
+- `heft` is told the scope in `HEFT_AGENT_SCOPE` and keeps to it for `read`,
+  `find`, `changes` and `propose`; a folder run gets only those verbs.
+- Nothing prompts. A refused read comes back as a denial, and allowing it adds
+  its folder with `--add-dir` for the rest of the chat. A refused command is
+  never offered: allowing one could run anything.
+
+- Nothing can be written, so every input goes to `heft` in a heredoc. JSON
+  in one is refused: a comma inside braces reads as brace expansion, which is
+  why `--replace` also takes plain `--- old` / `--- new` blocks. The guide
+  `agent-setup` writes sends agents to `/tmp`, so Ask leaves it out of the
+  vault's instructions and keeps the reader's own text around it.
+- A path named in a question is the reader's consent: a folder is added as it
+  is, a file as a copy in a folder of the chat's own, so naming one PDF does
+  not open the folder it is in.
+
+Ask is off until turned on in Settings ▸ Search. Each question carries the
+open note and any selection. A reply resumes the agent's own session, so it
+remembers what it read; on another Mac, where that session is not, the
+transcript is sent instead. Each run signs its proposals with its chat
+(`HEFT_AGENT_NAME`), so chats answered at the same time keep their own.
+
 ## Demo, in one screen
 
 ```bash

@@ -171,7 +171,9 @@ commands, tags or text; Backspace in an empty field leaves, a single tag back
 to the tags. Scopes and tags are also rows found by name and ranked by use.
 Space on one enters it only when the query starts its name or the arrows
 chose the row, as Chrome's keyword mode wants the keyword itself; otherwise
-Space is a space. Tab always enters.
+Space is a space. Tab always enters. Ask (`?`, ⌘6) is the one chip that is
+not a search: its list is the chats had, and a chat takes the list's place,
+with the field as its reply box (`Docs/AgentIntegration.md` has the run).
 A shortcut pressed with the bar open narrows it in place rather than closing
 it, which is why the three old flags are now names for `AppModel.bar`, and
 what was typed comes along selected, so ⌘O then ⇧⌘F searches the text for

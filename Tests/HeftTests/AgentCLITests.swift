@@ -73,7 +73,7 @@ struct AgentCLITests {
 
     private func run(
         _ arguments: [String], stdin: String? = nil, readLog: URL? = nil,
-        defaultsSuite: String? = nil
+        defaultsSuite: String? = nil, scope: String? = nil
     ) throws -> Output {
         guard let binary = Self.binary else {
             throw CLIUnavailable()
@@ -96,6 +96,7 @@ struct AgentCLITests {
         environment["HEFT_INDEX_CACHE"] = FileManager.default.temporaryDirectory
             .appendingPathComponent("HeftCLIIndex-\(UUID().uuidString)").path
         environment[HeftDefaults.suiteEnvironmentKey] = suite
+        environment[AgentCLI.scopeVariable] = scope
         process.environment = environment
         let out = Pipe(), err = Pipe(), input = Pipe()
         process.standardOutput = out
@@ -115,6 +116,57 @@ struct AgentCLITests {
     }
 
     private struct CLIUnavailable: Error {}
+
+    // MARK: - A run limited to a folder
+
+    /// An agent asked from the search bar in a focused folder is told it,
+    /// and `heft` is how it would otherwise read past it: a note outside
+    /// does not exist to read, search, or propose to.
+    @Test("Told a scope, heft reads, searches and proposes inside it only")
+    func scopedAgent() throws {
+        let root = try vault([
+            "Work/Plan.md": "# Plan\nThe launch is Friday.\n",
+            "Home/Secret.md": "# Secret\nThe launch code.\n",
+            "Plan.md": "# Plan\nThe top-level plan.\n",
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        // One log for the run, so the read below counts for the proposal.
+        let log = FileManager.default.temporaryDirectory.appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+
+        let inside = try run(["read", root.path, "Work/Plan.md"], readLog: log, scope: "Work")
+        #expect(inside.status == 0 && inside.text.contains("Friday"))
+        let outside = try run(["read", root.path, "Home/Secret.md"], scope: "Work")
+        #expect(outside.status != 0)
+        #expect(outside.error.contains("limited to"), "got \(outside.error)")
+        // A bare name finds the note inside, not the likelier one at the top.
+        let bare = try run(["read", root.path, "Plan"], scope: "Work")
+        #expect(bare.text.contains("Friday"), "got \(bare.text) \(bare.error)")
+
+        let found = try run(["find", root.path, "launch"], scope: "Work")
+        #expect(found.text.contains("Work/Plan.md") && !found.text.contains("Secret"), "got \(found.text)")
+
+        let proposed = try run(["propose", root.path, "Home/Secret.md"], stdin: "# Secret\nGone.\n", scope: "Work")
+        #expect(proposed.status != 0 && proposed.error.contains("limited to"))
+        let moved = try run(["propose", root.path, "Work/Plan.md", "--move", "Home/Plan.md"], scope: "Work")
+        #expect(moved.status != 0 && moved.error.contains("limited to"))
+        #expect(ProposalStore.all(in: root).isEmpty, "nothing was proposed")
+        let allowed = try run(
+            ["propose", root.path, "Work/Plan.md"], stdin: "# Plan\nMonday.\n", readLog: log, scope: "Work"
+        )
+        #expect(allowed.status == 0, "got \(allowed.error)")
+
+        // Without a scope, the whole vault as before.
+        #expect(try run(["read", root.path, "Home/Secret.md"]).status == 0)
+    }
+
+    @Test("A path is in a scope when it is the folder or under it")
+    func scopeMembership() {
+        #expect(AgentCLI.isInScope("Work/Plan.md", scope: "Work"))
+        #expect(AgentCLI.isInScope("Work", scope: "Work"))
+        #expect(!AgentCLI.isInScope("Workshop/Plan.md", scope: "Work"))
+        #expect(!AgentCLI.isInScope("Home/Plan.md", scope: "Work"))
+        #expect(AgentCLI.isInScope("Home/Plan.md", scope: nil))
+    }
 
     private func vault(_ files: [String: String]) throws -> URL {
         let root = FileManager.default.temporaryDirectory

@@ -26,6 +26,8 @@ public enum BarScope: Hashable, Sendable {
     case recent
     /// Every note with any use, most used first.
     case frequent
+    /// A question for the reader's agent, and the chats already had.
+    case ask
 
     /// The field's prompt with no scope. Short, since the chips under it and
     /// the keys beside each scope say the rest.
@@ -33,7 +35,7 @@ public enum BarScope: Hashable, Sendable {
     public static let unscopedPlaceholder = "Search everything"
 
     /// The scopes a reader can pick from a list, in the order offered.
-    public static let offered: [BarScope] = [.notes, .commands, .tags, .contents]
+    public static let offered: [BarScope] = [.notes, .commands, .tags, .contents, .ask]
 
     /// Every scope that can be found by name in the bar with no scope:
     /// typing "rec" offers Recent, and Space or Tab makes it the chip.
@@ -44,7 +46,9 @@ public enum BarScope: Hashable, Sendable {
     /// something is typed. Recent and Frequent are not chips: they are notes
     /// only, which beside Commands and Tags read as everything, and every
     /// chip now has its own recent and frequent.
-    public static let chips: [BarScope] = [.notes, .commands, .tags, .folders, .contents]
+    ///
+    /// Ask comes after Text: it is the one chip that is not a search.
+    public static let chips: [BarScope] = [.notes, .commands, .tags, .folders, .contents, .ask]
 
     /// The chip ⌘1, ⌘2 and so on go to, by its place in the row, as
     /// Spotlight's categories are numbered.
@@ -71,6 +75,7 @@ public enum BarScope: Hashable, Sendable {
         case .folder: "folder"
         case .recent: "recent history last opened"
         case .frequent: "frequent most used often popular"
+        case .ask: "ask agent question chat assistant claude ai"
         }
     }
 
@@ -107,6 +112,7 @@ public enum BarScope: Hashable, Sendable {
         case .folder(let path): path.split(separator: "/").last.map(String.init) ?? path
         case .recent: "Recent notes"
         case .frequent: "Frequent notes"
+        case .ask: "Ask"
         }
     }
 
@@ -120,6 +126,7 @@ public enum BarScope: Hashable, Sendable {
         case .folders, .folder: "folder"
         case .recent: "clock"
         case .frequent: "star"
+        case .ask: "sparkles"
         }
     }
 
@@ -134,6 +141,7 @@ public enum BarScope: Hashable, Sendable {
         case .folder(let path): "Search in \(path)"
         case .recent: "Search recent notes"
         case .frequent: "Search frequent notes"
+        case .ask: "Ask about your notes"
         }
     }
 
@@ -150,6 +158,7 @@ public enum BarScope: Hashable, Sendable {
         case .commands: ">"
         case .tags: "#"
         case .contents: "/"
+        case .ask: "?"
         default: nil
         }
     }

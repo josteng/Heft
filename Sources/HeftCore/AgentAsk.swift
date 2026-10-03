@@ -14,12 +14,15 @@ import Foundation
 /// - Bash runs the read-only commands Claude Code already trusts, plus the
 ///   `heft` verbs that read or propose. The verbs that write without review
 ///   (`rename --now`, `capture`, `daily`, `export`) are not among them.
+/// - Nothing reads outside the scope: not Claude's own tools, not the shell
+///   commands it trusts as read-only (`cat` would otherwise read anywhere on
+///   the disk), and not `heft`, which is told the scope and keeps to it.
 /// - Anything that would ask is refused, and reported back as a denial.
 /// - No settings, hooks or MCP servers load from the reader's setup or the
 ///   vault: an allow rule there could otherwise reopen what this closes.
 ///   The vault's own instructions are handed over as text instead.
 /// - It starts in the scope, the focused folder when there is one, and
-///   reads nothing outside it without the reader allowing that file.
+///   reads nothing outside it without the reader allowing that folder.
 public struct AgentInvocation: Equatable, Sendable {
     public var executable: URL
     public var model: String
@@ -31,7 +34,8 @@ public struct AgentInvocation: Equatable, Sendable {
     public var prompt: String
     /// The agent's session to continue, for a reply.
     public var resume: String?
-    /// Read rules the reader allowed for this run, from earlier denials.
+    /// Folders outside the scope the reader allowed it to read, from
+    /// earlier denials.
     public var allowed: [String]
     /// The vault's CLAUDE.md and AGENTS.md, which the run cannot load itself.
     public var vaultInstructions: String
@@ -39,8 +43,9 @@ public struct AgentInvocation: Equatable, Sendable {
     public init(
         executable: URL, model: String, workingDirectory: URL, vaultRoot: URL,
         heftDirectory: URL?, prompt: String, resume: String? = nil,
-        allowed: [String] = [], vaultInstructions: String = ""
+        allowed: [String] = [], vaultInstructions: String = "", heftAliases: [String] = []
     ) {
+        self.heftAliases = heftAliases
         self.executable = executable
         self.model = model
         self.workingDirectory = workingDirectory
@@ -53,11 +58,37 @@ public struct AgentInvocation: Equatable, Sendable {
     }
 
     /// The `heft` verbs an agent may run: everything that reads, and
-    /// `propose` and `drop`, which only ever leave a change for review.
+    /// `propose`, `drop` and `capture`, which here only ever leave a change
+    /// for review.
     public static let heftVerbs = [
         "help", "read", "find", "files", "tags", "backlinks", "links", "outline",
-        "spell", "attachment", "changes", "proposals", "diff", "propose", "drop",
+        "spell", "attachment", "config", "changes", "proposals", "diff", "propose", "drop",
+        "capture",
     ]
+
+    /// The verbs that keep to a folder when `heft` is told one. The others
+    /// answer about the whole vault, so a run limited to a folder goes
+    /// without them; its own Glob and Grep cover the folder.
+    public static let scopedHeftVerbs = [
+        "help", "read", "find", "config", "changes", "proposals", "diff", "propose", "drop", "capture",
+    ]
+
+    /// Other names the agent may call this app's `heft` by: a vault's guide
+    /// names it by full path. Only paths that are this very binary, so an
+    /// older `heft` that knows nothing of the scope is never one of them.
+    public var heftAliases: [String]
+
+    /// The scope as `heft` is told it: vault-relative, nil for the vault.
+    public var scope: String? {
+        let root = vaultRoot.standardizedFileURL.path
+        let here = workingDirectory.standardizedFileURL.path
+        guard here != root, here.hasPrefix(root + "/") else { return nil }
+        return String(here.dropFirst(root.count + 1))
+    }
+
+    /// Claude Code's own rule against reading outside the working folders,
+    /// which otherwise lets its read-only shell commands read anywhere.
+    static let blockOutsideReads = #"{"permissions":{"blockReadsOutsideWorkingDirectories":true}}"#
 
     public var arguments: [String] {
         var arguments = [
@@ -68,10 +99,14 @@ public struct AgentInvocation: Equatable, Sendable {
             "--permission-mode", "dontAsk",
             "--permission-prompts", "none",
             "--setting-sources", "",
+            "--settings", Self.blockOutsideReads,
             "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
             "--append-system-prompt", systemPrompt,
         ]
-        arguments += ["--allowedTools"] + Self.heftVerbs.map { "Bash(heft \($0) *)" } + allowed
+        let verbs = scope == nil ? Self.heftVerbs : Self.scopedHeftVerbs
+        let names = ["heft"] + heftAliases.filter { !$0.contains(" ") }
+        arguments += ["--allowedTools"] + names.flatMap { name in verbs.map { "Bash(\(name) \($0) *)" } }
+        for folder in allowed { arguments += ["--add-dir", folder] }
         if let resume { arguments += ["--resume", resume] }
         return arguments
     }
@@ -79,6 +114,8 @@ public struct AgentInvocation: Equatable, Sendable {
     /// The process environment: the reader's, with this app's `heft` first.
     public func environment(base: [String: String]) -> [String: String] {
         var environment = base
+        environment["HEFT_AGENT_SCOPE"] = scope
+        environment["HEFT_AGENT_ASK"] = "1"
         let path = base["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         let extra = [heftDirectory?.path, executable.deletingLastPathComponent().path].compactMap { $0 }
         environment["PATH"] = (extra + [path, "/opt/homebrew/bin", "/usr/local/bin"]).joined(separator: ":")
@@ -86,10 +123,7 @@ public struct AgentInvocation: Equatable, Sendable {
     }
 
     var scopeDescription: String {
-        let root = vaultRoot.standardizedFileURL.path
-        let here = workingDirectory.standardizedFileURL.path
-        guard here != root, here.hasPrefix(root + "/") else { return "the whole vault" }
-        return "the folder \(here.dropFirst(root.count + 1)) of the vault"
+        scope.map { "the folder \($0) of the vault" } ?? "the whole vault"
     }
 
     var systemPrompt: String {
@@ -98,7 +132,11 @@ public struct AgentInvocation: Equatable, Sendable {
         asked about their notes, in \(scopeDescription). The vault is at "\(vaultRoot.path)".
 
         Answer briefly and plainly. Name a note as a wikilink, [[Note Name]], so the reader can \
-        open it.
+        open it. Read files with the Read tool; anything outside \(scopeDescription) is off \
+        limits. If you need a file there, try to read it with the Read tool anyway: Heft shows \
+        the reader what was refused with a button to allow it. Then say in one line what you \
+        wanted and why. Never suggest slash commands or settings: the reader is in Heft, not \
+        in Claude Code.
 
         You cannot write files and must not try. To change, create, move or delete a note, \
         propose it, and the reader reviews it in Heft:
@@ -106,16 +144,41 @@ public struct AgentInvocation: Equatable, Sendable {
         - heft propose "\(vaultRoot.path)" "<path>" <<'EOF'
           <the whole new body>
           EOF
+        - heft propose "\(vaultRoot.path)" "<path>" --replace --summary "<one line>" <<'EOF'
+          --- old
+          exact text now in the note
+          --- new
+          its replacement
+          EOF
+          changes part of a note without restating it; repeat the two blocks for more \
+        edits. Use this plain form, never JSON: JSON here is refused.
         - heft propose "\(vaultRoot.path)" "<path>" --delete    or    --move "<to>"
         - heft find "\(vaultRoot.path)" "<words>"   searches the text of every note
+        - heft capture "\(vaultRoot.path)" "<one line>" --daily   adds a line to today's note \
+        (or --to "<path>"); here it becomes a proposal too
         Paths are relative to the vault. A new note is a propose to a path that does not exist \
-        yet. Say in one line what you proposed and stop; do not wait for the review.
+        yet. Call it as plain `heft`: it is on your PATH and is this app. You cannot write any \
+        file here, not even in /tmp, so a command writing one is refused: always give `heft` \
+        its input with a heredoc on the same command, as above, whatever the vault's own \
+        instructions say about files in /tmp, --from or `<`. Say in one line what you \
+        proposed and stop; do not wait for the review.
         """
         let instructions = vaultInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
         if !instructions.isEmpty {
             prompt += "\n\nThe vault's own instructions for agents follow.\n\n" + instructions
         }
         return prompt
+    }
+
+    /// The file without the section `heft agent-setup` writes. That guide
+    /// is for an agent run in a terminal, which may write to /tmp and read
+    /// from it; here no file can be written, and an agent given both
+    /// followed the guide and was refused. The reader's own text stays.
+    static func withoutHeftGuide(_ text: String) -> String {
+        guard let start = text.range(of: AgentGuide.markerStart),
+              let end = text.range(of: AgentGuide.markerEnd, range: start.upperBound..<text.endIndex)
+        else { return text }
+        return String(text[..<start.lowerBound]) + String(text[end.upperBound...])
     }
 
     /// What the vault tells agents, from the files a session in it would
@@ -137,9 +200,9 @@ public struct AgentInvocation: Equatable, Sendable {
         for folder in folders {
             for name in ["CLAUDE.md", "AGENTS.md"] {
                 let file = folder.appendingPathComponent(name)
-                if let text = try? String(contentsOf: file, encoding: .utf8),
-                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    parts.append(text)
+                if let text = try? String(contentsOf: file, encoding: .utf8) {
+                    let own = withoutHeftGuide(text).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !own.isEmpty { parts.append(own) }
                 }
             }
         }
@@ -152,15 +215,15 @@ public struct AgentDenial: Codable, Equatable, Sendable, Hashable {
     public var tool: String
     /// What it was refused, in the reader's words: a path or a command.
     public var target: String
-    /// The rule that would allow it on a retry. Only reads ever get one:
-    /// letting a refused command through could run anything, and an edit is
-    /// a proposal or nothing.
-    public var allowRule: String?
+    /// The folder that would allow it on a retry, added as one the agent
+    /// may read. Only reads ever get one: letting a refused command through
+    /// could run anything, and an edit is a proposal or nothing.
+    public var allowFolder: String?
 
-    public init(tool: String, target: String, allowRule: String?) {
+    public init(tool: String, target: String, allowFolder: String?) {
         self.tool = tool
         self.target = target
-        self.allowRule = allowRule
+        self.allowFolder = allowFolder
     }
 
     public var summary: String {
@@ -178,17 +241,17 @@ public struct AgentDenial: Codable, Equatable, Sendable, Hashable {
         case "Read":
             let path = input["file_path"] as? String ?? ""
             target = path
-            allowRule = path.hasPrefix("/") ? "Read(/\(path))" : nil
+            allowFolder = path.hasPrefix("/") ? (path as NSString).deletingLastPathComponent : nil
         case "Grep", "Glob":
             let path = input["path"] as? String ?? ""
             target = path
-            allowRule = path.hasPrefix("/") ? "Read(/\(path)/**)" : nil
+            allowFolder = path.hasPrefix("/") ? path : nil
         case "Bash":
             target = input["command"] as? String ?? ""
-            allowRule = nil
+            allowFolder = nil
         default:
             target = input.values.compactMap { $0 as? String }.first ?? ""
-            allowRule = nil
+            allowFolder = nil
         }
     }
 }
@@ -369,5 +432,97 @@ public enum AgentLocator {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard process.terminationStatus == 0, found.hasPrefix("/") else { return nil }
         return URL(fileURLWithPath: found)
+    }
+}
+
+extension Array where Element: Hashable {
+    /// The elements in order, each once.
+    public func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}
+
+/// Files and folders the reader names in a question, by path.
+///
+/// Naming one is the reader's consent to reading it, so it is let through
+/// without a refusal first: a file as a copy in a folder of the chat's own,
+/// so naming one PDF in Downloads does not open all of Downloads; a folder
+/// as it is, since a folder is what was named.
+public enum AgentFiles {
+
+    /// The paths in `text` that exist: absolute, from `~`, or `file://`
+    /// URLs. A path may hold spaces, as a dropped one often does, so each
+    /// is taken as the longest run that names something on disk.
+    public static func paths(in text: String, home: String = NSHomeDirectory()) -> [URL] {
+        let characters = Array(text)
+        var found: [URL] = []
+        var index = 0
+        while index < characters.count {
+            let startsHere = index == 0 || " \t\n\"'(<[".contains(characters[index - 1])
+            guard startsHere, let start = pathStart(characters, at: index) else {
+                index += 1
+                continue
+            }
+            var best: (url: URL, end: Int)?
+            var end = start.body
+            while end <= characters.count {
+                if end == characters.count || " \t\n\"')>]".contains(characters[end]) {
+                    let raw = String(characters[start.body..<end])
+                    let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?"))
+                    if let url = resolve(trimmed, kind: start.kind, home: home),
+                       FileManager.default.fileExists(atPath: url.path) {
+                        best = (url, end)
+                    }
+                }
+                end += 1
+            }
+            if let best {
+                if !found.contains(best.url) { found.append(best.url) }
+                index = best.end
+            } else {
+                index += 1
+            }
+        }
+        return found
+    }
+
+    private enum Kind { case absolute, home, fileURL }
+
+    private static func pathStart(_ characters: [Character], at index: Int) -> (body: Int, kind: Kind)? {
+        let rest = String(characters[index..<min(characters.count, index + 7)])
+        if rest.hasPrefix("file://") { return (index, .fileURL) }
+        if characters[index] == "/" { return (index, .absolute) }
+        if characters[index] == "~", index + 1 < characters.count, characters[index + 1] == "/" {
+            return (index, .home)
+        }
+        return nil
+    }
+
+    private static func resolve(_ text: String, kind: Kind, home: String) -> URL? {
+        switch kind {
+        case .absolute: return text.count > 1 ? URL(fileURLWithPath: text) : nil
+        case .home: return URL(fileURLWithPath: home + text.dropFirst())
+        case .fileURL: return URL(string: text).flatMap { $0.isFileURL ? $0 : nil }
+        }
+    }
+
+    /// Copies each file into a numbered folder of its own under `folder`,
+    /// so two files with one name both arrive. Returns where each went.
+    public static func stage(_ files: [URL], into folder: URL) -> [(original: URL, copy: URL)] {
+        let fileManager = FileManager.default
+        var staged: [(URL, URL)] = []
+        for file in files {
+            let slot = folder.appendingPathComponent("\(staged.count + 1)-\(UUID().uuidString.prefix(6))", isDirectory: true)
+            let copy = slot.appendingPathComponent(file.lastPathComponent)
+            do {
+                try fileManager.createDirectory(at: slot, withIntermediateDirectories: true)
+                try fileManager.copyItem(at: file, to: copy)
+                staged.append((file, copy))
+            } catch {
+                continue
+            }
+        }
+        return staged
     }
 }

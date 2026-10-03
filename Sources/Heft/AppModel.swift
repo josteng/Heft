@@ -420,6 +420,9 @@ final class AppModel: ObservableObject {
     /// the note switcher, which made jumping to a note by name slower and
     /// noisier. The scopes keep that apart: ⌘O is still names only, and text
     /// inside notes is searched only in its own scope, never in the mix.
+    /// The search bar's Ask: the agent's runs and chats for this window.
+    let agent = AgentRunner()
+
     @Published var bar: BarRequest? {
         didSet {
             let open = bar != nil
@@ -608,6 +611,9 @@ final class AppModel: ObservableObject {
         self.registry = registry
         self.host = host
         workspaceID = descriptor?.id ?? UUID()
+        defer {
+            agent.onProposals = { [weak self] _ in self?.refreshProposals() }
+        }
         scopePath = descriptor?.scopePath
         // `--vault <path>` and `--open <relative-path>` let a launch go
         // straight to a known state, which is how the app gets driven during

@@ -18,6 +18,47 @@ public enum AgentCLI {
         "capture",
     ]
 
+    /// The folder an agent asked from Heft's search bar is limited to,
+    /// vault-relative, set by Heft in the agent's environment. Reading,
+    /// searching and proposing stay inside it; outside, a note does not
+    /// exist as far as the agent can tell.
+    public static let scopeVariable = "HEFT_AGENT_SCOPE"
+
+    /// Set by Heft for a run asked from its search bar, where every change
+    /// is a card in the chat: a capture waits for review there, whatever
+    /// the setting says for agents run by hand.
+    public static let askVariable = "HEFT_AGENT_ASK"
+
+    static var isAsked: Bool { ProcessInfo.processInfo.environment[askVariable] == "1" }
+
+    /// Who a proposal is from when `--agent` does not say: the chat that
+    /// asked, when Heft's search bar ran it, so its proposals are told apart
+    /// from another chat's running at the same time.
+    public static let agentNameVariable = "HEFT_AGENT_NAME"
+
+    static var defaultAgent: String {
+        let named = ProcessInfo.processInfo.environment[agentNameVariable] ?? ""
+        return named.isEmpty ? "claude-code" : named
+    }
+
+    static var agentScope: String? {
+        guard let scope = ProcessInfo.processInfo.environment[scopeVariable] else { return nil }
+        let cleaned = NewNoteLocation.normalised(scope)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    /// Whether a vault-relative path is inside `scope`; everything is when
+    /// there is none.
+    public static func isInScope(_ relative: String, scope: String?) -> Bool {
+        guard let scope else { return true }
+        return relative == scope || relative.hasPrefix(scope + "/")
+    }
+
+    private static func requireInScope(_ relative: String) {
+        guard let scope = agentScope, !isInScope(relative, scope: scope) else { return }
+        fail("\(relative) is outside \(scope), the folder this question is limited to")
+    }
+
     /// Returns true when it handled the arguments (and has exited).
     public static func run(_ arguments: [String]) -> Bool {
         guard let verb = arguments.first, verbs.contains(verb) else { return false }
@@ -72,6 +113,8 @@ public enum AgentCLI {
         }
         let options = Options(arguments.dropFirst())
         let relative = normalized(notePath)
+        requireInScope(relative)
+        if let destination = options["move"] { requireInScope(NewNoteLocation.normalised(destination)) }
 
         // Deleting and moving are facts about the tree rather than about a
         // note's text, so neither reads a body and neither has hunks to
@@ -114,7 +157,7 @@ public enum AgentCLI {
             }
             let edits: [AnchoredEdit]
             do {
-                edits = try JSONDecoder().decode([AnchoredEdit].self, from: Data(body.utf8))
+                edits = try AnchoredEdit.parse(body)
             } catch {
                 // Naming the parse failure, not only the shape it wanted.
                 // "expects JSON" reads as "you sent the wrong fields" when
@@ -124,8 +167,9 @@ public enum AgentCLI {
                 // literal newlines inside strings. So the guide's own one-liner
                 // breaks the moment an anchor spans two lines.
                 fail("""
-                    --replace could not parse stdin as JSON: \(error.localizedDescription)
-                    It expects [{"old": "…", "new": "…"}].
+                    --replace could not parse its edits: \(error.localizedDescription)
+                    It expects [{"old": "…", "new": "…"}], or plain blocks: a line \
+                    `\(AnchoredEdit.oldMarker)`, the text, a line `\(AnchoredEdit.newMarker)`, its replacement.
                     If an anchor spans lines, `echo` is the usual culprit: it turns \\n \
                     inside the string into a real newline, which JSON does not allow. \
                     Write the JSON to a file and pipe it in, or use a quoted heredoc.
@@ -189,7 +233,7 @@ public enum AgentCLI {
             notePath: relative,
             base: current,
             body: body,
-            agent: options["agent"] ?? "claude-code",
+            agent: options["agent"] ?? defaultAgent,
             summary: summary ?? ProposalStore.defaultSummary,
             kind: current == nil ? .create : .edit,
             group: options["group"].map { Proposal.Group(summary: $0) }
@@ -272,7 +316,7 @@ public enum AgentCLI {
             notePath: item.relativePath,
             base: nil,
             body: "",
-            agent: options["agent"] ?? "claude-code",
+            agent: options["agent"] ?? defaultAgent,
             summary: described,
             kind: isMove ? .move : .delete,
             destination: destination,
@@ -545,8 +589,10 @@ public enum AgentCLI {
         }
 
         let index = VaultIndex.open(vaultAt: root)
+        let scope = agentScope
         let result = ContentSearch.run(
-            notes: index.notes, query: words.joined(separator: " "), limit: limit
+            notes: index.notes.filter { isInScope($0.relativePath, scope: scope) },
+            query: words.joined(separator: " "), limit: limit
         )
         guard !result.matches.isEmpty else {
             print("no matches")
@@ -647,7 +693,15 @@ public enum AgentCLI {
             target = cleaned
         }
 
-        if AgentCaptureReviewPreference.isOn {
+        // A run limited to a folder adds only to a note it names inside it:
+        // the inbox and today's note are wherever the settings put them.
+        if let scope = agentScope {
+            guard let target, isInScope(target, scope: scope) else {
+                fail("in \(scope), capture needs --to a note inside that folder, the one this question is limited to")
+            }
+        }
+
+        if AgentCaptureReviewPreference.isOn || isAsked {
             captureAsProposal(text, root: root, daily: options.flag("daily"), to: target)
         }
 
@@ -732,7 +786,7 @@ public enum AgentCLI {
             notePath: relative,
             base: starting,
             body: proposed,
-            agent: "claude-code",
+            agent: defaultAgent,
             summary: summary,
             kind: starting == nil ? .create : .edit
         )
@@ -836,7 +890,17 @@ public enum AgentCLI {
     /// resolves: a path, or a bare note name. `read` and `changes` both go
     /// through it so that a name means the same thing to each.
     private static func resolveNote(named name: String, in root: URL) -> String {
-        guard let found = VaultIndex.open(vaultAt: root).note(named: name) else {
+        let index = VaultIndex.open(vaultAt: root)
+        if let scope = agentScope {
+            // Resolved among the folder's notes alone, so a bare name finds
+            // the one inside rather than failing on a likelier one outside.
+            let inside = index.notes.filter { isInScope($0.relativePath, scope: scope) }
+            guard let found = VaultIndex.match(name, among: inside) else {
+                fail("no note called \(name) in \(scope), the folder this question is limited to")
+            }
+            return found.relativePath
+        }
+        guard let found = index.note(named: name) else {
             fail("no such note: \(name)")
         }
         return found.relativePath

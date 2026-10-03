@@ -68,6 +68,26 @@ final class GeneralSettings: ObservableObject {
     }
     static let keyHintsKey = "dev.stenglein.Heft.searchBar.keyHints"
 
+    /// The agent the search bar's Ask runs: a command on the PATH or a full
+    /// path, and the model it is asked to use.
+    /// Whether the search bar offers Ask at all. Off until turned on: it
+    /// runs an agent the reader may not have, on their own plan.
+    @Published var asksAgent: Bool {
+        didSet { HeftDefaults.shared.set(asksAgent, forKey: Self.asksAgentKey) }
+    }
+    static let asksAgentKey = "dev.stenglein.Heft.agent.enabled"
+
+    @Published var agentCommand: String {
+        didSet { HeftDefaults.shared.set(agentCommand, forKey: Self.agentCommandKey) }
+    }
+    @Published var agentModel: String {
+        didSet { HeftDefaults.shared.set(agentModel, forKey: Self.agentModelKey) }
+    }
+    static let agentCommandKey = "dev.stenglein.Heft.agent.command"
+    static let agentModelKey = "dev.stenglein.Heft.agent.model"
+    static let standardAgentCommand = "claude"
+    static let standardAgentModel = "haiku"
+
     /// What ⌘T lists before anything is typed, stored by `StartList`.
     @Published var startList: StartList {
         didSet { startList.save(in: HeftDefaults.shared) }
@@ -77,6 +97,11 @@ final class GeneralSettings: ObservableObject {
         scopeOrders = ScopeOrders.current(in: HeftDefaults.shared)
         startList = StartList.current(in: HeftDefaults.shared)
         sidebarLayout = SidebarLayout.current()
+        asksAgent = HeftDefaults.shared.bool(forKey: Self.asksAgentKey)
+        agentCommand = HeftDefaults.shared.string(forKey: Self.agentCommandKey)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? Self.standardAgentCommand
+        agentModel = HeftDefaults.shared.string(forKey: Self.agentModelKey)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? Self.standardAgentModel
         showsKeyHints = HeftDefaults.shared.object(forKey: Self.keyHintsKey) == nil
             || HeftDefaults.shared.bool(forKey: Self.keyHintsKey)
         offersAgentSetup = HeftDefaults.shared.object(forKey: Self.agentOfferKey) == nil
