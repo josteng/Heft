@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import HeftCore
 @testable import Heft
 
 /// Which sidebar views show, in what order, and where a window starts.
@@ -127,5 +128,33 @@ struct InspectorLayoutTests {
         onlyAsk.entries[0].isShown = false
         #expect(PanelLayoutRows.isLastShown(.chats, in: onlyAsk))
         #expect(!PanelLayoutRows.isLastShown(.backlinks, in: onlyAsk), "already off")
+    }
+}
+
+/// The file tree as one flat list of the rows showing.
+@Suite("File tree rows")
+struct TreeLinesTests {
+    private func folder(_ path: String, _ children: [VaultItem]) -> VaultItem {
+        VaultItem(url: URL(fileURLWithPath: "/vault/" + path), relativePath: path, kind: .folder,
+                  name: (path as NSString).lastPathComponent, children: children)
+    }
+
+    private func note(_ path: String) -> VaultItem {
+        VaultItem(url: URL(fileURLWithPath: "/vault/" + path), relativePath: path, kind: .markdown,
+                  name: (path as NSString).lastPathComponent)
+    }
+
+    @Test("An open folder's rows follow it, one deeper; a closed one's are left out")
+    func lines() {
+        let tree = [
+            folder("Daily", [note("Daily/2026-10-02.md"), note("Daily/2026-10-03.md")]),
+            folder("Projects", [folder("Projects/Old", [note("Projects/Old/A.md")])]),
+            note("Inbox.md"),
+        ]
+        let shown = SidebarView.treeLines(tree, expanded: ["Daily", "Projects/Old"])
+        #expect(shown.map(\.item.relativePath) == ["Daily", "Daily/2026-10-02.md", "Daily/2026-10-03.md", "Projects", "Inbox.md"])
+        #expect(shown.map(\.depth) == [0, 1, 1, 0, 0])
+        let deep = SidebarView.treeLines(tree, expanded: ["Projects", "Projects/Old"])
+        #expect(deep.map(\.depth) == [0, 0, 1, 2, 0])
     }
 }

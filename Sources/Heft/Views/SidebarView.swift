@@ -252,16 +252,20 @@ struct SidebarView: View {
         ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
-                if let tree = model.scopedTree {
-                    ForEach(tree.children) { child in
-                        TreeRow(
-                            item: child, depth: 0,
-                            dropTarget: $dropTarget,
-                            inlineEdit: $inlineEdit,
-                            selectedFolderPath: $selectedFolderPath,
-                            selection: $selection
-                        )
-                    }
+                // One flat list of the rows showing, each with its depth:
+                // nested, an open folder was one element of the lazy stack
+                // and built every row it held at once, so a folder of three
+                // thousand daily notes stuttered as it opened and on every
+                // switch back to Files. Keyed by the anchor, so a reveal can
+                // scroll to a row not yet built.
+                ForEach(Self.treeLines(model.scopedTree?.children ?? [], expanded: model.expandedFolders), id: \.anchor) { line in
+                    TreeRow(
+                        item: line.item, depth: line.depth,
+                        dropTarget: $dropTarget,
+                        inlineEdit: $inlineEdit,
+                        selectedFolderPath: $selectedFolderPath,
+                        selection: $selection
+                    )
                 }
             }
             .padding(.horizontal, 6)
@@ -991,6 +995,28 @@ struct SidebarAnchor: Hashable {
     let path: String
 }
 
+/// One row of the file tree as shown: the item and how deep it sits.
+struct TreeLine {
+    let item: VaultItem
+    let depth: Int
+    var anchor: SidebarAnchor { SidebarAnchor(path: item.relativePath) }
+}
+
+extension SidebarView {
+    /// The rows the tree shows, in order: each item, then the children of
+    /// the open folders under it.
+    static func treeLines(_ items: [VaultItem], expanded: Set<String>, depth: Int = 0) -> [TreeLine] {
+        var lines: [TreeLine] = []
+        for item in items {
+            lines.append(TreeLine(item: item, depth: depth))
+            if item.isFolder, expanded.contains(item.relativePath) {
+                lines += treeLines(item.children, expanded: expanded, depth: depth + 1)
+            }
+        }
+        return lines
+    }
+}
+
 /// The filter field and the menu beside it: the one row of the sidebar's
 /// header that differs between the three modes.
 ///
@@ -1247,17 +1273,6 @@ private struct TreeRow: View {
                 }
             }
 
-            if isExpanded {
-                ForEach(item.children) { child in
-                    TreeRow(
-                        item: child, depth: depth + 1,
-                        dropTarget: $dropTarget,
-                        inlineEdit: $inlineEdit,
-                        selectedFolderPath: $selectedFolderPath,
-                        selection: $selection
-                    )
-                }
-            }
         } else {
             NoteRow(
                 name: item.name,
