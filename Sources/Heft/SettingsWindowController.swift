@@ -72,7 +72,7 @@ final class SettingsWindowController: NSWindowController {
 
 /// The panes, and what each is called.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, appearance, startup, typing, calendar, capture, attachments, vim
+    case general, search, appearance, startup, typing, calendar, capture, attachments, vim
 
     var id: String { rawValue }
 
@@ -93,6 +93,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: "General"
+        case .search: "Search"
         case .appearance: "Appearance"
         case .startup: "Startup"
         case .typing: "Typing"
@@ -106,6 +107,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: "gearshape"
+        case .search: "magnifyingglass"
         case .appearance: "paintpalette"
         case .startup: "sunrise"
         case .typing: "keyboard"
@@ -119,6 +121,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     @ViewBuilder var content: some View {
         switch self {
         case .general: GeneralSettingsView()
+        case .search: SearchSettingsView()
         case .appearance: AppearanceSettingsView()
         case .startup: StartupSettingsView()
         case .typing: TypingSettingsView()

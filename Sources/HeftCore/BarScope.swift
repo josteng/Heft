@@ -46,6 +46,17 @@ public enum BarScope: Hashable, Sendable {
     /// chip now has its own recent and frequent.
     public static let chips: [BarScope] = [.notes, .commands, .tags, .folders, .contents]
 
+    /// The chip ⌘1, ⌘2 and so on go to, by its place in the row, as
+    /// Spotlight's categories are numbered.
+    public static func chip(number: Int) -> BarScope? {
+        chips.indices.contains(number - 1) ? chips[number - 1] : nil
+    }
+
+    /// This scope's number among the chips, if it is one.
+    public var chipNumber: Int? {
+        Self.chips.firstIndex(of: self).map { $0 + 1 }
+    }
+
     /// Other words a scope answers to, the way a command has search terms.
     public var aliases: String {
         switch self {

@@ -522,15 +522,15 @@ struct SearchBarRowTests {
 
         let commands = ids(model.barRows(scope: .commands, query: "", entireVault: true, order: first))
         #expect(Array(commands.prefix(3)) == [
-            "heading:Recent commands", "command:toggleBacklinks", "heading:Frequent commands",
+            "heading:Recent", "command:toggleBacklinks", "heading:Frequent",
         ], "got \(commands)")
         #expect(commands.filter { $0 == "command:toggleBacklinks" }.count == 1)
 
         let tags = ids(model.barRows(scope: .tags, query: "", entireVault: true, order: first))
-        #expect(Array(tags.prefix(3)) == ["heading:Recent tags", "tag:work", "heading:Frequent tags"])
+        #expect(Array(tags.prefix(3)) == ["heading:Recent", "tag:work", "heading:Frequent"])
 
         let folders = ids(model.barRows(scope: .folders, query: "", entireVault: true, order: first))
-        #expect(Array(folders.prefix(3)) == ["heading:Recent folders", "folder:Home", "heading:Frequent folders"])
+        #expect(Array(folders.prefix(3)) == ["heading:Recent", "folder:Home", "heading:Frequent"])
 
         // One order alone: no headings, and nothing dropped.
         let only = ids(model.barRows(
@@ -551,7 +551,19 @@ struct SearchBarRowTests {
         let notes = ids(model.barRows(scope: .notes, query: "", entireVault: true, orders: orders))
         #expect(notes.first == "heading:Recent", "got \(notes)")
         let commands = ids(model.barRows(scope: .commands, query: "", entireVault: true, orders: orders))
-        #expect(commands.first == "heading:Frequent commands", "got \(commands)")
+        #expect(commands.first == "heading:Frequent", "got \(commands)")
+        #expect(commands.dropFirst().first?.hasPrefix("command:") == true, "commands lead, by use")
+    }
+
+    /// ⌘1 is the first chip, as Spotlight numbers its categories.
+    @Test("The chips are numbered by their place")
+    func chipNumbers() {
+        #expect(BarScope.chip(number: 1) == .notes)
+        #expect(BarScope.chip(number: 5) == .contents)
+        #expect(BarScope.chip(number: 6) == nil)
+        #expect(BarScope.chip(number: 0) == nil)
+        #expect(BarScope.tags.chipNumber == 3)
+        #expect(BarScope.recent.chipNumber == nil)
     }
 
     @Test("The chips are the scopes with something to list, Text last")

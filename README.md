@@ -167,7 +167,8 @@ four-space indented code, raw HTML and entity references;
 - **One search bar** (⌘T) lists notes and commands together, what you
   opened last and what you use most first. Typing `@`, `>`, `#` or `/`
   narrows it to notes, commands, tags or text in notes, shown as a chip at
-  the start of the field, and Backspace widens it again. A scope or a tag can
+  the start of the field, and Backspace widens it again; ⌘1 to ⌘5 jump to
+  the chips, as in Spotlight. A scope or a tag can
   also be typed by name: "rec" offers Recent, and Space or Tab makes it the
   chip. Choosing a tag or a folder searches only its notes, by name first
   and then by the text inside them. **Quick open** (⌘O), the **command palette** (⌘P) and **content

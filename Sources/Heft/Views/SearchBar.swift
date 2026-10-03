@@ -102,6 +102,10 @@ struct SearchBarView: View {
         // One height whatever the scope: the chip row leaving gives its room
         // to the list rather than shrinking the sheet under the pointer.
         .frame(width: PaletteMetrics.barWidth, height: PaletteMetrics.barHeight, alignment: .top)
+        // ⌘1 to ⌘5 go to the chips by their place in the row, from any scope,
+        // as Spotlight's categories are numbered. Invisible buttons, since a
+        // shortcut needs something to belong to.
+        .background { chipShortcuts }
         .background(PaletteSheetBackground())
         .presentationBackground(.clear)
         .onAppear { refreshRows(); selectFirst() }
@@ -131,8 +135,14 @@ struct SearchBarView: View {
 
     private var field: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                .frame(height: Self.lineHeight)
+            // The magnifier says "search" until a chip says what is searched;
+            // then the chip takes its place, as a browser's search mode does,
+            // rather than standing beside a second mark.
+            if scope == nil {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    .frame(height: Self.lineHeight)
+                    .transition(.opacity)
+            }
             if let scope {
                 ScopeChip(scope: scope)
                     // One identity per scope, so going from the tags into a
@@ -382,6 +392,28 @@ struct SearchBarView: View {
         }
     }
 
+    private var chipShortcuts: some View {
+        ZStack {
+            ForEach(BarScope.chips, id: \.self) { chip in
+                if let number = chip.chipNumber {
+                    Button("") { switchToChip(chip) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .command)
+                }
+            }
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+
+    /// A chip chosen by its number, keeping what was typed, selected, as a
+    /// shortcut switching the scope does.
+    private func switchToChip(_ chip: BarScope) {
+        guard chip != scope else { return }
+        enter(chip, carrying: query)
+        if !trimmed.isEmpty { selectAllRequest += 1 }
+    }
+
     /// The ways into a scope, typed or pressed.
     private func keys(for scope: BarScope) -> String? {
         let shortcut: AppCommandShortcut? = switch scope {
@@ -390,7 +422,7 @@ struct SearchBarView: View {
         case .contents: .searchVault
         default: nil
         }
-        return [scope.trigger.map(String.init), shortcut?.display]
+        return [scope.trigger.map(String.init), scope.chipNumber.map { "⌘\($0)" }, shortcut?.display]
             .compactMap { $0 }
             .joined(separator: "  ")
     }

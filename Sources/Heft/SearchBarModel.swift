@@ -512,8 +512,8 @@ extension AppModel {
     }
 
     /// Commands, tags or folders with nothing typed, the way Quick Open lists
-    /// notes: one order first and the other after, as the one setting says,
-    /// headed by order and kind; or one order alone, without headings.
+    /// notes: one order first and the other after, as the scope's setting
+    /// says, headed by order; or one order alone, without headings.
     private func arrangedRows<Item>(
         _ items: [Item], kind: String, order: QuickOpenOrder,
         key: (Item) -> String, scoreKey: (Item) -> String, row: (Item) -> BarRow
@@ -527,8 +527,10 @@ extension AppModel {
         guard let heading = arranged.heading else {
             return (arranged.lead + arranged.rest).map(row)
         }
-        return [.heading("\(heading.title) \(kind)", target: nil)] + arranged.lead.map(row)
-            + [.heading("\(heading.other.title) \(kind)", target: nil)] + arranged.rest.map(row)
+        // The order alone, as Notes heads its own: the chip already says
+        // what kind of thing is listed.
+        return [.heading(heading.title, target: nil)] + arranged.lead.map(row)
+            + [.heading(heading.other.title, target: nil)] + arranged.rest.map(row)
     }
 
     /// Commands that cannot run moved to the end of whichever part they are
