@@ -36,6 +36,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A locked screen fails the launch below for a reason that has nothing to do
+# with the app: nothing can come to the front, so the window is never made and
+# no vault is recorded. Three runs during the night failed exactly so. macOS
+# adds CGSSessionScreenIsLocked to the console session while it is locked.
+if ioreg -n Root -d1 2>/dev/null | grep -q '"CGSSessionScreenIsLocked"=Yes'; then
+    fail "the screen is locked; run this while you are at the Mac"
+fi
+
 echo "Building..."
 "$ROOT/Scripts/bundle.sh" debug >/dev/null 2>&1 || fail "the bundle would not build"
 APP="$ROOT/.build/XcodeDerivedData/Build/Products/Debug/Heft.app"
