@@ -76,7 +76,7 @@ enum BarRow: Identifiable {
 
 @MainActor
 extension BarScope {
-    /// Whether Ask is turned on in Settings ▸ Search.
+    /// Whether Ask is turned on in Settings ▸ Ask.
     static var asksAgent: Bool { GeneralSettings.shared.asksAgent }
 
     /// The chips under the field: Ask only when it is turned on.
@@ -178,7 +178,57 @@ extension AppModel {
     func barRows(
         scope: BarScope?, query: String, entireVault: Bool,
         order: QuickOpenOrder? = nil, orders: ScopeOrders = .current, start: StartList = .current,
-        text: ContentSearchResult? = nil
+        text: ContentSearchResult? = nil, askFirst: GeneralSettings.AskFirst? = nil
+    ) -> [BarRow] {
+        let rows = listedRows(
+            scope: scope, query: query, entireVault: entireVault, order: order, orders: orders,
+            start: start, text: text
+        )
+        return Self.askingFirst(rows, query: query, when: askFirst ?? GeneralSettings.shared.askFirst)
+    }
+
+    /// The Ask row moved to the top, where Return reaches it, when the text
+    /// reads as a question and nothing is named by it, or when nothing at
+    /// all was found, as the reader chose. A note whose name starts with
+    /// the words still comes first: "What I learned" is a note to open.
+    static func askingFirst(_ rows: [BarRow], query: String, when: GeneralSettings.AskFirst) -> [BarRow] {
+        guard let ask = rows.firstIndex(where: { if case .ask = $0 { true } else { false } }) else { return rows }
+        let found = rows.filter { row in
+            switch row {
+            case .heading, .searchText, .ask, .elsewhere: false
+            default: true
+            }
+        }
+        let typed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let named = found.first.map { Self.title(of: $0).lowercased().hasPrefix(typed) } ?? false
+        let first: Bool = switch when {
+        case .never: false
+        case .whenNothingFound: found.isEmpty
+        case .forQuestions: found.isEmpty || (QuestionShape.isQuestion(query) && !named)
+        }
+        guard first else { return rows }
+        var moved = rows
+        moved.insert(moved.remove(at: ask), at: 0)
+        return moved
+    }
+
+    private static func title(of row: BarRow) -> String {
+        switch row {
+        case .note(let note): note.name
+        case .command(let command): command.title
+        case .tag(let name, _): name
+        case .folder(let path, _): (path as NSString).lastPathComponent
+        case .scope(let scope): scope.title
+        case .chat(_, let title, _): title
+        case .hit(let hit): hit.note.name
+        default: ""
+        }
+    }
+
+    private func listedRows(
+        scope: BarScope?, query: String, entireVault: Bool,
+        order: QuickOpenOrder?, orders: ScopeOrders, start: StartList,
+        text: ContentSearchResult?
     ) -> [BarRow] {
         let rows = nameRows(
             scope: scope, query: query, entireVault: entireVault, order: order, orders: orders,
@@ -472,6 +522,13 @@ extension AppModel {
                 if let found = value(scope.useKey) { candidates.append((.scope(scope), found)) }
             }
         }
+        if row.kinds.contains(.chats), BarScope.asksAgent {
+            for chat in agent.chats {
+                if let found = value(Self.chatUseKey(chat.id)) {
+                    candidates.append((.chat(id: chat.id, title: chat.title, updatedAt: chat.updatedAt), found))
+                }
+            }
+        }
 
         // Swift's sort is not stable, so the order gathered breaks ties.
         var ordered = candidates.enumerated()
@@ -658,6 +715,16 @@ extension AppModel {
             rest.insert(.heading(order.mode.heading), at: 0)
         }
         return [.heading("Pinned")] + pinned + rest
+    }
+
+    /// The key a chat's use is kept under, beside the commands' and scopes'.
+    static func chatUseKey(_ id: String) -> String { "chat:\(id)" }
+
+    /// Records that the reader opened or started a chat, so it ranks by use
+    /// in ⌘T's start list.
+    func recordChatUse(_ id: String) {
+        FrecencyStore.commands.record(Self.chatUseKey(id))
+        RecentUses.record(Self.chatUseKey(id))
     }
 
     /// Records that the reader went into `scope`, so it ranks by use.

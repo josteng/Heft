@@ -245,13 +245,14 @@ prompt. It is a guardrail rather than a sandbox: the point is that the easy
 path and the correct path are the same path.
 [`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) has the verbs in full.
 
-**Ask** (⌘6, or `?` in the search bar), once turned on in Settings ▸ Search,
-puts the same agent one keystroke away. It runs your own Claude Code, signed in with your own account, headless
+**Ask** (⌘6, or `?` in the search bar), experimental and turned on in
+Settings ▸ Ask, puts the same agent one keystroke away. It runs your own Claude Code, signed in with your own account, headless
 and on Haiku by default, and streams its answer into the bar; anything typed
 in ⌘T can be asked from the last row, and "Draft a note from…" has it write
-a new note for you to accept. It reads the focused folder or the whole vault,
-cannot write or run anything but `heft`, and every change it wants is a card
-in the chat: accept it, reject it with a word back to the agent, or open it in
+a new note for you to accept. Its use counts against your Claude plan. Each
+run may read only the focused folder or the whole vault and may only propose
+changes, under permission rules Heft sets for Claude Code (not a separate
+sandbox), and every change it wants is a card in the chat: accept it, reject it with a word back to the agent, or open it in
 review. Chats are kept in `.heft/chats/` to read again and continue.
 
 ## The `heft` command

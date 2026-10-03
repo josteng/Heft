@@ -330,7 +330,7 @@ setup can widen it:
   is, a file as a copy in a folder of the chat's own, so naming one PDF does
   not open the folder it is in.
 
-Ask is off until turned on in Settings ▸ Search. Each question carries the
+Ask is experimental and off until turned on in Settings ▸ Ask. Each question carries the
 open note and any selection. A reply resumes the agent's own session, so it
 remembers what it read; on another Mac, where that session is not, the
 transcript is sent instead. Each run signs its proposals with its chat

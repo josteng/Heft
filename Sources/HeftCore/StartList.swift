@@ -38,6 +38,8 @@ public struct StartList: Codable, Equatable, Sendable {
         case folders
         /// The bar's own scopes: Notes, Commands, Text and the rest.
         case scopes
+        /// Ask's chats, listed only while Ask is on.
+        case chats
 
         public var id: String { rawValue }
 
@@ -48,6 +50,7 @@ public struct StartList: Codable, Equatable, Sendable {
             case .tags: "Tags"
             case .folders: "Folders"
             case .scopes: "Scopes"
+            case .chats: "Chats"
             }
         }
 
@@ -152,9 +155,15 @@ public struct StartList: Codable, Equatable, Sendable {
         // rather than failing the whole list.
         return StartList(rows: stored.rows.compactMap { raw in
             guard let order = Order(rawValue: raw.order) else { return nil }
-            return Row(order, Set(raw.kinds.compactMap(Kind.init(rawValue:))), count: raw.count)
+            var kinds = Set(raw.kinds.compactMap(Kind.init(rawValue:)))
+            // A row saved as everything there was before chats existed meant
+            // everything, and still does.
+            if kinds == Self.kindsBeforeChats { kinds.insert(.chats) }
+            return Row(order, kinds, count: raw.count)
         })
     }
+
+    static let kindsBeforeChats: Set<Kind> = [.notes, .commands, .tags, .folders, .scopes]
 
     public func save(in defaults: UserDefaults) {
         let stored = Stored(rows: rows.map {

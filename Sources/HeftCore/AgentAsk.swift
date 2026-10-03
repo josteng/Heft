@@ -526,3 +526,31 @@ public enum AgentFiles {
         return staged
     }
 }
+
+/// Whether typed text reads as a question or a request rather than words to
+/// find, by the signs a search box goes by: a question mark, a question or
+/// request word first, or the length of a sentence. No model is asked: the
+/// answer has to be instant, the same every time, and wrong only visibly.
+public enum QuestionShape {
+    /// First words that make a question or an ask, English and German.
+    static let openers: Set<String> = [
+        "what", "why", "how", "when", "where", "who", "which", "whose", "whom",
+        "can", "could", "should", "would", "will", "is", "are", "was", "were",
+        "do", "does", "did", "has", "have", "explain", "summarize", "summarise",
+        "tell", "list", "compare", "write", "draft", "help", "give", "make", "create",
+        "add", "change", "rewrite", "translate", "suggest",
+        "wie", "warum", "wieso", "weshalb", "wann", "wo", "wer", "welche", "welcher",
+        "welches", "kannst", "könntest", "gibt", "fasse", "erkläre", "schreib", "schreibe",
+    ]
+
+    public static func isQuestion(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix("?") { return true }
+        let words = trimmed.split(whereSeparator: { $0.isWhitespace })
+        // Three words are as likely a note's name, "What I learned", as a
+        // question; four with a question word first rarely are.
+        guard words.count >= 4 else { return false }
+        let first = words[0].lowercased().trimmingCharacters(in: .punctuationCharacters)
+        return openers.contains(first) || words.count >= 7
+    }
+}

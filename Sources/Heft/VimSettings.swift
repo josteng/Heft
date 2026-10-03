@@ -77,12 +77,7 @@ struct VimSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 8) {
                             Text("Vim key bindings")
-                            Text("EXPERIMENTAL")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.orange)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.orange.opacity(0.12), in: .capsule)
+                            ExperimentalBadge()
                         }
                         Group {
                             Text("Off by default, and app-wide; the command palette (⌘P) has the same switch. "

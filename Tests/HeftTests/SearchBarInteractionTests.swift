@@ -45,7 +45,8 @@ struct SearchBarInteractionTests {
     }
 
     private func harness(
-        _ files: [String: String], scope: BarScope?, recent: [String] = []
+        _ files: [String: String], scope: BarScope?, recent: [String] = [],
+        prepare: (AppModel) throws -> Void = { _ in }
     ) async throws -> Harness {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("heft-barkeys-\(UUID().uuidString)")
@@ -65,6 +66,7 @@ struct SearchBarInteractionTests {
         }
         for path in recent { model.session?.recordRecent(path) }
         GeneralSettings.shared.quickOpenOrder = QuickOpenOrder(lead: .recent, count: 2)
+        try prepare(model)
 
         let host = NSHostingView(rootView: SearchBarView(scope: scope).environmentObject(model))
         let window = UnfocusableWindow(
@@ -101,6 +103,69 @@ struct SearchBarInteractionTests {
 
         bar.press(#selector(NSResponder.deleteBackward(_:)))
         #expect(bar.placeholder == BarScope.unscopedPlaceholder)
+    }
+
+    /// Out of a chat without reaching for the mouse: ← in an empty reply,
+    /// as Backspace, and ⌘↑ from anywhere, text clicked into included.
+    @Test("← in an empty reply and ⌘↑ go back from a chat to the chats")
+    func leavingAChat() async throws {
+        let asked = GeneralSettings.shared.asksAgent
+        GeneralSettings.shared.asksAgent = true
+        defer { GeneralSettings.shared.asksAgent = asked }
+        let bar = try await harness(["Plan.md": "x"], scope: .ask) { model in
+            let root = try #require(model.vaultRoot)
+            var chat = AgentChat(question: "When is it due?", scope: "")
+            chat.turns[0].answer = "Friday."
+            try AgentChatStore.save(chat, in: root)
+            model.agent.load(vaultRoot: root)
+            model.agent.open(chat)
+        }
+        defer { bar.model.closeWorkspace() }
+        #expect(bar.placeholder == "Reply")
+
+        bar.type("x")
+        bar.press(#selector(NSResponder.moveLeft(_:)))
+        #expect(bar.model.agent.chat != nil, "with text, ← moves the caret")
+        bar.type("")
+        bar.press(#selector(NSResponder.moveLeft(_:)))
+        #expect(bar.model.agent.chat == nil)
+        #expect(bar.placeholder == BarScope.ask.placeholder)
+
+        // Back in by Return on the chat's row, then ⌘↑ as a key equivalent,
+        // which needs no field.
+        bar.press(#selector(NSResponder.insertNewline(_:)))
+        #expect(bar.placeholder == "Reply")
+        let back = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+            windowNumber: bar.window.windowNumber, context: nil,
+            characters: String(UnicodeScalar(NSUpArrowFunctionKey)!), charactersIgnoringModifiers: String(UnicodeScalar(NSUpArrowFunctionKey)!),
+            isARepeat: false, keyCode: 126
+        ))
+        #expect(bar.window.performKeyEquivalent(with: back))
+        bar.settle()
+        #expect(bar.model.agent.chat == nil, "⌘↑ left the chat")
+    }
+
+    /// The key goes through the app as a real one would, to a window whose
+    /// field never had the focus, as when text in a chat was clicked into.
+    @Test("Esc closes the bar when the field does not have the focus")
+    func escapeFromAnywhere() async throws {
+        let bar = try await harness(["Plan.md": "x"], scope: nil)
+        defer { bar.model.closeWorkspace() }
+        var closed = false
+        let token = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: bar.window, queue: nil
+        ) { _ in closed = true }
+        defer { NotificationCenter.default.removeObserver(token) }
+        let escape = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: bar.window.windowNumber, context: nil,
+            characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: 53
+        ))
+        #expect(bar.window.firstResponder !== bar.field)
+        NSApp.sendEvent(escape)
+        bar.settle()
+        #expect(closed, "the bar closed")
     }
 
     @Test("A pasted path stays a query")

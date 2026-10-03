@@ -77,6 +77,24 @@ final class GeneralSettings: ObservableObject {
     }
     static let asksAgentKey = "dev.stenglein.Heft.agent.enabled"
 
+    /// When the bar with no scope puts Ask first, selected, rather than
+    /// last: what Return does with text that reads as a question.
+    enum AskFirst: String, CaseIterable, Identifiable {
+        case forQuestions, whenNothingFound, never
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .forQuestions: "For questions"
+            case .whenNothingFound: "When nothing is found"
+            case .never: "Never"
+            }
+        }
+    }
+    @Published var askFirst: AskFirst {
+        didSet { HeftDefaults.shared.set(askFirst.rawValue, forKey: Self.askFirstKey) }
+    }
+    static let askFirstKey = "dev.stenglein.Heft.agent.askFirst"
+
     @Published var agentCommand: String {
         didSet { HeftDefaults.shared.set(agentCommand, forKey: Self.agentCommandKey) }
     }
@@ -98,6 +116,8 @@ final class GeneralSettings: ObservableObject {
         startList = StartList.current(in: HeftDefaults.shared)
         sidebarLayout = SidebarLayout.current()
         asksAgent = HeftDefaults.shared.bool(forKey: Self.asksAgentKey)
+        askFirst = HeftDefaults.shared.string(forKey: Self.askFirstKey)
+            .flatMap(AskFirst.init(rawValue:)) ?? .forQuestions
         agentCommand = HeftDefaults.shared.string(forKey: Self.agentCommandKey)
             .flatMap { $0.isEmpty ? nil : $0 } ?? Self.standardAgentCommand
         agentModel = HeftDefaults.shared.string(forKey: Self.agentModelKey)

@@ -72,7 +72,7 @@ final class SettingsWindowController: NSWindowController {
 
 /// The panes, and what each is called.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, search, appearance, startup, typing, calendar, capture, attachments, vim
+    case general, search, appearance, startup, typing, calendar, capture, attachments, ask, vim
 
     var id: String { rawValue }
 
@@ -100,6 +100,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .calendar: "Calendar"
         case .capture: "Capture"
         case .attachments: "Attachments"
+        case .ask: "Ask"
         case .vim: "Vim"
         }
     }
@@ -114,6 +115,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .calendar: "calendar"
         case .capture: "tray.and.arrow.down"
         case .attachments: "paperclip"
+        case .ask: "sparkles"
         case .vim: "terminal"
         }
     }
@@ -128,6 +130,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .calendar: CalendarSettingsView()
         case .capture: CaptureSettingsView()
         case .attachments: AttachmentSettingsView()
+        case .ask: AskSettingsView()
         case .vim: VimSettingsView()
         }
     }

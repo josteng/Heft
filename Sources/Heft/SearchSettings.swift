@@ -10,9 +10,6 @@ struct SearchSettingsView: View {
     @ObservedObject private var settings = GeneralSettings.shared
     private static let startRowHeight: CGFloat = 40
     @State private var confirmsStartReset = false
-    /// Where the agent command was found, looked up off the main thread:
-    /// failing the usual places, it asks a login shell.
-    @State private var agentStatus = " "
 
     var body: some View {
         Form {
@@ -97,49 +94,9 @@ struct SearchSettingsView: View {
                 )
             }
 
-            Section {
-                Toggle(isOn: $settings.asksAgent) {
-                    SettingLabel("Ask in the search bar", detail: "Off until you turn it on. Needs Claude Code installed and signed in.")
-                }
-                LabeledContent {
-                    TextField("", text: $settings.agentCommand, prompt: Text(GeneralSettings.standardAgentCommand))
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 200)
-                } label: {
-                    SettingLabel("Agent", detail: agentStatus)
-                }
-                .disabled(!settings.asksAgent)
-                .task(id: settings.agentCommand) {
-                    let typed = settings.agentCommand.trimmingCharacters(in: .whitespaces)
-                    let command = typed.isEmpty ? GeneralSettings.standardAgentCommand : typed
-                    let found = await Task.detached { AgentLocator.find(command: command) }.value
-                    agentStatus = found.map { $0.path.replacingOccurrences(of: NSHomeDirectory(), with: "~") }
-                        ?? "Not found. Install Claude Code, or name the command's full path."
-                }
-                Picker(selection: $settings.agentModel) {
-                    ForEach(Self.models, id: \.self) { Text($0.capitalized).tag($0) }
-                    if !Self.models.contains(settings.agentModel) {
-                        Text(settings.agentModel).tag(settings.agentModel)
-                    }
-                } label: {
-                    SettingLabel("Model", detail: "Haiku answers in seconds; the others think longer and use more of your plan.")
-                }
-                .defaultMenuTint()
-                .disabled(!settings.asksAgent)
-            } header: {
-                SectionHeading(
-                    "Ask (⌘6)",
-                    detail: "Questions go to your own Claude Code, signed in with your account. It reads "
-                        + "the focused folder or the whole vault and can only propose changes, which you "
-                        + "accept or reject in the chat. It cannot write, delete or run other commands."
-                )
-            }
         }
         .formStyle(.grouped)
     }
-
-    private static let models = ["haiku", "sonnet", "opus"]
 }
 
 /// One row of ⌘T's start list: which order, which kinds, how many, and a
@@ -203,6 +160,10 @@ private struct StartRowView: View {
                             set: { on in changed { if on { $0.kinds.insert(kind) } else { $0.kinds.remove(kind) } } }
                         ))
                         .toggleStyle(.checkbox)
+                        // Kept ticked while Ask is off, and listed again
+                        // once it is on.
+                        .disabled(kind == .chats && !GeneralSettings.shared.asksAgent)
+                        .help(kind == .chats && !GeneralSettings.shared.asksAgent ? "Turn on Ask in Settings ▸ Ask" : "")
                     }
                     Divider()
                     HStack {

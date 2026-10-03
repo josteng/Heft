@@ -173,7 +173,13 @@ Space on one enters it only when the query starts its name or the arrows
 chose the row, as Chrome's keyword mode wants the keyword itself; otherwise
 Space is a space. Tab always enters. Ask (`?`, ⌘6) is the one chip that is
 not a search: its list is the chats had, and a chat takes the list's place,
-with the field as its reply box (`Docs/AgentIntegration.md` has the run).
+with the field sliding to the bottom as its reply box. The field is one view
+drawn over the rest and only its alignment changes; moved between two places in
+the layout it would be two fields, losing the typing, the caret and the focus.
+Text that reads as a question (`QuestionShape`: a question mark, a question
+word first in four words or more, or a sentence's length) puts the Ask row
+first where Return reaches it, unless a name starts with the words; decided
+by rule, not by a model, so it is instant and the same every time (`Docs/AgentIntegration.md` has the run).
 A shortcut pressed with the bar open narrows it in place rather than closing
 it, which is why the three old flags are now names for `AppModel.bar`, and
 what was typed comes along selected, so ⌘O then ⇧⌘F searches the text for

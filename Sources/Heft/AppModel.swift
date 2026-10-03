@@ -3220,6 +3220,8 @@ final class AppModel: ObservableObject {
     }
 
     func closeWorkspace() {
+        // The window's agent runs end with it, saved as far as they got.
+        agent.stopAll()
         externalChangePollTask?.cancel()
         externalChangePollTask = nil
         if !flushPendingSave() {
@@ -3297,6 +3299,8 @@ final class AppModel: ObservableObject {
         }
         let found = ProposalStore.all(in: vaultRoot)
         guard found != proposals else { return }
+        // A running Ask claims its own as they arrive, before its answer ends.
+        agent.claim(found)
         proposals = found
         pendingProposals = ProposalStore.sort(found)
         if let reviewing, !found.contains(where: { $0.id == reviewing.id }) {

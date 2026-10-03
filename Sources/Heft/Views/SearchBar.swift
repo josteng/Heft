@@ -44,6 +44,19 @@ struct SearchBarView: View {
     /// Whether a chat with the agent fills the bar, rather than the list of
     /// chats. The field is its reply box then.
     @State private var inChat = false
+    /// The field's height and the hint line's, measured: the field is drawn
+    /// over the rest so it can move, and the rest keeps it room.
+    @State private var fieldHeight: CGFloat = 46
+    @State private var footerHeight: CGFloat = 0
+
+    /// Whether a chat fills the bar, with the field under it as its reply box.
+    private var chatting: Bool { inChat && scope == .ask }
+
+    /// Into a chat or out of it, the field sliding to its new place.
+    private func setInChat(_ value: Bool) {
+        guard value != inChat else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { inChat = value }
+    }
 
     init(scope: BarScope?) {
         _scope = State(initialValue: scope)
@@ -94,19 +107,40 @@ struct SearchBarView: View {
 
     var body: some View {
         let rows = rows
-        VStack(spacing: 0) {
-            field
-            if scope == nil { scopeStrip }
-            Divider()
-            if inChat, scope == .ask {
-                AgentConversationView(runner: model.agent, onLeave: { dismiss() })
-            } else {
-                list(rows)
-            }
-            if settings.showsKeyHints {
+        let chatting = chatting
+        // The field is one view drawn over the rest, so opening a chat slides
+        // it from the top, where a search is typed, to the bottom, under the
+        // latest answer, as a chat is typed into. Moved between two places
+        // in the layout instead it would be two fields, and the typing, the
+        // caret and the focus would all start over.
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                if chatting {
+                    chatHeader
+                } else {
+                    Color.clear.frame(height: fieldHeight)
+                    if scope == nil { scopeStrip }
+                }
                 Divider()
-                footer
+                if chatting {
+                    AgentConversationView(runner: model.agent, onLeave: { dismiss() })
+                        .transition(.opacity)
+                    Divider()
+                    Color.clear.frame(height: fieldHeight)
+                } else {
+                    list(rows)
+                }
+                if settings.showsKeyHints {
+                    Divider()
+                    footer
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                }
             }
+            field
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fieldHeight = $0 }
+                .frame(maxHeight: .infinity, alignment: chatting ? .bottom : .top)
+                // Above the hint line and the rule over it.
+                .padding(.bottom, chatting && settings.showsKeyHints ? footerHeight + 1 : 0)
         }
         // One height whatever the scope: the chip row leaving gives its room
         // to the list rather than shrinking the sheet under the pointer.
@@ -119,13 +153,20 @@ struct SearchBarView: View {
         .presentationBackground(.clear)
         .onAppear {
             model.agent.load(vaultRoot: model.vaultRoot)
-            // Back in the chat it was left in, if the bar opens on Ask.
+            // Back in the chat it was left in, if the bar opens on Ask; no
+            // slide, as nothing was anywhere else before.
             inChat = scope == .ask && model.agent.chat != nil
             refreshRows()
             selectFirst()
         }
         // A finished run, or one deleted, changes the list of chats.
         .onReceive(model.agent.$chats) { _ in refreshRows() }
+
+        // Esc closes the bar wherever the focus is in it. Text clicked into
+        // in a chat takes the focus and the key, and neither the field's own
+        // handling nor a cancel shortcut ever heard it, so the bar listens
+        // ahead of everything in its window.
+        .background(EscapeCloses { dismiss() })
         // A file dropped anywhere on the bar is something to ask about: its
         // path goes into the question, which lets the agent read it.
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
@@ -176,7 +217,8 @@ struct SearchBarView: View {
                     .frame(height: Self.lineHeight)
                     .transition(.opacity)
             }
-            if let scope {
+            // In a chat the chip is in the header over it, with the title.
+            if let scope, !chatting {
                 ScopeChip(scope: scope)
                     // One identity per scope, so going from the tags into a
                     // tag pops a new chip in rather than relabelling the old.
@@ -203,6 +245,8 @@ struct SearchBarView: View {
                 onCancel: { dismiss() },
                 onTab: goIntoSelection,
                 onBackspaceWhenEmpty: leaveScope,
+                // ← out of a chat, as Backspace, when there is nothing to move through.
+                onLeftWhenEmpty: { chatting ? leaveScope() : false },
                 selectAllRequest: selectAllRequest
             )
             .padding(.vertical, -BarField.edge)
@@ -231,7 +275,7 @@ struct SearchBarView: View {
             }
             PaletteDismissButton(query: $query) { dismiss() }
                 .frame(height: Self.lineHeight)
-            if model.scopePath != nil, scope?.followsFolderFocus ?? true {
+            if model.scopePath != nil, scope?.followsFolderFocus ?? true, !chatting {
                 Button { searchesEntireVault.toggle(); refreshRows(); selectFirst() } label: {
                     Image(systemName: searchesEntireVault ? "globe" : "scope")
                         .frame(width: 16, height: 16)
@@ -244,6 +288,22 @@ struct SearchBarView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, BarField.edge)
+    }
+
+    /// A chat's top line: the chip it is in, and which chat this is.
+    private var chatHeader: some View {
+        HStack(spacing: 8) {
+            ScopeChip(scope: .ask)
+                .frame(height: Self.lineHeight)
+            Text(model.agent.chat?.title ?? "")
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, BarField.edge + 4)
+        .transition(.opacity)
     }
 
     private var summary: String {
@@ -469,6 +529,11 @@ struct SearchBarView: View {
             // bar is open.
             Button("") { newChat() }
                 .keyboardShortcut("n", modifiers: .command)
+            // ⌘↑ back from a chat up to the chats, as Finder goes up to the
+            // enclosing folder, from wherever focus is. Not ⌘[: on a German
+            // keyboard [ is ⌥5.
+            Button("") { if chatting { newChat() } }
+                .keyboardShortcut(.upArrow, modifiers: .command)
         }
         .frame(width: 0, height: 0)
         .opacity(0)
@@ -500,7 +565,15 @@ struct SearchBarView: View {
                     showsPin: false
                 )
             }
-        case .chat(let id, _, _):
+        case .chat(let id, let title, _):
+            Button("Rename Chat…", systemImage: "pencil") {
+                guard let chat = model.agent.chats.first(where: { $0.id == id }),
+                      let name = model.host.name(
+                        title: "Rename Chat", message: "A name for this chat.", initial: title, confirm: "Rename"
+                      )
+                else { return }
+                model.agent.rename(chat, to: name)
+            }
             Button("Delete Chat", systemImage: "trash", role: .destructive) {
                 guard let chat = model.agent.chats.first(where: { $0.id == id }) else { return }
                 model.agent.delete(chat)
@@ -572,8 +645,8 @@ struct SearchBarView: View {
                 if model.agent.isRunning { KeyHint(key: "⌘.", label: "Stop") }
                 KeyHint(key: "⌘N", label: "New chat")
             }
-            if scope != nil, trimmed.isEmpty {
-                KeyHint(key: "⌫", label: chatting ? "Chats" : "Back")
+            if chatting || (scope != nil && trimmed.isEmpty) {
+                KeyHint(key: chatting ? "⌘↑" : "⌫", label: chatting ? "Chats" : "Back")
             }
             Spacer(minLength: 8)
             KeyHint(key: "⌘1–\(BarScope.shownChips.count)", label: "Scopes")
@@ -672,8 +745,9 @@ struct SearchBarView: View {
         case .chat(let id, _, _):
             guard let chat = model.agent.chats.first(where: { $0.id == id }) else { return }
             model.agent.open(chat)
+            model.recordChatUse(id)
             enter(.ask, carrying: "")
-            inChat = true
+            setInChat(true)
         default:
             break
         }
@@ -689,15 +763,16 @@ struct SearchBarView: View {
             question, instruction: withContext(instruction ?? question),
             files: AgentFiles.paths(in: question), vaultRoot: vaultRoot, scope: newChatScope
         )
+        if let id = model.agent.chat?.id { model.recordChatUse(id) }
         enter(.ask, carrying: "")
-        inChat = true
+        setInChat(true)
     }
 
     /// A dropped file's path, added to what is being asked.
     private func addDropped(_ url: URL) {
         if scope != .ask {
             enter(.ask, carrying: query)
-            inChat = model.agent.chat != nil
+            setInChat(model.agent.chat != nil)
         }
         let path = url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
         query = query.isEmpty ? path + " " : query.trimmingCharacters(in: .whitespaces) + " " + path + " "
@@ -716,7 +791,7 @@ struct SearchBarView: View {
     private func newChat() {
         guard scope == .ask else { return }
         model.agent.close()
-        inChat = false
+        setInChat(false)
         refreshRows()
         selectFirst()
     }
@@ -806,7 +881,7 @@ struct SearchBarView: View {
         // Eased, not sprung: a bounce made the chip, the text and the clear
         // button all wobble, where sliding them aside is the whole effect.
         let animation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.22)
-        if target != .ask { inChat = false }
+        if target != .ask { setInChat(false) }
         withAnimation(animation) {
             scope = target
             query = text
@@ -879,6 +954,8 @@ struct BarField: NSViewRepresentable {
     let onCancel: () -> Void
     let onTab: () -> Bool
     let onBackspaceWhenEmpty: () -> Bool
+    /// ← in an empty field; false leaves it to the text view.
+    var onLeftWhenEmpty: () -> Bool = { false }
     let selectAllRequest: Int
 
     static let font = NSFont.systemFont(ofSize: 16)
@@ -988,6 +1065,7 @@ struct BarField: NSViewRepresentable {
             context.coordinator.selectAllRequest = selectAllRequest
             DispatchQueue.main.async { view.selectAll(nil) }
         }
+
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -1060,6 +1138,9 @@ struct BarField: NSViewRepresentable {
             case #selector(NSResponder.deleteBackward(_:)):
                 guard view.string.isEmpty else { return false }
                 return parent.onBackspaceWhenEmpty()
+            case #selector(NSResponder.moveLeft(_:)):
+                guard view.string.isEmpty else { return false }
+                return parent.onLeftWhenEmpty()
             default:
                 return false
             }
@@ -1417,5 +1498,46 @@ private struct KeyHint: View {
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
         .contentShape(.rect)
+    }
+}
+
+/// Closes the bar on Esc from anywhere in its window, before any view in it
+/// sees the key. A view that is composing text with an input method keeps
+/// Esc, which cancels the composition there.
+private struct EscapeCloses: NSViewRepresentable {
+    let close: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.view = view
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak coordinator = context.coordinator] event in
+            guard let coordinator, event.keyCode == 53,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+                  let window = coordinator.view?.window, event.window === window
+            else { return event }
+            if let composing = window.firstResponder as? NSTextInputClient, composing.hasMarkedText() {
+                return event
+            }
+            coordinator.close()
+            return nil
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.close = close
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(close: close) }
+
+    final class Coordinator {
+        var close: () -> Void
+        weak var view: NSView?
+        var monitor: Any?
+        init(close: @escaping () -> Void) { self.close = close }
     }
 }

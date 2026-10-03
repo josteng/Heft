@@ -689,7 +689,7 @@ struct SearchBarRowTests {
         let asked = GeneralSettings.shared.asksAgent
         GeneralSettings.shared.asksAgent = true
         defer { GeneralSettings.shared.asksAgent = asked }
-        let model = try await model(["Plan.md": "a"])
+        let model = try await model(["Plan.md": "a", "What we decided about the plan.md": "b"])
         defer { model.closeWorkspace() }
         let root = try #require(model.vaultRoot)
         var parser = AgentChat(question: "When is the parser due?", scope: "", createdAt: Date(timeIntervalSince1970: 100))
@@ -708,6 +708,29 @@ struct SearchBarRowTests {
         #expect(unscoped.last == "ask")
         #expect(!ids(model.barRows(scope: nil, query: "", entireVault: true)).contains("ask"))
 
+        // Text that reads as a question puts Ask first, where Return is,
+        // unless a name answers to it; the reader decides when.
+        let question = "what did I write about the parser this week"
+        #expect(ids(model.barRows(scope: nil, query: question, entireVault: true, askFirst: .forQuestions)).first == "ask")
+        #expect(ids(model.barRows(scope: nil, query: question, entireVault: true, askFirst: .never)).last == "ask")
+        #expect(ids(model.barRows(scope: nil, query: "plan", entireVault: true, askFirst: .forQuestions)).last == "ask",
+                "a search stays a search")
+        let nothing = "zqxv wrrt plmk"
+        #expect(ids(model.barRows(scope: nil, query: nothing, entireVault: true, askFirst: .whenNothingFound)).first == "ask")
+        // With "when nothing is found", anything found keeps Ask last.
+        #expect(ids(model.barRows(scope: nil, query: "plan", entireVault: true, askFirst: .whenNothingFound)).last == "ask")
+        // Found in a note's text, not named: a question still asks first,
+        // and "when nothing is found" lets the match lead.
+        let plan = try #require(model.index.notes.first { $0.name == "Plan" })
+        let hit = ContentMatch(note: plan, line: 1, preview: "a", occurrences: 1)
+        let text = ContentSearchResult(query: question, matches: [hit], totalOccurrences: 1, matchedNotes: 1)
+        #expect(ids(model.barRows(scope: nil, query: question, entireVault: true, text: text, askFirst: .forQuestions)).first == "ask")
+        #expect(ids(model.barRows(scope: nil, query: question, entireVault: true, text: text, askFirst: .whenNothingFound)).first != "ask")
+
+        // A note named by the words is opened, question or not.
+        let named = ids(model.barRows(scope: nil, query: "what we decided about the plan", entireVault: true, askFirst: .forQuestions))
+        #expect(named.first == "note:What we decided about the plan.md", "got \(named)")
+
         // A chat is found in ⌘T by its title, and by what was said in it
         // after every name.
         let byTitle = ids(model.barRows(scope: nil, query: "sidebar", entireVault: true))
@@ -715,10 +738,19 @@ struct SearchBarRowTests {
         let byAnswer = ids(model.barRows(scope: nil, query: "friday", entireVault: true))
         #expect(byAnswer.contains("chat:\(parser.id)"), "got \(byAnswer)")
 
+        // A chat opened is listed in ⌘T before anything is typed, ranked by
+        // use like the rest, and only while Ask is on.
+        model.recordChatUse(sidebar.id)
+        let start = StartList(rows: [.init(.recent, [.chats], count: 5)])
+        #expect(ids(model.barRows(scope: nil, query: "", entireVault: true, start: start)).contains("chat:\(sidebar.id)"))
+        #expect(!ids(model.barRows(scope: nil, query: "", entireVault: true, start: start)).contains("chat:\(parser.id)"),
+                "never opened, so not listed")
+
         // Off, which it is until turned on: no row, no chip, not found by name.
         GeneralSettings.shared.asksAgent = false
         #expect(!ids(model.barRows(scope: nil, query: "plan", entireVault: true)).contains("ask"))
         #expect(!BarScope.shownChips.contains(.ask))
+        #expect(!ids(model.barRows(scope: nil, query: "", entireVault: true, start: start)).contains("chat:\(sidebar.id)"))
         #expect(!ids(model.barRows(scope: nil, query: "sidebar", entireVault: true)).contains("chat:\(sidebar.id)"))
         #expect(!ids(model.barRows(scope: nil, query: "ask", entireVault: true)).contains("scope:Ask"))
         GeneralSettings.shared.asksAgent = true
@@ -935,6 +967,17 @@ struct StartListTests {
         #expect(StartList.Row(.recent, [.notes, .tags], count: 3).kindsSummary == "Notes, Tags")
         #expect(StartList.Row(.recent, Set(StartList.Kind.allCases), count: 3).kindsSummary == "Everything")
         #expect(StartList.Row(.recent, [.notes], count: 99).count == StartList.countRange.upperBound)
+    }
+
+    @Test("A row saved as everything before chats existed lists chats too")
+    func everythingBeforeChats() throws {
+        let defaults = try suite()
+        let stored = #"{"rows":[{"order":"frequent","kinds":["notes","commands","tags","folders","scopes"],"count":12},{"order":"recent","kinds":["notes"],"count":5}]}"#
+        defaults.set(Data(stored.utf8), forKey: StartList.defaultsKey)
+        let read = StartList.current(in: defaults)
+        #expect(read.rows[0].kinds.contains(.chats), "everything then is everything now")
+        #expect(read.rows[0].kindsSummary == "Everything")
+        #expect(read.rows[1].kinds == [.notes], "a narrower row stays as it was")
     }
 
     @Test("Stored and read back in the reader's order")

@@ -365,3 +365,27 @@ struct AnchoredEditPlainTests {
         #expect(try AnchoredEdit.parse("").isEmpty)
     }
 }
+
+@Suite("Question or search")
+struct QuestionShapeTests {
+
+    @Test("Questions and requests read as asks")
+    func questions() {
+        for text in [
+            "what did I write this week", "When is the parser due?", "summarise my thesis notes",
+            "wie war das meeting gestern", "draft a note about the sidebar", "parser?",
+            "notes from the meeting with the design group last tuesday",
+        ] {
+            #expect(QuestionShape.isQuestion(text), "\(text)")
+        }
+    }
+
+    /// A few words are a search, whatever they start with: "what i learned"
+    /// is as likely a note's name as a question.
+    @Test("A few keywords are a search")
+    func searches() {
+        for text in ["plan", "v0.7", "parser deadline", "what i learned", "meeting notes friday", ""] {
+            #expect(!QuestionShape.isQuestion(text), "\(text)")
+        }
+    }
+}

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import HeftCore
 
@@ -20,6 +21,9 @@ final class AgentRunner: ObservableObject {
     @Published private(set) var activities: [String: String] = [:]
     /// Whether the agent command could not be found on the last try.
     @Published private(set) var isMissing = false
+    /// A reply started for the reader, for the field to take up: what to
+    /// do instead of a proposal just rejected.
+    @Published var draft: String?
 
     /// Whether the chat on screen is being answered.
     var isRunning: Bool { chat.map { runs[$0.id] != nil } ?? false }
@@ -45,9 +49,47 @@ final class AgentRunner: ObservableObject {
     private struct Run {
         var process: Process
         var chat: AgentChat
+        /// When it started: its proposals are the ones signed with its chat
+        /// and made since, so one re-proposed under the same id counts.
+        var started: Date
     }
     @Published private var runs: [String: Run] = [:]
     private static let host = ProcessInfo.processInfo.hostName
+
+    /// How long a run may take before it is stopped: an agent that hangs
+    /// would otherwise hold its chat, and its process, forever.
+    var timeLimit: Duration = .seconds(600)
+    private var quitObserver: NSObjectProtocol?
+    /// Runs stopped for taking too long, so they say so.
+    private var timedOut: Set<String> = []
+
+    init() {
+        // Quitting stops every run rather than leaving them to finish alone,
+        // where one could still leave a proposal with no chat to show it.
+        quitObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopAll() }
+        }
+    }
+
+    deinit {
+        if let quitObserver { NotificationCenter.default.removeObserver(quitObserver) }
+    }
+
+    /// Stops every run and saves each chat as it stands, marked stopped:
+    /// for a window closing or the app quitting, which will not be here
+    /// when the processes end.
+    func stopAll() {
+        for (_, run) in runs {
+            run.process.terminate()
+            var chat = run.chat
+            chat.turns[chat.turns.count - 1].failure = "Stopped"
+            finish(chat)
+        }
+        runs.removeAll()
+        activities.removeAll()
+    }
 
     // MARK: Chats
 
@@ -67,6 +109,16 @@ final class AgentRunner: ObservableObject {
     }
 
     func isRunning(_ chatID: String) -> Bool { runs[chatID] != nil }
+
+    /// Names a chat as the reader wants it; its first question until then.
+    func rename(_ chat: AgentChat, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var renamed = runs[chat.id]?.chat ?? (self.chat?.id == chat.id ? self.chat ?? chat : chat)
+        renamed.title = trimmed
+        if runs[chat.id] != nil { runs[chat.id]?.chat = renamed }
+        finish(renamed)
+    }
 
     func delete(_ chat: AgentChat) {
         guard let vaultRoot else { return }
@@ -213,7 +265,7 @@ final class AgentRunner: ObservableObject {
             ),
             heftAliases: heftAliases()
         )
-        let before = Set(ProposalStore.all(in: vaultRoot).map(\.id))
+        let started = Date()
 
         let process = Process()
         process.executableURL = executable
@@ -235,8 +287,15 @@ final class AgentRunner: ObservableObject {
             finish(chat)
             return
         }
-        runs[chat.id] = Run(process: process, chat: chat)
+        runs[chat.id] = Run(process: process, chat: chat, started: started)
         activities[chat.id] = "Thinking"
+        let limit = timeLimit
+        Task { [weak self, weak process] in
+            try? await Task.sleep(for: limit)
+            guard let self, let process, process.isRunning, self.runs[chat.id]?.process === process else { return }
+            self.timedOut.insert(chat.id)
+            process.terminate()
+        }
 
         let chatID = chat.id
         let handle = output.fileHandleForReading
@@ -256,7 +315,7 @@ final class AgentRunner: ObservableObject {
             let stderr = String(decoding: errorHandle.readDataToEndOfFile(), as: UTF8.self)
             await self?.ended(
                 chatID, outcome: outcome, status: process.terminationStatus,
-                reason: process.terminationReason, stderr: stderr, before: before
+                reason: process.terminationReason, stderr: stderr
             )
         }
     }
@@ -282,12 +341,13 @@ final class AgentRunner: ObservableObject {
 
     private func ended(
         _ chatID: String, outcome: AgentOutcome?, status: Int32,
-        reason: Process.TerminationReason, stderr: String, before: Set<String>
+        reason: Process.TerminationReason, stderr: String
     ) {
         activities[chatID] = nil
         // The chat may have been closed while it ran; it is finished on disk
         // all the same.
-        guard var chat = runs.removeValue(forKey: chatID)?.chat, let vaultRoot else { return }
+        guard let run = runs.removeValue(forKey: chatID), let vaultRoot else { return }
+        var chat = run.chat
         let last = chat.turns.count - 1
         if let outcome {
             chat.turns[last].denials = outcome.denials
@@ -297,20 +357,51 @@ final class AgentRunner: ObservableObject {
             if chat.turns[last].answer.isEmpty, !outcome.isError {
                 chat.turns[last].answer = outcome.message
             }
+        } else if timedOut.remove(chatID) != nil {
+            chat.turns[last].failure = "The agent took longer than \(timeLimit.components.seconds / 60) minutes and was stopped."
         } else if reason == .uncaughtSignal {
             chat.turns[last].failure = "Stopped"
         } else {
             chat.turns[last].failure = Self.failure(stderr.isEmpty ? "The agent exited with status \(status)." : stderr)
         }
-        // Its own proposals, by the name it was given: another chat running
-        // alongside leaves proposals in the same folder.
-        let name = Self.agentName(for: chat)
-        let left = ProposalStore.all(in: vaultRoot).filter { !before.contains($0.id) && $0.agent == name }
-        chat.turns[last].proposals = left.map {
-            .init(id: $0.id, notePath: $0.notePath, headline: $0.headline)
-        }
+        // Its own proposals, by the name it was given and the time: another
+        // chat running alongside leaves proposals in the same folder.
+        let left = Self.own(ProposalStore.all(in: vaultRoot), chat: chat, since: run.started)
+        chat.turns[last].proposals = Self.merged(chat.turns[last].proposals, with: left)
         finish(chat)
         if !left.isEmpty { onProposals(chat.turns[last].proposals) }
+    }
+
+    /// Claims the proposals running chats have made so far, as they land on
+    /// disk: an answer's cards appear while it is still being written, and
+    /// an earlier card whose note was proposed again says so at once,
+    /// rather than showing the new version until the run ends.
+    func claim(_ proposals: [Proposal]) {
+        for (id, run) in runs {
+            let own = Self.own(proposals, chat: run.chat, since: run.started)
+            guard !own.isEmpty else { continue }
+            var chat = run.chat
+            let last = chat.turns.count - 1
+            let merged = Self.merged(chat.turns[last].proposals, with: own)
+            guard merged != chat.turns[last].proposals else { continue }
+            chat.turns[last].proposals = merged
+            runs[id]?.chat = chat
+            if self.chat?.id == id { self.chat = chat }
+        }
+    }
+
+    static func own(_ proposals: [Proposal], chat: AgentChat, since started: Date) -> [Proposal] {
+        let name = agentName(for: chat)
+        return proposals.filter { $0.agent == name && $0.createdAt >= started }
+    }
+
+    /// What a turn already listed, then what is new, each once.
+    static func merged(_ listed: [AgentChat.ProposalNote], with found: [Proposal]) -> [AgentChat.ProposalNote] {
+        var result = listed
+        for proposal in found where !result.contains(where: { $0.id == proposal.id }) {
+            result.append(.init(id: proposal.id, notePath: proposal.notePath, headline: proposal.headline))
+        }
+        return result
     }
 
     /// Saves a turn that has ended, and shows it if its chat is on screen.

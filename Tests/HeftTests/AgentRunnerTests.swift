@@ -50,7 +50,9 @@ struct AgentRunnerTests {
         if leavesProposal {
             _ = try ProposalStore.write(Proposal(
                 id: "plan", notePath: "Work/Plan.md", base: "# Plan\nFriday.\n",
-                body: "# Plan\nMonday.\n", agent: "claude-code", summary: "Move to Monday"
+                body: "# Plan\nMonday.\n", agent: "claude-code", summary: "Move to Monday",
+                // Stamped as heft stamps it, when the run proposes: after it started.
+                createdAt: Date().addingTimeInterval(60)
             ), in: staged)
         }
         let calls = root.appendingPathComponent("calls")
@@ -230,6 +232,70 @@ struct AgentRunnerTests {
         fixture.runner.ask("Look in \(outside.path)", files: [outside], vaultRoot: fixture.vault, scope: "")
         try await settle(fixture.runner)
         #expect(fixture.runner.chat?.allowed == [outside.path])
+    }
+
+    /// A window closing or the app quitting will not be here when the
+    /// process ends, so the chat is saved as far as it got, and nothing is
+    /// left running.
+    @Test("Stopping everything ends the processes and saves the chats as stopped")
+    func stopAll() async throws {
+        let fixture = try fixture(stdout: answering, delay: 5)
+        fixture.runner.ask("Slow?", vaultRoot: fixture.vault, scope: "")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(fixture.runner.isBusy)
+        fixture.runner.stopAll()
+        #expect(!fixture.runner.isBusy)
+        let saved = try #require(AgentChatStore.all(in: fixture.vault).first)
+        #expect(saved.turns[0].failure == "Stopped")
+        // The script was killed, so it never got to print its answer.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(AgentChatStore.all(in: fixture.vault).first?.turns[0].answer == "")
+    }
+
+    @Test("A run past its time limit is stopped and says why")
+    func timeLimit() async throws {
+        let fixture = try fixture(stdout: answering, delay: 5)
+        fixture.runner.timeLimit = .milliseconds(300)
+        fixture.runner.ask("Slow?", vaultRoot: fixture.vault, scope: "")
+        try await settle(fixture.runner)
+        let failure = try #require(fixture.runner.chat?.turns[0].failure)
+        #expect(failure.contains("longer than"), "got \(failure)")
+    }
+
+    /// Claimed as they land, so an earlier card whose note was proposed
+    /// again says "Replaced below" at once, not when the answer ends.
+    @Test("A running chat claims its proposals as they land, same id included")
+    func claimsWhileRunning() async throws {
+        let fixture = try fixture(stdout: answering, delay: 2)
+        fixture.runner.ask("Draft it", vaultRoot: fixture.vault, scope: "")
+        let chat = try #require(fixture.runner.chat)
+        let name = AgentRunner.agentName(for: chat)
+        func proposal(_ id: String, agent: String, at date: Date) -> Proposal {
+            Proposal(id: id, notePath: "Work/Plan.md", base: nil, body: "x", agent: agent, summary: "s", createdAt: date)
+        }
+        fixture.runner.claim([
+            proposal("plan", agent: name, at: Date()),
+            proposal("other", agent: "Ask: another chat", at: Date()),
+            proposal("old", agent: name, at: Date().addingTimeInterval(-3600)),
+        ])
+        #expect(fixture.runner.isRunning, "still answering")
+        #expect(fixture.runner.chat?.turns[0].proposals.map(\.id) == ["plan"], "its own, new, and only those")
+        fixture.runner.claim([proposal("plan", agent: name, at: Date())])
+        #expect(fixture.runner.chat?.turns[0].proposals.count == 1, "listed once")
+        fixture.runner.stopAll()
+    }
+
+    @Test("A chat is named by its first question until the reader renames it")
+    func rename() async throws {
+        let fixture = try fixture(stdout: answering)
+        fixture.runner.ask("When is it due?", vaultRoot: fixture.vault, scope: "")
+        try await settle(fixture.runner)
+        let chat = try #require(fixture.runner.chat)
+        #expect(chat.title == "When is it due?")
+        fixture.runner.rename(chat, to: "  Parser deadline  ")
+        #expect(AgentChatStore.all(in: fixture.vault).first?.title == "Parser deadline")
+        fixture.runner.rename(chat, to: "   ")
+        #expect(AgentChatStore.all(in: fixture.vault).first?.title == "Parser deadline", "an empty name is no name")
     }
 
     @Test("A closed chat keeps answering, and is complete when opened again")
