@@ -29,7 +29,8 @@ public enum BarScope: Hashable, Sendable {
 
     /// The field's prompt with no scope. Short, since the chips under it and
     /// the keys beside each scope say the rest.
-    public static let unscopedPlaceholder = "Search anything"
+    /// Named as the menu item and the setting are.
+    public static let unscopedPlaceholder = "Search everything"
 
     /// The scopes a reader can pick from a list, in the order offered.
     public static let offered: [BarScope] = [.notes, .commands, .tags, .contents]
@@ -37,6 +38,13 @@ public enum BarScope: Hashable, Sendable {
     /// Every scope that can be found by name in the bar with no scope:
     /// typing "rec" offers Recent, and Space or Tab makes it the chip.
     public static let searchable: [BarScope] = offered + [.folders, .recent, .frequent]
+
+    /// The chips under an empty field, Text last: every other scope lists
+    /// what you used recently and most, and text has nothing to list until
+    /// something is typed. Recent and Frequent are not chips: they are notes
+    /// only, which beside Commands and Tags read as everything, and every
+    /// chip now has its own recent and frequent.
+    public static let chips: [BarScope] = [.notes, .commands, .tags, .folders, .contents]
 
     /// Other words a scope answers to, the way a command has search terms.
     public var aliases: String {
@@ -86,8 +94,8 @@ public enum BarScope: Hashable, Sendable {
         case .folders: "Folders"
         // The chip shows the folder's own name; the placeholder its path.
         case .folder(let path): path.split(separator: "/").last.map(String.init) ?? path
-        case .recent: "Recent"
-        case .frequent: "Frequent"
+        case .recent: "Recent notes"
+        case .frequent: "Frequent notes"
         }
     }
 

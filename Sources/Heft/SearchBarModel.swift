@@ -77,6 +77,21 @@ extension QuickOpenOrder.Lead {
     var barScope: BarScope { self == .recent ? .recent : .frequent }
 }
 
+extension StartList.Row {
+    /// Where the row's heading leads when chosen: the scope that lists the
+    /// same one kind, and nowhere for a row that mixes kinds.
+    var barScope: BarScope? {
+        guard kinds.count == 1, let kind = kinds.first else { return nil }
+        switch kind {
+        case .notes: return order == .recent ? .recent : .frequent
+        case .commands: return .commands
+        case .tags: return .tags
+        case .folders: return .folders
+        case .scopes: return nil
+        }
+    }
+}
+
 @MainActor
 extension AppModel {
 
@@ -120,11 +135,6 @@ extension AppModel {
 
     // MARK: Rows
 
-    /// How many used notes and commands the bar with no scope lists before
-    /// anything is typed, below the recent block: enough to be worth a
-    /// heading, few enough that "Search in" is still reachable.
-    static let barFrequentLimit = 12
-
     /// Fewer name matches than this and the text inside notes is searched
     /// too, with no scope and in a tag or a folder alike: about as many rows
     /// as the list shows, so text fills the room names leave and never
@@ -146,7 +156,7 @@ extension AppModel {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         if scope == .contents { return true }
         guard scope == nil || scope?.searchesTextToo == true else { return false }
-        let found = nameRows(scope: scope, query: query, entireVault: entireVault, order: .current)
+        let found = nameRows(scope: scope, query: query, entireVault: entireVault, order: nil)
             .filter { if case .searchText = $0 { false } else { true } }
         return found.count < Self.barTextThreshold
     }
@@ -156,11 +166,20 @@ extension AppModel {
     /// - Parameter text: the text search for this query, which runs off the
     ///   main thread and arrives later. It is the whole list in the text
     ///   scope, and follows the name matches in a tag or a folder.
+    ///
+    /// - Parameters:
+    ///   - order: one order for every scope, overriding `orders`; for tests.
+    ///   - orders: each scope's own recent-or-frequent order.
+    ///   - start: what ⌘T lists before anything is typed.
     func barRows(
         scope: BarScope?, query: String, entireVault: Bool,
-        order: QuickOpenOrder = .current, text: ContentSearchResult? = nil
+        order: QuickOpenOrder? = nil, orders: ScopeOrders = .current, start: StartList = .current,
+        text: ContentSearchResult? = nil
     ) -> [BarRow] {
-        let rows = nameRows(scope: scope, query: query, entireVault: entireVault, order: order)
+        let rows = nameRows(
+            scope: scope, query: query, entireVault: entireVault, order: order, orders: orders,
+            start: start
+        )
         let hits = (text?.matches ?? []).prefix(Self.barTextRowLimit).map(BarRow.hit)
         if scope == .contents { return hits }
         if scope == nil, let text, !hits.isEmpty {
@@ -181,16 +200,18 @@ extension AppModel {
     }
 
     private func nameRows(
-        scope: BarScope?, query: String, entireVault: Bool, order: QuickOpenOrder
+        scope: BarScope?, query: String, entireVault: Bool, order: QuickOpenOrder?,
+        orders: ScopeOrders = .current,
+        start: StartList = .current
     ) -> [BarRow] {
         let typed = !query.trimmingCharacters(in: .whitespaces).isEmpty
         switch scope {
         case nil:
             return typed
                 ? everythingRows(query, entireVault: entireVault)
-                : startRows(entireVault: entireVault, order: order)
+                : startRows(entireVault: entireVault, start: start)
         case .notes:
-            var rows = quickOpenList(query, entireVault: entireVault, order: order).rows.map {
+            var rows = quickOpenList(query, entireVault: entireVault, order: order ?? orders[.notes]).rows.map {
                 switch $0 {
                 case .heading(let kind): BarRow.heading(kind.title, target: kind.barScope)
                 case .note(let note): BarRow.note(note)
@@ -210,12 +231,38 @@ extension AppModel {
             return named(query, among: index.notes(taggedWith: name), entireVault: entireVault)
                 .map(BarRow.note)
         case .tags:
+            guard typed else {
+                // By how many notes carry them when nothing else decides.
+                let tags = index.allTags
+                return arrangedRows(
+                    tags, kind: "tags", order: order ?? orders[.tags],
+                    key: { BarScope.tag($0).useKey }, scoreKey: { BarScope.tag($0).useKey },
+                    row: { BarRow.tag($0, count: self.index.noteCount(forTag: $0)) }
+                )
+            }
             return tagRows(query, limit: 200)
         case .folder(let path):
             return named(query, among: notes(under: path), entireVault: true).map(BarRow.note)
         case .folders:
+            guard typed else {
+                return arrangedRows(
+                    noteFolders, kind: "folders", order: order ?? orders[.folders],
+                    key: { BarScope.folder($0.path).useKey }, scoreKey: { BarScope.folder($0.path).useKey },
+                    row: { BarRow.folder($0.path, count: $0.count) }
+                )
+            }
             return folderRows(query, limit: 300)
         case .commands:
+            guard typed else {
+                // A command that cannot run sinks within its part, as it does
+                // in the whole list once something is typed.
+                let rows = arrangedRows(
+                    AppCommand.registry, kind: "commands", order: order ?? orders[.commands],
+                    key: { RecentUses.commandKey($0.id) }, scoreKey: { $0.id },
+                    row: { BarRow.command($0) }
+                )
+                return sinkingDisabledWithinParts(rows)
+            }
             return commandRows(query)
         case .contents:
             return []
@@ -257,20 +304,9 @@ extension AppModel {
     }
 
     /// Folders by name: a folder's own name ranks, its path counts as its
-    /// search terms. With nothing typed, the ones used most first.
+    /// search terms.
     private func folderRows(_ query: String, limit: Int) -> [BarRow] {
-        let folders = noteFolders
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return folders.enumerated()
-                .sorted { left, right in
-                    let l = FrecencyStore.commands.score(BarScope.folder(left.element.path).useKey)
-                    let r = FrecencyStore.commands.score(BarScope.folder(right.element.path).useKey)
-                    return l == r ? left.offset < right.offset : l > r
-                }
-                .prefix(limit)
-                .map { BarRow.folder($0.element.path, count: $0.element.count) }
-        }
-        return folders.compactMap { folder -> (row: BarRow, score: Int)? in
+        noteFolders.compactMap { folder -> (row: BarRow, score: Int)? in
             guard let tier = CommandMatch.score(
                 query: query, title: BarScope.folder(folder.path).title, terms: folder.path
             ) else { return nil }
@@ -286,68 +322,113 @@ extension AppModel {
     /// Nothing typed and no scope: what you opened last, then what you use
     /// most: notes, commands, scopes and tags together. The scopes themselves
     /// are a row of chips above the list, so they cost it no rows.
-    private func startRows(entireVault: Bool, order: QuickOpenOrder) -> [BarRow] {
+    private func startRows(entireVault: Bool, start: StartList) -> [BarRow] {
         var rows: [BarRow] = []
         var listed = Set<String>()
-        let recent = quickOpenList("", entireVault: entireVault, only: .recent).all
-        let frequent = frequentRows(entireVault: entireVault)
-
-        let blocks: [(QuickOpenOrder.Lead, [BarRow])] = order.lead == .recent
-            ? [(.recent, recent.map(BarRow.note)), (.frequent, frequent)]
-            : [(.frequent, frequent), (.recent, recent.map(BarRow.note))]
-        // The setting sizes the first block, as in Quick Open; the second is
-        // capped so that "Search in" stays within reach.
-        let sizes = [order.count, Self.barFrequentLimit]
-        for ((kind, candidates), size) in zip(blocks, sizes) {
-            let fresh = candidates.filter { !listed.contains($0.id) }.prefix(size)
+        for (row, limit) in start.plan {
+            let fresh = startCandidates(row, entireVault: entireVault, fillsRest: start.fillsRest(row))
+                .filter { !listed.contains($0.id) }
+                .prefix(limit)
             guard !fresh.isEmpty else { continue }
-            rows.append(.heading(kind.title, target: kind.barScope))
+            rows.append(.heading(row.title, target: row.barScope))
             rows += fresh
             listed.formUnion(fresh.map(\.id))
         }
-        // A vault with no notes opened yet would show no notes at all, or an
-        // empty sheet; it lists them after whatever else is used, as Quick
-        // Open always did.
-        if !rows.contains(where: { if case .note = $0 { true } else { false } }) {
-            let notes = quickOpenList("", entireVault: entireVault, order: .init(lead: .recent, count: 0)).all
+        // A list of rows that found nothing, or no rows at all, would open on
+        // an empty sheet; it opens on the notes instead, as Quick Open did.
+        if rows.isEmpty {
+            let notes = allNotesByUse(entireVault: entireVault)
             if !notes.isEmpty {
-                rows += [.heading(BarScope.notes.title, target: .notes)] + notes.map(BarRow.note)
+                rows = [.heading(BarScope.notes.title, target: .notes)] + notes.map(BarRow.note)
             }
         }
         return rows
     }
 
-    /// Used notes, commands, scopes and tags on one scale: every store adds
-    /// one per use and halves every three days, so the scores compare
-    /// directly.
-    private func frequentRows(entireVault: Bool) -> [BarRow] {
-        let familiarity: (NoteRef) -> Double = { [noteFrecency] in
-            noteFrecency?.score($0.relativePath) ?? 0
+    /// One start row's candidates: every kind it names, on one scale, most
+    /// recent or most used first. Recent compares times, so a note opened an
+    /// hour ago sits below a command run a minute ago; frequent compares use
+    /// scores, which every store keeps the same way. Only what has been used
+    /// is listed, except that a frequent row of notes filling the rest goes
+    /// on to every other note, so the list still reaches the whole vault.
+    private func startCandidates(
+        _ row: StartList.Row, entireVault: Bool, fillsRest: Bool
+    ) -> [BarRow] {
+        let recent = row.order == .recent
+        let lastUsed = RecentUses.dates()
+        /// What a key ranks by: when it was last used, or how much.
+        func value(_ key: String) -> Double? {
+            if recent { return lastUsed[key]?.timeIntervalSince1970 }
+            let score = FrecencyStore.commands.score(key)
+            return score > 0 ? score : nil
         }
-        let notes = quickOpenList("", entireVault: entireVault, only: .frequent).all
-            .map { (row: BarRow.note($0), score: familiarity($0)) }
-        let commands = AppCommand.registry
-            .filter { $0.isEnabled(on: self) && AppCommand.scopes[$0.id] == nil }
-            .map { (row: BarRow.command($0), score: FrecencyStore.commands.score($0.id)) }
-            .filter { $0.score > 0 }
-        let scopes = BarScope.searchable
-            .map { (row: BarRow.scope($0), score: FrecencyStore.commands.score($0.useKey)) }
-            .filter { $0.score > 0 }
-        let tags = index.allTags
-            .map { (row: BarRow.tag($0, count: index.noteCount(forTag: $0)),
-                    score: FrecencyStore.commands.score(BarScope.tag($0).useKey)) }
-            .filter { $0.score > 0 }
-        let folders = noteFolders
-            .map { (row: BarRow.folder($0.path, count: $0.count),
-                    score: FrecencyStore.commands.score(BarScope.folder($0.path).useKey)) }
-            .filter { $0.score > 0 }
-        return (notes + commands + scopes + tags + folders)
-            .enumerated()
+
+        var candidates: [(row: BarRow, value: Double)] = []
+        if row.kinds.contains(.notes) {
+            if recent {
+                let notes = quickOpenList("", entireVault: entireVault, only: .recent).all
+                for (offset, note) in notes.enumerated() {
+                    // A history entry without a time keeps its place below
+                    // the ones with one.
+                    let date = session?.lastOpened(note.relativePath)?.timeIntervalSince1970
+                    candidates.append((.note(note), date ?? -Double(offset)))
+                }
+            } else {
+                for note in quickOpenList("", entireVault: entireVault, only: .frequent).all {
+                    candidates.append((.note(note), noteFrecency?.score(note.relativePath) ?? 0))
+                }
+            }
+        }
+        if row.kinds.contains(.commands) {
+            for command in AppCommand.registry
+            where command.isEnabled(on: self) && AppCommand.scopes[command.id] == nil {
+                let key = recent ? RecentUses.commandKey(command.id) : command.id
+                let found = recent ? lastUsed[key]?.timeIntervalSince1970 : value(key)
+                if let found { candidates.append((.command(command), found)) }
+            }
+        }
+        if row.kinds.contains(.tags) {
+            for tag in index.allTags {
+                if let found = value(BarScope.tag(tag).useKey) {
+                    candidates.append((.tag(tag, count: index.noteCount(forTag: tag)), found))
+                }
+            }
+        }
+        if row.kinds.contains(.folders) {
+            for folder in noteFolders {
+                if let found = value(BarScope.folder(folder.path).useKey) {
+                    candidates.append((.folder(folder.path, count: folder.count), found))
+                }
+            }
+        }
+        if row.kinds.contains(.scopes) {
+            for scope in BarScope.searchable {
+                if let found = value(scope.useKey) { candidates.append((.scope(scope), found)) }
+            }
+        }
+
+        // Swift's sort is not stable, so the order gathered breaks ties.
+        var ordered = candidates.enumerated()
             .sorted { left, right in
-                left.element.score == right.element.score
-                    ? left.offset < right.offset : left.element.score > right.element.score
+                left.element.value == right.element.value
+                    ? left.offset < right.offset : left.element.value > right.element.value
             }
             .map(\.element.row)
+        if !recent, fillsRest, row.kinds.contains(.notes) {
+            let shown = Set(ordered.map(\.id))
+            ordered += allNotesByUse(entireVault: entireVault)
+                .map(BarRow.note)
+                .filter { !shown.contains($0.id) }
+        }
+        return ordered
+    }
+
+    /// Every note, most used first and then by name: what Quick Open lists.
+    private func allNotesByUse(entireVault: Bool) -> [NoteRef] {
+        quickOpenList(
+            "", entireVault: entireVault, limit: StartList.restLimit,
+            order: .init(lead: .recent, count: 0)
+        ).all
     }
 
     /// Something typed and no scope: notes and commands ranked together by
@@ -427,6 +508,46 @@ extension AppModel {
     /// Records that the reader went into `scope`, so it ranks by use.
     func recordScopeUse(_ scope: BarScope) {
         FrecencyStore.commands.record(scope.useKey)
+        RecentUses.record(scope.useKey)
+    }
+
+    /// Commands, tags or folders with nothing typed, the way Quick Open lists
+    /// notes: one order first and the other after, as the one setting says,
+    /// headed by order and kind; or one order alone, without headings.
+    private func arrangedRows<Item>(
+        _ items: [Item], kind: String, order: QuickOpenOrder,
+        key: (Item) -> String, scoreKey: (Item) -> String, row: (Item) -> BarRow
+    ) -> [BarRow] {
+        let lastUsed = RecentUses.dates()
+        let arranged = order.arrangeItems(
+            items,
+            lastUsed: { lastUsed[key($0)]?.timeIntervalSince1970 },
+            useScore: { FrecencyStore.commands.score(scoreKey($0)) }
+        )
+        guard let heading = arranged.heading else {
+            return (arranged.lead + arranged.rest).map(row)
+        }
+        return [.heading("\(heading.title) \(kind)", target: nil)] + arranged.lead.map(row)
+            + [.heading("\(heading.other.title) \(kind)", target: nil)] + arranged.rest.map(row)
+    }
+
+    /// Commands that cannot run moved to the end of whichever part they are
+    /// in, so the first row of each is one Return can act on.
+    private func sinkingDisabledWithinParts(_ rows: [BarRow]) -> [BarRow] {
+        var result: [BarRow] = []
+        var part: [BarRow] = []
+        func flush() {
+            result += AppCommand.sinkingDisabled(part) { row in
+                if case .command(let command) = row { return command.isEnabled(on: self) }
+                return true
+            }
+            part = []
+        }
+        for row in rows {
+            if case .heading = row { flush(); result.append(row) } else { part.append(row) }
+        }
+        flush()
+        return result
     }
 
     /// The palette's own order: what matches, by use, disabled last.

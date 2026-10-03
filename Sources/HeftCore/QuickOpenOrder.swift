@@ -36,6 +36,88 @@ public struct QuickOpenOrder: Equatable, Sendable {
     /// order, without headings.
     public var count: Int
 
+    /// The four ways the setting is offered: one order first and the other
+    /// after, or one order alone. "Alone" is a leading block of none, which
+    /// is how it has always been stored, so the settings read the same.
+    public enum Mode: String, CaseIterable, Identifiable, Sendable {
+        case recentFirst, frequentFirst, recentOnly, frequentOnly
+
+        public var id: String { rawValue }
+
+        public var title: String {
+            switch self {
+            case .recentFirst: "Recent first"
+            case .frequentFirst: "Frequent first"
+            case .recentOnly: "Recent only"
+            case .frequentOnly: "Frequent only"
+            }
+        }
+
+        public var isSplit: Bool { self == .recentFirst || self == .frequentFirst }
+    }
+
+    public var mode: Mode {
+        switch (lead, count == 0) {
+        case (.recent, false): .recentFirst
+        case (.frequent, false): .frequentFirst
+        // No leading block: the list is all in the other order.
+        case (.recent, true): .frequentOnly
+        case (.frequent, true): .recentOnly
+        }
+    }
+
+    /// This order in `mode`, keeping the count where it still applies.
+    public func with(mode: Mode) -> QuickOpenOrder {
+        let kept = count == 0 ? Self.standard.count : count
+        switch mode {
+        case .recentFirst: return QuickOpenOrder(lead: .recent, count: kept)
+        case .frequentFirst: return QuickOpenOrder(lead: .frequent, count: kept)
+        case .recentOnly: return QuickOpenOrder(lead: .frequent, count: 0)
+        case .frequentOnly: return QuickOpenOrder(lead: .recent, count: 0)
+        }
+    }
+
+    /// The same arrangement for anything with a last use and a use score:
+    /// commands, tags and folders, as notes have it.
+    ///
+    /// - Parameter fallback: every item in the order to fall back on, for
+    ///   ties and for what was never used.
+    /// - Returns: the leading block, the rest, and which order leads, nil when
+    ///   only one part has anything in it.
+    public func arrangeItems<Item>(
+        _ fallback: [Item], lastUsed: (Item) -> Double?, useScore: (Item) -> Double
+    ) -> (lead: [Item], rest: [Item], heading: Lead?) {
+        func ranked(_ value: (Item) -> Double?) -> [Ranked] {
+            var found: [Ranked] = []
+            for (offset, item) in fallback.enumerated() {
+                if let value = value(item) { found.append(Ranked(offset: offset, value: value)) }
+            }
+            // Swift's sort is not stable, so the fallback order breaks ties.
+            return found.sorted { $0.value == $1.value ? $0.offset < $1.offset : $0.value > $1.value }
+        }
+        let byRecency: [Int] = ranked(lastUsed).map { $0.offset }
+        let byUseRanked: [Ranked] = ranked { useScore($0) }
+        let byUse: [Int] = byUseRanked.map { $0.offset }
+        let used: [Int] = byUseRanked.filter { $0.value > 0 }.map { $0.offset }
+
+        let leadOffsets: [Int]
+        var restOffsets: [Int]
+        switch lead {
+        case .recent:
+            leadOffsets = Array(byRecency.prefix(count))
+            restOffsets = byUse
+        case .frequent:
+            leadOffsets = Array(used.prefix(count))
+            let opened = Set(byRecency)
+            restOffsets = byRecency + byUse.filter { !opened.contains($0) }
+        }
+        let taken = Set(leadOffsets)
+        restOffsets.removeAll { taken.contains($0) }
+        let leadItems = leadOffsets.map { fallback[$0] }
+        let restItems = restOffsets.map { fallback[$0] }
+        return (leadItems, restItems, leadItems.isEmpty || restItems.isEmpty ? nil : lead)
+    }
+
     public static let countRange = 0...20
     public static let standard = QuickOpenOrder(lead: .recent, count: 5)
 
@@ -155,6 +237,14 @@ public struct QuickOpenOrder: Equatable, Sendable {
     public static var current: QuickOpenOrder { current(in: HeftDefaults.shared) }
 
     public static func current(in defaults: UserDefaults) -> QuickOpenOrder {
+        load(in: defaults, leadKey: leadKey, countKey: countKey)
+    }
+
+    public func save(in defaults: UserDefaults) {
+        save(in: defaults, leadKey: Self.leadKey, countKey: Self.countKey)
+    }
+
+    static func load(in defaults: UserDefaults, leadKey: String, countKey: String) -> QuickOpenOrder {
         QuickOpenOrder(
             lead: defaults.string(forKey: leadKey).flatMap(Lead.init(rawValue:)) ?? standard.lead,
             count: defaults.object(forKey: countKey) == nil
@@ -162,9 +252,73 @@ public struct QuickOpenOrder: Equatable, Sendable {
         )
     }
 
+    func save(in defaults: UserDefaults, leadKey: String, countKey: String) {
+        defaults.set(lead.rawValue, forKey: leadKey)
+        defaults.set(count, forKey: countKey)
+    }
+}
+
+/// Recent or frequent first, chosen for each scope on its own: one reader
+/// wants the notes they opened last and the commands they run most.
+///
+/// Notes keep Quick Open's keys, so the setting made before there were more
+/// scopes carries over as the notes' row.
+public struct ScopeOrders: Equatable, Sendable {
+
+    public enum Kind: String, CaseIterable, Identifiable, Sendable {
+        case notes, commands, tags, folders
+
+        public var id: String { rawValue }
+
+        public var title: String {
+            switch self {
+            case .notes: "Notes (⌘O)"
+            case .commands: "Commands (⌘P)"
+            case .tags: "Tags"
+            case .folders: "Folders"
+            }
+        }
+    }
+
+    private var orders: [Kind: QuickOpenOrder]
+
+    public static let standard = ScopeOrders(orders: [:])
+
+    public init(orders: [Kind: QuickOpenOrder]) {
+        self.orders = orders
+    }
+
+    public subscript(kind: Kind) -> QuickOpenOrder {
+        get { orders[kind] ?? .standard }
+        set { orders[kind] = newValue }
+    }
+
+    public func matches(_ other: ScopeOrders) -> Bool {
+        Kind.allCases.allSatisfy { self[$0] == other[$0] }
+    }
+
+    public static var current: ScopeOrders { current(in: HeftDefaults.shared) }
+
+    public static func current(in defaults: UserDefaults) -> ScopeOrders {
+        var result = ScopeOrders.standard
+        for kind in Kind.allCases {
+            let (lead, count) = keys(for: kind)
+            result[kind] = QuickOpenOrder.load(in: defaults, leadKey: lead, countKey: count)
+        }
+        return result
+    }
+
     public func save(in defaults: UserDefaults) {
-        defaults.set(lead.rawValue, forKey: Self.leadKey)
-        defaults.set(count, forKey: Self.countKey)
+        for kind in Kind.allCases {
+            let (lead, count) = Self.keys(for: kind)
+            self[kind].save(in: defaults, leadKey: lead, countKey: count)
+        }
+    }
+
+    private static func keys(for kind: Kind) -> (String, String) {
+        if kind == .notes { return (QuickOpenOrder.leadKey, QuickOpenOrder.countKey) }
+        return ("dev.stenglein.Heft.scopeOrder.\(kind.rawValue).lead",
+                "dev.stenglein.Heft.scopeOrder.\(kind.rawValue).count")
     }
 }
 
@@ -172,4 +326,10 @@ extension Int {
     fileprivate func clamped(to range: ClosedRange<Int>) -> Int {
         Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
+}
+
+/// An item's place in the fallback order and the value it ranks by.
+private struct Ranked {
+    let offset: Int
+    let value: Double
 }

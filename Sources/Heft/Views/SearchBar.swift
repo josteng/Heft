@@ -84,7 +84,7 @@ struct SearchBarView: View {
         let text = contentsScope == scope && !trimmed.isEmpty ? contents : nil
         rows = model.barRows(
             scope: scope, query: query, entireVault: searchesEntireVault,
-            order: settings.quickOpenOrder, text: text
+            orders: settings.scopeOrders, start: settings.startList, text: text
         )
         wantsText = model.barWantsText(
             scope: scope, query: query, entireVault: searchesEntireVault
@@ -114,7 +114,8 @@ struct SearchBarView: View {
             enter(request.scope, carrying: query)
             if !trimmed.isEmpty { selectAllRequest += 1 }
         }
-        .onChange(of: settings.quickOpenOrder) { refreshRows(); selectFirst() }
+        .onChange(of: settings.scopeOrders) { refreshRows(); selectFirst() }
+        .onChange(of: settings.startList) { refreshRows(); selectFirst() }
         // Keyed on whether text is wanted too: that is settled when the list
         // is rebuilt, which can land after the query has already changed.
         .task(id: "\(trimmed)|\(searchesEntireVault)|\(String(describing: scope))|\(wantsText)") {
@@ -216,7 +217,7 @@ struct SearchBarView: View {
 
     private var scopeChips: some View {
         HStack(spacing: 6) {
-            ForEach(BarScope.searchable, id: \.self) { candidate in
+            ForEach(BarScope.chips, id: \.self) { candidate in
                 Button {
                     enter(candidate, carrying: "")
                 } label: {
@@ -303,7 +304,7 @@ struct SearchBarView: View {
         // both share and fading the rest. Across families the list is
         // replaced: a tag the reader uses sat in ⌘T's Frequent and, kept,
         // travelled to the top of the tags while every other row faded in.
-        .id("\(trimmed)#\(searchesEntireVault)#\(settings.quickOpenOrder)#\(listFamily)")
+        .id("\(trimmed)#\(searchesEntireVault)#\(listFamily)")
         .frame(maxHeight: .infinity)
     }
 

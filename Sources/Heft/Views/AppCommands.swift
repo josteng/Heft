@@ -560,6 +560,7 @@ struct AppCommand: Identifiable {
 
     @MainActor func perform(on model: AppModel) {
         FrecencyStore.commands.record(id)
+        RecentUses.record(RecentUses.commandKey(id))
         action(model)
     }
 

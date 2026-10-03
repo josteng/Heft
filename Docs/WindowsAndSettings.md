@@ -177,6 +177,15 @@ it, which is why the three old flags are now names for `AppModel.bar`, and
 what was typed comes along selected, so ⌘O then ⇧⌘F searches the text for
 the same words and the next key can still replace them.
 
+What ⌘T lists before anything is typed is its own setting (`StartList`),
+apart from Quick Open's: rows in the reader's order, each an order (recent or
+frequent), the kinds it lists and a count, the last filling the rest. Five
+fixed sections came first and read as presets whose names hid what they did;
+the two choices every one of them made are the row now. Recent compares
+times, from `RecentUses` for everything but notes and the vault's own history
+for notes, so one row can mix kinds in the order they were used. A frequent
+row of notes that fills the rest goes on past the used notes to every note.
+
 The bar with no scope ranks notes and commands together on one ladder
 (`CommandMatch` mirrors the name tiers of `VaultIndex.scoredSearch`), and a
 command that cannot run still sinks. Text inside notes is never mixed in. A
@@ -214,8 +223,12 @@ is runnable whenever any row is.
 
 With nothing typed, Quick Open lists a short block first, by default the five
 notes opened last, then everything else by frecency (`QuickOpenOrder`; General
-settings can lead with the most used instead, then the rest by when opened, or
-turn the block off). Frecency alone ranked a note opened once today below one
+settings offer recent or frequent first, or either alone). Commands, Tags and
+Folders are arranged the same way (`arrangeItems`), from the times and scores
+every kind now keeps, each scope with its own row in one table
+(`ScopeOrders`): a reader can open notes on what they opened last and
+commands on what they run most. The notes' row keeps Quick Open's keys. That is also why Recent and Frequent are not
+chips: they are notes only, and beside the other chips they read as everything. Frecency alone ranked a note opened once today below one
 opened often last week, so a new note was the hardest to find; recency alone,
 which is Obsidian's answer, loses the notes opened every morning. Each part is
 headed by the order it follows, and a heading is a row: Return on it enters

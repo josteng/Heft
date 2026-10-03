@@ -163,6 +163,10 @@ struct SearchBarRowTests {
 
     private func ids(_ rows: [BarRow]) -> [String] { rows.map(\.id) }
 
+    private static let frequentOnly = StartList(
+        rows: [.init(.frequent, Set(StartList.Kind.allCases), count: 12)]
+    )
+
     /// The bar ⌘T opens: the last note opened, then what is used most. The
     /// scopes are chips above the list and cost it no rows.
     @Test("With nothing typed: recent, then frequent")
@@ -173,11 +177,15 @@ struct SearchBarRowTests {
         for _ in 0..<5 { session.recordRecent("Alpha.md") }
         session.recordRecent("Gamma.md")
 
-        let rows = ids(model.barRows(
-            scope: nil, query: "", entireVault: true, order: .init(lead: .recent, count: 1)
-        ))
+        // A row after Frequent, so Frequent does not fill the rest; the last
+        // row would go on to every note.
+        let start = StartList(rows: [
+            .init(.recent, [.notes], count: 1), .init(.frequent, Set(StartList.Kind.allCases), count: 12),
+            .init(.recent, [.scopes], count: 1),
+        ])
+        let rows = ids(model.barRows(scope: nil, query: "", entireVault: true, start: start))
         #expect(Array(rows.prefix(4)) == [
-            "heading:Recent", "note:Gamma.md", "heading:Frequent", "note:Alpha.md",
+            "heading:Recent notes", "note:Gamma.md", "heading:Frequent", "note:Alpha.md",
         ], "got \(rows)")
         // The store of uses is app-wide and other tests enter scopes, so the
         // rule checked is the real one: a scope listed here has been used.
@@ -191,15 +199,85 @@ struct SearchBarRowTests {
         }
     }
 
-    /// No note opened yet must not mean a list without notes. Commands may
-    /// already be frequent, since that store is app-wide.
+    /// No note opened yet still lists the notes, under All notes, which
+    /// fills the rest by default. Commands may already be frequent, since
+    /// that store is app-wide.
     @Test("A vault with no history still lists its notes")
     func noHistory() async throws {
         let model = try await model(["Alpha.md": "a", "Beta.md": "b"])
         defer { model.closeWorkspace() }
-        let rows = model.barRows(scope: nil, query: "", entireVault: true)
-        #expect(Array(ids(rows).suffix(3)) == ["heading:Notes", "note:Alpha.md", "note:Beta.md"])
-        #expect(rows.first { $0.id == "heading:Notes" }?.scope == .notes)
+        let rows = model.barRows(scope: nil, query: "", entireVault: true, start: .standard)
+        #expect(Array(ids(rows).suffix(3)) == ["heading:Frequent notes", "note:Alpha.md", "note:Beta.md"])
+
+        // No rows at all would be an empty sheet; it opens on the notes.
+        #expect(ids(model.barRows(scope: nil, query: "", entireVault: true, start: StartList(rows: [])))
+            == ["heading:Notes", "note:Alpha.md", "note:Beta.md"])
+    }
+
+    /// Recent rows are only as good as their history: running a command and
+    /// entering a scope both record when.
+    @Test("Running a command or entering a scope records when")
+    func usesAreRecorded() throws {
+        let model = AppModel(registry: VaultRegistry(), descriptor: WorkspaceDescriptor())
+        let command = try #require(AppCommand.registry.first { $0.id == "toggleBacklinks" })
+        let before = Date().addingTimeInterval(-1)
+        command.perform(on: model)
+        model.recordScopeUse(.folder("Work"))
+        let dates = RecentUses.dates()
+        #expect((dates[RecentUses.commandKey("toggleBacklinks")] ?? .distantPast) > before)
+        #expect((dates[BarScope.folder("Work").useKey] ?? .distantPast) > before)
+    }
+
+    /// The sections come in the reader's order, each capped, nothing twice,
+    /// and the last one switched on takes the rest.
+    @Test("The start list follows its setting")
+    func startListOrder() async throws {
+        let model = try await model(["Alpha.md": "a", "Beta.md": "b", "Gamma.md": "c"])
+        defer { model.closeWorkspace() }
+        try #require(model.session).recordRecent("Gamma.md")
+        // In the future, so no other test's uses of the same app-wide store
+        // can come between them.
+        let soon = Date().addingTimeInterval(10_000)
+        RecentUses.record(RecentUses.commandKey("toggleBacklinks"), at: soon)
+        RecentUses.record(RecentUses.commandKey("toggleSidebar"), at: soon.addingTimeInterval(1))
+        let start = StartList(rows: [
+            .init(.recent, [.commands], count: 1),
+            .init(.recent, [.notes], count: 5),
+            .init(.frequent, [.notes], count: 1),
+        ])
+        let rows = ids(model.barRows(scope: nil, query: "", entireVault: true, start: start))
+        #expect(rows == [
+            "heading:Recent commands", "command:toggleSidebar",
+            "heading:Recent notes", "note:Gamma.md",
+            // The last row, so its count of one does not apply, and it goes on
+            // past the used notes to every note; Gamma is not repeated.
+            "heading:Frequent notes", "note:Alpha.md", "note:Beta.md",
+        ], "got \(rows)")
+    }
+
+    /// One row can mix kinds; a recent one orders them by when they were
+    /// used, whatever kind each is.
+    @Test("A recent row of several kinds orders them by time")
+    func recentMix() async throws {
+        let model = try await model(["Work/Plan.md": "a", "Home.md": "b"])
+        defer { model.closeWorkspace() }
+        try #require(model.session).recordRecent("Home.md")
+        let later = Date().addingTimeInterval(1_000_000)
+        RecentUses.record(BarScope.folder("Work").useKey, at: later)
+        RecentUses.record(RecentUses.commandKey("toggleBacklinks"), at: later.addingTimeInterval(-1))
+        let start = StartList(rows: [.init(.recent, [.notes, .folders, .commands], count: 30)])
+        let rows = ids(model.barRows(scope: nil, query: "", entireVault: true, start: start))
+        // Other tests use commands in the same app-wide store, so the check
+        // is the order of these three, not the whole list.
+        let folder = try #require(rows.firstIndex(of: "folder:Work"), "got \(rows)")
+        let command = try #require(rows.firstIndex(of: "command:toggleBacklinks"))
+        let note = try #require(rows.firstIndex(of: "note:Home.md"))
+        #expect(rows.first == "heading:Recent notes, commands and folders")
+        #expect(folder < command && command < note, "got \(rows)")
+        // A row that ticks nothing lists nothing and takes no heading.
+        let empty = StartList(rows: [.init(.recent, [], count: 3), .init(.recent, [.folders], count: 3)])
+        #expect(ids(model.barRows(scope: nil, query: "", entireVault: true, start: empty)).first
+            == "heading:Recent folders")
     }
 
     /// Frequent mixes both kinds on one scale.
@@ -208,9 +286,7 @@ struct SearchBarRowTests {
         let model = try await model(["Alpha.md": "a"])
         defer { model.closeWorkspace() }
         for _ in 0..<40 { FrecencyStore.commands.record("toggleSidebar") }
-        let rows = ids(model.barRows(
-            scope: nil, query: "", entireVault: true, order: .init(lead: .recent, count: 0)
-        ))
+        let rows = ids(model.barRows(scope: nil, query: "", entireVault: true, start: Self.frequentOnly))
         #expect(rows.contains("command:toggleSidebar"), "got \(rows)")
     }
 
@@ -220,10 +296,10 @@ struct SearchBarRowTests {
     func scopesByName() async throws {
         let model = try await model(["Plan.md": "#work", "Diary.md": "x"])
         defer { model.closeWorkspace() }
-        #expect(ids(model.barRows(scope: nil, query: "rec", entireVault: true)).first == "scope:Recent")
+        #expect(ids(model.barRows(scope: nil, query: "rec", entireVault: true)).first == "scope:Recent notes")
         #expect(ids(model.barRows(scope: nil, query: "tags", entireVault: true)).first == "scope:Tags")
         #expect(ids(model.barRows(scope: nil, query: "most used", entireVault: true))
-            .contains("scope:Frequent"), "a synonym finds it too")
+            .contains("scope:Frequent notes"), "a synonym finds it too")
         #expect(ids(model.barRows(scope: nil, query: "wor", entireVault: true)).first == "tag:work")
     }
 
@@ -251,9 +327,7 @@ struct SearchBarRowTests {
         defer { model.closeWorkspace() }
         for _ in 0..<30 { model.recordScopeUse(.tags) }
         for _ in 0..<30 { model.recordScopeUse(.tag("home")) }
-        let rows = ids(model.barRows(
-            scope: nil, query: "", entireVault: true, order: .init(lead: .recent, count: 0)
-        ))
+        let rows = ids(model.barRows(scope: nil, query: "", entireVault: true, start: Self.frequentOnly))
         #expect(rows.contains("scope:Tags"), "got \(rows)")
         #expect(rows.contains("tag:home"), "got \(rows)")
     }
@@ -434,6 +508,59 @@ struct SearchBarRowTests {
         #expect(matches == 13)
     }
 
+    /// One setting orders every scope with nothing typed: commands, tags
+    /// and folders get the recent and frequent parts notes have.
+    @Test("Commands, tags and folders list recent, then frequent")
+    func scopesArranged() async throws {
+        let model = try await model(["Work/Plan.md": "#home", "Home/List.md": "#work"])
+        defer { model.closeWorkspace() }
+        let soon = Date().addingTimeInterval(3_000_000)
+        RecentUses.record(RecentUses.commandKey("toggleBacklinks"), at: soon)
+        RecentUses.record(BarScope.tag("work").useKey, at: soon)
+        RecentUses.record(BarScope.folder("Home").useKey, at: soon)
+        let first = QuickOpenOrder(lead: .recent, count: 1)
+
+        let commands = ids(model.barRows(scope: .commands, query: "", entireVault: true, order: first))
+        #expect(Array(commands.prefix(3)) == [
+            "heading:Recent commands", "command:toggleBacklinks", "heading:Frequent commands",
+        ], "got \(commands)")
+        #expect(commands.filter { $0 == "command:toggleBacklinks" }.count == 1)
+
+        let tags = ids(model.barRows(scope: .tags, query: "", entireVault: true, order: first))
+        #expect(Array(tags.prefix(3)) == ["heading:Recent tags", "tag:work", "heading:Frequent tags"])
+
+        let folders = ids(model.barRows(scope: .folders, query: "", entireVault: true, order: first))
+        #expect(Array(folders.prefix(3)) == ["heading:Recent folders", "folder:Home", "heading:Frequent folders"])
+
+        // One order alone: no headings, and nothing dropped.
+        let only = ids(model.barRows(
+            scope: .tags, query: "", entireVault: true, order: first.with(mode: .recentOnly)
+        ))
+        #expect(only == ["tag:work", "tag:home"], "got \(only)")
+    }
+
+    /// Recent notes first and frequent commands first, at once.
+    @Test("Each scope follows its own order")
+    func ordersPerScope() async throws {
+        let model = try await model(["Alpha.md": "a", "Beta.md": "b"])
+        defer { model.closeWorkspace() }
+        try #require(model.session).recordRecent("Alpha.md")
+        for _ in 0..<5 { FrecencyStore.commands.record("toggleBacklinks") }
+        var orders = ScopeOrders.standard
+        orders[.commands] = QuickOpenOrder(lead: .frequent, count: 1)
+        let notes = ids(model.barRows(scope: .notes, query: "", entireVault: true, orders: orders))
+        #expect(notes.first == "heading:Recent", "got \(notes)")
+        let commands = ids(model.barRows(scope: .commands, query: "", entireVault: true, orders: orders))
+        #expect(commands.first == "heading:Frequent commands", "got \(commands)")
+    }
+
+    @Test("The chips are the scopes with something to list, Text last")
+    func chips() {
+        #expect(BarScope.chips == [.notes, .commands, .tags, .folders, .contents])
+        #expect(!BarScope.chips.contains(.recent) && !BarScope.chips.contains(.frequent))
+        #expect(BarScope.recent.title == "Recent notes")
+    }
+
     @Test("A focused window narrows notes but not commands")
     func folderFocus() async throws {
         let model = try await model(["Thesis/Draft.md": "a", "Home/Draft list.md": "b"], scope: "Thesis")
@@ -521,5 +648,150 @@ struct SearchBarRowTests {
         #expect(model.bar != nil)
         model.isCommandPalettePresented = false
         #expect(model.bar == nil)
+    }
+}
+
+
+@Suite("Start list setting")
+struct StartListTests {
+
+    private func suite() throws -> UserDefaults {
+        try #require(UserDefaults(suiteName: "dev.stenglein.Heft.start-test-\(UUID().uuidString)"))
+    }
+
+    @Test("The standard list: recent notes, frequent everything, then the notes")
+    func standard() {
+        let plan = StartList.standard.plan
+        #expect(plan.map(\.row.title) == ["Recent notes", "Frequent", "Frequent notes"])
+        #expect(plan.map(\.limit) == [5, 12, StartList.restLimit])
+        #expect(StartList.standard.fillsRest(StartList.standard.rows[2]))
+        #expect(!StartList.standard.fillsRest(StartList.standard.rows[1]))
+
+        // A row with nothing ticked is not the last one: the row above it
+        // still fills the rest.
+        let trailing = StartList(rows: [.init(.frequent, [.notes], count: 3), .init(.recent, [], count: 3)])
+        #expect(trailing.fillsRest(trailing.rows[0]))
+        #expect(trailing.plan.map(\.limit) == [StartList.restLimit])
+    }
+
+    @Test("A row's heading names its kind when it has one")
+    func titles() {
+        #expect(StartList.Row(.recent, [.folders], count: 3).title == "Recent folders")
+        #expect(StartList.Row(.frequent, [.notes, .tags], count: 3).title == "Frequent notes and tags")
+        #expect(StartList.Row(.frequent, [.commands, .notes, .tags], count: 3).title
+            == "Frequent notes, commands and tags", "kinds in their own order")
+        #expect(StartList.Row(.recent, [.notes, .tags, .folders, .scopes], count: 3).title == "Recent")
+        #expect(StartList.Row(.recent, [.notes, .tags], count: 3).kindsSummary == "Notes, Tags")
+        #expect(StartList.Row(.recent, Set(StartList.Kind.allCases), count: 3).kindsSummary == "Everything")
+        #expect(StartList.Row(.recent, [.notes], count: 99).count == StartList.countRange.upperBound)
+    }
+
+    @Test("Stored and read back in the reader's order")
+    func roundTrip() throws {
+        let defaults = try suite()
+        #expect(StartList.current(in: defaults).matches(.standard), "nothing stored")
+        var list = StartList.standard
+        list.rows.swapAt(0, 2)
+        list.rows.append(.init(.recent, [.tags, .folders], count: 7))
+        list.save(in: defaults)
+        #expect(StartList.current(in: defaults).matches(list))
+    }
+
+    /// A list written by a later version keeps what it can.
+    @Test("An unknown order drops its row, an unknown kind drops only the kind")
+    func tolerant() throws {
+        let defaults = try suite()
+        let json = #"{"rows":[{"order":"recent","kinds":["notes","pins"],"count":3},"#
+            + #"{"order":"pinned","kinds":["notes"],"count":4}]}"#
+        defaults.set(Data(json.utf8), forKey: StartList.defaultsKey)
+        let list = StartList.current(in: defaults)
+        #expect(list.rows.count == 1)
+        #expect(list.rows.first?.kinds == [.notes])
+    }
+
+    @Test("Uses are remembered by time, last first, and only so many")
+    func recentUses() throws {
+        let defaults = try suite()
+        let start = Date()
+        RecentUses.record("a", at: start, in: defaults)
+        RecentUses.record("b", at: start.addingTimeInterval(1), in: defaults)
+        RecentUses.record("a", at: start.addingTimeInterval(2), in: defaults)
+        #expect(RecentUses.keys(in: defaults) == ["a", "b"])
+        for i in 0..<100 { RecentUses.record("c\(i)", at: start.addingTimeInterval(10 + Double(i)), in: defaults) }
+        #expect(RecentUses.keys(in: defaults).count == RecentUses.limit)
+        #expect(RecentUses.keys(in: defaults).first == "c99")
+    }
+}
+
+
+@Suite("Quick Open modes")
+struct QuickOpenModeTests {
+
+    /// "Alone" is a leading block of none, as the setting was always stored.
+    @Test("Four choices map onto the order and count already stored")
+    func modes() {
+        #expect(QuickOpenOrder(lead: .recent, count: 5).mode == .recentFirst)
+        #expect(QuickOpenOrder(lead: .frequent, count: 5).mode == .frequentFirst)
+        #expect(QuickOpenOrder(lead: .frequent, count: 0).mode == .recentOnly)
+        #expect(QuickOpenOrder(lead: .recent, count: 0).mode == .frequentOnly)
+        for mode in QuickOpenOrder.Mode.allCases {
+            #expect(QuickOpenOrder.standard.with(mode: mode).mode == mode)
+        }
+        // A count is kept across a change of order, and restored after "only".
+        #expect(QuickOpenOrder(lead: .recent, count: 7).with(mode: .frequentFirst).count == 7)
+        #expect(QuickOpenOrder(lead: .recent, count: 0).with(mode: .recentFirst).count
+            == QuickOpenOrder.standard.count)
+    }
+
+    @Test("Anything with a last use and a score is arranged as notes are")
+    func arrangeItems() {
+        let items = ["a", "b", "c", "d"]
+        let last: [String: Double] = ["c": 3, "a": 2]
+        let score: [String: Double] = ["b": 5, "a": 1]
+        let recentFirst = QuickOpenOrder(lead: .recent, count: 1).arrangeItems(
+            items, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
+        )
+        #expect(recentFirst.lead == ["c"])
+        #expect(recentFirst.rest == ["b", "a", "d"], "by use, then the order given")
+        #expect(recentFirst.heading == .recent)
+
+        let frequentFirst = QuickOpenOrder(lead: .frequent, count: 1).arrangeItems(
+            items, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
+        )
+        #expect(frequentFirst.lead == ["b"])
+        #expect(frequentFirst.rest == ["c", "a", "d"], "by when used, then the rest")
+
+        let recentOnly = QuickOpenOrder(lead: .frequent, count: 0).arrangeItems(
+            items, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
+        )
+        #expect(recentOnly.lead.isEmpty && recentOnly.heading == nil)
+        #expect(recentOnly.rest == ["c", "a", "b", "d"])
+    }
+}
+
+
+@Suite("Per-scope orders")
+struct ScopeOrdersTests {
+
+    private func suite() throws -> UserDefaults {
+        try #require(UserDefaults(suiteName: "dev.stenglein.Heft.scope-orders-\(UUID().uuidString)"))
+    }
+
+    /// The setting from before there were more scopes is the notes' row.
+    @Test("Each scope keeps its own order, and notes keep Quick Open's keys")
+    func storage() throws {
+        let defaults = try suite()
+        QuickOpenOrder(lead: .frequent, count: 3).save(in: defaults)
+        var orders = ScopeOrders.current(in: defaults)
+        #expect(orders[.notes] == QuickOpenOrder(lead: .frequent, count: 3), "carried over")
+        #expect(orders[.commands] == .standard)
+
+        orders[.commands] = QuickOpenOrder(lead: .frequent, count: 0)
+        orders.save(in: defaults)
+        let read = ScopeOrders.current(in: defaults)
+        #expect(read[.commands].mode == .recentOnly)
+        #expect(read[.notes] == QuickOpenOrder(lead: .frequent, count: 3))
+        #expect(read[.tags] == .standard)
+        #expect(QuickOpenOrder.current(in: defaults) == read[.notes], "the same keys")
     }
 }

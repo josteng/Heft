@@ -9,6 +9,7 @@ struct AttachmentSettingsView: View {
     @StateObject private var settings = AttachmentSettings.shared
     /// Bumped when the front window changes, purely to re-run the lookup.
     @State private var frontWindowChanges = 0
+    @State private var confirmsReset = false
 
     var body: some View {
         Form {
@@ -20,10 +21,7 @@ struct AttachmentSettingsView: View {
                             entry: entry,
                             obsidianSetting: obsidianSetting,
                             isReachable: settings.plan.isReachable(index),
-                            canMoveUp: index > 0,
-                            canMoveDown: index < settings.plan.entries.count - 1,
-                            onChange: { settings.plan.entries[index] = $0 },
-                            onMove: { move(index, by: $0) }
+                            onChange: { settings.plan.entries[index] = $0 }
                         )
                     }
                     .onMove { settings.plan.entries.move(fromOffsets: $0, toOffset: $1) }
@@ -53,7 +51,7 @@ struct AttachmentSettingsView: View {
                 SectionHeading(
                     "Where attachments go",
                     detail: "Tried from the top; the first that finds a folder wins. "
-                        + "Drag a rule, or use its arrows, to reorder. If none "
+                        + "Drag a rule to reorder. If none "
                         + "finds a folder, the file goes to the top of the vault."
                 )
             } footer: {
@@ -62,8 +60,18 @@ struct AttachmentSettingsView: View {
                 // which is where System Settings puts "Add Focus…".
                 HStack {
                     Spacer()
-                    Button("Reset") { settings.reset() }
+                    // Asked first, as the search list's Reset is: the rules
+                    // take some arranging, and Settings has no undo.
+                    Button("Reset") { confirmsReset = true }
                         .disabled(settings.plan == .standard)
+                        .confirmationDialog(
+                            "Reset where attachments go to the standard rules?",
+                            isPresented: $confirmsReset
+                        ) {
+                            Button("Reset", role: .destructive) { settings.reset() }
+                        } message: {
+                            Text("Your order and the folders you named are replaced.")
+                        }
                 }
             }
 
@@ -91,12 +99,6 @@ struct AttachmentSettingsView: View {
     /// quietly reintroduce the scroll.
     private var rowsHeight: CGFloat {
         CGFloat(settings.plan.entries.count) * 54 + 16
-    }
-
-    private func move(_ index: Int, by offset: Int) {
-        let target = index + offset
-        guard settings.plan.entries.indices.contains(target) else { return }
-        settings.plan.entries.swapAt(index, target)
     }
 
     private var obsidianSetting: String {
@@ -149,13 +151,15 @@ struct AttachmentRuleRow: View {
     let entry: AttachmentPlan.Entry
     let obsidianSetting: String
     let isReachable: Bool
-    let canMoveUp: Bool
-    let canMoveDown: Bool
     let onChange: (AttachmentPlan.Entry) -> Void
-    let onMove: (Int) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            // The handle says the row drags, which is what the arrows were
+            // for; the search list's rows wear the same one.
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
             Toggle("", isOn: Binding(
                 get: { entry.isEnabled },
                 set: { var next = entry; next.isEnabled = $0; onChange(next) }
@@ -183,20 +187,6 @@ struct AttachmentRuleRow: View {
             }
 
             Spacer(minLength: 8)
-
-            // Buttons rather than dragging. The order is the whole point of
-            // this list, and nothing about a row says it can be dragged.
-            VStack(spacing: 2) {
-                Button { onMove(-1) } label: { Image(systemName: "chevron.up") }
-                    .disabled(!canMoveUp)
-                    .help("Try this rule earlier")
-                Button { onMove(1) } label: { Image(systemName: "chevron.down") }
-                    .disabled(!canMoveDown)
-                    .help("Try this rule later")
-            }
-            .buttonStyle(.borderless)
-            .font(.caption)
-            .padding(.top, 1)
         }
         .padding(.vertical, 7)
         .opacity(entry.isEnabled && isReachable ? 1 : 0.55)

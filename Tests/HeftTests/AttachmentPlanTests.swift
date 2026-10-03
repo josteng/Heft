@@ -134,8 +134,7 @@ struct AttachmentRowTests {
     ) -> AttachmentRuleRow {
         AttachmentRuleRow(
             entry: AttachmentPlan.Entry(choice: choice, folder: "Attachments", isEnabled: true),
-            obsidianSetting: obsidian, isReachable: reachable,
-            canMoveUp: true, canMoveDown: true, onChange: { _ in }, onMove: { _ in }
+            obsidianSetting: obsidian, isReachable: reachable, onChange: { _ in }
         )
     }
 
@@ -165,8 +164,7 @@ struct AttachmentRowTests {
         let content = VStack(alignment: .leading, spacing: 0) {
             ForEach(AttachmentPlan.standard.entries) { entry in
                 AttachmentRuleRow(
-                    entry: entry, obsidianSetting: "", isReachable: true,
-                    canMoveUp: true, canMoveDown: true, onChange: { _ in }, onMove: { _ in }
+                    entry: entry, obsidianSetting: "", isReachable: true, onChange: { _ in }
                 )
             }
         }
