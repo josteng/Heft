@@ -53,6 +53,7 @@ struct AppCommandShortcut {
     static let quickOpen = Self("quickOpen")
     static let commandPalette = Self("commandPalette")
     static let revealInSidebar = Self("revealInSidebar")
+    static let renameNote = Self("renameNote")
     static let settings = Self("settings")
 }
 
@@ -503,11 +504,11 @@ struct AppCommand: Identifiable {
             title: "Rename Note",
             symbol: "pencil",
             searchTerms: "rename title name note file",
+            shortcut: .renameNote,
             enabled: { $0.currentItem != nil },
-            action: { model in
-                guard let item = model.currentItem else { return }
-                _ = model.rename(item)
-            }
+            // Under the title, where a click on it opens the same; the
+            // dialog when the title cannot be found.
+            action: { model in model.titleRenameRequest += 1 }
         ),
         Self(
             id: "duplicateNote",

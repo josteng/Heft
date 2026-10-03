@@ -315,6 +315,7 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | ⇧⌘T | Today's Daily Note |
 | ⇧⌘O | Open Vault in New Window |
 | ⇧⌘E | Export as PDF |
+| ⇧⌘R | Rename Note |
 | ⌘S | Save pending edits now |
 | ⇧⌘F | Search the vault |
 | ⌘T | Search everything |

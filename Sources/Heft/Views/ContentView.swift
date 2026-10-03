@@ -15,6 +15,7 @@ struct ContentView: View {
             workspaceID: model.workspaceID,
             topChromeHeight: $windowTopChromeHeight
         ))
+            .background(TitleClickToRename(model: model))
         .sheet(item: $model.bar, onDismiss: { model.barDidDismiss() }) { request in
             SearchBarView(scope: request.scope)
         }

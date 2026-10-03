@@ -83,6 +83,8 @@ public enum KeyboardShortcuts {
         .init(id: "openToday", title: "Today's Daily Note", key: "t", modifiers: [.command, .shift], group: .file, isNotable: true),
         .init(id: "openVaultInNewWindow", title: "Open Vault in New Window", key: "o", modifiers: [.command, .shift], group: .file, isNotable: true),
         .init(id: "exportPDF", title: "Export as PDF", key: "e", modifiers: [.command, .shift], group: .file, isNotable: true),
+        // R for rename, free here, and one reach on any layout.
+        .init(id: "renameNote", title: "Rename Note", key: "r", modifiers: [.command, .shift], group: .file, isNotable: true),
         .init(id: "save", title: "Save pending edits now", key: "s", modifiers: [.command], group: .file, isNotable: true),
 
         .init(id: "bold", title: "Bold", key: "b", modifiers: [.command], group: .format),

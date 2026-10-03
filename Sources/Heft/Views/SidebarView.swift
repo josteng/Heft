@@ -527,6 +527,7 @@ struct SidebarView: View {
                             symbol: "doc.text",
                             renameText: renameBinding(for: item),
                             renameSource: renameSource(for: item),
+                            onForceClick: { beginRename(item) },
                             onRenameCommit: { commitRename(item) },
                             onRenameCancel: cancelRename
                         ) {
@@ -804,6 +805,7 @@ struct SidebarView: View {
             preview: preview,
             renameText: renameBinding(for: item),
             renameSource: renameSource(for: item),
+            onForceClick: { beginRename(item) },
             onRenameCommit: { commitRename(item) },
             onRenameCancel: cancelRename
         ) {
@@ -857,6 +859,7 @@ struct SidebarView: View {
                         depth: 0,
                         symbol: "folder",
                         renameText: renameBinding(for: folder),
+                        onForceClick: { beginRename(folder) },
                         onRenameCommit: { commitRename(folder) },
                         onRenameCancel: cancelRename
                     ) {
@@ -898,6 +901,7 @@ struct SidebarView: View {
                         symbol: "doc.text",
                         renameText: renameBinding(for: item),
                         renameSource: renameSource(for: item),
+                        onForceClick: { beginRename(item) },
                         onRenameCommit: { commitRename(item) },
                         onRenameCancel: cancelRename
                     ) {
@@ -946,6 +950,8 @@ struct SidebarView: View {
         item.isMarkdown && GeneralSettings.shared.suggestsNames ? item.url : nil
     }
 
+    /// Renaming in the row: one of three places, kept alike with the others
+    /// listed at `AppModel.rename`.
     private func beginRename(_ item: VaultItem) {
         inlineEdit = SidebarInlineEdit(path: item.relativePath, name: item.name)
     }
@@ -1185,6 +1191,7 @@ private struct TreeRow: View {
                 disclosure: isExpanded,
                 isDropTargeted: dropTarget == item.relativePath,
                 renameText: renameBinding,
+                onForceClick: { inlineEdit = SidebarInlineEdit(path: item.relativePath, name: item.name) },
                 onRenameCommit: commitRename,
                 onRenameCancel: cancelRename
             ) {
@@ -1261,6 +1268,7 @@ private struct TreeRow: View {
                 isDimmed: item.needsDownload,
                 renameText: renameBinding,
                 renameSource: item.isMarkdown && GeneralSettings.shared.suggestsNames ? item.url : nil,
+                onForceClick: { inlineEdit = SidebarInlineEdit(path: item.relativePath, name: item.name) },
                 onRenameCommit: commitRename,
                 onRenameCancel: cancelRename
             ) {
@@ -1806,6 +1814,8 @@ struct NoteRow: View {
     var renameText: Binding<String>? = nil
     /// The note to suggest names from while renaming it; nil offers none.
     var renameSource: URL? = nil
+    /// A force click on the row, which renames it, as in Finder.
+    var onForceClick: (() -> Void)? = nil
     var onRenameCommit: (() -> Void)? = nil
     var onRenameCancel: (() -> Void)? = nil
     let action: () -> Void
@@ -1814,6 +1824,9 @@ struct NoteRow: View {
     @State private var didFinishRename = false
     /// Names the on-device model suggested for the note being renamed.
     @State private var suggestedNames: [String] = []
+    /// Set by a force click, so the click it also is does not open the row:
+    /// opening moves the focus to the editor, which would end the rename.
+    @State private var wasForceClicked = false
     @FocusState private var isRenameFocused: Bool
 
     var body: some View {
@@ -1837,11 +1850,24 @@ struct NoteRow: View {
                         if oldValue && !newValue { finishRename(commit: true) }
                     }
             } else {
-                Button(action: action) { rowContents(renameText: nil) }
+                Button {
+                    if wasForceClicked { wasForceClicked = false } else { action() }
+                } label: { rowContents(renameText: nil) }
                     .buttonStyle(.plain)
             }
         }
         .onHover { isHovering = $0 }
+        // The row under the pointer takes the force click; SwiftUI has no
+        // pressure of its own, so it comes from `ForceClick`.
+        // The field replacing the row can take the release with it, so the
+        // flag goes when renaming starts or ends, not only on a click.
+        .onChange(of: renameText != nil) { wasForceClicked = false }
+        .onReceive(ForceClick.shared.clicks) { _ in
+            if isHovering, renameText == nil, let onForceClick {
+                wasForceClicked = true
+                onForceClick()
+            }
+        }
         .namesForSiri(siriEntity)
     }
 
@@ -2051,5 +2077,28 @@ struct RenameFieldStyle: ViewModifier {
                 RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: .textBackgroundColor))
             )
             .padding(.horizontal, -Self.inset)
+    }
+}
+
+/// Force clicks in Heft's windows, as a stream the sidebar's rows listen to.
+///
+/// SwiftUI reports no pressure, so this watches AppKit's pressure events
+/// ahead of the views, and passes them on untouched: an ordinary click and a
+/// drag are as they were. A force click is stage two, sent once per press.
+/// With force click turned off in System Settings there is no stage two.
+@MainActor
+final class ForceClick {
+    static let shared = ForceClick()
+    let clicks = PassthroughSubject<Void, Never>()
+    private var monitor: Any?
+    private var stage = 0
+
+    private init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .pressure) { [weak self] event in
+            guard let self else { return event }
+            if event.stage == 2, self.stage < 2 { self.clicks.send() }
+            self.stage = event.stage
+            return event
+        }
     }
 }

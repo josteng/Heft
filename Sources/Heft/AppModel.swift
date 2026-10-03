@@ -420,6 +420,9 @@ final class AppModel: ObservableObject {
     /// the note switcher, which made jumping to a note by name slower and
     /// noisier. The scopes keep that apart: ⌘O is still names only, and text
     /// inside notes is searched only in its own scope, never in the mix.
+    /// Moved to open the rename popover under the window's title.
+    @Published var titleRenameRequest = 0
+
     /// The search bar's Ask: the agent's runs and chats for this window.
     let agent = AgentRunner()
 
@@ -1517,6 +1520,19 @@ final class AppModel: ObservableObject {
     // MARK: - File operations
 
     @discardableResult
+    /// Every rename ends here, from three places that each ask for the name
+    /// their own way. A change to how renaming looks or behaves (suggested
+    /// names, what Return or Esc do, what a name may contain) belongs in all
+    /// three:
+    /// - **In the row**: the sidebar's inline field (`NoteRow`, begun by
+    ///   Rename, a force click, or a new note), for anything in the tree.
+    /// - **Under the title**: `TitleRenameView`, opened by a click on the
+    ///   window's title or ⇧⌘R, for the open note.
+    /// - **The dialog**: `FilePrompt.name` with no name given here, for a
+    ///   note or folder that is neither open nor in a row to type in, such as
+    ///   a ⌘T result renamed from its menu, and for the title when it cannot
+    ///   be found.
+    ///
     /// `thenOpen` is for a note that has just been named for the first time.
     /// Nothing has opened it yet, and the path it ends up at is read back from
     /// the plan rather than rebuilt from the name, so where the file went and

@@ -145,6 +145,10 @@ struct HeftCommands: Commands {
                 openWindow(value: model?.descriptor(scopePath: model?.scopePath) ?? WorkspaceDescriptor())
             }
             .keyboardShortcut(.newWindow)
+            // Under the title, as a click on it does.
+            Button("Rename Note…") { model?.titleRenameRequest += 1 }
+                .keyboardShortcut(.renameNote)
+                .disabled(model?.currentItem == nil || behindBar)
             Divider()
             Button("Open Inbox") { model?.openInbox() }
                 .disabled(model?.vaultRoot == nil || behindBar)

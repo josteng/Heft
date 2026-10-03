@@ -10,6 +10,10 @@ import UniformTypeIdentifiers
 enum FilePrompt {
 
     /// A single-field name prompt. Returns nil when cancelled.
+    /// As the rename dialog, one of three places, kept alike with the others
+    /// listed at `AppModel.rename`: used for what is neither open nor in a
+    /// row, such as a ⌘T result renamed from its menu.
+    ///
     /// - Parameter suggestFrom: a note to suggest names from, under the
     ///   field, while renaming it.
     @MainActor

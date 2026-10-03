@@ -361,3 +361,27 @@ struct SearchBarInteractionTests {
         #expect(bar.text == "milk")
     }
 }
+
+@MainActor
+@Suite("Title rename")
+struct TitleRenameTests {
+    /// The click goes on AppKit's title label, found by its text outside
+    /// the window's content: a line in the note reading the same is not it.
+    @Test("The title label is found by its text, outside the content")
+    func findsTitle() {
+        let frame = NSView()
+        let content = NSView()
+        let inNote = NSTextField(labelWithString: "Plan")
+        content.addSubview(inNote)
+        let toolbar = NSStackView()
+        let title = NSTextField(labelWithString: "Plan")
+        let editable = NSTextField(string: "Plan")
+        toolbar.addArrangedSubview(editable)
+        toolbar.addArrangedSubview(title)
+        frame.addSubview(content)
+        frame.addSubview(toolbar)
+        let found = TitleClickToRename.Coordinator.label(showing: "Plan", in: frame, skipping: content)
+        #expect(found === title)
+        #expect(TitleClickToRename.Coordinator.label(showing: "Other", in: frame, skipping: content) == nil)
+    }
+}
