@@ -491,6 +491,17 @@ private struct CalendarGrid: View, Equatable {
         lhs.days == rhs.days
     }
 
+    /// The open note's day is marked by one shape the grid draws behind its
+    /// cells: it slides from the day it was on to the day it is on when both
+    /// are in view, and grows from the middle when the old day is not, so
+    /// the eye follows the change. One shape, placed from the cells' reported
+    /// bounds; a mark in every cell, linked across them, both slid and grew
+    /// at once and did not always slide on a click.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appAccent) private var accent
+
+    private var selectedDay: Date? { days.first(where: \.isSelected)?.date }
+
     var body: some View {
         LazyVGrid(columns: columns, spacing: 2) {
             ForEach(days) { day in
@@ -505,8 +516,39 @@ private struct CalendarGrid: View, Equatable {
                 ) {
                     open(day)
                 }
+                .anchorPreference(key: OpenDayBounds.self, value: .bounds) {
+                    day.isSelected ? $0 : nil
+                }
             }
         }
+        .backgroundPreferenceValue(OpenDayBounds.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor {
+                    let rect = proxy[anchor]
+                    // Placed with `position`, so the mark's view is the whole
+                    // grid and a growing mark can be scaled about the day's
+                    // own middle. Moved with an offset, the view sat at the
+                    // grid's top-left, and a new mark grew out of that corner.
+                    let middle = UnitPoint(
+                        x: proxy.size.width > 0 ? rect.midX / proxy.size.width : 0.5,
+                        y: proxy.size.height > 0 ? rect.midY / proxy.size.height : 0.5
+                    )
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(accent.opacity(0.25))
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                        // The month on screen is the mark's identity: within
+                        // it the mark slides, and a new month's mark grows,
+                        // decided as the frame is drawn rather than after.
+                        .id(days.first?.date)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.3, anchor: middle).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.2), value: selectedDay)
     }
 }
 
@@ -556,9 +598,8 @@ private struct DayCell: View {
             .frame(maxWidth: .infinity)
             .frame(height: 22)
             .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 6).fill(accent.opacity(0.25))
-                } else if isHovering {
+                // The open day's mark is the grid's, drawn behind the cells.
+                if isHovering, !isSelected {
                     RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.08))
                 }
             }
@@ -644,5 +685,13 @@ private struct DayMenu: View {
                 onCreate()
             }
         }
+    }
+}
+
+/// Where the open note's day sits in the grid, for the one mark behind it.
+private struct OpenDayBounds: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
     }
 }
