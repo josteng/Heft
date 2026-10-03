@@ -6,7 +6,11 @@ import Testing
 
 /// The clipboard half of inserting a picture. Dragging a file in was covered;
 /// pasting one was not, and pasting is how a screenshot actually arrives.
+/// On the main actor: it makes text views, and AppKit made off the main
+/// thread raced the other suites' windows and once took the run down in the
+/// font panel's setup.
 @Suite("Pasteboard images")
+@MainActor
 struct PasteboardImageTests {
 
     /// A tiny real PNG, built rather than checked in so the test carries no
