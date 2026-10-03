@@ -140,7 +140,9 @@ struct ScoredSearchTests {
 @Suite("Search bar rows", .serialized)
 struct SearchBarRowTests {
 
-    private func model(_ files: [String: String], scope: String? = nil) async throws -> AppModel {
+    private func model(
+        _ files: [String: String], scope: String? = nil, edited: [String: Date] = [:]
+    ) async throws -> AppModel {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("heft-bar-\(UUID().uuidString)")
         for (path, contents) in files {
@@ -149,6 +151,9 @@ struct SearchBarRowTests {
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true
             )
             try Data(contents.utf8).write(to: url)
+            if let date = edited[path] {
+                try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+            }
         }
         let model = AppModel(
             registry: VaultRegistry(),
@@ -581,6 +586,51 @@ struct SearchBarRowTests {
         #expect(commands.dropFirst().first?.hasPrefix("command:") == true, "commands lead, by use")
     }
 
+    /// A folder or a tag lists its own notes in its own order before
+    /// anything is typed, with the pinned ones among them first; it used to
+    /// list them as the scan found them.
+    @Test("A folder and a tag order their notes by their own rows")
+    func notesInScopeOrdered() async throws {
+        let now = Date()
+        let model = try await model(
+            [
+                "Work/Zeta.md": "#t", "Work/Note 10.md": "#t", "Work/Note 2.md": "z",
+                "Home/Alpha.md": "#t",
+            ],
+            edited: [
+                "Work/Zeta.md": now.addingTimeInterval(-300),
+                "Work/Note 10.md": now.addingTimeInterval(-100),
+                "Home/Alpha.md": now.addingTimeInterval(-200),
+                "Work/Note 2.md": now.addingTimeInterval(-400),
+            ]
+        )
+        defer { model.closeWorkspace() }
+        model.togglePin(.init(.note, "Work/Zeta.md"))
+        model.togglePin(.init(.note, "Home/Alpha.md"))
+        var orders = ScopeOrders.standard
+        orders[.folder] = QuickOpenOrder.standard.with(mode: .alphabetical)
+        orders[.tag] = QuickOpenOrder.standard.with(mode: .lastEdited)
+
+        let folder = ids(model.barRows(scope: .folder("Work"), query: "", entireVault: true, orders: orders))
+        #expect(folder == [
+            "heading:Pinned", "note:Work/Zeta.md",
+            "heading:Alphabetical", "note:Work/Note 2.md", "note:Work/Note 10.md",
+        ], "got \(folder)")
+
+        model.togglePin(.init(.note, "Work/Zeta.md"))
+        let tag = ids(model.barRows(scope: .tag("t"), query: "", entireVault: true, orders: orders))
+        #expect(tag == [
+            "heading:Pinned", "note:Home/Alpha.md",
+            "heading:Last edited", "note:Work/Note 10.md", "note:Work/Zeta.md",
+        ], "got \(tag)")
+
+        // Each follows its own row: the folder's order is not the tag's.
+        orders[.folder] = QuickOpenOrder.standard.with(mode: .lastEdited)
+        let byEdit = ids(model.barRows(scope: .folder("Work"), query: "", entireVault: true, orders: orders))
+        #expect(byEdit == ["note:Work/Note 10.md", "note:Work/Zeta.md", "note:Work/Note 2.md"],
+                "a pin outside the folder stays out; got \(byEdit)")
+    }
+
     /// ⌘1 is the first chip, as Spotlight numbers its categories.
     @Test("The chips are numbered by their place")
     func chipNumbers() {
@@ -846,6 +896,12 @@ struct QuickOpenModeTests {
         #expect(QuickOpenOrder(lead: .recent, count: 7).with(mode: .frequentFirst).count == 7)
         #expect(QuickOpenOrder(lead: .recent, count: 0).with(mode: .recentFirst).count
             == QuickOpenOrder.standard.count)
+        // A plain sort keeps the block, so going back finds it as it was.
+        let sorted = QuickOpenOrder(lead: .frequent, count: 7).with(mode: .alphabetical)
+        #expect(sorted.with(mode: .frequentFirst) == QuickOpenOrder(lead: .frequent, count: 7))
+        #expect(!QuickOpenOrder.Mode.choices(lastEdited: false).contains(.lastEdited))
+        #expect(QuickOpenOrder.Mode.choices(lastEdited: true).contains(.lastEdited))
+        #expect(ScopeOrders.Kind.folder.listsNotes && !ScopeOrders.Kind.commands.listsNotes)
     }
 
     @Test("Anything with a last use and a score is arranged as notes are")
@@ -854,23 +910,31 @@ struct QuickOpenModeTests {
         let last: [String: Double] = ["c": 3, "a": 2]
         let score: [String: Double] = ["b": 5, "a": 1]
         let recentFirst = QuickOpenOrder(lead: .recent, count: 1).arrangeItems(
-            items, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
+            items, name: { $0 }, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
         )
         #expect(recentFirst.lead == ["c"])
         #expect(recentFirst.rest == ["b", "a", "d"], "by use, then the order given")
         #expect(recentFirst.heading == .recent)
 
         let frequentFirst = QuickOpenOrder(lead: .frequent, count: 1).arrangeItems(
-            items, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
+            items, name: { $0 }, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
         )
         #expect(frequentFirst.lead == ["b"])
         #expect(frequentFirst.rest == ["c", "a", "d"], "by when used, then the rest")
 
         let recentOnly = QuickOpenOrder(lead: .frequent, count: 0).arrangeItems(
-            items, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
+            items, name: { $0 }, lastUsed: { last[$0] }, useScore: { score[$0] ?? 0 }
         )
         #expect(recentOnly.lead.isEmpty && recentOnly.heading == nil)
         #expect(recentOnly.rest == ["c", "a", "b", "d"])
+
+        // By name as Finder sorts, use ignored.
+        let named = ["Item 10", "item 2", "Beta", "alpha"]
+        let alphabetical = QuickOpenOrder.standard.with(mode: .alphabetical).arrangeItems(
+            named, name: { $0 }, lastUsed: { _ in 1 }, useScore: { _ in 1 }
+        )
+        #expect(alphabetical.lead.isEmpty && alphabetical.heading == nil)
+        #expect(alphabetical.rest == ["alpha", "Beta", "item 2", "Item 10"], "got \(alphabetical.rest)")
     }
 }
 
@@ -898,6 +962,18 @@ struct ScopeOrdersTests {
         #expect(read[.notes] == QuickOpenOrder(lead: .frequent, count: 3))
         #expect(read[.tags] == .standard)
         #expect(QuickOpenOrder.current(in: defaults) == read[.notes], "the same keys")
+
+        // A plain sort is stored beside the block, and cleared with it.
+        var sorted = read
+        sorted[.folder] = QuickOpenOrder.standard.with(mode: .alphabetical)
+        sorted[.notes] = read[.notes].with(mode: .lastEdited)
+        sorted.save(in: defaults)
+        let again = ScopeOrders.current(in: defaults)
+        #expect(again[.folder].mode == .alphabetical)
+        #expect(again[.tag] == .standard, "a folder's row is not a tag's")
+        #expect(QuickOpenOrder.current(in: defaults).mode == .lastEdited)
+        again[.notes].with(mode: .frequentFirst).save(in: defaults)
+        #expect(QuickOpenOrder.current(in: defaults) == QuickOpenOrder(lead: .frequent, count: 3))
     }
 }
 

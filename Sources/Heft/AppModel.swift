@@ -252,12 +252,18 @@ final class AppModel: ObservableObject {
     ///   alone and in full while nothing is typed.
     func quickOpenList(
         _ query: String, entireVault: Bool, limit: Int = 60,
-        order: QuickOpenOrder = .current, only: QuickOpenOrder.Lead? = nil
+        order: QuickOpenOrder = .current, only: QuickOpenOrder.Lead? = nil,
+        among: ((NoteRef) -> Bool)? = nil
     ) -> QuickOpenOrder.Arranged {
         let frecency = noteFrecency
-        let scope: ((NoteRef) -> Bool)? = entireVault || scopePath == nil
+        let focus: ((NoteRef) -> Bool)? = entireVault || scopePath == nil
             ? nil
             : { self.isInScope($0) }
+        let scope: ((NoteRef) -> Bool)? = switch (focus, among) {
+        case let (focus?, among?): { focus($0) && among($0) }
+        case (nil, nil): nil
+        default: focus ?? among
+        }
         let familiarity: (NoteRef) -> Double = { frecency?.score($0.relativePath) ?? 0 }
         let typed = !query.trimmingCharacters(in: .whitespaces).isEmpty
         guard typed else {
@@ -273,9 +279,11 @@ final class AppModel: ObservableObject {
                 )
                 return QuickOpenOrder.Arranged(lead: notes, rest: [], heading: only)
             }
+            let index = index
             return order.arrange(
                 byUse, recent: session?.recentPaths ?? [], limit: limit,
-                isUsed: { familiarity($0) > 0 }
+                isUsed: { familiarity($0) > 0 },
+                edited: { index.modificationDate(of: $0.relativePath) }
             )
         }
         var found = index.search(

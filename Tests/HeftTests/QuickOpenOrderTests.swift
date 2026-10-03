@@ -31,6 +31,28 @@ struct QuickOpenOrderTests {
         #expect(arranged.restHeading == .frequent, "the rest is named after its own order")
     }
 
+    /// "Recent" is when a note was opened; "Last edited" is when its file
+    /// was written, so a note only read stays where its last change put it.
+    @Test("A plain sort lists every note once, by name or by last edit, without headings")
+    func plainSorts() {
+        let byUse = notes(["Note 10", "beta", "Note 2", "Alpha"])
+        let alphabetical = QuickOpenOrder.standard.with(mode: .alphabetical).arrange(
+            byUse, recent: ["beta.md"], limit: 60, isUsed: { _ in true }
+        )
+        #expect(alphabetical.all.map(\.name) == ["Alpha", "beta", "Note 2", "Note 10"])
+        #expect(alphabetical.heading == nil && alphabetical.lead.isEmpty)
+
+        let edits: [String: Date] = [
+            "Note 2": Date(timeIntervalSince1970: 300), "Alpha": Date(timeIntervalSince1970: 100),
+            "beta": Date(timeIntervalSince1970: 200),
+        ]
+        let lastEdited = QuickOpenOrder.standard.with(mode: .lastEdited).arrange(
+            byUse, recent: ["Alpha.md"], limit: 3, isUsed: { _ in true }, edited: { edits[$0.name] }
+        )
+        #expect(lastEdited.all.map(\.name) == ["Note 2", "beta", "Alpha"], "undated last, and cut at the limit")
+        #expect(lastEdited.heading == nil)
+    }
+
     @Test("No note is listed twice")
     func noDuplicates() {
         let byUse = notes(["A", "B", "C"])

@@ -231,17 +231,19 @@ every row above what you were reaching for. Because it sinks, the first row
 is runnable whenever any row is.
 
 With nothing typed, Quick Open lists a short block first, by default the five
-notes opened last, then everything else by frecency (`QuickOpenOrder`; General
-settings offer recent or frequent first, or either alone). Commands, Tags and
-Folders are arranged the same way (`arrangeItems`), from the times and scores
-every kind now keeps, each scope with its own row in one table
-(`ScopeOrders`): a reader can open notes on what they opened last and
-commands on what they run most. The notes' row keeps Quick Open's keys. That is also why Recent and Frequent are not
+notes opened last, then everything else by frecency (`QuickOpenOrder`; Search
+settings offer recent or frequent first, either alone, alphabetical, and for
+notes last edited, which is the file's date where Recent is the last opening).
+Commands, Tags and Folders are arranged the same way (`arrangeItems`), from
+the times and scores every kind now keeps, and so are the notes inside one
+folder or tag, each scope with its own row in one table (`ScopeOrders`): a
+reader can open notes on what they opened last and a folder on its names.
+The notes' row keeps Quick Open's keys. That is also why Recent and Frequent are not
 chips: they are notes only, and beside the other chips they read as everything. Frecency alone ranked a note opened once today below one
 opened often last week, so a new note was the hardest to find; recency alone,
 which is Obsidian's answer, loses the notes opened every morning. Each part is
-headed by the order it follows, and a heading is a row: Return on it enters
-that order as a scope, alone and in full. With something typed it is
+headed by the order it follows; a heading is a label the arrows pass over.
+With something typed it is
 worth at most `VaultIndex.boostWeight`, less than the gap between match tiers,
 so familiarity reorders within a tier and never lifts a substring match above
 a prefix one. Both sorts carry the original index as a final tiebreak, since

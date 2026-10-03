@@ -89,8 +89,8 @@ struct SearchSettingsView: View {
                 SectionHeading(
                     "Inside a scope",
                     detail: "What each lists before anything is typed: what you used last, what "
-                        + "you use most, or one after the other. What is listed first is not listed "
-                        + "again below it. Typing always ranks by match."
+                        + "you use most, one after the other, or simply by name. Notes can also go "
+                        + "by when they were last edited. Typing always ranks by match."
                 )
             }
         }
@@ -225,8 +225,8 @@ private struct RowControlLabel: View {
     }
 }
 
-/// One scope's order: recent or frequent first, or either alone, and how
-/// many come first. A row per scope, so the notes can open on what was
+/// One scope's order: recent or frequent first, either alone, or a plain
+/// sort, and how many come first. A row per scope, so the notes can open on what was
 /// opened last while the commands open on what is run most.
 private struct ScopeOrderRow: View {
     let kind: ScopeOrders.Kind
@@ -242,18 +242,12 @@ private struct ScopeOrderRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(kind.title)
+                .padding(.leading, kind.isNested ? 16 : 0)
             Spacer(minLength: 8)
-            Picker("", selection: Binding(
-                get: { order.mode },
-                set: { order = order.with(mode: $0) }
-            )) {
-                ForEach(QuickOpenOrder.Mode.allCases) { Text($0.title).tag($0) }
-            }
-            .labelsHidden()
-            .fixedSize()
-            .defaultMenuTint()
-            // The count's place is kept when an "only" order has none, so
-            // the menus line up down the table.
+            // The count stands before the menu and reads with it, "5 Recent
+            // first". An order without one leaves its place empty on the
+            // side of the gap, where it does not show, and the menus still
+            // end in one column.
             HStack(spacing: 4) {
                 TextField("", value: count, format: .number)
                     .textFieldStyle(.roundedBorder)
@@ -267,6 +261,23 @@ private struct ScopeOrderRow: View {
             .opacity(order.mode.isSplit ? 1 : 0)
             .disabled(!order.mode.isSplit)
             .help("How many come before the other order")
+            Picker("", selection: Binding(
+                get: { order.mode },
+                set: { order = order.with(mode: $0) }
+            )) {
+                ForEach(QuickOpenOrder.Mode.choices(lastEdited: kind.listsNotes)) { mode in
+                    // By use above, plain sorts below.
+                    if mode == .alphabetical { Divider() }
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .defaultMenuTint()
+            // As wide as the widest choice, so the counts line up too.
+            .frame(width: Self.menuWidth, alignment: .trailing)
         }
     }
+
+    private static let menuWidth: CGFloat = 130
 }

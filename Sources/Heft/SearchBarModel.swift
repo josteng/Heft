@@ -194,12 +194,7 @@ extension AppModel {
                 ? everythingRows(query, entireVault: entireVault)
                 : startRows(entireVault: entireVault, start: start)
         case .notes:
-            var rows = quickOpenList(query, entireVault: entireVault, order: order ?? orders[.notes]).rows.map {
-                switch $0 {
-                case .heading(let kind): BarRow.heading(kind.title)
-                case .note(let note): BarRow.note(note)
-                }
-            }
+            var rows = Self.rows(quickOpenList(query, entireVault: entireVault, order: order ?? orders[.notes]))
             if typed {
                 let elsewhere = notesElsewhere(query, entireVault: entireVault, nothingFound: rows.isEmpty)
                 if elsewhere > 0 { rows.append(.elsewhere(elsewhere)) }
@@ -212,6 +207,13 @@ extension AppModel {
             let section = quickOpenList("", entireVault: entireVault, only: kind).all
             return named(query, among: section, entireVault: entireVault).map(BarRow.note)
         case .tag(let name):
+            guard typed else {
+                let tagged = Set(index.notes(taggedWith: name).map(\.relativePath))
+                return notesInScope(
+                    order: order ?? orders[.tag], entireVault: entireVault,
+                    among: { tagged.contains($0.relativePath) }
+                )
+            }
             return named(query, among: index.notes(taggedWith: name), entireVault: entireVault)
                 .map(BarRow.note)
         case .tags:
@@ -219,7 +221,7 @@ extension AppModel {
                 // By how many notes carry them when nothing else decides.
                 let tags = index.allTags
                 let rows = arrangedRows(
-                    tags, kind: "tags", order: order ?? orders[.tags],
+                    tags, kind: "tags", order: order ?? orders[.tags], name: { $0 },
                     key: { BarScope.tag($0).useKey }, scoreKey: { BarScope.tag($0).useKey },
                     row: { BarRow.tag($0, count: self.index.noteCount(forTag: $0)) }
                 )
@@ -227,11 +229,19 @@ extension AppModel {
             }
             return tagRows(query, limit: 200)
         case .folder(let path):
+            guard typed else {
+                // A folder chosen is searched whole, whatever the window's focus.
+                return notesInScope(
+                    order: order ?? orders[.folder], entireVault: true,
+                    among: { $0.relativePath.hasPrefix(path + "/") }
+                )
+            }
             return named(query, among: notes(under: path), entireVault: true).map(BarRow.note)
         case .folders:
             guard typed else {
                 let rows = arrangedRows(
                     noteFolders, kind: "folders", order: order ?? orders[.folders],
+                    name: { BarScope.folder($0.path).title },
                     key: { BarScope.folder($0.path).useKey }, scoreKey: { BarScope.folder($0.path).useKey },
                     row: { BarRow.folder($0.path, count: $0.count) }
                 )
@@ -244,6 +254,7 @@ extension AppModel {
                 // in the whole list once something is typed.
                 let rows = arrangedRows(
                     AppCommand.registry, kind: "commands", order: order ?? orders[.commands],
+                    name: { $0.title },
                     key: { RecentUses.commandKey($0.id) }, scoreKey: { $0.id },
                     row: { BarRow.command($0) }
                 )
@@ -285,6 +296,29 @@ extension AppModel {
         }
         return counts.map { (path: $0.key, count: $0.value) }
             .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    /// A folder's or a tag's notes before anything is typed, in that scope's
+    /// own order, with the pinned ones among them first.
+    private func notesInScope(
+        order: QuickOpenOrder, entireVault: Bool, among: @escaping (NoteRef) -> Bool
+    ) -> [BarRow] {
+        let arranged = quickOpenList(
+            "", entireVault: entireVault, limit: .max, order: order, among: among
+        )
+        return withPinned(
+            .note, Self.rows(arranged), order: order, entireVault: entireVault,
+            among: { if case .note(let note) = $0 { among(note) } else { false } }
+        )
+    }
+
+    private static func rows(_ arranged: QuickOpenOrder.Arranged) -> [BarRow] {
+        arranged.rows.map {
+            switch $0 {
+            case .heading(let kind): BarRow.heading(kind.title)
+            case .note(let note): BarRow.note(note)
+            }
+        }
     }
 
     func notes(under folder: String) -> [NoteRef] {
@@ -558,9 +592,10 @@ extension AppModel {
     /// taken out of the rest. With nothing pinned the list is unchanged; with
     /// pins and a list that had no headings, the rest is headed by its order.
     private func withPinned(
-        _ kind: Pins.Kind, _ rows: [BarRow], order: QuickOpenOrder, entireVault: Bool
+        _ kind: Pins.Kind, _ rows: [BarRow], order: QuickOpenOrder, entireVault: Bool,
+        among: ((BarRow) -> Bool)? = nil
     ) -> [BarRow] {
-        let pinned = pinnedRows(kind, entireVault: entireVault)
+        let pinned = pinnedRows(kind, entireVault: entireVault).filter { among?($0) ?? true }
         guard !pinned.isEmpty else { return rows }
         let taken = Set(pinned.map(\.id))
         var rest = rows.filter { !taken.contains($0.id) }
@@ -573,8 +608,7 @@ extension AppModel {
         }.map(\.element)
         let headed = rest.contains { if case .heading = $0 { true } else { false } }
         if !headed, !rest.isEmpty {
-            let title = order.mode == .recentOnly || order.mode == .recentFirst ? "Recent" : "Frequent"
-            rest.insert(.heading(title), at: 0)
+            rest.insert(.heading(order.mode.heading), at: 0)
         }
         return [.heading("Pinned")] + pinned + rest
     }
@@ -589,12 +623,12 @@ extension AppModel {
     /// notes: one order first and the other after, as the scope's setting
     /// says, headed by order; or one order alone, without headings.
     private func arrangedRows<Item>(
-        _ items: [Item], kind: String, order: QuickOpenOrder,
+        _ items: [Item], kind: String, order: QuickOpenOrder, name: (Item) -> String,
         key: (Item) -> String, scoreKey: (Item) -> String, row: (Item) -> BarRow
     ) -> [BarRow] {
         let lastUsed = RecentUses.dates()
         let arranged = order.arrangeItems(
-            items,
+            items, name: name,
             lastUsed: { lastUsed[key($0)]?.timeIntervalSince1970 },
             useScore: { FrecencyStore.commands.score(scoreKey($0)) }
         )

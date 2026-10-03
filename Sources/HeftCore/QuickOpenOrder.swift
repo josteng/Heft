@@ -31,16 +31,27 @@ public struct QuickOpenOrder: Equatable, Sendable {
         }
     }
 
+    /// A list in one plain order instead of by use: by name, or for notes
+    /// by when the file was last written. "Recent" is when a note was last
+    /// opened, which is not the same thing.
+    public enum Sort: String, CaseIterable, Sendable {
+        case alphabetical, lastEdited
+    }
+
     public var lead: Lead
     /// How many notes the leading block holds. Zero leaves only the second
     /// order, without headings.
     public var count: Int
+    /// Overrides the lead and count while set; they are kept, so going back
+    /// to an order by use finds the block as it was.
+    public var sort: Sort?
 
-    /// The four ways the setting is offered: one order first and the other
-    /// after, or one order alone. "Alone" is a leading block of none, which
-    /// is how it has always been stored, so the settings read the same.
+    /// The ways the setting is offered: one order first and the other
+    /// after, one order alone, or a plain sort. "Alone" is a leading block of
+    /// none, which is how it has always been stored, so the settings read
+    /// the same.
     public enum Mode: String, CaseIterable, Identifiable, Sendable {
-        case recentFirst, frequentFirst, recentOnly, frequentOnly
+        case recentFirst, frequentFirst, recentOnly, frequentOnly, alphabetical, lastEdited
 
         public var id: String { rawValue }
 
@@ -50,14 +61,36 @@ public struct QuickOpenOrder: Equatable, Sendable {
             case .frequentFirst: "Frequent first"
             case .recentOnly: "Recent only"
             case .frequentOnly: "Frequent only"
+            case .alphabetical: "Alphabetical"
+            case .lastEdited: "Last edited"
+            }
+        }
+
+        /// What the list is headed when something is pinned above it.
+        public var heading: String {
+            switch self {
+            case .recentFirst, .recentOnly: "Recent"
+            case .frequentFirst, .frequentOnly: "Frequent"
+            case .alphabetical: "Alphabetical"
+            case .lastEdited: "Last edited"
             }
         }
 
         public var isSplit: Bool { self == .recentFirst || self == .frequentFirst }
+
+        /// The choices for a list. Only notes have a file to have been edited.
+        public static func choices(lastEdited: Bool) -> [Mode] {
+            lastEdited ? allCases : allCases.filter { $0 != .lastEdited }
+        }
     }
 
     public var mode: Mode {
-        switch (lead, count == 0) {
+        switch sort {
+        case .alphabetical: return .alphabetical
+        case .lastEdited: return .lastEdited
+        case nil: break
+        }
+        return switch (lead, count == 0) {
         case (.recent, false): .recentFirst
         case (.frequent, false): .frequentFirst
         // No leading block: the list is all in the other order.
@@ -70,6 +103,8 @@ public struct QuickOpenOrder: Equatable, Sendable {
     public func with(mode: Mode) -> QuickOpenOrder {
         let kept = count == 0 ? Self.standard.count : count
         switch mode {
+        case .alphabetical: return QuickOpenOrder(lead: lead, count: count, sort: .alphabetical)
+        case .lastEdited: return QuickOpenOrder(lead: lead, count: count, sort: .lastEdited)
         case .recentFirst: return QuickOpenOrder(lead: .recent, count: kept)
         case .frequentFirst: return QuickOpenOrder(lead: .frequent, count: kept)
         case .recentOnly: return QuickOpenOrder(lead: .frequent, count: 0)
@@ -80,13 +115,22 @@ public struct QuickOpenOrder: Equatable, Sendable {
     /// The same arrangement for anything with a last use and a use score:
     /// commands, tags and folders, as notes have it.
     ///
-    /// - Parameter fallback: every item in the order to fall back on, for
-    ///   ties and for what was never used.
+    /// - Parameters:
+    ///   - fallback: every item in the order to fall back on, for ties and
+    ///     for what was never used.
+    ///   - name: what an alphabetical order sorts by.
     /// - Returns: the leading block, the rest, and which order leads, nil when
-    ///   only one part has anything in it.
+    ///   only one part has anything in it. A plain sort is all rest.
     public func arrangeItems<Item>(
-        _ fallback: [Item], lastUsed: (Item) -> Double?, useScore: (Item) -> Double
+        _ fallback: [Item], name: (Item) -> String,
+        lastUsed: (Item) -> Double?, useScore: (Item) -> Double
     ) -> (lead: [Item], rest: [Item], heading: Lead?) {
+        switch sort {
+        case .alphabetical: return ([], Self.alphabetical(fallback, name: name), nil)
+        // Only notes have an edit date; anything else stays as given.
+        case .lastEdited: return ([], fallback, nil)
+        case nil: break
+        }
         func ranked(_ value: (Item) -> Double?) -> [Ranked] {
             var found: [Ranked] = []
             for (offset, item) in fallback.enumerated() {
@@ -121,9 +165,22 @@ public struct QuickOpenOrder: Equatable, Sendable {
     public static let countRange = 0...20
     public static let standard = QuickOpenOrder(lead: .recent, count: 5)
 
-    public init(lead: Lead, count: Int) {
+    public init(lead: Lead, count: Int, sort: Sort? = nil) {
         self.lead = lead
         self.count = count.clamped(to: Self.countRange)
+        self.sort = sort
+    }
+
+    /// By name as Finder sorts, so "Note 2" comes before "Note 10"; the
+    /// order given breaks ties.
+    static func alphabetical<Item>(_ items: [Item], name: (Item) -> String) -> [Item] {
+        items.enumerated()
+            .map { (offset: $0.offset, item: $0.element, name: name($0.element)) }
+            .sorted {
+                let order = $0.name.localizedStandardCompare($1.name)
+                return order == .orderedSame ? $0.offset < $1.offset : order == .orderedAscending
+            }
+            .map(\.item)
     }
 
     /// The list, split where the headings go.
@@ -197,10 +254,29 @@ public struct QuickOpenOrder: Equatable, Sendable {
     ///     are honoured without a second filter.
     ///   - isUsed: whether a note has any use recorded, so a "Frequent"
     ///     block never pads itself with notes merely first alphabetically.
+    ///   - edited: when a note's file was last written, for "Last edited".
     public func arrange(
         _ byUse: [NoteRef], recent: [String], limit: Int,
-        isUsed: (NoteRef) -> Bool
+        isUsed: (NoteRef) -> Bool, edited: (NoteRef) -> Date? = { _ in nil }
     ) -> Arranged {
+        switch sort {
+        case .alphabetical:
+            let sorted = Self.alphabetical(byUse) { $0.name }
+            return Arranged(lead: [], rest: Array(sorted.prefix(limit)), heading: nil)
+        case .lastEdited:
+            // A note without a date last; ties keep the order given.
+            let dated = byUse.enumerated().map { (offset: $0.offset, note: $0.element, date: edited($0.element)) }
+            let sorted = dated.sorted { a, b in
+                switch (a.date, b.date) {
+                case let (x?, y?) where x != y: return x > y
+                case (.some, nil): return true
+                case (nil, .some): return false
+                default: return a.offset < b.offset
+                }
+            }
+            return Arranged(lead: [], rest: Array(sorted.prefix(limit).map(\.note)), heading: nil)
+        case nil: break
+        }
         let byRecency = Self.section(
             .recent, of: byUse, recent: recent, limit: .max, isUsed: isUsed
         )
@@ -236,48 +312,68 @@ public struct QuickOpenOrder: Equatable, Sendable {
 
     public static var current: QuickOpenOrder { current(in: HeftDefaults.shared) }
 
+    public static let sortKey = "dev.stenglein.Heft.quickOpen.sort"
+
     public static func current(in defaults: UserDefaults) -> QuickOpenOrder {
-        load(in: defaults, leadKey: leadKey, countKey: countKey)
+        load(in: defaults, keys: (leadKey, countKey, sortKey))
     }
 
     public func save(in defaults: UserDefaults) {
-        save(in: defaults, leadKey: Self.leadKey, countKey: Self.countKey)
+        save(in: defaults, keys: (Self.leadKey, Self.countKey, Self.sortKey))
     }
 
-    static func load(in defaults: UserDefaults, leadKey: String, countKey: String) -> QuickOpenOrder {
+    typealias Keys = (lead: String, count: String, sort: String)
+
+    static func load(in defaults: UserDefaults, keys: Keys) -> QuickOpenOrder {
         QuickOpenOrder(
-            lead: defaults.string(forKey: leadKey).flatMap(Lead.init(rawValue:)) ?? standard.lead,
-            count: defaults.object(forKey: countKey) == nil
-                ? standard.count : defaults.integer(forKey: countKey)
+            lead: defaults.string(forKey: keys.lead).flatMap(Lead.init(rawValue:)) ?? standard.lead,
+            count: defaults.object(forKey: keys.count) == nil
+                ? standard.count : defaults.integer(forKey: keys.count),
+            sort: defaults.string(forKey: keys.sort).flatMap(Sort.init(rawValue:))
         )
     }
 
-    func save(in defaults: UserDefaults, leadKey: String, countKey: String) {
-        defaults.set(lead.rawValue, forKey: leadKey)
-        defaults.set(count, forKey: countKey)
+    func save(in defaults: UserDefaults, keys: Keys) {
+        defaults.set(lead.rawValue, forKey: keys.lead)
+        defaults.set(count, forKey: keys.count)
+        if let sort {
+            defaults.set(sort.rawValue, forKey: keys.sort)
+        } else {
+            defaults.removeObject(forKey: keys.sort)
+        }
     }
 }
 
-/// Recent or frequent first, chosen for each scope on its own: one reader
-/// wants the notes they opened last and the commands they run most.
+/// Recent or frequent first, or a plain sort, chosen for each scope on its
+/// own: one reader wants the notes they opened last and the commands they
+/// run most, and a folder's notes by name.
 ///
 /// Notes keep Quick Open's keys, so the setting made before there were more
 /// scopes carries over as the notes' row.
 public struct ScopeOrders: Equatable, Sendable {
 
     public enum Kind: String, CaseIterable, Identifiable, Sendable {
-        case notes, commands, tags, folders
+        // One tag's or one folder's notes sit under the list they are chosen from.
+        case notes, commands, tags, tag, folders, folder
 
         public var id: String { rawValue }
 
         public var title: String {
             switch self {
             case .notes: "Notes (⌘O)"
+            case .folder: "A folder's notes"
+            case .tag: "A tag's notes"
             case .commands: "Commands (⌘P)"
             case .tags: "Tags"
             case .folders: "Folders"
             }
         }
+
+        /// Whether the list is of notes, which can be ordered by last edit.
+        public var listsNotes: Bool { self == .notes || self == .folder || self == .tag }
+
+        /// Drawn indented under the list it belongs to.
+        public var isNested: Bool { self == .folder || self == .tag }
     }
 
     private var orders: [Kind: QuickOpenOrder]
@@ -302,23 +398,21 @@ public struct ScopeOrders: Equatable, Sendable {
     public static func current(in defaults: UserDefaults) -> ScopeOrders {
         var result = ScopeOrders.standard
         for kind in Kind.allCases {
-            let (lead, count) = keys(for: kind)
-            result[kind] = QuickOpenOrder.load(in: defaults, leadKey: lead, countKey: count)
+            result[kind] = QuickOpenOrder.load(in: defaults, keys: keys(for: kind))
         }
         return result
     }
 
     public func save(in defaults: UserDefaults) {
         for kind in Kind.allCases {
-            let (lead, count) = Self.keys(for: kind)
-            self[kind].save(in: defaults, leadKey: lead, countKey: count)
+            self[kind].save(in: defaults, keys: Self.keys(for: kind))
         }
     }
 
-    private static func keys(for kind: Kind) -> (String, String) {
-        if kind == .notes { return (QuickOpenOrder.leadKey, QuickOpenOrder.countKey) }
-        return ("dev.stenglein.Heft.scopeOrder.\(kind.rawValue).lead",
-                "dev.stenglein.Heft.scopeOrder.\(kind.rawValue).count")
+    private static func keys(for kind: Kind) -> QuickOpenOrder.Keys {
+        if kind == .notes { return (QuickOpenOrder.leadKey, QuickOpenOrder.countKey, QuickOpenOrder.sortKey) }
+        let prefix = "dev.stenglein.Heft.scopeOrder.\(kind.rawValue)"
+        return ("\(prefix).lead", "\(prefix).count", "\(prefix).sort")
     }
 }
 
