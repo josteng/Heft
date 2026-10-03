@@ -322,7 +322,7 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | ⌘O | Quick open |
 | ⌘P | Command palette |
 | ⌘L | Toggle checkbox |
-| ⇧⌘J | Show this note in the file tree |
+| ⇧⌘J | Reveal this note in Files |
 | ⇧⌘S | Toggle sidebar |
 | ⌘1 | First sidebar view |
 | ⌘2 | Second sidebar view |

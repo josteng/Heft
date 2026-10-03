@@ -332,9 +332,11 @@ struct HeftCommands: Commands {
             // Quick Open and a wikilink both open a note without touching the
             // tree, so after either the sidebar is showing somewhere else and
             // where the note actually lives is a guess.
-            Button("Reveal in Sidebar") { model?.revealCurrentInSidebar() }
+            // In Files, not Finder; and only while Files is one of the
+            // views, or it would show a list the switch has no place for.
+            Button("Reveal in Files") { model?.revealCurrentInSidebar() }
                 .keyboardShortcut(.revealInSidebar)
-                .disabled(model?.current == nil || behindBar)
+                .disabled(model?.current == nil || behindBar || !general.sidebarLayout.visible.contains(.files))
             Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
             Toggle("Show Backlinks", isOn: binding(\.isInspectorVisible))
                 .keyboardShortcut(.toggleBacklinks)

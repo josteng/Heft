@@ -94,6 +94,36 @@ struct PaletteReachTests {
         #expect(model.folderInHand?.lastPathComponent == "Work")
     }
 
+    /// Reveal in Files shows the note in the Files view, so with Files
+    /// switched off there is nowhere to show it: the sidebar used to put up
+    /// a tree its switch had no place for.
+    @Test("Reveal in Files waits for a Files view")
+    func revealNeedsFiles() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("heft-reveal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("note".utf8).write(to: root.appendingPathComponent("Note.md"))
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = GeneralSettings.shared.sidebarLayout
+        defer { GeneralSettings.shared.sidebarLayout = layout }
+
+        let model = AppModel(
+            registry: VaultRegistry(), descriptor: WorkspaceDescriptor(vaultPath: root.path)
+        )
+        defer { model.closeWorkspace() }
+        for _ in 0..<600 where model.index.notes.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        model.open(try #require(model.index.notes.first))
+        GeneralSettings.shared.sidebarLayout = .standard
+        #expect(try command("revealInSidebar").isEnabled(on: model))
+        #expect(try command("revealInSidebar").title == "Reveal in Files")
+
+        GeneralSettings.shared.sidebarLayout.entries[0].isShown = false
+        try #require(GeneralSettings.shared.sidebarLayout.entries[0].mode == .files)
+        #expect(!(try command("revealInSidebar").isEnabled(on: model)))
+    }
+
     /// A focus is felt in the tree, so the tree is where a reader looks to
     /// undo it, rather than in the menu under the window's title.
     @Test("The way out of a focused folder is in the tree's own menu")

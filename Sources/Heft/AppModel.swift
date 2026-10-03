@@ -359,7 +359,7 @@ final class AppModel: ObservableObject {
     // MARK: UI state
     @Published var isCalendarVisible = true
 
-    /// A note the sidebar has been asked to show, set by Reveal in Sidebar and
+    /// A note the sidebar has been asked to show, set by Reveal in Files and
     /// cleared by the sidebar once it has scrolled there.
     ///
     /// A request rather than a call, because the scrolling belongs to the view:

@@ -276,11 +276,12 @@ struct AppCommand: Identifiable {
         ),
         Self(
             id: "revealInSidebar",
-            title: "Reveal in Sidebar",
+            title: "Reveal in Files",
             symbol: "sidebar.leading",
             searchTerms: "show find locate file tree folder where sidebar navigator",
             shortcut: .revealInSidebar,
-            enabled: { $0.current != nil },
+            // Only where there is a Files view to reveal it in.
+            enabled: { $0.current != nil && GeneralSettings.shared.sidebarLayout.visible.contains(.files) },
             action: { $0.revealCurrentInSidebar() }
         ),
         Self(

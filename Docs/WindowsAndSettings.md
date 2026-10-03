@@ -641,7 +641,9 @@ lists is showing. It observes the request twice, once to put the file list
 back and once inside the tree, and the inner one is `task(id:)` because the
 tree is built after the request when switching back from Tags. `SidebarAnchor`
 wraps the path in its own type so the tree's rows and the anchor do not share
-an identifier.
+an identifier. Reveal in Files is disabled while Files is switched off: the
+request still shows the tree, as ⌘N needs it to name a note, but a reveal
+there would be a list the switch has no segment for.
 
 A new note is named in the sidebar, in the row it is about to occupy. ⌘N
 posts a request the view answers and falls back to a prompt when the sidebar
