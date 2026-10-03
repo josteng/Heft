@@ -408,6 +408,8 @@ final class AppModel: ObservableObject {
     /// A sidebar view asked for from the menu (⌘1 to ⌘3); the sidebar owns
     /// which one it shows and takes the request, as it takes a new note's.
     @Published var sidebarModeRequest: SidebarMode?
+    /// The same for the right side's views, answered by `InspectorView`.
+    @Published var inspectorModeRequest: InspectorMode?
     private var inlineNoteSequence = 0
     var isInspectorVisible: Bool {
         get { chrome.isInspectorVisible }
@@ -3292,6 +3294,14 @@ final class AppModel: ObservableObject {
             withAnimation(.snappy(duration: 0.2)) { columnVisibility = .all }
         }
         sidebarModeRequest = mode
+    }
+
+    /// The right side, on `mode`, shown if it was hidden.
+    func showInspector(_ mode: InspectorMode) {
+        inspectorModeRequest = mode
+        if !isInspectorVisible {
+            withAnimation(.snappy(duration: 0.2)) { isInspectorVisible = true }
+        }
     }
 
     func toggleSidebar() {

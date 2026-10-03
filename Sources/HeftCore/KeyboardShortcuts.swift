@@ -129,7 +129,12 @@ public enum KeyboardShortcuts {
         .init(id: "sidebarView2", title: "Second sidebar view", key: "2", modifiers: [.command], group: .view, isNotable: true),
         .init(id: "sidebarView3", title: "Third sidebar view", key: "3", modifiers: [.command], group: .view, isNotable: true),
         .init(id: "toggleCalendar", title: "Toggle calendar", key: "d", modifiers: [.command, .shift], group: .view, isNotable: true),
-        .init(id: "toggleBacklinks", title: "Toggle backlinks", key: "b", modifiers: [.command, .option], group: .view, isNotable: true),
+        // ⌥⌘0 to ⌥⌘2 as Xcode shows and switches its inspectors: 0 shows or
+        // hides the right sidebar, and its views are numbered on their own,
+        // so hiding one on the left does not renumber the right.
+        .init(id: "toggleBacklinks", title: "Toggle right sidebar", key: "0", modifiers: [.command, .option], group: .view, isNotable: true),
+        .init(id: "inspectorView1", title: "First right sidebar view", key: "1", modifiers: [.command, .option], group: .view, isNotable: true),
+        .init(id: "inspectorView2", title: "Second right sidebar view", key: "2", modifiers: [.command, .option], group: .view, isNotable: true),
     ]
 
     public static func shortcut(_ id: String) -> Shortcut {

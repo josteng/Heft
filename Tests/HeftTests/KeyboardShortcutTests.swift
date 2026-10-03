@@ -29,7 +29,7 @@ struct KeyboardShortcutTests {
     @Test("A shortcut spells itself the way macOS does")
     func displayOrder() {
         #expect(KeyboardShortcuts.shortcut("openToday").display == "⇧⌘T")
-        #expect(KeyboardShortcuts.shortcut("toggleBacklinks").display == "⌥⌘B")
+        #expect(KeyboardShortcuts.shortcut("toggleBacklinks").display == "⌥⌘0")
         #expect(KeyboardShortcuts.shortcut("newNote").display == "⌘N")
         // Declared [.command, .shift]; must not print as ⌘⇧.
         #expect(KeyboardShortcuts.shortcut("searchVault").display == "⇧⌘F")

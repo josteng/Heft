@@ -76,3 +76,46 @@ struct SidebarLayoutTests {
         #expect(SidebarLayout.lastUsed(in: defaults) == .tags)
     }
 }
+
+/// The right side's views: the same layout, stored apart from the left's.
+@Suite("Right sidebar layout")
+@MainActor
+struct InspectorLayoutTests {
+
+    @Test("Stored under its own keys, so the left side's order is untouched")
+    func storedApart() throws {
+        let defaults = try #require(UserDefaults(suiteName: "dev.stenglein.Heft.inspector-\(UUID().uuidString)"))
+        let left = SidebarLayout(entries: [.init(mode: .tags, isShown: true), .init(mode: .files, isShown: false),
+                                           .init(mode: .recent, isShown: true)], start: .lastUsed)
+        left.save(in: defaults)
+        #expect(InspectorLayout.current(in: defaults) == .standard)
+
+        let right = InspectorLayout(entries: [.init(mode: .chats, isShown: true), .init(mode: .backlinks, isShown: true)],
+                                    start: .view(.chats))
+        right.save(in: defaults)
+        #expect(InspectorLayout.current(in: defaults) == right)
+        #expect(SidebarLayout.current(in: defaults) == left)
+        #expect(defaults.stringArray(forKey: "dev.stenglein.Heft.sidebar.order") == ["tags", "files", "recent"],
+                "the left side keeps the keys it always had")
+
+        InspectorLayout.recordLastUsed(.chats, in: defaults)
+        #expect(InspectorLayout.lastUsed(in: defaults) == .chats)
+        #expect(SidebarLayout.lastUsed(in: defaults) == nil)
+    }
+
+    @Test("A view that cannot show leaves the switch, the shortcuts and the start")
+    func offering() {
+        let both = InspectorLayout(entries: [.init(mode: .chats, isShown: true), .init(mode: .backlinks, isShown: true)],
+                                   start: .view(.chats))
+        #expect(both.mode(forShortcut: 1) == .chats)
+        #expect(both.mode(forShortcut: 2) == .backlinks)
+        let noChats = both.offering { $0 != .chats }
+        #expect(noChats.visible == [.backlinks])
+        #expect(noChats.mode(forShortcut: 1) == nil, "one view has nothing to switch to")
+        #expect(noChats.initialMode(lastUsed: .chats) == .backlinks)
+        // Backlinks switched off and Chats unavailable still leaves a view.
+        let neither = InspectorLayout(entries: [.init(mode: .backlinks, isShown: false), .init(mode: .chats, isShown: true)],
+                                      start: .first).offering { $0 != .chats }
+        #expect(neither.visible == [.backlinks])
+    }
+}

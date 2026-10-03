@@ -300,6 +300,11 @@ struct SearchBarView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 8)
+            Button { continueInSidebar() } label: {
+                Image(systemName: "sidebar.trailing")
+            }
+            .buttonStyle(.borderless)
+            .help("Continue in the right sidebar (⌘J)")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, BarField.edge + 4)
@@ -534,6 +539,10 @@ struct SearchBarView: View {
             // keyboard [ is ⌥5.
             Button("") { if chatting { newChat() } }
                 .keyboardShortcut(.upArrow, modifiers: .command)
+            // ⌘J hands the chat to the right sidebar, as Raycast's Quick AI
+            // continues in its chat window.
+            Button("") { if chatting { continueInSidebar() } }
+                .keyboardShortcut("j", modifiers: .command)
         }
         .frame(width: 0, height: 0)
         .opacity(0)
@@ -644,6 +653,11 @@ struct SearchBarView: View {
                 KeyHint(key: "↵", label: "Reply")
                 if model.agent.isRunning { KeyHint(key: "⌘.", label: "Stop") }
                 KeyHint(key: "⌘N", label: "New chat")
+                Button { continueInSidebar() } label: {
+                    KeyHint(key: "⌘J", label: "Sidebar")
+                }
+                .buttonStyle(.plain)
+                .help("Continue this chat in the right sidebar, beside the note")
             }
             if chatting || (scope != nil && trimmed.isEmpty) {
                 KeyHint(key: chatting ? "⌘↑" : "⌫", label: chatting ? "Chats" : "Back")
@@ -757,13 +771,8 @@ struct SearchBarView: View {
 
     /// A new chat with `question`, in the bar's place for its list.
     private func startChat(_ question: String, instruction: String? = nil) {
-        guard let vaultRoot = model.vaultRoot else { return }
-        model.agent.close()
-        model.agent.ask(
-            question, instruction: withContext(instruction ?? question),
-            files: AgentFiles.paths(in: question), vaultRoot: vaultRoot, scope: newChatScope
-        )
-        if let id = model.agent.chat?.id { model.recordChatUse(id) }
+        guard model.vaultRoot != nil else { return }
+        model.startChat(question, instruction: instruction, scope: newChatScope)
         enter(.ask, carrying: "")
         setInChat(true)
     }
@@ -780,12 +789,15 @@ struct SearchBarView: View {
 
     /// The field's text as the next turn of the open chat.
     private func reply() {
-        guard let vaultRoot = model.vaultRoot, !trimmed.isEmpty, !model.agent.isRunning else { return }
-        model.agent.ask(
-            query, instruction: withContext(query), files: AgentFiles.paths(in: query),
-            vaultRoot: vaultRoot, scope: model.agent.chat?.scope ?? newChatScope
-        )
-        query = ""
+        if model.replyToChat(query, newChatScope: newChatScope) { query = "" }
+    }
+
+    /// The bar closes and the chat goes on in the right sidebar, the same
+    /// chat with the same run, beside the note it is about.
+    private func continueInSidebar() {
+        guard model.agent.chat != nil else { return }
+        model.showInspector(.chats)
+        dismiss()
     }
 
     private func newChat() {
@@ -794,51 +806,6 @@ struct SearchBarView: View {
         setInChat(false)
         refreshRows()
         selectFirst()
-    }
-
-    /// The question with what the reader is looking at, so "what is this
-    /// note about?" has an answer: the open note and any selection in it,
-    /// as they are when the question is asked, since a reply can come from
-    /// another note.
-    private func withContext(_ text: String) -> String {
-        var lines: [String] = []
-        if let note = model.current {
-            lines.append("The reader has \(note.relativePath) open.")
-            if let selected = Self.editorSelection(), !selected.isEmpty {
-                let shown = selected.count > 2000 ? String(selected.prefix(2000)) + "…" : selected
-                lines.append("They have selected this text in it:\n\"\"\"\n\(shown)\n\"\"\"")
-            }
-        }
-        // Today's note, so "today", "this week" and "add to my daily note"
-        // need no search to find where the reader keeps it.
-        if let vaultRoot = model.vaultRoot {
-            let daily = DailyNotes(vaultRoot: vaultRoot, settings: model.settings)
-            let today = Date()
-            let path = daily.relativePath(for: today)
-            lines.append(daily.exists(for: today)
-                ? "Today's daily note is \(path)."
-                : "Today's daily note would be \(path); it does not exist yet.")
-        }
-        lines.append("Today is \(Date().formatted(.iso8601.year().month().day())).")
-        return "(Context from Heft, not part of the question: " + lines.joined(separator: " ") + ")\n\n" + text
-    }
-
-    /// What is selected in the editor under the bar, which keeps its
-    /// selection while the sheet has the keyboard.
-    private static func editorSelection() -> String? {
-        let window = NSApp.keyWindow?.sheetParent ?? NSApp.mainWindow
-        guard let content = window?.contentView, let editor = findEditor(in: content) else { return nil }
-        let range = editor.selectedRange()
-        guard range.length > 0, NSMaxRange(range) <= (editor.string as NSString).length else { return nil }
-        return (editor.string as NSString).substring(with: range)
-    }
-
-    private static func findEditor(in view: NSView) -> HeftTextKit2View? {
-        if let editor = view as? HeftTextKit2View { return editor }
-        for child in view.subviews {
-            if let found = findEditor(in: child) { return found }
-        }
-        return nil
     }
 
     /// What "Draft a note from" asks: a whole note, named and filed by the

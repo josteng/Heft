@@ -342,6 +342,11 @@ remembers what it read; on another Mac, where that session is not, the
 transcript is sent instead. Each run signs its proposals with its chat
 (`HEFT_AGENT_NAME`), so chats answered at the same time keep their own.
 
+The right sidebar's Chats view is the same window's chat from the same
+`AgentRunner`, so a question asked in the bar goes on there (⌘J) without a
+second run or copy; the bar stays the quick way in, the sidebar is where a
+long answer has room beside the note it changes.
+
 ## Demo, in one screen
 
 ```bash

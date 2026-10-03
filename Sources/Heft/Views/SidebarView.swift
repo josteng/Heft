@@ -8,8 +8,10 @@ import SwiftUI
 ///
 /// Three ways into the same vault, because they answer different questions:
 /// where a note lives, what was open lately, and what it is about.
-enum SidebarMode: String, CaseIterable, Identifiable {
+enum SidebarMode: String, PanelMode {
     case files, recent, tags
+
+    static let storageName = "sidebar"
 
     var id: String { rawValue }
 

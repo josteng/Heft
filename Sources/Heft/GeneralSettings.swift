@@ -60,6 +60,11 @@ final class GeneralSettings: ObservableObject {
         didSet { sidebarLayout.save() }
     }
 
+    /// The same for the right sidebar's views.
+    @Published var inspectorLayout: InspectorLayout {
+        didSet { inspectorLayout.save() }
+    }
+
     /// Whether the search bar shows what its keys do along its bottom. On
     /// by default, since nothing else says ⌘D pins; off for a reader who has
     /// learnt them and wants the row back.
@@ -129,6 +134,7 @@ final class GeneralSettings: ObservableObject {
         scopeOrders = ScopeOrders.current(in: HeftDefaults.shared)
         startList = StartList.current(in: HeftDefaults.shared)
         sidebarLayout = SidebarLayout.current()
+        inspectorLayout = InspectorLayout.current()
         asksAgent = HeftDefaults.shared.bool(forKey: Self.asksAgentKey)
         suggestsNames = HeftDefaults.shared.object(forKey: Self.suggestsNamesKey) == nil
             || HeftDefaults.shared.bool(forKey: Self.suggestsNamesKey)
@@ -160,7 +166,6 @@ final class GeneralSettings: ObservableObject {
 /// so a pane filled in there measures as its own empty placeholder.
 struct GeneralSettingsView: View {
     @ObservedObject private var settings = GeneralSettings.shared
-    private static let sidebarRowHeight: CGFloat = 32
 
     /// Which of the four the picker is on. Held apart from the folder text so
     /// that switching away from "a folder" and back does not lose what was
@@ -281,64 +286,11 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                List {
-                    ForEach(Array(settings.sidebarLayout.entries.enumerated()), id: \.element.id) { index, entry in
-                        HStack(spacing: 10) {
-                            // The handle says the row drags, as in the other
-                            // ordered lists here.
-                            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-                            let isLast = entry.isShown && !settings.sidebarLayout.canHide(entry.mode)
-                            Toggle("", isOn: Binding(
-                                get: { entry.isShown },
-                                set: { settings.sidebarLayout.entries[index].isShown = $0 }
-                            ))
-                            .toggleStyle(.checkbox)
-                            .labelsHidden()
-                            // The last view shown stays: a sidebar with none
-                            // would be an empty column. Only the box is
-                            // disabled, so the view's name does not dim as if
-                            // it were the one switched off.
-                            .disabled(isLast)
-                            .help(isLast ? "At least one view stays in the sidebar" : "")
-                            Label(entry.mode.title, systemImage: entry.mode.symbol)
-                                .foregroundStyle(entry.isShown ? .primary : .secondary)
-                            Spacer()
-                            // No number with one view: there is nothing to
-                            // switch to.
-                            if let number = settings.sidebarLayout.visible.firstIndex(of: entry.mode),
-                               entry.isShown, number < 3, settings.sidebarLayout.visible.count > 1 {
-                                Text("⌘\(number + 1)").foregroundStyle(.secondary).monospacedDigit()
-                            }
-                        }
-                        .frame(height: Self.sidebarRowHeight)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
-                    }
-                    .onMove { settings.sidebarLayout.entries.move(fromOffsets: $0, toOffset: $1) }
-                }
-                .environment(\.defaultMinListRowHeight, Self.sidebarRowHeight)
-                .contentMargins(.vertical, 0, for: .scrollContent)
-                .scrollDisabled(true)
-                .frame(height: CGFloat(settings.sidebarLayout.entries.count) * Self.sidebarRowHeight)
-                .alternatingRowBackgrounds()
-
-                // With one view there is nothing to open on but it.
-                if settings.sidebarLayout.visible.count > 1 {
-                Picker(selection: Binding(
-                    get: { settings.sidebarLayout.start },
-                    set: { settings.sidebarLayout.start = $0 }
-                )) {
-                    ForEach(SidebarLayout.Start.allCases.prefix(2)) { Text($0.title).tag($0) }
-                    Divider()
-                    ForEach(SidebarLayout.Start.allCases.dropFirst(2)) { Text($0.title).tag($0) }
-                } label: {
-                    SettingLabel(
-                        "Opens on",
-                        detail: "The view a new window's sidebar starts in. Last used comes back "
-                            + "where you were, after a relaunch too."
-                    )
-                }
-                .defaultMenuTint()
-                }
+                PanelLayoutRows(
+                    layout: $settings.sidebarLayout, shortcutPrefix: "⌘", shortcutCount: 3,
+                    opensOnDetail: "The view a new window's sidebar starts in. Last used comes back "
+                        + "where you were, after a relaunch too."
+                )
                 Picker(selection: Binding(
                     get: { settings.calendarVisibility },
                     set: { settings.calendarVisibility = $0 }
@@ -365,7 +317,93 @@ struct GeneralSettingsView: View {
                         + "With one shown, the switch above the list goes away."
                 )
             }
+
+            Section {
+                PanelLayoutRows(
+                    layout: $settings.inspectorLayout, shortcutPrefix: "⌥⌘", shortcutCount: 2,
+                    isAvailable: { $0.isAvailable },
+                    unavailableHelp: "Chats show while Ask is on, in Settings ▸ Ask",
+                    opensOnDetail: "The view a new window's right sidebar starts in. ⌥⌘0 shows and hides it."
+                )
+            } header: {
+                SectionHeading(
+                    "Right Sidebar",
+                    detail: "About the note that is open. ⌥⌘1 and ⌥⌘2 follow its views."
+                )
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// A side's views in Settings: each switched on or off and dragged into
+/// place, with the shortcut it has and the view a window opens on. One list
+/// for the left side and the right, so they work alike.
+struct PanelLayoutRows<Mode: PanelMode>: View {
+    @Binding var layout: PanelLayout<Mode>
+    /// The shortcut's modifiers as shown before its number: ⌘ or ⌥⌘.
+    let shortcutPrefix: String
+    let shortcutCount: Int
+    /// Whether a view can be shown right now; one that cannot keeps its
+    /// place and its box, dimmed, until it can.
+    var isAvailable: (Mode) -> Bool = { _ in true }
+    var unavailableHelp = ""
+    let opensOnDetail: String
+    private static var rowHeight: CGFloat { 32 }
+
+    var body: some View {
+        let usable = layout.offering(isAvailable)
+        List {
+            ForEach(Array(layout.entries.enumerated()), id: \.element.id) { index, entry in
+                let available = isAvailable(entry.mode)
+                HStack(spacing: 10) {
+                    // The handle says the row drags, as in the other
+                    // ordered lists here.
+                    Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                    let isLast = entry.isShown && available && !usable.canHide(entry.mode)
+                    Toggle("", isOn: Binding(
+                        get: { entry.isShown },
+                        set: { layout.entries[index].isShown = $0 }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    // The last view shown stays: a side with none would be
+                    // an empty column. Only the box is disabled, so the
+                    // view's name does not dim as if it were the one
+                    // switched off.
+                    .disabled(isLast || !available)
+                    .help(!available ? unavailableHelp : isLast ? "At least one view stays in the sidebar" : "")
+                    Label(entry.mode.title, systemImage: entry.mode.symbol)
+                        .foregroundStyle(entry.isShown && available ? .primary : .secondary)
+                        .help(available ? "" : unavailableHelp)
+                    Spacer()
+                    // No number with one view: there is nothing to switch to.
+                    if let number = usable.visible.firstIndex(of: entry.mode),
+                       entry.isShown, available, number < shortcutCount, usable.visible.count > 1 {
+                        Text("\(shortcutPrefix)\(number + 1)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                .frame(height: Self.rowHeight)
+                .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+            }
+            .onMove { layout.entries.move(fromOffsets: $0, toOffset: $1) }
+        }
+        .environment(\.defaultMinListRowHeight, Self.rowHeight)
+        .contentMargins(.vertical, 0, for: .scrollContent)
+        .scrollDisabled(true)
+        .frame(height: CGFloat(layout.entries.count) * Self.rowHeight)
+        .alternatingRowBackgrounds()
+
+        // With one view there is nothing to open on but it.
+        if usable.visible.count > 1 {
+            Picker(selection: $layout.start) {
+                ForEach(PanelLayout<Mode>.Start.allCases.prefix(2)) { Text($0.title).tag($0) }
+                Divider()
+                ForEach(PanelLayout<Mode>.Start.allCases.dropFirst(2)) { Text($0.title).tag($0) }
+            } label: {
+                SettingLabel("Opens on", detail: opensOnDetail)
+            }
+            .defaultMenuTint()
+        }
     }
 }

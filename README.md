@@ -183,13 +183,16 @@ four-space indented code, raw HTML and entity references;
   vault-relative or absolute, quoted or as a `file://` URL.
 - **The sidebar's views**, Files, Recent and Tags, can be hidden and put in
   any order in Settings ▸ General; ⌘1 to ⌘3 follow them, and a window can open
-  on the first, the last used, or one in particular.
+  on the first, the last used, or one in particular. The right sidebar (⌥⌘0)
+  is about the open note, Backlinks and Chats, set up the same way, with ⌥⌘1
+  and ⌥⌘2.
 - **Recent** reads like your notes rather than a folder listing: each row
   has its date, first line and folder, grouped under Today, Yesterday,
   Previous 7 Days and by month. Order it by last edit, which follows notes
   changed on your other devices, or by last opening on this Mac.
 - **Calendar** with a dot per daily note; clicking a day creates it from the
-  vault's template. **Backlinks** panel with the referencing line as context.
+  vault's template. **Backlinks** in the right sidebar, with the referencing
+  line as context.
 - **PDF export** (⇧⌘E) of the rendered note, tables, callouts and typeset
   LaTeX included, printed from the live surface itself so the page matches
   the editor. Page size, margin and text size are set in the save panel and
@@ -253,7 +256,9 @@ a new note for you to accept. Its use counts against your Claude plan. Each
 run may read only the focused folder or the whole vault and may only propose
 changes, under permission rules Heft sets for Claude Code (not a separate
 sandbox), and every change it wants is a card in the chat: accept it, reject it with a word back to the agent, or open it in
-review. Chats are kept in `.heft/chats/` to read again and continue.
+review. ⌘J carries a chat from the bar into the right sidebar's Chats, to go
+on beside the note it is changing. Chats are kept in `.heft/chats/` to read
+again and continue.
 
 ## The `heft` command
 
@@ -328,7 +333,9 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | ⌘2 | Second sidebar view |
 | ⌘3 | Third sidebar view |
 | ⇧⌘D | Toggle calendar |
-| ⌥⌘B | Toggle backlinks |
+| ⌥⌘0 | Toggle right sidebar |
+| ⌥⌘1 | First right sidebar view |
+| ⌥⌘2 | Second right sidebar view |
 
 ## Not built yet
 

@@ -31,6 +31,8 @@ struct AppCommandShortcut {
     static let sidebarView2 = Self("sidebarView2")
     static let sidebarView3 = Self("sidebarView3")
     static let toggleBacklinks = Self("toggleBacklinks")
+    static let inspectorView1 = Self("inspectorView1")
+    static let inspectorView2 = Self("inspectorView2")
     static let exportPDF = Self("exportPDF")
     static let newNote = Self("newNote")
     static let newWindow = Self("newWindow")
@@ -562,11 +564,11 @@ struct AppCommand: Identifiable {
         ),
         Self(
             id: "toggleBacklinks",
-            title: "Toggle backlinks",
-            symbol: "link",
-            searchTerms: "backlinks inspector panel show hide open close view",
+            title: "Toggle right sidebar",
+            symbol: "sidebar.trailing",
+            searchTerms: "backlinks chats ask inspector right sidebar panel show hide open close view",
             shortcut: .toggleBacklinks,
-            displayTitle: { $0.isInspectorVisible ? "Hide backlinks" : "Show backlinks" },
+            displayTitle: { $0.isInspectorVisible ? "Hide right sidebar" : "Show right sidebar" },
             action: { $0.isInspectorVisible.toggle() }
         ),
     ]

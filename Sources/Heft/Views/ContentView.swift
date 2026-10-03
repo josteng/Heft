@@ -161,7 +161,7 @@ struct WorkspaceSplit: View {
             DetailColumn(topChromeHeight: topChromeHeight)
         }
         .inspector(isPresented: $chrome.isInspectorVisible) {
-            BacklinksPanel()
+            InspectorView()
                 .inspectorColumnWidth(min: 220, ideal: 280, max: 420)
         }
         .toolbar { toolbarContent }
@@ -218,9 +218,9 @@ struct WorkspaceSplit: View {
 
         ToolbarItem(placement: .primaryAction) {
             Button { chrome.isInspectorVisible.toggle() } label: {
-                Image(systemName: "link")
+                Image(systemName: "sidebar.trailing")
             }
-            .help("Toggle backlinks (⌥⌘B)")
+            .help("Show or hide the right sidebar (⌥⌘0)")
         }
     }
 }

@@ -64,7 +64,6 @@ struct BacklinksPanel: View {
             }
             .padding(14)
         }
-        .background(.ultraThinMaterial)
     }
 
     @ViewBuilder

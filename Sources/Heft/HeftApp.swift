@@ -338,9 +338,20 @@ struct HeftCommands: Commands {
                 .keyboardShortcut(.revealInSidebar)
                 .disabled(model?.current == nil || behindBar || !general.sidebarLayout.visible.contains(.files))
             Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
-            Toggle("Show Backlinks", isOn: binding(\.isInspectorVisible))
+            Toggle("Show Right Sidebar", isOn: binding(\.isInspectorVisible))
                 .keyboardShortcut(.toggleBacklinks)
                 .disabled(behindBar)
+            // The right side's views, numbered on their own.
+            if let view = general.inspectorLayout.usable.mode(forShortcut: 1) {
+                Button(view.title) { model?.showInspector(view) }
+                    .keyboardShortcut(.inspectorView1)
+                    .disabled(model == nil || behindBar)
+            }
+            if let view = general.inspectorLayout.usable.mode(forShortcut: 2) {
+                Button(view.title) { model?.showInspector(view) }
+                    .keyboardShortcut(.inspectorView2)
+                    .disabled(model == nil || behindBar)
+            }
         }
     }
 

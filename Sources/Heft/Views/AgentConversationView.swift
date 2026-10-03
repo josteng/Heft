@@ -502,11 +502,26 @@ private struct SelectableAnswer: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: NSTextView, context: Context) -> CGSize? {
-        let width = proposal.width ?? 400
-        guard let container = view.textContainer, let layout = view.layoutManager else { return nil }
-        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        // Asked for an ideal size, a narrow one: the column decides the
+        // width, and the answer fills whatever it is given.
+        let width = proposal.width ?? 150
+        guard let text = view.textStorage else { return nil }
+        return CGSize(width: width, height: Self.height(of: text, width: width))
+    }
+
+    /// How tall `text` is at `width`, laid out on its own. Measuring in the
+    /// view's own container left it at the width last tried, which SwiftUI
+    /// tries several of: the text drawn ran past the column, its height was
+    /// another width's, and an answer being written flickered between them.
+    static func height(of text: NSAttributedString, width: CGFloat) -> CGFloat {
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
         layout.ensureLayout(for: container)
-        return CGSize(width: width, height: ceil(layout.usedRect(for: container).height))
+        return ceil(layout.usedRect(for: container).height)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(open: open) }

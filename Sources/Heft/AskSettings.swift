@@ -19,24 +19,19 @@ struct AskSettingsView: View {
                 Toggle(isOn: $settings.asksAgent) {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 8) {
-                            Text("Ask in the search bar")
+                            Text("Ask about your notes")
                             ExperimentalBadge()
+                            // The rest of what it is and what keeps it in
+                            // check, on hover, so the pane is not a page.
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.secondary)
+                                .help(Self.details)
                         }
-                        Group {
-                            Text("Ask questions about your notes from the search bar (⌘6, or ? in ⌘T), and "
-                                + "have changes proposed for you to accept or reject in the chat.")
-                            Text("It runs your own Claude Code, signed in with your own account, so its use "
-                                + "counts against your Claude plan. Heft never sees your login.")
-                            Text("Each run may read only the focused folder, or the whole vault, and may only "
-                                + "propose changes. Those limits are Claude Code's permission rules, which Heft "
-                                + "sets for every run; they are not a separate sandbox.")
-                            Text("Separate from agent access: Claude Code or any other agent you run yourself "
-                                + "can use the heft command whether Ask is on or off. File ▸ Set Up Agent Access "
-                                + "teaches it how.")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text("In the search bar (⌘6, or ? in ⌘T) and the right sidebar. "
+                            + "Runs your own Claude Code, on your Claude plan.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -97,6 +92,20 @@ struct AskSettingsView: View {
     }
 
     private static let models = ["haiku", "sonnet", "opus"]
+
+    private static let details = """
+        Changes it wants are proposed in the chat, for you to accept or reject.
+
+        It runs your own Claude Code, signed in with your own account, so its use counts against \
+        your Claude plan. Heft never sees your login.
+
+        Each run may read only the focused folder, or the whole vault, and may only propose \
+        changes. Those limits are Claude Code's permission rules, which Heft sets for every run; \
+        they are not a separate sandbox.
+
+        Separate from agent access: an agent you run yourself can use the heft command whether \
+        Ask is on or off. File ▸ Set Up Agent Access teaches it how.
+        """
 }
 
 /// The mark on a setting that is still finding its shape, as Vim and Ask are.
