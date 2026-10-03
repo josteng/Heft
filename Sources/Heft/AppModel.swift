@@ -670,8 +670,20 @@ final class AppModel: ObservableObject {
         let namedOnTheCommandLine = arguments.firstIndex(of: "--open").flatMap {
             $0 + 1 < arguments.count ? arguments[$0 + 1] : nil
         }
+        //
+        // A window built later with no other open is the app being picked up
+        // again from the Dock after its last window closed, which has its own
+        // setting; one built beside others is a second window, and keeps what
+        // it was given.
         var opened = namedOnTheCommandLine.map(openIfPresent) ?? false
-        if !opened, Self.claimStartupOpening() { opened = openStartupNote() }
+        if !opened {
+            if Self.claimStartupOpening() {
+                opened = openStartupNote()
+            } else if !registry.hasOpenWorkspace, let root = vaultRoot {
+                let launch = StartupSettings.shared.setting(for: root)
+                opened = openStartupNote(StartupSettings.shared.reopen(for: root).resolved(launch: launch))
+            }
+        }
         if !opened, let restored = descriptor?.notePath { opened = openIfPresent(restored) }
 
         startExternalChangePolling()
@@ -710,9 +722,9 @@ final class AppModel: ObservableObject {
     /// path typed into a settings field is not a request to litter the vault
     /// with empty files on every launch.
     @discardableResult
-    private func openStartupNote() -> Bool {
+    private func openStartupNote(_ chosen: StartupNote? = nil) -> Bool {
         guard let root = vaultRoot else { return false }
-        let setting = StartupSettings.shared.setting(for: root)
+        let setting = chosen ?? StartupSettings.shared.setting(for: root)
         guard let relative = setting.relativePath(
             on: Date(),
             dailyPath: { dailyNotes?.relativePath(for: $0) },

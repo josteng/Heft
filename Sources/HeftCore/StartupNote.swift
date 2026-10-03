@@ -90,3 +90,45 @@ public struct StartupNote: Codable, Equatable, Sendable {
         return joined
     }
 }
+
+/// What a vault's window opens on when it comes back after its last window
+/// was closed, without Heft having quit: the Dock click that reopens it.
+///
+/// Its own answer, since starting the day and picking up again are different
+/// moments: a reader may want today's daily note at launch and the note they
+/// just left when they reopen. Every launch answer is offered, a named note
+/// and a pattern included, or simply the launch's own. The default is the
+/// note they were last on, which is what closing and reopening a window means
+/// in every other editor; before this a reopened window came back on nothing.
+public struct ReopenNote: Codable, Equatable, Sendable {
+    /// Whatever the launch setting says.
+    public var sameAsLaunch: Bool
+    /// The reopen's own answer, used when `sameAsLaunch` is off.
+    public var note: StartupNote
+
+    public static let standard = ReopenNote(sameAsLaunch: false, note: StartupNote(choice: .lastNote))
+
+    public init(sameAsLaunch: Bool, note: StartupNote) {
+        self.sameAsLaunch = sameAsLaunch
+        self.note = note
+    }
+
+    /// The launch-shaped answer this stands for.
+    public func resolved(launch: StartupNote) -> StartupNote {
+        sameAsLaunch ? launch : note
+    }
+
+    /// Read from what was stored: this as JSON, or the four-word choice an
+    /// earlier build kept, so a choice already made carries over.
+    public static func decode(_ data: Data?, legacy: String?) -> ReopenNote {
+        if let data, let decoded = try? JSONDecoder().decode(ReopenNote.self, from: data) {
+            return decoded
+        }
+        switch legacy {
+        case "asLaunch": return ReopenNote(sameAsLaunch: true, note: standard.note)
+        case "nothing": return ReopenNote(sameAsLaunch: false, note: StartupNote(choice: .nothing))
+        case "dailyNote": return ReopenNote(sameAsLaunch: false, note: StartupNote(choice: .dailyNote))
+        default: return standard
+        }
+    }
+}

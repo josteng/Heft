@@ -853,7 +853,11 @@ struct VaultHostTests {
         #expect(model.copyCurrentNote())
         #expect(host.pasteboardFiles.map(\.resolved) == [root.appendingPathComponent("Index.md").resolved])
 
-        let empty = try await ready(self.model(root, ScriptedHost()))
+        // Another vault, with no history: a window on the same vault with
+        // none open is a reopen, and goes back to the note it was on.
+        let elsewhere = try vault()
+        defer { try? FileManager.default.removeItem(at: elsewhere) }
+        let empty = try await ready(self.model(elsewhere, ScriptedHost()))
         #expect(!empty.copyCurrentNote())
     }
 

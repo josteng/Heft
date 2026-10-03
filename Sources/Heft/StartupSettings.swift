@@ -37,6 +37,25 @@ final class StartupSettings: ObservableObject {
         objectWillChange.send()
     }
 
+    private static let reopenPrefix = "dev.stenglein.Heft.reopenNote:"
+
+    /// What this vault's window opens on when it is reopened without a quit.
+    func reopen(for vault: URL) -> ReopenNote {
+        let key = Self.reopenKey(for: vault)
+        let defaults = HeftDefaults.shared
+        return ReopenNote.decode(defaults.data(forKey: key), legacy: defaults.string(forKey: key))
+    }
+
+    func setReopen(_ setting: ReopenNote, for vault: URL) {
+        guard let data = try? JSONEncoder().encode(setting) else { return }
+        HeftDefaults.shared.set(data, forKey: Self.reopenKey(for: vault))
+        objectWillChange.send()
+    }
+
+    private static func reopenKey(for vault: URL) -> String {
+        reopenPrefix + (vault.standardizedFileURL.path as NSString).standardizingPath
+    }
+
     /// App-wide, unlike the rest of this pane: which vault a start with
     /// nothing to restore opens. Empty means the vault opened last.
     var launchVaultPath: String {

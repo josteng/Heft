@@ -17,7 +17,7 @@ struct StartupSettingsView: View {
 
     var body: some View {
         Form {
-            // App-wide, above the per-vault answer: which vault comes up at
+            // App-wide, above the per-vault answers: which vault comes up at
             // all decides which of the answers below applies.
             Section {
                 LabeledContent {
@@ -26,71 +26,69 @@ struct StartupSettingsView: View {
                 } label: {
                     SettingLabel(
                         "Open",
-                        detail: "For a start with no windows to bring back."
+                        detail: "Which vault comes up. What it opens is chosen below."
                     )
                 }
             } header: {
                 SectionHeading("When there is nothing to restore")
             }
 
-            // The choice on its own. A field in the same group sat directly
-            // under the last option and read as belonging to it, however it
-            // was labelled: a grouped Form draws one card, and everything in
-            // the card looks related.
-            Section {
-                if vault != nil {
-                    Picker("", selection: choice) {
-                        ForEach(StartupNote.Choice.allCases) { option in
-                            Text(title(option)).tag(option)
-                        }
+            if let vault {
+                // Menus rather than radio groups: two lists of five answers
+                // each made the pane a column of dots, and the field a choice
+                // needs now sits right under the menu it belongs to.
+                Section {
+                    // What the chosen answer does is the row's, under its name,
+                    // as everywhere in Settings; above the card is only what
+                    // the group is.
+                    StartupChoiceEditor(
+                        title: "Open",
+                        note: Binding(get: { current }, set: { save($0) }),
+                        vault: vault,
+                        detail: explanation
+                    )
+                } header: {
+                    SectionHeading("When Heft opens \(vault.lastPathComponent)")
+                }
+
+                Section {
+                    // A switch, and the same menu as above under it while it
+                    // is off: following the launch is a yes or no, not one
+                    // more answer in a list of them.
+                    let follows = Binding(
+                        get: { settings.reopen(for: vault).sameAsLaunch },
+                        set: { var next = settings.reopen(for: vault); next.sameAsLaunch = $0; settings.setReopen(next, for: vault) }
+                    )
+                    Toggle("Same as when Heft opens", isOn: follows)
+                    if !follows.wrappedValue {
+                        StartupChoiceEditor(
+                            title: "Open",
+                            note: Binding(
+                                get: { settings.reopen(for: vault).note },
+                                set: { var next = settings.reopen(for: vault); next.note = $0; settings.setReopen(next, for: vault) }
+                            ),
+                            vault: vault
+                        )
                     }
-                    .pickerStyle(.radioGroup)
-                    .labelsHidden()
-                } else {
+                } header: {
+                    SectionHeading(
+                        "When a window opens again",
+                        detail: "After its last window was closed without quitting, as when you "
+                            + "click Heft in the Dock."
+                    )
+                }
+
+                if current.choice != .nothing {
+                    // Not "today": only two of the five answers depend on the
+                    // date at all, and a named note is the same note whenever.
+                    Section("What Heft would open now") {
+                        Text(preview).foregroundStyle(.primary)
+                    }
+                }
+            } else {
+                Section {
                     Text("Open a vault to choose what it starts on.")
                         .foregroundStyle(.secondary)
-                }
-            } header: {
-                SectionHeading(
-                    "When Heft opens\(vault.map { " \($0.lastPathComponent)" } ?? "")",
-                    detail: vault == nil ? nil : explanation
-                )
-            }
-
-            if vault != nil, current.choice.needsText {
-                Section {
-                    LabeledContent(fieldLabel) {
-                        HStack(spacing: 8) {
-                            TextField("", text: text, prompt: Text(placeholder))
-                                .textFieldStyle(.roundedBorder)
-                                .labelsHidden()
-                            if current.choice == .note {
-                                Button("Choose…") { chooseNote() }
-                            }
-                        }
-                    }
-
-                    // The same list the daily-note sheet shows, from the same
-                    // component: the same tokens through the same
-                    // `MomentFormat`, and two lists would read as two systems
-                    // that happen to look alike.
-                    if current.choice == .pattern {
-                        PlaceholderReference(
-                            title: "Template Variables",
-                            tokens: PlaceholderReference.dateTokens,
-                            footnote: PlaceholderReference.momentTokenFootnote,
-                            tokenWidth: 160
-                        )
-                        .padding(.top, 6)
-                    }
-                }
-            }
-
-            if vault != nil, current.choice != .nothing {
-                // Not "today": only two of the five answers depend on the date
-                // at all, and a named note is the same note whenever you look.
-                Section("What Heft would open now") {
-                    Text(preview).foregroundStyle(.primary)
                 }
             }
         }
@@ -108,44 +106,6 @@ struct StartupSettingsView: View {
     private func save(_ setting: StartupNote) {
         guard let vault else { return }
         settings.set(setting, for: vault)
-    }
-
-    private var choice: Binding<StartupNote.Choice> {
-        Binding(
-            get: { current.choice },
-            set: { var next = current; next.choice = $0; save(next) }
-        )
-    }
-
-    private var text: Binding<String> {
-        Binding(
-            get: { current.text },
-            set: { var next = current; next.text = $0; save(next) }
-        )
-    }
-
-    // MARK: - Words
-
-    private func title(_ option: StartupNote.Choice) -> String {
-        switch option {
-        case .nothing: "Nothing"
-        case .lastNote: "The note you were last on"
-        case .dailyNote: "Today's daily note"
-        case .note: "One note, always"
-        case .pattern: "A note worked out from the date"
-        }
-    }
-
-    private var fieldLabel: String {
-        current.choice == .note ? "Note" : "Pattern"
-    }
-
-    /// Not `Inbox.md`. That name means one thing in Heft — the note Spotlight
-    /// capture appends to — and offering it as the example here made it look like the
-    /// canonical note for everything, which is the sort of overlap that reads
-    /// as two features pointing at the same place.
-    private var placeholder: String {
-        current.choice == .note ? "Projects/Overview.md" : "Journal/{{date:YYYY}}/{{date:YYYY-MM}}.md"
     }
 
     private var explanation: String {
@@ -195,20 +155,80 @@ struct StartupSettingsView: View {
     private func lastNote() -> String? {
         registry.frontmostModel?.recentNotes.first?.relativePath
     }
+}
+
+/// One launch-shaped answer: a menu of what to open, and the note or the
+/// pattern the answer needs, under it. Used for launching and, when it does
+/// not simply follow the launch, for reopening.
+private struct StartupChoiceEditor: View {
+    let title: String
+    @Binding var note: StartupNote
+    let vault: URL
+    /// What the chosen answer does, under the menu's name.
+    var detail: String?
+
+    var body: some View {
+        Picker(selection: $note.choice) {
+            ForEach(StartupNote.Choice.allCases) { Text(Self.title($0)).tag($0) }
+        } label: {
+            if let detail { SettingLabel(title, detail: detail) } else { Text(title) }
+        }
+        .defaultMenuTint()
+
+        if note.choice.needsText {
+            LabeledContent(note.choice == .note ? "Note" : "Pattern") {
+                HStack(spacing: 8) {
+                    TextField("", text: $note.text, prompt: Text(placeholder))
+                        .textFieldStyle(.roundedBorder)
+                        .labelsHidden()
+                    if note.choice == .note {
+                        Button("Choose…") { chooseNote() }
+                    }
+                }
+            }
+            // The same list the daily-note sheet shows, from the same
+            // component: the same tokens through the same `MomentFormat`.
+            if note.choice == .pattern {
+                PlaceholderReference(
+                    title: "Template Variables",
+                    tokens: PlaceholderReference.dateTokens,
+                    footnote: PlaceholderReference.momentTokenFootnote,
+                    tokenWidth: 160
+                )
+                .padding(.top, 6)
+            }
+        }
+    }
+
+    static func title(_ option: StartupNote.Choice) -> String {
+        switch option {
+        case .nothing: "Nothing"
+        case .lastNote: "The note you were last on"
+        case .dailyNote: "Today's daily note"
+        case .note: "One note, always"
+        case .pattern: "A note worked out from the date"
+        }
+    }
+
+    /// Not `Inbox.md`. That name means one thing in Heft — the note Spotlight
+    /// capture appends to — and offering it as the example here made it look
+    /// like the canonical note for everything.
+    private var placeholder: String {
+        note.choice == .note ? "Projects/Overview.md" : "Journal/{{date:YYYY}}/{{date:YYYY-MM}}.md"
+    }
 
     private func chooseNote() {
-        guard let vault else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.directoryURL = vault
         panel.prompt = "Choose"
-        panel.message = "Pick the note Heft should open when it starts."
+        panel.message = "Pick the note Heft should open."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let root = vault.standardizedFileURL.path
         let chosen = url.standardizedFileURL.path
         guard chosen.hasPrefix(root + "/") else { return }
-        text.wrappedValue = String(chosen.dropFirst(root.count + 1))
+        note.text = String(chosen.dropFirst(root.count + 1))
     }
 }

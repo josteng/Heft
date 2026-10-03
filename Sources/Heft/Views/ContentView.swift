@@ -267,8 +267,39 @@ private struct WindowToolbarConfiguration: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        DispatchQueue.main.async { configure(view.window) }
+        DispatchQueue.main.async {
+            configure(view.window)
+            if let window = view.window {
+                MainActor.assumeIsolated { Self.leaveFieldsUnfocused(in: window) }
+            }
+        }
         return view
+    }
+
+    /// A window that opens on no note does not put its caret in the sidebar's
+    /// filter. With nothing claiming the keyboard, SwiftUI hands it to the
+    /// first field it finds, so a window opening on Recent blinked in "Filter
+    /// recent" as if asking to be typed in. Once, as the window first becomes
+    /// key, and only a text field's focus: the note editor is not a field, so
+    /// a window that opens on a note keeps its caret there. A click or Tab
+    /// still reaches the filter.
+    @MainActor
+    private static func leaveFieldsUnfocused(in window: NSWindow) {
+        Task { @MainActor in
+            if !window.isKeyWindow {
+                // The first time it becomes key, then no more: an async
+                // sequence rather than an observer, so there is no token to
+                // keep and remove.
+                for await _ in NotificationCenter.default.notifications(
+                    named: NSWindow.didBecomeKeyNotification, object: window
+                ) { break }
+            }
+            // A moment later, once SwiftUI has handed out its default focus;
+            // a single yield could come before it.
+            try? await Task.sleep(for: .milliseconds(50))
+            guard let editor = window.firstResponder as? NSTextView, editor.isFieldEditor else { return }
+            window.makeFirstResponder(nil)
+        }
     }
 
     func updateNSView(_ view: NSView, context: Context) {

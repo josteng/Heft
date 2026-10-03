@@ -381,7 +381,11 @@ opened.
 Three sources decide, in order of how deliberate they are: a note named on the
 command line, then the setting, then a restored window's own note. The setting
 outranks restoration, or a launch from the Dock would make it do nothing, and
-it is claimed once per process. Only the daily note is created; a path in a
+it is claimed once per process. A window built later while no other is open
+is the app picked up again from the Dock after its last window closed, and
+follows its own answer (`ReopenNote`), by default the note it was last on;
+one built beside an open window keeps what it was given. Only the daily note
+is created; a path in a
 settings field is not a request to litter the vault with empty files.
 
 ## Making a vault

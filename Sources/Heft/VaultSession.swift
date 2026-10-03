@@ -323,6 +323,12 @@ final class VaultRegistry: ObservableObject {
     private var focusedFolders: [UUID: String] = [:]
     private var workspaceWindows: [UUID: WeakWindow] = [:]
     private var workspaceModels: [UUID: WeakModel] = [:]
+
+    /// Whether any workspace window is open now. A window built while none
+    /// is, after the first of the process, is a reopen.
+    var hasOpenWorkspace: Bool {
+        workspaceModels.values.contains { $0.value != nil }
+    }
     private var windowOpeners: [UUID: (WorkspaceDescriptor) -> Void] = [:]
     /// For a launch with nothing to restore: the vault chosen in Settings ▸
     /// Startup, else the one opened last. Not the vault chosen for captures:
