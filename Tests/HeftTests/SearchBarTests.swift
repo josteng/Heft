@@ -378,7 +378,7 @@ struct SearchBarRowTests {
         let order = QuickOpenOrder(lead: .recent, count: 1)
         let rows = model.barRows(scope: .notes, query: "", entireVault: true, order: order)
         #expect(ids(rows) == ["heading:Recent", "note:Beta.md", "heading:Frequent", "note:Alpha.md"])
-        #expect(rows.first?.scope == .recent, "the heading is a way into its scope")
+        #expect(rows.first?.isSelectable == false, "a heading is a label the arrows pass over")
 
         let typed = ids(model.barRows(scope: .notes, query: "alp", entireVault: true, order: order))
         #expect(typed == ["note:Alpha.md", "searchText"])
@@ -499,7 +499,7 @@ struct SearchBarRowTests {
         let rows = model.barRows(scope: nil, query: "zebra", entireVault: true, text: text)
         let rowIDs = ids(rows)
         let heading = try #require(rowIDs.firstIndex(of: "heading:Text"), "got \(rowIDs)")
-        #expect(rows[heading].scope == .contents, "the heading leads into the text scope")
+        #expect(!rows[heading].isSelectable, "a label, like every heading")
         #expect(rowIDs.firstIndex(of: "note:Zebra notes.md")! < heading, "names first")
         #expect(rowIDs.filter { $0.hasPrefix("hit:") }.count == AppModel.barTextPreview)
         guard case .searchText(_, let matches) = try #require(rows.last) else {
@@ -639,7 +639,8 @@ struct SearchBarRowTests {
         #expect(BarRow.command(quickOpen).scope == .notes)
         #expect(BarRow.command(search).scope == .contents)
         #expect(BarRow.searchText("x").scope == .contents)
-        #expect(!BarRow.heading("Search In", target: nil).isSelectable)
+        #expect(!BarRow.heading("Search In").isSelectable)
+        #expect(BarRow.heading("Recent").scope == nil, "no heading leads anywhere")
     }
 
     /// ⌘1 to ⌘3 ask the sidebar for a view, and bring a hidden sidebar back.

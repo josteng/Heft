@@ -6,7 +6,7 @@ import Testing
 @testable import Heft
 
 /// The bar's keys, through the real view: what typing a trigger, Backspace,
-/// Tab and Return on a heading do to the field.
+/// Tab, and the arrows passing over headings, do to the field.
 ///
 /// The field is never made first responder. A text field focused in a
 /// headless window starts the system's completion service, which has taken
@@ -125,22 +125,17 @@ struct SearchBarInteractionTests {
         #expect(bar.placeholder == BarScope.tags.placeholder)
     }
 
-    /// The list opens on the first note; one up is the heading, and Return
-    /// on it enters that order as a scope.
-    @Test("Return on a heading enters its scope")
-    func headingEntersScope() async throws {
+    /// Headings are labels: Up from the first note has nowhere to go, so
+    /// the note stays chosen and Return opens it.
+    @Test("Up passes over headings")
+    func arrowsSkipHeadings() async throws {
         let bar = try await harness(
             ["Alpha.md": "a", "Beta.md": "b"], scope: .notes, recent: ["Alpha.md"]
         )
         defer { bar.model.closeWorkspace() }
         bar.press(#selector(NSResponder.moveUp(_:)))
         bar.press(#selector(NSResponder.insertNewline(_:)))
-        // The heading flashes first and the scope follows on the next turn of
-        // the main queue, which a run loop spun from inside this test cannot
-        // reach; awaiting yields to it.
-        try await Task.sleep(for: .milliseconds(100))
-        bar.settle()
-        #expect(bar.placeholder == BarScope.recent.placeholder)
+        #expect(bar.model.current?.name == "Alpha")
     }
 
     /// "rec" puts Recent first, and the space after it makes the chip, as

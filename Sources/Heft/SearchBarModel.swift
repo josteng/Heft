@@ -13,9 +13,11 @@ struct BarRequest: Identifiable, Equatable {
 
 /// One row of the search bar.
 enum BarRow: Identifiable {
-    /// A section title. With a target it is a row the arrows reach, and
-    /// choosing it enters that scope; without one it only labels.
-    case heading(String, target: BarScope?)
+    /// A section title, which only labels: the arrows pass over it. Some
+    /// headings once led into a scope and others did not, so the arrows
+    /// stopped on some and skipped others; every scope is a chip, ⌘1 to ⌘5
+    /// and a name to type instead.
+    case heading(String)
     case note(NoteRef)
     case command(AppCommand)
     case tag(String, count: Int)
@@ -32,7 +34,7 @@ enum BarRow: Identifiable {
 
     var id: String {
         switch self {
-        case .heading(let title, _): "heading:\(title)"
+        case .heading(let title): "heading:\(title)"
         case .note(let note): "note:\(note.relativePath)"
         case .command(let command): "command:\(command.id)"
         case .tag(let name, _): "tag:\(name)"
@@ -45,7 +47,7 @@ enum BarRow: Identifiable {
     }
 
     var isSelectable: Bool {
-        if case .heading(_, nil) = self { return false }
+        if case .heading = self { return false }
         return true
     }
 
@@ -53,7 +55,6 @@ enum BarRow: Identifiable {
     /// than opening or running something. Tab goes into it as well.
     var scope: BarScope? {
         switch self {
-        case .heading(_, let target): target
         case .tag(let name, _): .tag(name)
         case .folder(let path, _): .folder(path)
         case .scope(let scope): scope
@@ -71,25 +72,6 @@ extension AppCommand {
         "quickOpen": .notes,
         "searchVault": .contents,
     ]
-}
-
-extension QuickOpenOrder.Lead {
-    var barScope: BarScope { self == .recent ? .recent : .frequent }
-}
-
-extension StartList.Row {
-    /// Where the row's heading leads when chosen: the scope that lists the
-    /// same one kind, and nowhere for a row that mixes kinds.
-    var barScope: BarScope? {
-        guard order != .pinned, kinds.count == 1, let kind = kinds.first else { return nil }
-        switch kind {
-        case .notes: return order == .recent ? .recent : .frequent
-        case .commands: return .commands
-        case .tags: return .tags
-        case .folders: return .folders
-        case .scopes: return nil
-        }
-    }
 }
 
 @MainActor
@@ -189,7 +171,7 @@ extension AppModel {
             let names = rows.filter { if case .searchText = $0 { false } else { true } }
             // The heading is a way in, as Quick Open's are: the text scope,
             // carrying the query.
-            return names + [.heading("Text", target: .contents)]
+            return names + [.heading("Text")]
                 + hits.prefix(Self.barTextPreview)
                 + [.searchText(query, matches: text.totalMatches)]
         }
@@ -197,7 +179,7 @@ extension AppModel {
         // The names stay first and unlabelled, so a note found by name is
         // still one Return away and nothing above it moves when the text
         // arrives; a "Names" heading appearing over them pushed the list down.
-        return rows + [.heading("Text", target: nil)] + hits
+        return rows + [.heading("Text")] + hits
     }
 
     private func nameRows(
@@ -214,7 +196,7 @@ extension AppModel {
         case .notes:
             var rows = quickOpenList(query, entireVault: entireVault, order: order ?? orders[.notes]).rows.map {
                 switch $0 {
-                case .heading(let kind): BarRow.heading(kind.title, target: kind.barScope)
+                case .heading(let kind): BarRow.heading(kind.title)
                 case .note(let note): BarRow.note(note)
                 }
             }
@@ -336,7 +318,7 @@ extension AppModel {
                 .filter { !listed.contains($0.id) }
                 .prefix(limit)
             guard !fresh.isEmpty else { continue }
-            rows.append(.heading(row.title, target: row.barScope))
+            rows.append(.heading(row.title))
             rows += fresh
             listed.formUnion(fresh.map(\.id))
         }
@@ -345,7 +327,7 @@ extension AppModel {
         if rows.isEmpty {
             let notes = allNotesByUse(entireVault: entireVault)
             if !notes.isEmpty {
-                rows = [.heading(BarScope.notes.title, target: .notes)] + notes.map(BarRow.note)
+                rows = [.heading(BarScope.notes.title)] + notes.map(BarRow.note)
             }
         }
         return rows
@@ -590,9 +572,9 @@ extension AppModel {
         let headed = rest.contains { if case .heading = $0 { true } else { false } }
         if !headed, !rest.isEmpty {
             let title = order.mode == .recentOnly || order.mode == .recentFirst ? "Recent" : "Frequent"
-            rest.insert(.heading(title, target: nil), at: 0)
+            rest.insert(.heading(title), at: 0)
         }
-        return [.heading("Pinned", target: nil)] + pinned + rest
+        return [.heading("Pinned")] + pinned + rest
     }
 
     /// Records that the reader went into `scope`, so it ranks by use.
@@ -619,8 +601,8 @@ extension AppModel {
         }
         // The order alone, as Notes heads its own: the chip already says
         // what kind of thing is listed.
-        return [.heading(heading.title, target: nil)] + arranged.lead.map(row)
-            + [.heading(heading.other.title, target: nil)] + arranged.rest.map(row)
+        return [.heading(heading.title)] + arranged.lead.map(row)
+            + [.heading(heading.other.title)] + arranged.rest.map(row)
     }
 
     /// Commands that cannot run moved to the end of whichever part they are

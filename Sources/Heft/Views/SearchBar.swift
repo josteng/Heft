@@ -35,9 +35,6 @@ struct SearchBarView: View {
     /// either uses it or replaces it.
     @State private var selectAllRequest = 0
     @State private var isSearching = false
-    /// The heading just chosen, drawn brighter for a moment so the choice
-    /// visibly registered before the rows change.
-    @State private var flashing: String?
     /// Whether the highlighted row was reached by the arrows or a click
     /// rather than by being first. Space enters a scope row the reader
     /// moved to whatever they typed; one that is merely first needs the
@@ -268,8 +265,6 @@ struct SearchBarView: View {
         case .folder(let path, _):
             let target = BarScope.folder(path)
             return isSelectionChosen || target.isNamed(byPrefix: old) ? target : nil
-        case .heading(_, let target?):
-            return isSelectionChosen ? target : nil
         default:
             return nil
         }
@@ -335,15 +330,8 @@ struct SearchBarView: View {
     @ViewBuilder
     private func rowView(_ row: BarRow, isSelected: Bool) -> some View {
         switch row {
-        case .heading(let title, let target):
-            if target == nil {
-                SectionLabel(title: title)
-            } else {
-                HeadingRow(
-                    title: title, hint: "Show All",
-                    isSelected: isSelected, isFlashing: flashing == row.id
-                )
-            }
+        case .heading(let title):
+            SectionLabel(title: title)
         case .note(let note):
             NoteResultRow(note: note, isSelected: isSelected, isPinned: model.isPinned(row))
                 // A result is a file, and dragging one out beats opening it
@@ -470,7 +458,7 @@ struct SearchBarView: View {
         switch row {
         case .note, .hit: "Open"
         case .command: "Run"
-        case .heading(_, let target): target == nil ? nil : "Show"
+        case .heading: nil
         case .tag, .folder, .scope, .searchText: "Search in"
         case .elsewhere: "Show"
         }
@@ -523,15 +511,6 @@ struct SearchBarView: View {
         guard rows.indices.contains(index) else { return }
         let row = rows[index]
         if let target = row.scope {
-            if case .heading = row {
-                // Drawn in a turn of its own, then animated away with the
-                // change of scope; set together, it would never be seen.
-                flashing = row.id
-                // Into text the words come along, as from its row below.
-                let carried = target == .contents ? query : ""
-                DispatchQueue.main.async { enter(target, carrying: carried) }
-                return
-            }
             if case .searchText(let text, _) = row {
                 enter(target, carrying: text)
             } else {
@@ -583,7 +562,6 @@ struct SearchBarView: View {
         withAnimation(animation) {
             scope = target
             query = text
-            flashing = nil
             textStuck = false
             contents = .empty()
             refreshRows()
@@ -926,42 +904,6 @@ private struct SectionLabel: View {
             .padding(.top, 8)
             .padding(.bottom, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// A heading that is a way into its own scope, so it says what Return will
-/// do once the arrows reach it.
-private struct HeadingRow: View {
-    @Environment(\.appAccent) private var accent
-
-    let title: String
-    let hint: String
-    let isSelected: Bool
-    var isFlashing = false
-
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-            Spacer(minLength: 8)
-            if isSelected {
-                Text(hint).font(.system(size: 11))
-            }
-        }
-        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if isSelected || isFlashing {
-                RoundedRectangle(cornerRadius: 6).fill(accent)
-                    .overlay(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(isFlashing ? 0.35 : 0)))
-            }
-        }
-        .contentShape(.rect)
-        // The gap above a heading sits outside its highlight, or the label
-        // is drawn low inside it.
-        .padding(.top, 3)
     }
 }
 
