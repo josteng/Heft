@@ -397,6 +397,9 @@ final class AppModel: ObservableObject {
     }
 
     @Published var inlineNoteRequest: InlineNoteRequest?
+    /// A sidebar view asked for from the menu (⌘1 to ⌘3); the sidebar owns
+    /// which one it shows and takes the request, as it takes a new note's.
+    @Published var sidebarModeRequest: SidebarMode?
     private var inlineNoteSequence = 0
     var isInspectorVisible: Bool {
         get { chrome.isInspectorVisible }
@@ -3233,6 +3236,15 @@ final class AppModel: ObservableObject {
 
     /// Expands every ancestor folder so a note opened from search or the
     /// calendar becomes visible in the sidebar.
+    /// Shows the sidebar on `mode`, bringing the sidebar back if it was
+    /// hidden: asking for Files with the sidebar closed means wanting it seen.
+    func showSidebar(_ mode: SidebarMode) {
+        if columnVisibility == .detailOnly {
+            withAnimation(.snappy(duration: 0.2)) { columnVisibility = .all }
+        }
+        sidebarModeRequest = mode
+    }
+
     func toggleSidebar() {
         withAnimation(.snappy(duration: 0.2)) {
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly

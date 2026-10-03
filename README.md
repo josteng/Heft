@@ -168,7 +168,10 @@ four-space indented code, raw HTML and entity references;
   opened last and what you use most first. Typing `@`, `>`, `#` or `/`
   narrows it to notes, commands, tags or text in notes, shown as a chip at
   the start of the field, and Backspace widens it again; ⌘1 to ⌘5 jump to
-  the chips, as in Spotlight. A scope or a tag can
+  the chips, as in Spotlight. ⌘D, right-click or the hint along the bottom of
+  the bar pins the highlighted note, folder, tag or command, as does Pin in
+  Search on a note or folder in the sidebar: pins come first in their scope and in ⌘T, in the order pinned,
+  and live in the vault's `.heft/pins.json`, so they sync with it. A scope or a tag can
   also be typed by name: "rec" offers Recent, and Space or Tab makes it the
   chip. Choosing a tag or a folder searches only its notes, by name first
   and then by the text inside them. **Quick open** (⌘O), the **command palette** (⌘P) and **content
@@ -178,6 +181,9 @@ four-space indented code, raw HTML and entity references;
   carries the file tree's own verbs too, so a note's path or wikilink is a
   search away without finding its row first. ⌘O also takes a path,
   vault-relative or absolute, quoted or as a `file://` URL.
+- **The sidebar's views**, Files, Recent and Tags, can be hidden and put in
+  any order in Settings ▸ General; ⌘1 to ⌘3 follow them, and a window can open
+  on the first, the last used, or one in particular.
 - **Recent** reads like your notes rather than a folder listing: each row
   has its date, first line and folder, grouped under Today, Yesterday,
   Previous 7 Days and by month. Order it by last edit, which follows notes
@@ -307,6 +313,9 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | ⌘L | Toggle checkbox |
 | ⇧⌘J | Show this note in the file tree |
 | ⇧⌘S | Toggle sidebar |
+| ⌘1 | First sidebar view |
+| ⌘2 | Second sidebar view |
+| ⌘3 | Third sidebar view |
 | ⇧⌘D | Toggle calendar |
 | ⌥⌘B | Toggle backlinks |
 

@@ -98,6 +98,10 @@ struct SearchBarView: View {
             if scope == nil { scopeStrip }
             Divider()
             list(rows)
+            if settings.showsKeyHints {
+                Divider()
+                footer
+            }
         }
         // One height whatever the scope: the chip row leaving gives its room
         // to the list rather than shrinking the sheet under the pointer.
@@ -290,6 +294,16 @@ struct SearchBarView: View {
                                     isSelectionChosen = true
                                     choose(at: index)
                                 }
+                                // Right-click is where a Mac reader looks for
+                                // what can be done to a row.
+                                .contextMenu {
+                                    if let pin = model.pin(for: row) {
+                                        let pinned = model.isPinned(row)
+                                        Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+                                            togglePin(pin, keeping: row.id)
+                                        }
+                                    }
+                                }
                         }
                     }
                     .padding(6)
@@ -331,7 +345,7 @@ struct SearchBarView: View {
                 )
             }
         case .note(let note):
-            NoteResultRow(note: note, isSelected: isSelected)
+            NoteResultRow(note: note, isSelected: isSelected, isPinned: model.isPinned(row))
                 // A result is a file, and dragging one out beats opening it
                 // to find its path. Simultaneous so a click still opens it,
                 // and only once the pointer has travelled.
@@ -342,7 +356,8 @@ struct SearchBarView: View {
         case .command(let command):
             CommandRow(
                 command: command, title: command.title(on: model),
-                isSelected: isSelected, isEnabled: command.isEnabled(on: model)
+                isSelected: isSelected, isPinned: model.isPinned(row),
+                isEnabled: command.isEnabled(on: model)
             )
         case .tag(let name, let count):
             ActionRow(
@@ -350,7 +365,7 @@ struct SearchBarView: View {
                 detail: isSelected
                     ? "Space to search"
                     : (count == 1 ? "1 note" : "\(count) notes"),
-                isSelected: isSelected
+                isSelected: isSelected, isPinned: model.isPinned(row)
             )
         case .folder(let path, let count):
             ActionRow(
@@ -358,7 +373,7 @@ struct SearchBarView: View {
                 detail: isSelected
                     ? "Space to search"
                     : (count == 1 ? "1 note" : "\(count) notes"),
-                isSelected: isSelected
+                isSelected: isSelected, isPinned: model.isPinned(row)
             )
         case .scope(let target):
             // As Chrome says "Press Tab to search" on a keyword's row.
@@ -400,10 +415,65 @@ struct SearchBarView: View {
                         .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .command)
                 }
             }
+            // ⌘D pins or unpins the selected row, as it bookmarks in Safari.
+            Button("") { togglePinOfSelection() }
+                .keyboardShortcut("d", modifiers: .command)
         }
         .frame(width: 0, height: 0)
         .opacity(0)
         .accessibilityHidden(true)
+    }
+
+    /// Pins the selected row, or unpins it, and keeps it selected wherever
+    /// the list now puts it.
+    private func togglePinOfSelection() {
+        guard rows.indices.contains(selection), let pin = model.pin(for: rows[selection]) else { return }
+        togglePin(pin, keeping: rows[selection].id)
+    }
+
+    private func togglePin(_ pin: Pins.Pin, keeping id: String) {
+        model.togglePin(pin)
+        refreshRows()
+        if let moved = rows.firstIndex(where: { $0.id == id }) { selection = moved }
+    }
+
+    // MARK: The hint line
+
+    /// What the keys do to the row in hand, along the bottom, as Raycast and
+    /// Linear show it: Return, pinning, leaving a scope, the chips. Pinning
+    /// was ⌘D and nothing else, which nobody would find; the hint is also a
+    /// button.
+    private var footer: some View {
+        let row = rows.indices.contains(selection) ? rows[selection] : nil
+        return HStack(spacing: 14) {
+            if let row, let action = returnHint(for: row) {
+                KeyHint(key: "↵", label: action)
+            }
+            if let row, model.pin(for: row) != nil {
+                Button { togglePinOfSelection() } label: {
+                    KeyHint(key: "⌘D", label: model.isPinned(row) ? "Unpin" : "Pin")
+                }
+                .buttonStyle(.plain)
+                .help(model.isPinned(row) ? "Unpin, so it no longer comes first" : "Pin, so it comes first here and in ⌘T")
+            }
+            if scope != nil, trimmed.isEmpty {
+                KeyHint(key: "⌫", label: "Back")
+            }
+            Spacer(minLength: 8)
+            KeyHint(key: "⌘1–5", label: "Scopes")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+    }
+
+    private func returnHint(for row: BarRow) -> String? {
+        switch row {
+        case .note, .hit: "Open"
+        case .command: "Run"
+        case .heading(_, let target): target == nil ? nil : "Show"
+        case .tag, .folder, .scope, .searchText: "Search in"
+        case .elsewhere: "Show"
+        }
     }
 
     /// A chip chosen by its number, keeping what was typed, selected, as a
@@ -900,6 +970,7 @@ private struct NoteResultRow: View {
 
     let note: NoteRef
     let isSelected: Bool
+    var isPinned = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -910,6 +981,12 @@ private struct NoteResultRow: View {
             Text(note.name)
                 .font(.system(size: 13))
                 .lineLimit(1)
+            if isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.75)) : AnyShapeStyle(.secondary))
+                    .accessibilityLabel("Pinned")
+            }
             Spacer(minLength: 8)
             if !note.folder.isEmpty {
                 Text(note.folder)
@@ -936,6 +1013,7 @@ private struct CommandRow: View {
     let command: AppCommand
     let title: String
     let isSelected: Bool
+    var isPinned = false
     let isEnabled: Bool
 
     var body: some View {
@@ -946,6 +1024,12 @@ private struct CommandRow: View {
                 .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
             Text(title)
                 .font(.system(size: 13))
+            if isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.75)) : AnyShapeStyle(.secondary))
+                    .accessibilityLabel("Pinned")
+            }
             Spacer(minLength: 8)
             if let shortcut = command.shortcut {
                 Text(shortcut.display)
@@ -976,6 +1060,7 @@ private struct ActionRow: View {
     let title: String
     let detail: String?
     let isSelected: Bool
+    var isPinned = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -986,6 +1071,12 @@ private struct ActionRow: View {
             Text(title)
                 .font(.system(size: 13))
                 .lineLimit(1)
+            if isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.75)) : AnyShapeStyle(.secondary))
+                    .accessibilityLabel("Pinned")
+            }
             Spacer(minLength: 8)
             if let detail, !detail.isEmpty {
                 Text(detail)
@@ -1116,3 +1207,25 @@ private struct OverlayScrollerConfiguration: NSViewRepresentable {
     }
 }
 #endif
+
+/// One key and what it does, for the bar's hint line.
+private struct KeyHint: View {
+    let key: String
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // Return and Delete as the system's symbols, which sit on the
+            // text's middle; the font's ↵ and ⌫ glyphs sat low beside a word.
+            switch key {
+            case "↵": Image(systemName: "return").fontWeight(.semibold)
+            case "⌫": Image(systemName: "delete.left").fontWeight(.semibold)
+            default: Text(key).fontWeight(.semibold)
+            }
+            Text(label)
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .contentShape(.rect)
+    }
+}

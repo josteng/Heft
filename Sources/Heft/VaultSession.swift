@@ -189,7 +189,29 @@ final class VaultSession: ObservableObject {
 
     /// A file moved: the Recent list, the reader's ranking and the agent's
     /// all follow it, since each is about the note and not the path.
+    /// What the reader pinned in this vault. Read again whenever the search
+    /// bar opens, since another Mac may have pinned something since.
+    private(set) var pins = Pins()
+
+    func reloadPins() {
+        pins = Pins.load(from: root)
+    }
+
+    /// Pins `pin`, or unpins it, and writes the vault's pins at once.
+    @discardableResult
+    func togglePin(_ pin: Pins.Pin) -> Bool {
+        reloadPins()
+        let pinned = pins.toggle(pin)
+        try? pins.save(to: root)
+        return pinned
+    }
+
     func replaceRecentPath(_ oldPath: String, with newPath: String) {
+        reloadPins()
+        if pins.values(of: .note).contains(oldPath) {
+            pins.move(.note, from: oldPath, to: newPath)
+            try? pins.save(to: root)
+        }
         recentPaths = recentPaths.map { $0 == oldPath ? newPath : $0 }
         if let opened = openedAt.removeValue(forKey: oldPath) { openedAt[newPath] = opened }
         HeftDefaults.shared.set(recentPaths, forKey: recentsKey)

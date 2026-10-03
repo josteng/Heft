@@ -199,6 +199,15 @@ so a note found by name stays first, and once shown they stay until the field
 is cleared, or they blink as the count crosses the line. A folder chip
 ignores the window's focus, since choosing it is the more specific request.
 
+Pins (`Pins`) are a third order beside recent and frequent: whatever the
+reader pinned, in the order pinned, first in its scope whatever that scope's
+setting, and a row order in ⌘T's start list. They live in `.heft/pins.json`
+in the vault, beside the proposals, so they sync with it. Not Obsidian's
+bookmarks, which have no place for a command, and which Heft would have had to
+merge with Obsidian's own writes. The order is never ranked, since that is
+what recent and frequent already are; unpinning and pinning again moves one to
+the end.
+
 Rows are identified by what they show, not their position, so entering a
 scope keeps the rows both lists share and fades the rest; the list is keyed
 on the query only, against a sheet keeping stale children.

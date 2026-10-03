@@ -55,6 +55,19 @@ final class GeneralSettings: ObservableObject {
         set { scopeOrders[.notes] = newValue }
     }
 
+    /// Which sidebar views show, in what order, and which a window opens on.
+    @Published var sidebarLayout: SidebarLayout {
+        didSet { sidebarLayout.save() }
+    }
+
+    /// Whether the search bar shows what its keys do along its bottom. On
+    /// by default, since nothing else says ⌘D pins; off for a reader who has
+    /// learnt them and wants the row back.
+    @Published var showsKeyHints: Bool {
+        didSet { HeftDefaults.shared.set(showsKeyHints, forKey: Self.keyHintsKey) }
+    }
+    static let keyHintsKey = "dev.stenglein.Heft.searchBar.keyHints"
+
     /// What ⌘T lists before anything is typed, stored by `StartList`.
     @Published var startList: StartList {
         didSet { startList.save(in: HeftDefaults.shared) }
@@ -63,6 +76,9 @@ final class GeneralSettings: ObservableObject {
     private init() {
         scopeOrders = ScopeOrders.current(in: HeftDefaults.shared)
         startList = StartList.current(in: HeftDefaults.shared)
+        sidebarLayout = SidebarLayout.current()
+        showsKeyHints = HeftDefaults.shared.object(forKey: Self.keyHintsKey) == nil
+            || HeftDefaults.shared.bool(forKey: Self.keyHintsKey)
         offersAgentSetup = HeftDefaults.shared.object(forKey: Self.agentOfferKey) == nil
             || HeftDefaults.shared.bool(forKey: Self.agentOfferKey)
         newNoteLocation = NewNoteLocation(
@@ -81,6 +97,7 @@ final class GeneralSettings: ObservableObject {
 /// so a pane filled in there measures as its own empty placeholder.
 struct GeneralSettingsView: View {
     @ObservedObject private var settings = GeneralSettings.shared
+    private static let sidebarRowHeight: CGFloat = 32
 
     /// Which of the four the picker is on. Held apart from the folder text so
     /// that switching away from "a folder" and back does not lose what was
@@ -174,6 +191,79 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle(isOn: Binding(
+                    get: { settings.offersAgentSetup },
+                    set: { settings.offersAgentSetup = $0 }
+                )) {
+                    SettingLabel(
+                        "Offer agent setup for new vaults",
+                        detail: settings.offersAgentSetup
+                            ? "A vault without agent instructions is asked once whether to add them. "
+                                + "Not Now is remembered for that vault."
+                            : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them."
+                    )
+                }
+            }
+
+            Section {
+                List {
+                    ForEach(Array(settings.sidebarLayout.entries.enumerated()), id: \.element.id) { index, entry in
+                        HStack(spacing: 10) {
+                            // The handle says the row drags, as in the other
+                            // ordered lists here.
+                            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                            let isLast = entry.isShown && !settings.sidebarLayout.canHide(entry.mode)
+                            Toggle("", isOn: Binding(
+                                get: { entry.isShown },
+                                set: { settings.sidebarLayout.entries[index].isShown = $0 }
+                            ))
+                            .toggleStyle(.checkbox)
+                            .labelsHidden()
+                            // The last view shown stays: a sidebar with none
+                            // would be an empty column. Only the box is
+                            // disabled, so the view's name does not dim as if
+                            // it were the one switched off.
+                            .disabled(isLast)
+                            .help(isLast ? "At least one view stays in the sidebar" : "")
+                            Label(entry.mode.title, systemImage: entry.mode.symbol)
+                                .foregroundStyle(entry.isShown ? .primary : .secondary)
+                            Spacer()
+                            // No number with one view: there is nothing to
+                            // switch to.
+                            if let number = settings.sidebarLayout.visible.firstIndex(of: entry.mode),
+                               entry.isShown, number < 3, settings.sidebarLayout.visible.count > 1 {
+                                Text("⌘\(number + 1)").foregroundStyle(.secondary).monospacedDigit()
+                            }
+                        }
+                        .frame(height: Self.sidebarRowHeight)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10))
+                    }
+                    .onMove { settings.sidebarLayout.entries.move(fromOffsets: $0, toOffset: $1) }
+                }
+                .environment(\.defaultMinListRowHeight, Self.sidebarRowHeight)
+                .contentMargins(.vertical, 0, for: .scrollContent)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(settings.sidebarLayout.entries.count) * Self.sidebarRowHeight)
+                .alternatingRowBackgrounds()
+
+                // With one view there is nothing to open on but it.
+                if settings.sidebarLayout.visible.count > 1 {
+                Picker(selection: Binding(
+                    get: { settings.sidebarLayout.start },
+                    set: { settings.sidebarLayout.start = $0 }
+                )) {
+                    ForEach(SidebarLayout.Start.allCases.prefix(2)) { Text($0.title).tag($0) }
+                    Divider()
+                    ForEach(SidebarLayout.Start.allCases.dropFirst(2)) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "Opens on",
+                        detail: "The view a new window's sidebar starts in. Last used comes back "
+                            + "where you were, after a relaunch too."
+                    )
+                }
+                .defaultMenuTint()
+                }
                 Picker(selection: Binding(
                     get: { settings.calendarVisibility },
                     set: { settings.calendarVisibility = $0 }
@@ -193,23 +283,13 @@ struct GeneralSettingsView: View {
                     )
                 }
                 .defaultMenuTint()
+            } header: {
+                SectionHeading(
+                    "Sidebar",
+                    detail: "The views it switches between, in order; ⌘1 to ⌘3 follow them. "
+                        + "With one shown, the switch above the list goes away."
+                )
             }
-
-            Section {
-                Toggle(isOn: Binding(
-                    get: { settings.offersAgentSetup },
-                    set: { settings.offersAgentSetup = $0 }
-                )) {
-                    SettingLabel(
-                        "Offer agent setup for new vaults",
-                        detail: settings.offersAgentSetup
-                            ? "A vault without agent instructions is asked once whether to add them. "
-                                + "Not Now is remembered for that vault."
-                            : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them."
-                    )
-                }
-            }
-
         }
         .formStyle(.grouped)
     }

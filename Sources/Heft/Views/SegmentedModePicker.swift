@@ -12,10 +12,11 @@ import SwiftUI
 struct SegmentedModePicker: NSViewRepresentable {
     @Binding var mode: SidebarMode
     @Binding var filter: String
+    /// The views shown, in the reader's order.
+    var modes: [SidebarMode] = SidebarMode.allCases
 
     func makeNSView(context: Context) -> NSSegmentedControl {
         let control = NSSegmentedControl()
-        control.segmentCount = SidebarMode.allCases.count
         control.trackingMode = .selectOne
         control.controlSize = .small
         // The Tahoe appearance, not the old bezel: `.automatic` and
@@ -35,14 +36,8 @@ struct SegmentedModePicker: NSViewRepresentable {
             // the 27 appearance.
             control.selectedSegmentBezelColor = .unemphasizedSelectedContentBackgroundColor
         }
-        for (index, option) in SidebarMode.allCases.enumerated() {
-            control.setLabel(option.title, forSegment: index)
-            control.setImage(
-                NSImage(systemSymbolName: option.symbol, accessibilityDescription: option.title),
-                forSegment: index
-            )
-            control.setImageScaling(.scaleProportionallyDown, forSegment: index)
-        }
+        Self.configure(control, for: modes)
+        context.coordinator.modes = modes
         // AppKit draws the track for a toolbar, where the surface behind it is
         // lighter than this sidebar, so at full strength it is the brightest
         // thing here and louder than the filter field below it. There is no
@@ -58,9 +53,28 @@ struct SegmentedModePicker: NSViewRepresentable {
         return control
     }
 
+    /// One segment per view shown, rebuilt when the reader changes which.
+    private static func configure(_ control: NSSegmentedControl, for modes: [SidebarMode]) {
+        control.segmentCount = modes.count
+        for (index, option) in modes.enumerated() {
+            control.setLabel(option.title, forSegment: index)
+            control.setImage(
+                NSImage(systemSymbolName: option.symbol, accessibilityDescription: option.title),
+                forSegment: index
+            )
+            control.setImageScaling(.scaleProportionallyDown, forSegment: index)
+        }
+    }
+
     func updateNSView(_ control: NSSegmentedControl, context: Context) {
         context.coordinator.parent = self
-        let index = SidebarMode.allCases.firstIndex(of: mode) ?? 0
+        if context.coordinator.modes != modes {
+            context.coordinator.modes = modes
+            Self.configure(control, for: modes)
+        }
+        // None selected when the view showing is one switched off, as the
+        // file tree is while Reveal in Sidebar uses it.
+        let index = modes.firstIndex(of: mode) ?? -1
         // Only when it differs: assigning during a drag would fight AppKit
         // for the selection it is animating.
         if control.selectedSegment != index { control.selectedSegment = index }
@@ -70,11 +84,12 @@ struct SegmentedModePicker: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var parent: SegmentedModePicker
+        var modes: [SidebarMode] = []
 
         init(_ parent: SegmentedModePicker) { self.parent = parent }
 
         @objc func segmentChanged(_ sender: NSSegmentedControl) {
-            let options = SidebarMode.allCases
+            let options = modes
             guard options.indices.contains(sender.selectedSegment) else { return }
             let chosen = options[sender.selectedSegment]
             guard chosen != parent.mode else { return }

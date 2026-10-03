@@ -74,7 +74,11 @@ struct SidebarView: View {
     // rare enough to redraw the sidebar for.
     @ObservedObject private var appearance = AppearanceSettings.shared
     @State private var filter = ""
-    @State private var mode: SidebarMode = .files
+    /// The view the reader's layout opens on: the first shown, or the one
+    /// last used. Read once per window, as `@State` keeps its first value.
+    @State private var mode: SidebarMode = SidebarLayout.current()
+        .initialMode(lastUsed: SidebarLayout.lastUsed())
+    @ObservedObject private var general = GeneralSettings.shared
     /// Bumped when the session has read a note again, so the Recent list
     /// picks up a new date or first line that no published property carries.
     @State private var contentGeneration = 0
@@ -204,6 +208,17 @@ struct SidebarView: View {
         // ⌘N, which has no field of its own to draw. Answered here rather
         // than in the tree because the tree may not be on screen: switching
         // back from Tags has to happen first, and `beginCreatingNote` does it.
+        .onChange(of: mode) { _, mode in SidebarLayout.recordLastUsed(mode) }
+        // A view switched off while showing gives way to the first one shown.
+        .onChange(of: general.sidebarLayout) { _, layout in
+            let shown = layout.shown(mode)
+            if shown != mode { mode = shown }
+        }
+        .onChange(of: model.sidebarModeRequest) { _, request in
+            guard let request else { return }
+            model.sidebarModeRequest = nil
+            mode = request
+        }
         .onChange(of: model.inlineNoteRequest) { _, request in
             guard let request else { return }
             model.inlineNoteRequest = nil
@@ -459,9 +474,14 @@ struct SidebarView: View {
     /// `.small`, because the three labels with their icons want 209pt and a
     /// sidebar at its 240pt minimum has about 216pt to give. `.regular`
     /// wants 221pt and would be clipped there.
-    private var modePicker: some View {
-        SegmentedModePicker(mode: $mode, filter: $filter)
-            .frame(height: 20)
+    /// Hidden when one view is all there is: a switch with one position
+    /// switches nothing.
+    @ViewBuilder private var modePicker: some View {
+        let modes = general.sidebarLayout.visible
+        if modes.count > 1 {
+            SegmentedModePicker(mode: $mode, filter: $filter, modes: modes)
+                .frame(height: 20)
+        }
     }
 
     /// Tags, most used first, each expanding to the notes carrying it.
@@ -1552,6 +1572,22 @@ private struct TreeViewportHeightKey: PreferenceKey {
 }
 
 /// Actions on a note or attachment.
+/// Pins a note or folder for the search bar, or unpins it. Named "in
+/// Search" so it is not taken for a place in this sidebar: a pin comes first
+/// in ⌘O, ⌘T and the folders scope, and nowhere here.
+private struct PinMenuButton: View {
+    @EnvironmentObject private var model: AppModel
+    let pin: Pins.Pin
+
+    var body: some View {
+        let pinned = model.pins.contains(pin)
+        MenuButton(pinned ? "Unpin from Search" : "Pin in Search", symbol: pinned ? "pin.slash" : "pin") {
+            model.session?.reloadPins()
+            model.togglePin(pin)
+        }
+    }
+}
+
 private struct FileMenu: View {
     @EnvironmentObject private var model: AppModel
     let item: VaultItem
@@ -1588,6 +1624,7 @@ private struct FileMenu: View {
             many ? model.promptToMove(items) : model.promptToMove(item)
         }
         MenuButton("Duplicate", symbol: "plus.square.on.square") { model.duplicate(item) }
+        if !many { PinMenuButton(pin: .init(.note, item.relativePath)) }
         Divider()
         // The file itself, for pasting into a folder here or in the Finder.
         // The vault-relative path is what a link needs; the absolute one is
@@ -1656,6 +1693,7 @@ private struct FolderMenu: View {
         MenuButton("Rename", symbol: "pencil") { onRename() }
         MenuButton("Move to…", symbol: "folder") { model.promptToMove(item) }
         MenuButton("Duplicate", symbol: "plus.square.on.square") { model.duplicate(item) }
+        PinMenuButton(pin: .init(.folder, item.relativePath))
         Divider()
         MenuButton("Copy", symbol: "doc.on.doc") { model.copy(item) }
             .keyboardShortcut("c", modifiers: .command)

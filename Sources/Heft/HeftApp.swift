@@ -127,6 +127,8 @@ struct HeftCommands: Commands {
     }
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var appearance = AppearanceSettings.shared
+    /// Watched so the View menu's sidebar views follow the reader's layout.
+    @ObservedObject private var general = GeneralSettings.shared
 
     var body: some Commands {
         // Ours rather than the one a `Settings` scene installs, since there is
@@ -304,6 +306,22 @@ struct HeftCommands: Commands {
             }
             .keyboardShortcut(.toggleSidebar)
             .disabled(behindBar)
+            // The views shown, in the reader's order, numbered as they stand.
+            if let view = general.sidebarLayout.mode(forShortcut: 1) {
+                Button(view.title) { model?.showSidebar(view) }
+                    .keyboardShortcut(.sidebarView1)
+                    .disabled(model == nil || behindBar)
+            }
+            if let view = general.sidebarLayout.mode(forShortcut: 2) {
+                Button(view.title) { model?.showSidebar(view) }
+                    .keyboardShortcut(.sidebarView2)
+                    .disabled(model == nil || behindBar)
+            }
+            if let view = general.sidebarLayout.mode(forShortcut: 3) {
+                Button(view.title) { model?.showSidebar(view) }
+                    .keyboardShortcut(.sidebarView3)
+                    .disabled(model == nil || behindBar)
+            }
             Toggle("Show Calendar", isOn: binding(\.isCalendarVisible))
                 .keyboardShortcut(.toggleCalendar)
                 .disabled(behindBar)

@@ -120,6 +120,12 @@ public enum KeyboardShortcuts {
         .init(id: "revealInSidebar", title: "Show this note in the file tree", key: "j", modifiers: [.command, .shift], group: .navigate, isNotable: true),
 
         .init(id: "toggleSidebar", title: "Toggle sidebar", key: "s", modifiers: [.command, .shift], group: .view, isNotable: true),
+        // ⌘1 to ⌘3 as Finder and Xcode switch their sidebars, numbering the
+        // views the reader shows, in their order. In the search bar the same
+        // keys go to its chips, which take them first.
+        .init(id: "sidebarView1", title: "First sidebar view", key: "1", modifiers: [.command], group: .view, isNotable: true),
+        .init(id: "sidebarView2", title: "Second sidebar view", key: "2", modifiers: [.command], group: .view, isNotable: true),
+        .init(id: "sidebarView3", title: "Third sidebar view", key: "3", modifiers: [.command], group: .view, isNotable: true),
         .init(id: "toggleCalendar", title: "Toggle calendar", key: "d", modifiers: [.command, .shift], group: .view, isNotable: true),
         .init(id: "toggleBacklinks", title: "Toggle backlinks", key: "b", modifiers: [.command, .option], group: .view, isNotable: true),
     ]

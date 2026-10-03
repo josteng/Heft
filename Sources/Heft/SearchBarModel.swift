@@ -81,7 +81,7 @@ extension StartList.Row {
     /// Where the row's heading leads when chosen: the scope that lists the
     /// same one kind, and nowhere for a row that mixes kinds.
     var barScope: BarScope? {
-        guard kinds.count == 1, let kind = kinds.first else { return nil }
+        guard order != .pinned, kinds.count == 1, let kind = kinds.first else { return nil }
         switch kind {
         case .notes: return order == .recent ? .recent : .frequent
         case .commands: return .commands
@@ -99,6 +99,7 @@ extension AppModel {
 
     /// Opens the bar narrowed to `scope`, or narrows the one already open.
     func openBar(_ scope: BarScope?) {
+        session?.reloadPins()
         if var open = bar {
             open.scope = scope
             open.generation += 1
@@ -221,8 +222,9 @@ extension AppModel {
                 let elsewhere = notesElsewhere(query, entireVault: entireVault, nothingFound: rows.isEmpty)
                 if elsewhere > 0 { rows.append(.elsewhere(elsewhere)) }
                 rows.append(.searchText(query))
+                return rows
             }
-            return rows
+            return withPinned(.note, rows, order: order ?? orders[.notes], entireVault: entireVault)
         case .recent, .frequent:
             let kind: QuickOpenOrder.Lead = scope == .recent ? .recent : .frequent
             let section = quickOpenList("", entireVault: entireVault, only: kind).all
@@ -234,22 +236,24 @@ extension AppModel {
             guard typed else {
                 // By how many notes carry them when nothing else decides.
                 let tags = index.allTags
-                return arrangedRows(
+                let rows = arrangedRows(
                     tags, kind: "tags", order: order ?? orders[.tags],
                     key: { BarScope.tag($0).useKey }, scoreKey: { BarScope.tag($0).useKey },
                     row: { BarRow.tag($0, count: self.index.noteCount(forTag: $0)) }
                 )
+                return withPinned(.tag, rows, order: order ?? orders[.tags], entireVault: entireVault)
             }
             return tagRows(query, limit: 200)
         case .folder(let path):
             return named(query, among: notes(under: path), entireVault: true).map(BarRow.note)
         case .folders:
             guard typed else {
-                return arrangedRows(
+                let rows = arrangedRows(
                     noteFolders, kind: "folders", order: order ?? orders[.folders],
                     key: { BarScope.folder($0.path).useKey }, scoreKey: { BarScope.folder($0.path).useKey },
                     row: { BarRow.folder($0.path, count: $0.count) }
                 )
+                return withPinned(.folder, rows, order: order ?? orders[.folders], entireVault: entireVault)
             }
             return folderRows(query, limit: 300)
         case .commands:
@@ -261,7 +265,9 @@ extension AppModel {
                     key: { RecentUses.commandKey($0.id) }, scoreKey: { $0.id },
                     row: { BarRow.command($0) }
                 )
-                return sinkingDisabledWithinParts(rows)
+                return sinkingDisabledWithinParts(
+                    withPinned(.command, rows, order: order ?? orders[.commands], entireVault: entireVault)
+                )
             }
             return commandRows(query)
         case .contents:
@@ -354,6 +360,19 @@ extension AppModel {
     private func startCandidates(
         _ row: StartList.Row, entireVault: Bool, fillsRest: Bool
     ) -> [BarRow] {
+        if row.order == .pinned {
+            // In the order pinned, across kinds, as they were pinned.
+            let wanted: [Pins.Kind: StartList.Kind] = [
+                .note: .notes, .command: .commands, .tag: .tags, .folder: .folders,
+            ]
+            var byPin: [Pins.Pin: BarRow] = [:]
+            for kind in Pins.Kind.allCases where row.kinds.contains(wanted[kind]!) {
+                for found in pinnedRows(kind, entireVault: entireVault) {
+                    if let pin = pin(for: found) { byPin[pin] = found }
+                }
+            }
+            return pins.items.compactMap { byPin[$0] }
+        }
         let recent = row.order == .recent
         let lastUsed = RecentUses.dates()
         /// What a key ranks by: when it was last used, or how much.
@@ -503,6 +522,77 @@ extension AppModel {
     private static func useBoost(_ key: String) -> Int {
         let use = FrecencyStore.commands.score(key)
         return Int(min(use / VaultIndex.wellUsed, 1) * Double(VaultIndex.boostWeight))
+    }
+
+    // MARK: Pins
+
+    var pins: Pins { session?.pins ?? Pins() }
+
+    /// What pinning `row` would pin, if it is something that can be.
+    func pin(for row: BarRow) -> Pins.Pin? {
+        switch row {
+        case .note(let note): Pins.Pin(.note, note.relativePath)
+        case .command(let command): Pins.Pin(.command, command.id)
+        case .tag(let name, _): Pins.Pin(.tag, name)
+        case .folder(let path, _): Pins.Pin(.folder, path)
+        default: nil
+        }
+    }
+
+    func isPinned(_ row: BarRow) -> Bool {
+        pin(for: row).map(pins.contains) ?? false
+    }
+
+    @discardableResult
+    func togglePin(_ pin: Pins.Pin) -> Bool {
+        session?.togglePin(pin) ?? false
+    }
+
+    /// The pinned things of one kind as rows, in the order pinned, leaving
+    /// out what no longer exists or cannot be shown here.
+    func pinnedRows(_ kind: Pins.Kind, entireVault: Bool) -> [BarRow] {
+        let values = pins.values(of: kind)
+        guard !values.isEmpty else { return [] }
+        switch kind {
+        case .note:
+            let inScope = folderFilter(entireVault, .notes)
+            let byPath = Dictionary(index.notes.map { ($0.relativePath, $0) }, uniquingKeysWith: { a, _ in a })
+            return values.compactMap { byPath[$0] }.filter { inScope?($0) ?? true }.map(BarRow.note)
+        case .command:
+            let byID = Dictionary(AppCommand.registry.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            return values.compactMap { byID[$0] }.map(BarRow.command)
+        case .tag:
+            let tags = Set(index.allTags)
+            return values.filter(tags.contains).map { BarRow.tag($0, count: index.noteCount(forTag: $0)) }
+        case .folder:
+            let counts = Dictionary(noteFolders.map { ($0.path, $0.count) }, uniquingKeysWith: { a, _ in a })
+            return values.compactMap { path in counts[path].map { BarRow.folder(path, count: $0) } }
+        }
+    }
+
+    /// A scope's list with what is pinned first, under its own heading, and
+    /// taken out of the rest. With nothing pinned the list is unchanged; with
+    /// pins and a list that had no headings, the rest is headed by its order.
+    private func withPinned(
+        _ kind: Pins.Kind, _ rows: [BarRow], order: QuickOpenOrder, entireVault: Bool
+    ) -> [BarRow] {
+        let pinned = pinnedRows(kind, entireVault: entireVault)
+        guard !pinned.isEmpty else { return rows }
+        let taken = Set(pinned.map(\.id))
+        var rest = rows.filter { !taken.contains($0.id) }
+        // A heading left with nothing under it once the pins are out goes too.
+        rest = rest.enumerated().filter { offset, row in
+            guard case .heading = row else { return true }
+            let next = rest.indices.contains(offset + 1) ? rest[offset + 1] : nil
+            if case .heading = next { return false }
+            return next != nil
+        }.map(\.element)
+        let headed = rest.contains { if case .heading = $0 { true } else { false } }
+        if !headed, !rest.isEmpty {
+            let title = order.mode == .recentOnly || order.mode == .recentFirst ? "Recent" : "Frequent"
+            rest.insert(.heading(title, target: nil), at: 0)
+        }
+        return [.heading("Pinned", target: nil)] + pinned + rest
     }
 
     /// Records that the reader went into `scope`, so it ranks by use.

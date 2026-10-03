@@ -27,6 +27,9 @@ struct AppCommandShortcut {
     static let openToday = Self("openToday")
     static let toggleCalendar = Self("toggleCalendar")
     static let toggleSidebar = Self("toggleSidebar")
+    static let sidebarView1 = Self("sidebarView1")
+    static let sidebarView2 = Self("sidebarView2")
+    static let sidebarView3 = Self("sidebarView3")
     static let toggleBacklinks = Self("toggleBacklinks")
     static let exportPDF = Self("exportPDF")
     static let newNote = Self("newNote")
@@ -537,6 +540,22 @@ struct AppCommand: Identifiable {
             action: { model in
                 guard let item = model.currentItem else { return }
                 model.delete(item)
+            }
+        ),
+        Self(
+            id: "pinNote",
+            title: "Pin in Search",
+            symbol: "pin",
+            searchTerms: "pin unpin favourite favorite star keep top note",
+            displayTitle: { model in
+                guard let note = model.current else { return "Pin in Search" }
+                return model.pins.contains(.init(.note, note.relativePath)) ? "Unpin from Search" : "Pin in Search"
+            },
+            enabled: { $0.current != nil },
+            action: { model in
+                guard let note = model.current else { return }
+                model.session?.reloadPins()
+                model.togglePin(.init(.note, note.relativePath))
             }
         ),
         Self(

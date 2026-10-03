@@ -17,9 +17,18 @@ public struct StartList: Codable, Equatable, Sendable {
     public enum Order: String, Codable, CaseIterable, Sendable, Identifiable {
         case recent
         case frequent
+        /// What the reader pinned, in the order they pinned it.
+        case pinned
 
         public var id: String { rawValue }
-        public var title: String { self == .recent ? "Recent" : "Frequent" }
+
+        public var title: String {
+            switch self {
+            case .recent: "Recent"
+            case .frequent: "Frequent"
+            case .pinned: "Pinned"
+            }
+        }
     }
 
     public enum Kind: String, Codable, CaseIterable, Sendable, Identifiable, Comparable {
@@ -96,6 +105,8 @@ public struct StartList: Codable, Equatable, Sendable {
     /// A constant, so its rows keep their ids: built afresh on every read,
     /// no row of it was ever the last row of itself.
     public static let standard = StartList(rows: [
+        // Empty until something is pinned, and then what was pinned first.
+        Row(.pinned, Set(Kind.allCases), count: 10),
         Row(.recent, [.notes], count: 5),
         Row(.frequent, Set(Kind.allCases), count: 12),
         Row(.frequent, [.notes], count: 10),

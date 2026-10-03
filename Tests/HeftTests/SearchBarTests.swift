@@ -566,6 +566,53 @@ struct SearchBarRowTests {
         #expect(BarScope.recent.chipNumber == nil)
     }
 
+    /// What is pinned comes first in its scope, once, under its own
+    /// heading; the rest keeps its order without it.
+    @Test("Pins lead their scope and are not repeated below")
+    func pinnedFirst() async throws {
+        let model = try await model(["Alpha.md": "a", "Beta.md": "b", "Gamma.md": "c"])
+        defer { model.closeWorkspace() }
+        try #require(model.session).recordRecent("Beta.md")
+        model.togglePin(.init(.note, "Gamma.md"))
+        model.togglePin(.init(.note, "Alpha.md"))
+        model.togglePin(.init(.command, "toggleBacklinks"))
+        let order = QuickOpenOrder(lead: .recent, count: 1)
+
+        let notes = ids(model.barRows(scope: .notes, query: "", entireVault: true, order: order))
+        #expect(Array(notes.prefix(3)) == ["heading:Pinned", "note:Gamma.md", "note:Alpha.md"], "got \(notes)")
+        #expect(notes.filter { $0 == "note:Alpha.md" }.count == 1)
+        #expect(notes.contains("heading:Recent") && notes.contains("note:Beta.md"))
+
+        let commands = ids(model.barRows(scope: .commands, query: "", entireVault: true, order: order))
+        #expect(Array(commands.prefix(2)) == ["heading:Pinned", "command:toggleBacklinks"])
+        #expect(commands.filter { $0 == "command:toggleBacklinks" }.count == 1)
+
+        // ⌘T's pinned row lists them across kinds, in the order pinned.
+        let start = StartList(rows: [.init(.pinned, Set(StartList.Kind.allCases), count: 10)])
+        let all = ids(model.barRows(scope: nil, query: "", entireVault: true, start: start))
+        #expect(Array(all.prefix(4)) == ["heading:Pinned", "note:Gamma.md", "note:Alpha.md", "command:toggleBacklinks"],
+                "got \(all)")
+        #expect(model.isPinned(.note(try #require(model.index.notes.first { $0.name == "Gamma" }))))
+
+        // Unpinning puts it back where it would be.
+        model.togglePin(.init(.note, "Gamma.md"))
+        let after = ids(model.barRows(scope: .notes, query: "", entireVault: true, order: order))
+        #expect(Array(after.prefix(2)) == ["heading:Pinned", "note:Alpha.md"])
+        #expect(after.contains("note:Gamma.md"))
+        // The pins are the vault's, in a file beside the proposals.
+        let root = try #require(model.vaultRoot)
+        #expect(Pins.load(from: root).items.map(\.value) == ["Alpha.md", "toggleBacklinks"])
+    }
+
+    @Test("A pinned note followed when it moves")
+    func pinFollowsRename() async throws {
+        let model = try await model(["Plan.md": "a"])
+        defer { model.closeWorkspace() }
+        model.togglePin(.init(.note, "Plan.md"))
+        try #require(model.session).replaceRecentPath("Plan.md", with: "Work/Plan.md")
+        #expect(model.pins.values(of: .note) == ["Work/Plan.md"])
+    }
+
     @Test("The chips are the scopes with something to list, Text last")
     func chips() {
         #expect(BarScope.chips == [.notes, .commands, .tags, .folders, .contents])
@@ -593,6 +640,16 @@ struct SearchBarRowTests {
         #expect(BarRow.command(search).scope == .contents)
         #expect(BarRow.searchText("x").scope == .contents)
         #expect(!BarRow.heading("Search In", target: nil).isSelectable)
+    }
+
+    /// ⌘1 to ⌘3 ask the sidebar for a view, and bring a hidden sidebar back.
+    @Test("Asking for a sidebar view shows the sidebar on it")
+    func sidebarViews() {
+        let model = AppModel(registry: VaultRegistry(), descriptor: WorkspaceDescriptor())
+        model.columnVisibility = .detailOnly
+        model.showSidebar(.tags)
+        #expect(model.sidebarModeRequest == .tags)
+        #expect(model.columnVisibility != .detailOnly)
     }
 
     /// The menu bar cannot observe the model, so it watches this instead;
@@ -623,6 +680,7 @@ struct SearchBarRowTests {
         let behind = [
             "newNote", "openToday", "exportPDF", "toggleCheckbox", "find", "findNext",
             "findPrevious", "toggleSidebar", "toggleCalendar", "revealInSidebar", "toggleBacklinks",
+            "sidebarView1", "sidebarView2", "sidebarView3",
         ]
         for id in behind {
             let marker = ".keyboardShortcut(.\(id))"
@@ -671,13 +729,13 @@ struct StartListTests {
         try #require(UserDefaults(suiteName: "dev.stenglein.Heft.start-test-\(UUID().uuidString)"))
     }
 
-    @Test("The standard list: recent notes, frequent everything, then the notes")
+    @Test("The standard list: pinned, recent notes, frequent everything, then the notes")
     func standard() {
         let plan = StartList.standard.plan
-        #expect(plan.map(\.row.title) == ["Recent notes", "Frequent", "Frequent notes"])
-        #expect(plan.map(\.limit) == [5, 12, StartList.restLimit])
-        #expect(StartList.standard.fillsRest(StartList.standard.rows[2]))
-        #expect(!StartList.standard.fillsRest(StartList.standard.rows[1]))
+        #expect(plan.map(\.row.title) == ["Pinned", "Recent notes", "Frequent", "Frequent notes"])
+        #expect(plan.map(\.limit) == [10, 5, 12, StartList.restLimit])
+        #expect(StartList.standard.fillsRest(StartList.standard.rows[3]))
+        #expect(!StartList.standard.fillsRest(StartList.standard.rows[2]))
 
         // A row with nothing ticked is not the last one: the row above it
         // still fills the rest.
@@ -714,7 +772,7 @@ struct StartListTests {
     func tolerant() throws {
         let defaults = try suite()
         let json = #"{"rows":[{"order":"recent","kinds":["notes","pins"],"count":3},"#
-            + #"{"order":"pinned","kinds":["notes"],"count":4}]}"#
+            + #"{"order":"starred","kinds":["notes"],"count":4}]}"#
         defaults.set(Data(json.utf8), forKey: StartList.defaultsKey)
         let list = StartList.current(in: defaults)
         #expect(list.rows.count == 1)
@@ -805,5 +863,47 @@ struct ScopeOrdersTests {
         #expect(read[.notes] == QuickOpenOrder(lead: .frequent, count: 3))
         #expect(read[.tags] == .standard)
         #expect(QuickOpenOrder.current(in: defaults) == read[.notes], "the same keys")
+    }
+}
+
+
+@Suite("Pins")
+struct PinsTests {
+
+    @Test("Pinned in the order pinned, once; pinning again unpins")
+    func toggle() {
+        var pins = Pins()
+        let first = pins.toggle(.init(.note, "a.md"))
+        let second = pins.toggle(.init(.tag, "work"))
+        let again = pins.toggle(.init(.note, "a.md"))
+        #expect(first && second)
+        #expect(!again, "the second toggle unpins")
+        pins.toggle(.init(.note, "a.md"))
+        #expect(pins.items == [.init(.tag, "work"), .init(.note, "a.md")], "back at the end")
+        #expect(Pins([.init(.note, "x"), .init(.note, "x")]).items.count == 1)
+    }
+
+    @Test("A moved folder carries the pins of what is in it")
+    func moves() {
+        var pins = Pins([.init(.note, "Work/Plan.md"), .init(.folder, "Work"), .init(.note, "Workshop.md")])
+        pins.move(.folder, from: "Work", to: "Jobs")
+        #expect(pins.items == [.init(.note, "Jobs/Plan.md"), .init(.folder, "Jobs"), .init(.note, "Workshop.md")])
+        pins.move(.note, from: "Workshop.md", to: "Shop.md")
+        #expect(pins.items.last == .init(.note, "Shop.md"))
+    }
+
+    @Test("Stored in the vault and read back; an unknown kind is dropped alone")
+    func storage() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("heft-pins-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(Pins.load(from: root).items.isEmpty, "no file yet")
+        let pins = Pins([.init(.command, "newNote"), .init(.folder, "Work")])
+        try pins.save(to: root)
+        #expect(Pins.load(from: root) == pins)
+        #expect(Pins.url(in: root).path.hasSuffix(".heft/pins.json"))
+
+        let json = #"{"pins":[{"kind":"note","value":"a.md"},{"kind":"heading","value":"x"}]}"#
+        try Data(json.utf8).write(to: Pins.url(in: root))
+        #expect(Pins.load(from: root).items == [.init(.note, "a.md")])
     }
 }

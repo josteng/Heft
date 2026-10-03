@@ -14,6 +14,15 @@ struct SearchSettingsView: View {
     var body: some View {
         Form {
             Section {
+                Toggle(isOn: $settings.showsKeyHints) {
+                    SettingLabel(
+                        "Show key hints",
+                        detail: "A line under the results with the keys you can use, such as how to pin."
+                    )
+                }
+            }
+
+            Section {
                 List {
                     ForEach(Array(settings.startList.rows.enumerated()), id: \.element.id) { index, row in
                         StartRowView(

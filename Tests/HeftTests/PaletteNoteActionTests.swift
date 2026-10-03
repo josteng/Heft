@@ -235,6 +235,10 @@ struct PaletteNoteActionTests {
                 .appendingPathComponent("Sources/Heft/Views/SidebarView.swift"),
             encoding: .utf8
         )
+        // Pinning is offered on notes and folders, and from the palette.
+        #expect(source.contains("PinMenuButton(pin: .init(.note"), "the note menu offers no pin")
+        #expect(source.contains("PinMenuButton(pin: .init(.folder"), "the folder menu offers no pin")
+        #expect(AppCommand.registry.contains { $0.id == "pinNote" })
         for (menuTitle, id) in expected {
             #expect(
                 source.contains("MenuButton(\"\(menuTitle)\""),
