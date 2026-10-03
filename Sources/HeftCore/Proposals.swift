@@ -162,8 +162,27 @@ public struct Proposal: Codable, Sendable, Equatable, Identifiable {
         case .edit: "Edit \(noteName)"
         case .create: "New note \(notePath)"
         case .delete: "Delete \(notePath)"
-        case .move: "Move \(notePath) to \(destination ?? "?")"
+        case .move: Self.describeMove(from: notePath, to: destination ?? "?")
         }
+    }
+
+    /// A move as a reader says it: a rename when the folder stays, by name
+    /// and not by path; otherwise where it goes. The paths stay in the
+    /// proposal itself, which is what the CLI and the agent read.
+    public static func describeMove(from source: String, to destination: String) -> String {
+        func name(_ path: String) -> String {
+            let last = (path as NSString).lastPathComponent
+            return last.hasSuffix(".md") ? String(last.dropLast(3)) : last
+        }
+        let fromFolder = (source as NSString).deletingLastPathComponent
+        let toFolder = (destination as NSString).deletingLastPathComponent
+        if fromFolder == toFolder {
+            return "Rename \(name(source)) to \(name(destination))"
+        }
+        let place = toFolder.isEmpty ? "the top of the vault" : toFolder
+        return name(source) == name(destination)
+            ? "Move \(name(source)) to \(place)"
+            : "Move \(name(source)) to \(place) as \(name(destination))"
     }
 }
 

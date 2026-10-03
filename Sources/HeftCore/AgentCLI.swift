@@ -307,7 +307,7 @@ public enum AgentCLI {
         let replaced = replacement(for: item.relativePath, root: root, options: options)
         let summary = options["summary"]
         let described = summary ?? (isMove
-            ? "Move \(item.relativePath) to \(destination ?? "")"
+            ? Proposal.describeMove(from: item.relativePath, to: destination ?? "")
             : "Delete \(item.relativePath)")
         let proposal = Proposal(
             id: ProposalStore.identifier(

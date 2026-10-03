@@ -2010,6 +2010,16 @@ struct AgentCLITests {
         #expect(ProposalStore.all(in: root).first?.kind == .create)
     }
 
+    /// A rename reads as one, by names; a move says where to.
+    @Test("A move is described by names: a rename in place, otherwise where it goes")
+    func moveDescriptions() {
+        #expect(Proposal.describeMove(from: "Heft/v0.7.md", to: "Heft/v0.7 features.md") == "Rename v0.7 to v0.7 features")
+        #expect(Proposal.describeMove(from: "Inbox/Plan.md", to: "Archive/Plan.md") == "Move Plan to Archive")
+        #expect(Proposal.describeMove(from: "Inbox/Plan.md", to: "Plan.md") == "Move Plan to the top of the vault")
+        #expect(Proposal.describeMove(from: "Inbox/Plan.md", to: "Archive/Old plan.md") == "Move Plan to Archive as Old plan")
+        #expect(Proposal.describeMove(from: "Papers/scan.pdf", to: "Papers/receipt.pdf") == "Rename scan.pdf to receipt.pdf")
+    }
+
     @Test("Deleting and moving are proposable, and read no body")
     func structuralProposals() throws {
         let root = try vault(["Old/C.md": "x\n", "Keep.md": "y\n"])
@@ -2022,7 +2032,8 @@ struct AgentCLITests {
         let move = try #require(all.first { $0.kind == .move })
         #expect(move.destination == "New/C.md")
         #expect(move.isStructural)
-        #expect(move.headline == "Move Old/C.md to New/C.md")
+        #expect(move.headline == "Move C to New")
+        #expect(move.summary == "Move C to New", "the summary an agent gave none of reads the same")
         let remove = try #require(all.first { $0.kind == .delete })
         #expect(remove.isStructural)
         #expect(remove.body.isEmpty)
