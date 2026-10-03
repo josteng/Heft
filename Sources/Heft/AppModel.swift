@@ -1541,7 +1541,8 @@ final class AppModel: ObservableObject {
         } else {
             guard let prompted = host.name(
                 title: "Rename \(item.isFolder ? "Folder" : "Note")",
-                message: item.relativePath, initial: item.name, confirm: "Rename"
+                message: item.relativePath, initial: item.name, confirm: "Rename",
+                suggestFrom: item.isMarkdown ? item.url : nil
             ) else { return false }
             entered = prompted
         }

@@ -21,9 +21,7 @@ final class AgentRunner: ObservableObject {
     @Published private(set) var activities: [String: String] = [:]
     /// Whether the agent command could not be found on the last try.
     @Published private(set) var isMissing = false
-    /// A reply started for the reader, for the field to take up: what to
-    /// do instead of a proposal just rejected.
-    @Published var draft: String?
+
 
     /// Whether the chat on screen is being answered.
     var isRunning: Bool { chat.map { runs[$0.id] != nil } ?? false }
@@ -41,6 +39,12 @@ final class AgentRunner: ObservableObject {
     var heftDirectory: () -> URL? = AgentRunner.linkedHeftDirectory
     /// Full paths the agent may call `heft` by; this app's own by default.
     var heftAliases: () -> [String] = AgentRunner.ownHeftPaths
+    /// Names a chat from its first question and answer; nil leaves it
+    /// named by the question. Apple's on-device model by default.
+    var titler: @MainActor (String, String) async -> String? = { question, answer in
+        guard GeneralSettings.shared.namesChats else { return nil }
+        return await ChatTitler.title(question: question, answer: answer)
+    }
 
     private var vaultRoot: URL?
     /// A chat being answered: its process, and the chat as the run has it,
@@ -370,6 +374,20 @@ final class AgentRunner: ObservableObject {
         chat.turns[last].proposals = Self.merged(chat.turns[last].proposals, with: left)
         finish(chat)
         if !left.isEmpty { onProposals(chat.turns[last].proposals) }
+        if last == 0, chat.turns[0].failure == nil, !chat.turns[0].answer.isEmpty { nameChat(chat) }
+    }
+
+    /// Gives a chat a name after its first answer, unless the reader has
+    /// already given it one.
+    private func nameChat(_ chat: AgentChat) {
+        let question = chat.turns[0].question
+        let answer = chat.turns[0].answer
+        Task { [weak self] in
+            guard let self, let title = await self.titler(question, answer) else { return }
+            let current = self.chats.first { $0.id == chat.id } ?? chat
+            guard current.title == AgentChat.title(for: question) else { return }
+            self.rename(current, to: title)
+        }
     }
 
     /// Claims the proposals running chats have made so far, as they land on

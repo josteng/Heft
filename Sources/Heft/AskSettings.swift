@@ -66,6 +66,19 @@ struct AskSettingsView: View {
                     SettingLabel("Model", detail: "Haiku answers in seconds; the others think longer and use more of your plan.")
                 }
                 .defaultMenuTint()
+                let unavailable = OnDeviceModel.unavailableReason
+                Toggle(isOn: Binding(
+                    get: { settings.namesChats && unavailable == nil },
+                    set: { settings.namesChats = $0 }
+                )) {
+                    SettingLabel(
+                        "Name chats with Apple Intelligence",
+                        detail: (unavailable.map { $0 + " Until then a chat is named by its first question." })
+                            ?? "After the first answer, on this Mac. Off, a chat is named by its first "
+                            + "question. Right-click a chat to rename it."
+                    )
+                }
+                .disabled(unavailable != nil)
                 Picker(selection: $settings.askFirst) {
                     ForEach(GeneralSettings.AskFirst.allCases) { Text($0.title).tag($0) }
                 } label: {

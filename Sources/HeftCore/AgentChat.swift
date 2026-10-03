@@ -117,7 +117,7 @@ public struct AgentChat: Codable, Equatable, Identifiable, Sendable {
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }
 
-    static func title(for question: String) -> String {
+    public static func title(for question: String) -> String {
         let line = question.split(separator: "\n").first.map(String.init) ?? question
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return trimmed.count > 80 ? String(trimmed.prefix(79)) + "…" : trimmed

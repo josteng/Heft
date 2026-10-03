@@ -59,7 +59,22 @@ protocol VaultHost {
 }
 
 extension VaultHost {
+    /// The same prompt, offering names suggested from `suggestFrom`, a note,
+    /// when the host can. A host that cannot asks plainly.
+    func name(title: String, message: String, initial: String, confirm: String, suggestFrom: URL?) -> String? {
+        if let host = self as? SuggestingNames {
+            return host.suggestingName(title: title, message: message, initial: initial, confirm: confirm, from: suggestFrom)
+        }
+        return name(title: title, message: message, initial: initial, confirm: confirm)
+    }
+
     func confirm(title: String, message: String, confirm: String) -> Bool {
         self.confirm(title: title, message: message, confirm: confirm, destructive: false)
     }
+}
+
+/// A host whose name prompt can offer suggested names.
+@MainActor
+protocol SuggestingNames {
+    func suggestingName(title: String, message: String, initial: String, confirm: String, from note: URL?) -> String?
 }

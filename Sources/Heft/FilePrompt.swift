@@ -10,7 +10,12 @@ import UniformTypeIdentifiers
 enum FilePrompt {
 
     /// A single-field name prompt. Returns nil when cancelled.
-    static func name(title: String, message: String, initial: String, confirm: String) -> String? {
+    /// - Parameter suggestFrom: a note to suggest names from, under the
+    ///   field, while renaming it.
+    @MainActor
+    static func name(
+        title: String, message: String, initial: String, confirm: String, suggestFrom: URL? = nil
+    ) -> String? {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -20,7 +25,13 @@ enum FilePrompt {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = initial
         field.placeholderString = "Name"
-        alert.accessoryView = field
+        let suggesting = suggestFrom.flatMap { GeneralSettings.shared.suggestsNames ? $0 : nil }
+            .flatMap { OnDeviceModel.unavailableReason == nil ? $0 : nil }
+        if let suggesting {
+            alert.accessoryView = SuggestedNamesPanel(field: field, note: suggesting, current: initial)
+        } else {
+            alert.accessoryView = field
+        }
         // Without this the buttons take focus and the name has to be clicked
         // into before it can be typed. Focusing a text field also selects its
         // contents, so a suggested name can be replaced by typing or accepted
@@ -88,7 +99,7 @@ enum FilePrompt {
 
 /// What ships: every question and every hand-off goes to AppKit.
 @MainActor
-struct AppKitHost: VaultHost {
+struct AppKitHost: VaultHost, SuggestingNames {
 
     /// Nonisolated so it can be a default argument. `AppModel.init` is
     /// main-actor isolated but its default expressions are evaluated outside
@@ -97,6 +108,10 @@ struct AppKitHost: VaultHost {
 
     func name(title: String, message: String, initial: String, confirm: String) -> String? {
         FilePrompt.name(title: title, message: message, initial: initial, confirm: confirm)
+    }
+
+    func suggestingName(title: String, message: String, initial: String, confirm: String, from note: URL?) -> String? {
+        FilePrompt.name(title: title, message: message, initial: initial, confirm: confirm, suggestFrom: note)
     }
 
     func confirm(title: String, message: String, confirm: String, destructive: Bool) -> Bool {
@@ -133,5 +148,68 @@ struct AppKitHost: VaultHost {
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         let read = NSPasteboard.general.readObjects(forClasses: [NSURL.self], options: options)
         return (read as? [URL]) ?? []
+    }
+}
+
+/// The rename prompt's field with names suggested under it, as buttons that
+/// fill it in. Room for them is kept from the start, so the alert does not
+/// change size when they arrive; until then it says it is suggesting.
+private final class SuggestedNamesPanel: NSStackView {
+    private let field: NSTextField
+    private let list = NSStackView()
+    private let waiting = NSTextField(labelWithString: "Suggesting names…")
+    private var task: Task<Void, Never>?
+
+    init(field: NSTextField, note: URL, current: String) {
+        self.field = field
+        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 24 + 8 + 16 + 3 * 22))
+        orientation = .vertical
+        alignment = .leading
+        spacing = 6
+        let heading = NSTextField(labelWithString: "Suggested")
+        heading.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        heading.textColor = .secondaryLabelColor
+        waiting.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        waiting.textColor = .tertiaryLabelColor
+        list.orientation = .vertical
+        list.alignment = .leading
+        list.spacing = 2
+        list.addArrangedSubview(waiting)
+        addArrangedSubview(field)
+        addArrangedSubview(heading)
+        addArrangedSubview(list)
+        field.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        // Runs while the alert is up: its modal loop still serves the main
+        // queue, which is where the names arrive.
+        task = Task { @MainActor [weak self] in
+            let text = await Task.detached { (try? String(contentsOf: note, encoding: .utf8)) ?? "" }.value
+            let names = await NameSuggester.suggestions(for: text, current: current)
+            self?.show(names)
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    deinit { task?.cancel() }
+
+    private func show(_ names: [String]) {
+        list.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard !names.isEmpty else {
+            waiting.stringValue = "No names to suggest"
+            list.addArrangedSubview(waiting)
+            return
+        }
+        for name in names {
+            let button = NSButton(title: name, target: self, action: #selector(choose(_:)))
+            button.bezelStyle = .accessoryBarAction
+            button.controlSize = .small
+            list.addArrangedSubview(button)
+        }
+    }
+
+    @objc private func choose(_ sender: NSButton) {
+        field.stringValue = sender.title
+        window?.makeFirstResponder(field)
+        field.currentEditor()?.selectedRange = NSRange(location: (sender.title as NSString).length, length: 0)
     }
 }

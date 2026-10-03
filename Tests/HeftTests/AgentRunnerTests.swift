@@ -74,6 +74,7 @@ struct AgentRunnerTests {
         runner.command = { script.path }
         runner.model = { "haiku" }
         runner.heftDirectory = { nil }
+        runner.titler = { _, _ in nil }
         runner.load(vaultRoot: vault)
         return Fixture(vault: vault, script: script, calls: calls, runner: runner)
     }
@@ -262,6 +263,41 @@ struct AgentRunnerTests {
         #expect(failure.contains("longer than"), "got \(failure)")
     }
 
+    /// The on-device model names a chat after its first answer; the agent
+    /// is never asked to. A name the reader gave is never replaced.
+    @Test("The first answer names the chat, unless the reader named it")
+    func onDeviceTitle() async throws {
+        let fixture = try fixture(stdout: answering)
+        var asked: [(String, String)] = []
+        fixture.runner.titler = { question, answer in
+            asked.append((question, answer))
+            return "Parser deadline"
+        }
+        fixture.runner.ask("When is it due?", vaultRoot: fixture.vault, scope: "")
+        try await settle(fixture.runner)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(fixture.runner.chat?.title == "Parser deadline")
+        #expect(asked.count == 1 && asked.first?.0 == "When is it due?" && asked.first?.1 == "Due Friday, see [[Plan]].")
+        #expect(!(fixture.calledArguments().first ?? []).contains { $0.contains("Title") }, "the agent is not asked")
+
+        fixture.runner.ask("And after?", vaultRoot: fixture.vault, scope: "")
+        try await settle(fixture.runner)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(asked.count == 1, "only the first answer names it")
+
+        // Renamed by the reader before the name arrives: theirs stays.
+        fixture.runner.close()
+        fixture.runner.titler = { _, _ in
+            try? await Task.sleep(for: .milliseconds(200))
+            return "Model name"
+        }
+        fixture.runner.ask("Another?", vaultRoot: fixture.vault, scope: "")
+        try await settle(fixture.runner)
+        fixture.runner.rename(try #require(fixture.runner.chat), to: "Mine")
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(fixture.runner.chats.first { $0.turns[0].question == "Another?" }?.title == "Mine")
+    }
+
     /// Claimed as they land, so an earlier card whose note was proposed
     /// again says "Replaced below" at once, not when the answer ends.
     @Test("A running chat claims its proposals as they land, same id included")
@@ -283,6 +319,15 @@ struct AgentRunnerTests {
         fixture.runner.claim([proposal("plan", agent: name, at: Date())])
         #expect(fixture.runner.chat?.turns[0].proposals.count == 1, "listed once")
         fixture.runner.stopAll()
+    }
+
+    @Test("Turned off, the on-device model is not asked for a name")
+    func namingOff() async {
+        let naming = GeneralSettings.shared.namesChats
+        GeneralSettings.shared.namesChats = false
+        defer { GeneralSettings.shared.namesChats = naming }
+        let title = await AgentRunner().titler("When is the parser due?", "Friday.")
+        #expect(title == nil)
     }
 
     @Test("A chat is named by its first question until the reader renames it")
@@ -328,5 +373,53 @@ struct AgentRunnerTests {
         broken.runner.ask("Hello?", vaultRoot: broken.vault, scope: "")
         try await settle(broken.runner)
         #expect(broken.runner.chat?.turns[0].failure == "Something else broke")
+    }
+}
+
+@Suite("Chat cards")
+struct ChatCardTests {
+
+    /// A proposal proposed again later, by id or by note, is decided on its
+    /// newest card; the older one says it was replaced.
+    @Test("A proposal a later turn replaced is marked on the earlier turn only")
+    func replaced() {
+        var chat = AgentChat(question: "Draft the feedback", scope: "")
+        chat.turns[0].proposals = [
+            .init(id: "feedback", notePath: "Paper/Feedback.md", headline: "New note"),
+            .init(id: "plan", notePath: "Plan.md", headline: "Edit Plan"),
+        ]
+        chat.turns.append(.init(question: "Make that shorter"))
+        chat.turns[1].proposals = [.init(id: "feedback", notePath: "Paper/Feedback.md", headline: "New note")]
+        chat.turns.append(.init(question: "And the plan"))
+        chat.turns[2].proposals = [.init(id: "plan-2", notePath: "Plan.md", headline: "Edit Plan")]
+        #expect(AgentConversationView.replaced(in: chat, before: 0) == ["feedback", "plan"])
+        #expect(AgentConversationView.replaced(in: chat, before: 1).isEmpty)
+        #expect(AgentConversationView.replaced(in: chat, before: 2).isEmpty)
+    }
+
+    @Test("A model's title is cut to its first line, without quotes or a full stop")
+    func cleaned() {
+        #expect(ChatTitler.cleaned("\"Parser deadline.\"\nMore") == "Parser deadline")
+        #expect(ChatTitler.cleaned("Title: Week review") == "Week review")
+        #expect(ChatTitler.cleaned("  \n") == nil)
+        #expect((ChatTitler.cleaned(String(repeating: "a", count: 90)) ?? "").count == 60)
+    }
+}
+
+@Suite("Suggested names")
+struct NameSuggesterTests {
+
+    @Test("A model's names are cleaned into names a file can have, three at most")
+    func cleaned() {
+        let names = NameSuggester.cleaned("""
+        1. Parser Deadline
+        - "Parser: Ship Friday."
+        * parser deadline
+        Plan.md
+        Plan
+        Weekly Plan
+        Fourth one
+        """, current: "Plan")
+        #expect(names == ["Parser Deadline", "Parser- Ship Friday", "Weekly Plan"], "got \(names)")
     }
 }

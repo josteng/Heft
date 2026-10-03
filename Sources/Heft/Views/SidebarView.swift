@@ -526,6 +526,7 @@ struct SidebarView: View {
                             depth: 1,
                             symbol: "doc.text",
                             renameText: renameBinding(for: item),
+                            renameSource: renameSource(for: item),
                             onRenameCommit: { commitRename(item) },
                             onRenameCancel: cancelRename
                         ) {
@@ -802,6 +803,7 @@ struct SidebarView: View {
             symbol: "doc.text",
             preview: preview,
             renameText: renameBinding(for: item),
+            renameSource: renameSource(for: item),
             onRenameCommit: { commitRename(item) },
             onRenameCancel: cancelRename
         ) {
@@ -895,6 +897,7 @@ struct SidebarView: View {
                         depth: 0,
                         symbol: "doc.text",
                         renameText: renameBinding(for: item),
+                        renameSource: renameSource(for: item),
                         onRenameCommit: { commitRename(item) },
                         onRenameCancel: cancelRename
                     ) {
@@ -936,6 +939,11 @@ struct SidebarView: View {
             get: { inlineEdit?.name ?? item.name },
             set: { inlineEdit?.name = $0 }
         )
+    }
+
+    /// The note a rename suggests names from, while suggesting is on.
+    private func renameSource(for item: VaultItem) -> URL? {
+        item.isMarkdown && GeneralSettings.shared.suggestsNames ? item.url : nil
     }
 
     private func beginRename(_ item: VaultItem) {
@@ -1252,6 +1260,7 @@ private struct TreeRow: View {
                 symbol: symbol(for: item.kind),
                 isDimmed: item.needsDownload,
                 renameText: renameBinding,
+                renameSource: item.isMarkdown && GeneralSettings.shared.suggestsNames ? item.url : nil,
                 onRenameCommit: commitRename,
                 onRenameCancel: cancelRename
             ) {
@@ -1795,12 +1804,16 @@ struct NoteRow: View {
     var isDimmed: Bool = false
     var isDropTargeted: Bool = false
     var renameText: Binding<String>? = nil
+    /// The note to suggest names from while renaming it; nil offers none.
+    var renameSource: URL? = nil
     var onRenameCommit: (() -> Void)? = nil
     var onRenameCancel: (() -> Void)? = nil
     let action: () -> Void
 
     @State private var isHovering = false
     @State private var didFinishRename = false
+    /// Names the on-device model suggested for the note being renamed.
+    @State private var suggestedNames: [String] = []
     @FocusState private var isRenameFocused: Bool
 
     var body: some View {
@@ -1854,6 +1867,8 @@ struct NoteRow: View {
                     .focused($isRenameFocused)
                     .onSubmit { finishRename(commit: true) }
                     .onExitCommand { finishRename(commit: false) }
+                    .modifier(SuggestedNames(names: suggestedNames))
+                    .task(id: renameSource) { await suggestNames() }
             } else {
                 Text(name)
                     .font(.system(size: 13, weight: .semibold))
@@ -1905,6 +1920,8 @@ struct NoteRow: View {
                     .focused($isRenameFocused)
                     .onSubmit { finishRename(commit: true) }
                     .onExitCommand { finishRename(commit: false) }
+                    .modifier(SuggestedNames(names: suggestedNames))
+                    .task(id: renameSource) { await suggestNames() }
             } else {
                 Text(name)
                     .font(.system(size: 12))
@@ -1973,6 +1990,17 @@ struct NoteRow: View {
         }
     }
 
+    /// Asks the on-device model for names while the field is open; the
+    /// field works as ever until they arrive, or if none do.
+    private func suggestNames() async {
+        suggestedNames = []
+        guard let source = renameSource, let current = renameText?.wrappedValue else { return }
+        let text = await Task.detached { (try? String(contentsOf: source, encoding: .utf8)) ?? "" }.value
+        let names = await NameSuggester.suggestions(for: text, current: current)
+        guard !Task.isCancelled else { return }
+        suggestedNames = names
+    }
+
     private func finishRename(commit: Bool) {
         guard !didFinishRename else { return }
         didFinishRename = true
@@ -1991,6 +2019,26 @@ struct NoteRow: View {
 /// colour, so neither could be seen. The field is the text background with
 /// the text colour, and is set out by its own padding so the name does not
 /// move when editing starts.
+/// Names offered under a rename field, as Finder offers them, chosen with
+/// the arrows and Return or a click.
+///
+/// Always applied, empty until names arrive. Applied only once there were
+/// names, it made the field a different view the moment they came: SwiftUI
+/// rebuilt it, the focus went, and losing the focus ended the rename.
+private struct SuggestedNames: ViewModifier {
+    let names: [String]
+
+    func body(content: Content) -> some View {
+        content.textInputSuggestions {
+            if !names.isEmpty {
+                Section("Suggested") {
+                    ForEach(names, id: \.self) { Text($0).textInputCompletion($0) }
+                }
+            }
+        }
+    }
+}
+
 struct RenameFieldStyle: ViewModifier {
     static let inset: CGFloat = 3
 

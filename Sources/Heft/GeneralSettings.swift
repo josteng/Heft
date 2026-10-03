@@ -95,6 +95,20 @@ final class GeneralSettings: ObservableObject {
     }
     static let askFirstKey = "dev.stenglein.Heft.agent.askFirst"
 
+    /// Whether chats are named by Apple's on-device model after their
+    /// first answer. On by default; off, a chat keeps its first question.
+    @Published var namesChats: Bool {
+        didSet { HeftDefaults.shared.set(namesChats, forKey: Self.namesChatsKey) }
+    }
+    static let namesChatsKey = "dev.stenglein.Heft.agent.namesChats"
+
+    /// Whether renaming a note offers names Apple's on-device model
+    /// suggests from what is in it, as Finder does. On by default.
+    @Published var suggestsNames: Bool {
+        didSet { HeftDefaults.shared.set(suggestsNames, forKey: Self.suggestsNamesKey) }
+    }
+    static let suggestsNamesKey = "dev.stenglein.Heft.general.suggestsNames"
+
     @Published var agentCommand: String {
         didSet { HeftDefaults.shared.set(agentCommand, forKey: Self.agentCommandKey) }
     }
@@ -116,6 +130,10 @@ final class GeneralSettings: ObservableObject {
         startList = StartList.current(in: HeftDefaults.shared)
         sidebarLayout = SidebarLayout.current()
         asksAgent = HeftDefaults.shared.bool(forKey: Self.asksAgentKey)
+        suggestsNames = HeftDefaults.shared.object(forKey: Self.suggestsNamesKey) == nil
+            || HeftDefaults.shared.bool(forKey: Self.suggestsNamesKey)
+        namesChats = HeftDefaults.shared.object(forKey: Self.namesChatsKey) == nil
+            || HeftDefaults.shared.bool(forKey: Self.namesChatsKey)
         askFirst = HeftDefaults.shared.string(forKey: Self.askFirstKey)
             .flatMap(AskFirst.init(rawValue:)) ?? .forQuestions
         agentCommand = HeftDefaults.shared.string(forKey: Self.agentCommandKey)
@@ -233,6 +251,18 @@ struct GeneralSettingsView: View {
                         )
                     }
                 }
+                let unavailable = OnDeviceModel.unavailableReason
+                Toggle(isOn: Binding(
+                    get: { settings.suggestsNames && unavailable == nil },
+                    set: { settings.suggestsNames = $0 }
+                )) {
+                    SettingLabel(
+                        "Suggest names when renaming",
+                        detail: unavailable ?? "Renaming a note offers names Apple Intelligence suggests "
+                            + "from what is in it, on this Mac, as Finder does."
+                    )
+                }
+                .disabled(unavailable != nil)
             }
 
             Section {
