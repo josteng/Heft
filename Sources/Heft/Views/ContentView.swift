@@ -591,6 +591,8 @@ struct EditorPane: View {
                 onSidebarCopy: { model.copyFromKeyboard() },
                 onSidebarPaste: { model.pasteFromKeyboard() },
                 onEditorClaimed: { model.releaseSidebarKeys() },
+                onAskAbout: { model.askAboutSelection() },
+                onSelectionPresence: { model.editorSelection.update($0) },
                 onFollowLink: { url in
                     if !model.handle(url: url) { NSWorkspace.shared.open(url) }
                 },

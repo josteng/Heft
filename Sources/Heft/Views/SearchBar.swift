@@ -542,6 +542,9 @@ struct SearchBarView: View {
             // keyboard [ is ⌥5.
             Button("") { if chatting { newChat() } }
                 .keyboardShortcut(.upArrow, modifiers: .command)
+            // ⌘. stops an answer coming; the chat has no Stop button of its own.
+            Button("") { if chatting, model.agent.isRunning { model.agent.cancel() } }
+                .keyboardShortcut(".", modifiers: .command)
             // ⌘J hands the chat to the right sidebar, as Raycast's Quick AI
             // continues in its chat window.
             Button("") { if chatting { continueInSidebar() } }
@@ -654,7 +657,10 @@ struct SearchBarView: View {
             }
             if chatting {
                 KeyHint(key: "↵", label: "Reply")
-                if model.agent.isRunning { KeyHint(key: "⌘.", label: "Stop") }
+                if model.agent.isRunning {
+                    Button { model.agent.cancel() } label: { KeyHint(key: "⌘.", label: "Stop") }
+                        .buttonStyle(.plain)
+                }
                 KeyHint(key: "⌘N", label: "New chat")
                 Button { continueInSidebar() } label: {
                     KeyHint(key: "⌘J", label: "Sidebar")

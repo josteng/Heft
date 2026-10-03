@@ -116,8 +116,15 @@ private struct TurnView: View {
     /// This turn's proposals that a later turn replaced.
     let replaced: Set<String>
     let onLeave: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Whether a question just sent has risen into its place.
+    @State private var hasRisen = false
 
     private var isAnswering: Bool { isLast && runner.isRunning }
+
+    /// A question asked a moment ago, which rises from the field below as
+    /// it appears; one opened from the history is simply there.
+    private var isJustAsked: Bool { isLast && Date().timeIntervalSince(turn.askedAt) < 1.5 }
 
     /// This turn's proposals still waiting, as they stand now.
     private var waiting: [Proposal] {
@@ -163,25 +170,28 @@ private struct TurnView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
                     .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary))
+                    // One motion: up from the field it was typed in, into place.
+                    .offset(y: isJustAsked && !hasRisen ? 28 : 0)
+                    .opacity(isJustAsked && !hasRisen ? 0 : 1)
+                    .onAppear {
+                        guard isJustAsked, !reduceMotion else { hasRisen = true; return }
+                        withAnimation(.easeOut(duration: 0.28)) { hasRisen = true }
+                    }
             }
             if !turn.answer.isEmpty {
                 AnswerText(text: turn.answer, onLeave: onLeave)
             }
-            if isAnswering {
-                // Along the top, so a status that wraps grows downwards and
-                // the spinner and Stop stay where they were.
+            // What the agent is doing, while no text is arriving: before the
+            // answer starts, and when it pauses to read or search. Stopping
+            // is the send button's job, turned into a stop button meanwhile.
+            if isAnswering, let activity = runner.activity {
+                // Along the top, so a step that wraps grows downwards.
                 HStack(alignment: .top, spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text(runner.activity ?? "Thinking")
+                    Text(activity)
                         .foregroundStyle(.secondary)
                         .contentTransition(.opacity)
-                    Spacer()
-                    // Quiet, as the rest of the line is: a filled button in the
-                    // accent was the loudest thing on screen while it worked.
-                    Button("Stop") { runner.cancel() }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
-                        .keyboardShortcut(".", modifiers: .command)
+                    Spacer(minLength: 0)
                 }
                 .font(.callout)
             }

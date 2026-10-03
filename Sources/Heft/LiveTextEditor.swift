@@ -92,6 +92,10 @@ struct LiveTextEditor: NSViewRepresentable {
     /// A click or a keystroke in the text, after which the sidebar's last
     /// click no longer decides what ⌘C and ⌘V mean.
     var onEditorClaimed: (() -> Void)? = nil
+    /// Ask About Selection, from the text's right-click menu.
+    var onAskAbout: (() -> Void)? = nil
+    /// Whether text is selected, each time the selection changes.
+    var onSelectionPresence: ((Bool) -> Void)? = nil
     let onFollowLink: (URL) -> Void
     let onVimSearch: (VimHostAction) -> Void
 
@@ -140,6 +144,8 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onSidebarCopy = onSidebarCopy
         textView.onSidebarPaste = onSidebarPaste
         textView.onEditorClaimed = onEditorClaimed
+        textView.onAskAbout = onAskAbout
+        textView.onSelectionPresence = onSelectionPresence
         textView.onVimSearch = onVimSearch
         textView.completionIndex = context.index
         // Also set here, not only in `updateNSView`: a note typed into before
@@ -195,6 +201,8 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onSidebarCopy = onSidebarCopy
         textView.onSidebarPaste = onSidebarPaste
         textView.onEditorClaimed = onEditorClaimed
+        textView.onAskAbout = onAskAbout
+        textView.onSelectionPresence = onSelectionPresence
         textView.onVimSearch = onVimSearch
         textView.checksSpelling(typing.checksSpelling, grammar: typing.checksGrammar)
         textView.correctsSpelling = typing.correctsSpelling
@@ -1358,6 +1366,8 @@ final class HeftTextKit2View: NSTextView {
     var onSidebarCopy: (() -> Bool)?
     var onSidebarPaste: (() -> Bool)?
     var onEditorClaimed: (() -> Void)?
+    var onAskAbout: (() -> Void)?
+    var onSelectionPresence: ((Bool) -> Void)?
     var onVimSearch: ((VimHostAction) -> Void)?
     var onFirstResponderChange: ((Bool) -> Void)?
     var completionIndex = VaultIndex.empty
@@ -2370,7 +2380,23 @@ final class HeftTextKit2View: NSTextView {
     override func menu(for event: NSEvent) -> NSMenu? {
         pendingTableCommand = nil
         let point = convert(event.locationInWindow, from: nil)
-        return tableMenu(at: point) ?? super.menu(for: event)
+        if let table = tableMenu(at: point) { return table }
+        guard let menu = super.menu(for: event) else { return nil }
+        // Ask About Selection first, above AppKit's own items, while Ask is
+        // on and something is selected.
+        let selection = selectedRange()
+        if onAskAbout != nil, BarScope.asksAgent, selection.length > 0 {
+            let item = NSMenuItem(title: "Ask About Selection", action: #selector(askAboutSelection), keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: BarScope.ask.symbol, accessibilityDescription: nil)
+            item.target = self
+            menu.insertItem(item, at: 0)
+            menu.insertItem(.separator(), at: 1)
+        }
+        return menu
+    }
+
+    @objc private func askAboutSelection() {
+        onAskAbout?()
     }
 
     /// ⌘C and ⌘V, before the menu bar can answer for them.
@@ -3180,6 +3206,9 @@ final class HeftTextKit2View: NSTextView {
     /// Shows or hides the formatting bar for the current selection.
     func updateFormatBar() {
         let selection = selectedRange()
+        // Before the bar's own conditions: a selection is still one while
+        // the keyboard is in the right sidebar, asking about it.
+        onSelectionPresence?(selection.length > 0)
         // A block is a range per line and the bar formats one, so it stays
         // hidden there; Visual and Visual Line follow the setting.
         let vimHidesBar = vimEnabled && (

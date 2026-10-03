@@ -64,6 +64,15 @@ enum SaveConflictResolution {
 /// in the window observes the model and only the status bar wants this.
 /// Typing publishes here and nowhere else.
 @MainActor
+/// Whether the editor has text selected; published only when that flips.
+final class EditorSelection: ObservableObject {
+    @Published private(set) var isActive = false
+
+    func update(_ active: Bool) {
+        if active != isActive { isActive = active }
+    }
+}
+
 final class NoteStats: ObservableObject {
     private(set) var wordCount = 0
     private(set) var characterCount = 0
@@ -311,6 +320,9 @@ final class AppModel: ObservableObject {
     var text: String = "" { didSet { textDidChange(from: oldValue) } }
     /// What the status bar shows about the open note.
     let stats = NoteStats()
+    /// Whether text is selected in the editor, for Ask's suggestions. Its
+    /// own object, as `stats` is, so a selection redraws Ask alone.
+    let editorSelection = EditorSelection()
     @Published private(set) var isDirty = false {
         didSet { if isDirty != oldValue { updateEditedMarker() } }
     }
@@ -412,6 +424,8 @@ final class AppModel: ObservableObject {
     @Published var inspectorModeRequest: InspectorMode?
     /// Text Ask About adds to the right sidebar's field, taken by `ChatsPanel`.
     @Published var askInsertRequest: String?
+    /// Bumped by Ask About Selection for a new chat there, taken the same way.
+    @Published var askNewChatRequest = 0
     private var inlineNoteSequence = 0
     var isInspectorVisible: Bool {
         get { chrome.isInspectorVisible }

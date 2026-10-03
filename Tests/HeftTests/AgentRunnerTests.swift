@@ -102,6 +102,29 @@ struct AgentRunnerTests {
         ]
     }
 
+    /// The step shows while no text arrives: text clears it, and a tool
+    /// call between the text brings it back until the text resumes.
+    @Test("What the agent is doing shows only while its answer is not arriving")
+    func activityWhileNotWriting() async throws {
+        let fixture = try fixture(stdout: answering)
+        var steps: [String?] = []
+        let watch = fixture.runner.$activities.sink { all in
+            let now = all.values.first
+            if steps.last.map({ $0 != now }) ?? true { steps.append(now) }
+        }
+        defer { watch.cancel() }
+        fixture.runner.ask("What is due?", vaultRoot: fixture.vault, scope: "Work")
+        try await settle(fixture.runner)
+        let shown = steps.drop { $0 == nil }
+        #expect(shown.first == "Thinking")
+        // Text, then a read, then text: cleared, shown, cleared.
+        let after = Array(shown.dropFirst())
+        #expect(after.count >= 3, "steps were \(steps)")
+        #expect(after.first == .some(nil), "the first text clears Thinking")
+        #expect(after.contains { $0?.isEmpty == false }, "the read shows while the text pauses")
+        #expect(after.last == .some(nil))
+    }
+
     @Test("A question streams its answer, starts in its scope, and is saved with its proposals")
     func ask() async throws {
         let fixture = try fixture(stdout: answering, leavesProposal: true)

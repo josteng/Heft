@@ -333,6 +333,9 @@ final class AgentRunner: ObservableObject {
                 chat.host = Self.host
             case .text(let text):
                 chat.turns[chat.turns.count - 1].answer += text
+                // The answer arriving says it is working; the step it was
+                // on is shown again only when the text pauses for another.
+                if !text.isEmpty { activities[chatID] = nil }
             case .activity(let doing):
                 activities[chatID] = doing
             case .finished:

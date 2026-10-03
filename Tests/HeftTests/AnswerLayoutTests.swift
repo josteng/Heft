@@ -235,4 +235,30 @@ struct AnswerLayoutTests {
         let view = try #require(textViews(in: host).first)
         #expect(view.selectedRange() == NSRange(location: (state.text as NSString).length, length: 0))
     }
+
+    @Test("With text selected, the suggestions are about it; Ask About Selection opens a new chat")
+    func selectionSuggestionsAndQuote() async throws {
+        #expect(ChatsPanel.suggestions(note: "Garden plan", hasSelection: true).first == "Explain the selected text")
+        #expect(ChatsPanel.suggestions(note: "Garden plan", hasSelection: false).first?.contains("Garden plan") == true)
+
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("heft-sel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = AppModel(registry: VaultRegistry(), descriptor: WorkspaceDescriptor(vaultPath: root.path))
+        defer { model.closeWorkspace() }
+        let before = model.askNewChatRequest
+        model.askAboutSelection()
+        #expect(model.askNewChatRequest == before + 1)
+        #expect(model.askInsertRequest == nil, "nothing is pasted: the selection is sent with the question")
+        #expect(model.inspectorModeRequest == .chats)
+
+        // A selection is published when it starts and ends, not on every move.
+        var published = 0
+        let watch = model.editorSelection.objectWillChange.sink { published += 1 }
+        defer { watch.cancel() }
+        model.editorSelection.update(true)
+        model.editorSelection.update(true)
+        model.editorSelection.update(false)
+        #expect(published == 2)
+    }
 }

@@ -49,6 +49,14 @@ extension AppModel {
         showInspector(.chats)
     }
 
+    /// Ask About Selection, from the editor's menu: a new chat in the right
+    /// sidebar, the keyboard in its field. Nothing is pasted: every question
+    /// is sent with the selection, and a new chat's suggestions are about it.
+    func askAboutSelection() {
+        askNewChatRequest += 1
+        showInspector(.chats)
+    }
+
     /// Where a link in a chat leads, as a vault item: a note by its name,
     /// a folder or file by its path in the vault. Nil for anything outside.
     func vaultItem(forLink url: URL) -> VaultItem? {

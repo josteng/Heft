@@ -71,7 +71,7 @@ struct InspectorView: View {
             }
             switch layout.shown(mode) {
             case .backlinks: BacklinksPanel()
-            case .chats: ChatsPanel(runner: model.agent)
+            case .chats: ChatsPanel(runner: model.agent, selection: model.editorSelection)
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -100,6 +100,7 @@ struct ChatsPanel: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var runner: AgentRunner
     @ObservedObject private var settings = GeneralSettings.shared
+    @ObservedObject var selection: EditorSelection
     @State private var draft = ""
     /// Bumped by New Chat, to put the keyboard in the field.
     @State private var focusRequest = 0
@@ -155,6 +156,11 @@ struct ChatsPanel: View {
             takeAskInsert()
         }
         .onChange(of: model.askInsertRequest) { takeAskInsert() }
+        .onChange(of: model.askNewChatRequest) {
+            runner.close()
+            showsHistory = false
+            focusRequest += 1
+        }
     }
 
     /// Ask About's item, into the field with the caret after it.
@@ -225,7 +231,7 @@ struct ChatsPanel: View {
             Spacer(minLength: 0)
             if settings.suggestsQuestions {
                 sectionTitle("Try")
-                ForEach(Self.suggestions(note: model.current?.name), id: \.self) { question in
+                ForEach(Self.suggestions(note: model.current?.name, hasSelection: selection.isActive), id: \.self) { question in
                     SuggestionButton(text: question) {
                         model.startChat(question, scope: newChatScope)
                     }
@@ -246,7 +252,17 @@ struct ChatsPanel: View {
             .padding(.bottom, 2)
     }
 
-    static func suggestions(note: String?) -> [String] {
+    /// With text selected, about that text, which every question is sent
+    /// with; otherwise about the open note and the vault.
+    static func suggestions(note: String?, hasSelection: Bool = false) -> [String] {
+        if hasSelection {
+            return [
+                "Explain the selected text",
+                "Summarise the selection",
+                "Which notes relate to the selection?",
+                "Suggest a clearer wording for it",
+            ]
+        }
         var questions: [String] = []
         if let note {
             questions.append("What is \u{201C}\(note)\u{201D} about?")
@@ -278,9 +294,7 @@ struct ChatsPanel: View {
             // lines, then scrolls under a fade, as ⌘T's does.
             BarField(
                 text: $draft,
-                placeholder: runner.chat == nil
-                    ? (newChatScope.isEmpty ? "Ask about your notes" : "Ask about \(model.scopeName)")
-                    : "Reply",
+                placeholder: placeholder,
                 onSubmit: send,
                 onMove: { _ in },
                 onCancel: {},
@@ -291,16 +305,42 @@ struct ChatsPanel: View {
                 focusRequest: focusRequest,
                 focusesOnAppear: false
             )
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 18))
+            // Send, or Stop while an answer comes, as chat apps do: one
+            // place for both, which never moves.
+            if runner.isRunning {
+                Button { runner.cancel() } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 18))
+                }
+                .buttonStyle(.plain)
+                // In the accent, as Send is: grey read as disabled.
+                .foregroundStyle(.tint)
+                .keyboardShortcut(".", modifiers: .command)
+                .help("Stop (⌘.)")
+            } else {
+                Button(action: send) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 18))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                .disabled(!canSend)
+                .help(runner.chat == nil ? "Ask" : "Reply")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-            .disabled(!canSend)
-            .help(runner.chat == nil ? "Ask" : "Reply")
         }
         .padding(.horizontal, 10)
+    }
+
+    /// The field's prompt, which also says when the question carries the
+    /// selection: in the prompt rather than a line of its own, which pushed
+    /// everything above it up each time text was merely selected. The open
+    /// note and today's note go along too, but always, and are expected.
+    private var placeholder: String {
+        if selection.isActive {
+            return runner.chat == nil ? "Ask about your selection" : "Reply about your selection"
+        }
+        if runner.chat != nil { return "Reply" }
+        return newChatScope.isEmpty ? "Ask about your notes" : "Ask about \(model.scopeName)"
     }
 
     private var canSend: Bool {
