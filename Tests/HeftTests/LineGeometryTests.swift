@@ -445,6 +445,74 @@ struct PointerCursorTests {
         // Every checkbox state Obsidian carries through, not only `[ ]`.
         #expect(!editor("- [x] done\n").pointerRects().isEmpty)
     }
+
+    /// Laid out as a drawn view is. Fresh from `editor`, the first point
+    /// asked about answers with its line's end, as though the viewport had
+    /// not been laid out yet.
+    private func laidOut(_ source: String) -> HeftTextKit2View {
+        let view = editor(source)
+        view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        return view
+    }
+
+    /// The gap past a box, and the gutter left of it, is collapsed markup to
+    /// TextKit: a click there landed the caret in front of `- [ ] `.
+    @Test("A click beside a hidden marker lands after it")
+    func clickBesideMarkerLandsAfterIt() throws {
+        let view = laidOut("prose\n- [ ] a task with words\n")
+        let box = try #require(view.checkboxTargets().first).rect
+        let task = NSRange(location: 6, length: 6)
+        // Either side of the box, inside the text container's inset.
+        for x in [box.minX - 2, box.maxX + 2] {
+            let found = view.hiddenMarkupPrefix(at: CGPoint(x: x, y: box.midY))
+            #expect(found == task, "x=\(x) found \(String(describing: found))")
+        }
+        #expect(view.hiddenMarkupPrefix(at: CGPoint(x: 300, y: box.midY)) == nil, "the words keep the click")
+        let bullet = laidOut("prose\n- a bullet\n")
+        #expect(bullet.hiddenMarkupPrefix(at: CGPoint(x: 40, y: box.midY)) == NSRange(location: 6, length: 2))
+    }
+
+    /// The click has to open the marker up, or `- [ ]` cannot be clicked into
+    /// at all: a list marker reveals only while the caret touches it, so the
+    /// caret goes to its end, short of the space before the words.
+    @Test("A click beside a list marker lands where it reveals")
+    func clickRevealsTheMarker() throws {
+        for (source, caret) in [
+            ("- [ ] a task\n", 5), ("- [x] done\n", 5), ("- a bullet\n", 1),
+            ("1. numbered\n", 2), ("  - [ ] nested\n", 7),
+        ] {
+            let text = source as NSString
+            #expect(MarkdownEditing.caretBesideMarkup(ofLineAt: 0, in: text) == caret, "\(source)")
+            let marker = try #require(LiveDecorator.decorations(in: source).first {
+                if case .listMarker = $0.style { true } else { false }
+            })
+            let reveal = Reveal(selection: NSRange(location: caret, length: 0), in: text)
+            #expect(reveal.reveals(marker), "\(source) stays hidden")
+        }
+        // A heading reveals with its line, so the caret can go to the words.
+        #expect(MarkdownEditing.caretBesideMarkup(ofLineAt: 0, in: "## Title\n") == 3)
+    }
+
+    /// What the reader sees is what the click means: in a code block, or with
+    /// the caret already in it, `- [ ] ` is on screen and keeps the click.
+    @Test("Markup on screen keeps the click")
+    func visibleMarkupKeepsTheClick() {
+        let code = laidOut("```\n- [ ] not a task\n```\n")
+        #expect(code.hiddenMarkupPrefix(at: CGPoint(x: 30, y: 28 + 30)) == nil)
+
+        let view = laidOut("prose\n- [ ] a task\n")
+        let y = view.checkboxTargets().first!.rect.midY
+        _ = LiveStyler.apply(
+            to: view.textStorage!,
+            reveal: Reveal(selection: NSRange(location: 8, length: 0), in: view.string as NSString),
+            context: RenderContext(index: .empty, current: nil, vaultRoot: nil),
+            contentWidth: 644
+        )
+        view.textLayoutManager?.ensureLayout(for: view.textLayoutManager!.documentRange)
+        view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        #expect(view.hiddenMarkupPrefix(at: CGPoint(x: 30, y: y)) == nil)
+    }
+
 }
 
 /// A table's line is as tall as its grid and the inset every block gets, and

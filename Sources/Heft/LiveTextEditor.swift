@@ -2832,9 +2832,19 @@ final class HeftTextKit2View: NSTextView {
             && vimEngine.mode != .replace
             && vimEngine.mode != .blockInsert
         let emptyLineLocation = usesVimSelection ? vimEmptyLineLocation(at: point) : nil
+        let hiddenPrefix = event.clickCount == 1 ? hiddenMarkupPrefix(at: point) : nil
         isTrackingMouse = true
         super.mouseDown(with: event)
         isTrackingMouse = false
+        if let hiddenPrefix {
+            let caret = selectedRange()
+            if caret.length == 0, NSLocationInRange(caret.location, hiddenPrefix) {
+                let caret = MarkdownEditing.caretBesideMarkup(
+                    ofLineAt: hiddenPrefix.location, in: string as NSString
+                )
+                setSelectedRange(NSRange(location: caret, length: 0))
+            }
+        }
         if usesVimSelection {
             if let emptyLineLocation {
                 // AppKit double-clicks select the newline character as a word.
@@ -2854,6 +2864,31 @@ final class HeftTextKit2View: NSTextView {
             updateVimCursor()
         }
         onTrackingEnded?()
+    }
+
+    /// The markup before the words of the line under `point`, while it is
+    /// collapsed: `- [ ] `, `> `, `## `.
+    ///
+    /// Collapsed markup is hairline-wide, so TextKit gives the whole gutter
+    /// left of the words, the gap past a checkbox included, to the line's
+    /// first character, and the line then reveals with the caret in front of
+    /// `- [ ] `. A click there meant the words. Resolved before `super`,
+    /// because the click reveals the line and the markup takes up room again.
+    func hiddenMarkupPrefix(at point: NSPoint) -> NSRange? {
+        let text = string as NSString
+        guard text.length > 0, let storage = textStorage else { return nil }
+        let index = min(characterIndexForInsertion(at: point), text.length)
+        let prefix = MarkdownEditing.markupPrefix(ofLineAt: index, in: text)
+        guard prefix.length > 0, NSLocationInRange(index, prefix) else { return nil }
+        // Literal text, as in a code block, is not collapsed and keeps the click.
+        var collapsed = true
+        storage.enumerateAttribute(.font, in: prefix) { value, _, stop in
+            if ((value as? NSFont)?.pointSize ?? 0) >= 1 {
+                collapsed = false
+                stop.pointee = true
+            }
+        }
+        return collapsed ? prefix : nil
     }
 
     /// Returns the source insertion position for an actually empty logical

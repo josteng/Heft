@@ -555,6 +555,28 @@ public enum MarkdownEditing {
         return line.location + (prefix as NSString).length
     }
 
+    /// The line's markup before its words, from the line start up to
+    /// `contentStart`: what a click on the line's hidden prefix is moved past.
+    public static func markupPrefix(ofLineAt location: Int, in text: NSString) -> NSRange {
+        let line = text.lineRange(for: NSRange(location: location, length: 0))
+        let start = contentStart(ofLineAt: location, in: text)
+        return NSRange(location: line.location, length: start - line.location)
+    }
+
+    /// Where a click on the line's hidden prefix puts the caret.
+    ///
+    /// On a list line, the end of `- [ ]` without its space: a list marker
+    /// reveals only while the caret touches it, so one past the space would
+    /// leave it hidden with no way to click into it. A heading or quote
+    /// reveals with its whole line, so there the caret goes to the words.
+    public static func caretBesideMarkup(ofLineAt location: Int, in text: NSString) -> Int {
+        let line = text.lineRange(for: NSRange(location: location, length: 0))
+        let parsed = ListLine(text.substring(with: line))
+        guard !parsed.marker.isEmpty else { return contentStart(ofLineAt: location, in: text) }
+        let markup = (parsed.marker + parsed.checkbox).trimmingCharacters(in: .whitespaces)
+        return line.location + (parsed.indent as NSString).length + (markup as NSString).length
+    }
+
     /// Wraps the selection in a link, putting the caret where the destination
     /// goes so it can be typed or pasted straight away.
     public static func makeLink(in source: String, range: NSRange) -> Edit {
