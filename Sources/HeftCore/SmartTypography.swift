@@ -652,8 +652,10 @@ public enum SmartTypography {
         }
 
         // The word the caret sits in. A tag's `#` only counts at its start, so
-        // a heading's `# ` — which is followed by a space — is prose.
-        let word = prefix.split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
+        // a heading's `# ` — which is followed by a space — is prose. Empty
+        // pieces are kept, or a URL a space ago would still count as this word.
+        let word = prefix.split(omittingEmptySubsequences: false, whereSeparator: \.isWhitespace)
+            .last.map(String.init) ?? ""
         if word.hasPrefix("#") { return true }
         return word.contains("://")
     }

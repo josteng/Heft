@@ -949,6 +949,8 @@ public enum SelfCheck {
         expect(substituted("[a](./x ->"), "[a](./x ->", "no substitution in a link destination")
         expect(substituted("#project--"), "#project--", "no substitution inside a tag")
         expect(substituted("https://x.dev/a--"), "https://x.dev/a--", "no substitution inside a URL")
+        expect(substituted("https://example.com ->"), "https://example.com \u{2192}", "after a URL it fires")
+        expect(substituted("#project ->"), "#project \u{2192}", "after a tag it fires")
         // A closed span puts the caret back in prose.
         expect(substituted("`code` a ->"), "`code` a \u{2192}", "after a closed code span it fires")
 
