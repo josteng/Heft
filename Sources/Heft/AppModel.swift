@@ -108,6 +108,13 @@ final class BarPresence: ObservableObject {
     @Published var isOpen = false
 }
 
+/// Whether this window has a note open, mirrored for the menu bar for the
+/// same reason. Read off the model, ⌘L stayed disabled after launch: the menu
+/// was built before the first note opened and never looked again.
+final class NotePresence: ObservableObject {
+    @Published var isOpen = false
+}
+
 @MainActor
 final class AppModel: ObservableObject {
 
@@ -306,8 +313,13 @@ final class AppModel: ObservableObject {
 
     // MARK: Open document
     @Published private(set) var current: NoteRef? {
-        didSet { if current?.url != oldValue?.url { updateProxyIcon() } }
+        didSet {
+            if current?.url != oldValue?.url { updateProxyIcon() }
+            let open = current != nil
+            if notePresence.isOpen != open { notePresence.isOpen = open }
+        }
     }
+    let notePresence = NotePresence()
     /// The open note's source. Deliberately not `@Published`.
     ///
     /// The editor writes the whole note here on every keystroke, and every

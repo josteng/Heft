@@ -879,6 +879,39 @@ struct SearchBarRowTests {
         #expect(!model.barPresence.isOpen)
     }
 
+    /// Same for an open note: ⌘L stayed off after launch while the menu read
+    /// `current` off a model it does not observe.
+    @Test("The menu's view of the open note follows it")
+    func notePresence() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("heft-presence-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: root.appendingPathComponent("Alpha.md"))
+        let model = AppModel(registry: VaultRegistry(), descriptor: WorkspaceDescriptor(vaultPath: root.path))
+        defer { model.closeWorkspace() }
+        for _ in 0..<600 where model.index.notes.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!model.notePresence.isOpen)
+        model.open(try #require(model.index.notes.first))
+        #expect(model.notePresence.isOpen)
+        model.openVault(at: root)
+        #expect(!model.notePresence.isOpen, "changing vaults closes the note")
+    }
+
+    /// No menu item may be enabled by reading the model, which the menu holds
+    /// but never watches; the state it was built with would stick.
+    @Test("No menu item is enabled by a model it does not watch")
+    func menuWatchesWhatItReads() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/Heft/HeftApp.swift"),
+            encoding: .utf8
+        )
+        // `currentItem` too: it is derived from `current`.
+        #expect(!source.contains(".disabled(model?.current"))
+        #expect(source.contains(".keyboardShortcut(.toggleCheckbox)\n                .disabled(noNote"))
+    }
+
     /// While the bar is up, a shortcut that acts on the note or the window
     /// behind it is off. Read from the menu's source, as the shortcut table's
     /// own tests read it, since a menu cannot be driven without a window.

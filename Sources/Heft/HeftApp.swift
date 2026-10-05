@@ -92,6 +92,7 @@ private struct WorkspaceWindow: View {
             .focusedSceneValue(\.workspaceModel, model)
             .focusedSceneObject(model.sidebarKeys)
             .focusedSceneObject(model.barPresence)
+            .focusedSceneObject(model.notePresence)
             .onAppear {
                 descriptor = model.restorationDescriptor
                 registry.register(model: model) { descriptor in
@@ -118,6 +119,8 @@ struct HeftCommands: Commands {
     /// under the sheet, and ⌘⌫ would have trashed one.
     @FocusedObject private var barPresence: BarPresence?
     private var behindBar: Bool { barPresence?.isOpen == true }
+    @FocusedObject private var notePresence: NotePresence?
+    private var noNote: Bool { notePresence?.isOpen != true }
 
     /// Named after what it would put back, so the menu says whether ⌘Z is
     /// about to touch the tree or the text.
@@ -148,7 +151,7 @@ struct HeftCommands: Commands {
             // Under the title, as a click on it does.
             Button("Rename Note…") { model?.titleRenameRequest += 1 }
                 .keyboardShortcut(.renameNote)
-                .disabled(model?.currentItem == nil || behindBar)
+                .disabled(noNote || behindBar)
             Divider()
             Button("Open Inbox") { model?.openInbox() }
                 .disabled(model?.vaultRoot == nil || behindBar)
@@ -274,7 +277,7 @@ struct HeftCommands: Commands {
                     NSApp.sendAction(#selector(HeftTextKit2View.formatChecklist), to: nil, from: nil)
                 }
                 .keyboardShortcut(.toggleCheckbox)
-                .disabled(model?.current == nil || behindBar)
+                .disabled(noNote || behindBar)
             }
             Divider()
             Menu("Find") {
@@ -336,7 +339,7 @@ struct HeftCommands: Commands {
             // views, or it would show a list the switch has no place for.
             Button("Reveal in Files") { model?.revealCurrentInSidebar() }
                 .keyboardShortcut(.revealInSidebar)
-                .disabled(model?.current == nil || behindBar || !general.sidebarLayout.visible.contains(.files))
+                .disabled(noNote || behindBar || !general.sidebarLayout.visible.contains(.files))
             Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
             Toggle("Show Right Sidebar", isOn: binding(\.isInspectorVisible))
                 .keyboardShortcut(.toggleBacklinks)
