@@ -110,7 +110,10 @@ public enum MarkdownEditing {
             if removeEverywhere {
                 if let edit = removals[index] { edits.append(edit) }
             } else if removals[index] == nil {
-                edits.append(wrapping(format, text.substring(with: segment), at: segment))
+                edits.append(
+                    merging(format, in: text, range: segment)
+                        ?? wrapping(format, text.substring(with: segment), at: segment)
+                )
             }
         }
         guard !edits.isEmpty else { return .nothing(keeping: range) }
@@ -450,7 +453,102 @@ public enum MarkdownEditing {
         _ format: InlineFormat, in text: NSString, range: NSRange
     ) -> Edit {
         if let edit = removal(of: format, in: text, range: range) { return edit }
-        return wrapping(format, text.substring(with: range), at: range)
+        if let edit = splitting(format, in: text, range: range) { return edit }
+        return merging(format, in: text, range: range)
+            ?? wrapping(format, text.substring(with: range), at: range)
+    }
+
+    /// The spans of `format` on `range`'s line that it overlaps, from the
+    /// decorator, so `*` and `_` italics and a highlight's colour emoji are
+    /// read the way they are drawn. `***both***` is left out: its markers
+    /// are two formats at once and not this one's to take apart.
+    private static func spans(
+        of format: InlineFormat, in text: NSString, overlapping range: NSRange
+    ) -> [MarkdownDecoration] {
+        guard format != .code else { return [] }
+        let line = text.lineRange(for: NSRange(location: range.location, length: 0))
+        return LiveDecorator.decorations(in: text.substring(with: line)).compactMap { decoration in
+            let matches = switch (format, decoration.style) {
+            case (.bold, .bold), (.italic, .italic), (.strikethrough, .strikethrough),
+                 (.highlight, .highlight): true
+            default: false
+            }
+            guard matches, decoration.syntax.count >= 2,
+                  decoration.syntax.first?.length == (format.marker as NSString).length
+            else { return nil }
+            let shifted = MarkdownDecoration(
+                range: NSRange(location: decoration.range.location + line.location, length: decoration.range.length),
+                syntax: decoration.syntax.map { NSRange(location: $0.location + line.location, length: $0.length) },
+                style: decoration.style
+            )
+            return NSIntersectionRange(shifted.range, range).length > 0 ? shifted : nil
+        }
+    }
+
+    /// Takes `format` off part of one span: `**bold**` with `ol` selected
+    /// becomes `**b**ol**d**`. Whitespace at a cut stays outside the markers,
+    /// because `**a **` is not emphasis.
+    private static func splitting(
+        _ format: InlineFormat, in text: NSString, range: NSRange
+    ) -> Edit? {
+        let found = spans(of: format, in: text, overlapping: range)
+        guard found.count == 1, let span = found.first, let closing = span.syntax.last else { return nil }
+        let opening = span.syntax.dropLast()
+        let contentStart = opening.map(NSMaxRange).max() ?? span.range.location
+        guard range.location >= contentStart, NSMaxRange(range) <= closing.location else { return nil }
+
+        let open = opening.map { text.substring(with: $0) }.joined()
+        let close = text.substring(with: closing)
+        var before = text.substring(with: NSRange(location: contentStart, length: range.location - contentStart))
+        var after = text.substring(with: NSRange(location: NSMaxRange(range), length: closing.location - NSMaxRange(range)))
+        var selected = text.substring(with: range)
+        let trailing = before.reversed().prefix { $0 == " " || $0 == "\t" }
+        before.removeLast(trailing.count)
+        selected = String(trailing.reversed()) + selected
+        let leading = after.prefix { $0 == " " || $0 == "\t" }
+        after.removeFirst(leading.count)
+        selected += leading
+
+        let head = before.isEmpty ? "" : open + before + close
+        let tail = after.isEmpty ? "" : open + after + close
+        return Edit(
+            range: span.range,
+            replacement: head + selected + tail,
+            selection: NSRange(
+                location: span.range.location + (head as NSString).length
+                    + (trailing.count > 0 ? (String(trailing) as NSString).length : 0),
+                length: range.length
+            )
+        )
+    }
+
+    /// Formats a selection that already has the format in places as one
+    /// span: `x **bold** y` becomes `**x bold y**` rather than
+    /// `**x **bold** y**`, which reads as two spans with plain text between.
+    /// A highlight keeps the first colour it absorbs.
+    private static func merging(
+        _ format: InlineFormat, in text: NSString, range: NSRange
+    ) -> Edit? {
+        let found = spans(of: format, in: text, overlapping: range)
+        guard !found.isEmpty else { return nil }
+        let union = found.reduce(range) { NSUnionRange($0, $1.range) }
+        var body = text.substring(with: union)
+        let markup = found.flatMap(\.syntax).sorted { $0.location > $1.location }
+        for marker in markup {
+            body = (body as NSString).replacingCharacters(
+                in: NSRange(location: marker.location - union.location, length: marker.length), with: ""
+            )
+        }
+        var open = format.marker
+        if case .highlight(let color?) = found.min(by: { $0.range.location < $1.range.location })?.style {
+            open += color.emoji
+        }
+        let openLength = (open as NSString).length
+        return Edit(
+            range: union,
+            replacement: open + body + format.marker,
+            selection: NSRange(location: union.location + openLength, length: (body as NSString).length)
+        )
     }
 
     private static func wrapping(_ format: InlineFormat, _ body: String, at range: NSRange) -> Edit {
