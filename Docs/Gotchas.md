@@ -27,6 +27,10 @@ preferences or the icon.
   An `NSHostingView` in an `NSWindow` ordered front, then `cacheDisplay`,
   draws everything including the controls, which is how the settings panes
   are checked; `heft export` covers the editing surface.
+- **Never call the editor's `mouseDown` from a test.** A click it does not
+  take reaches NSTextView's tracking loop, which waits for a release that
+  never comes headless: a regression hangs the suite instead of failing.
+  Test the hook it calls first, such as `takePictureClick`.
 
 ## Preferences and processes
 

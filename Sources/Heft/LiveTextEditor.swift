@@ -1042,6 +1042,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // a stale rectangle at the readable-width boundary.
             (textView as? HeftTextKit2View)?.updateFormatBar()
             (textView as? HeftTextKit2View)?.updateTableCaret()
+            (textView as? HeftTextKit2View)?.updateImageSelection()
             (textView as? HeftTextKit2View)?.updateVimCursor()
             // This pass styled whatever is in the storage now, so a restyle
             // queued by the edit that led here has nothing left to do.
@@ -1629,6 +1630,21 @@ final class HeftTextKit2View: NSTextView {
     /// caret is — right-clicking a table the caret has never been in is the
     /// normal way to reach them.
     var pendingTableCommand: (grid: TableGrid, row: Int, column: Int)?
+    /// The picture a click selected, by its source range. See
+    /// `ImageSelection.swift`.
+    var selectedImage: NSRange?
+    /// Set while a picture command edits the text, so the edit does not
+    /// count as the reader typing and drop the selection.
+    var isEditingSelectedImage = false
+    private var loadedImageSelectionOverlay: ImageSelectionOverlay?
+    var imageSelectionOverlayIfLoaded: ImageSelectionOverlay? { loadedImageSelectionOverlay }
+    var imageSelectionOverlay: ImageSelectionOverlay {
+        if let loadedImageSelectionOverlay { return loadedImageSelectionOverlay }
+        let overlay = ImageSelectionOverlay(frame: .zero)
+        addSubview(overlay, positioned: .above, relativeTo: nil)
+        loadedImageSelectionOverlay = overlay
+        return overlay
+    }
     private var loadedTableCaretOverlay: TableCaretOverlay?
     var tableCaretOverlayIfLoaded: TableCaretOverlay? { loadedTableCaretOverlay }
     var tableCaretOverlay: TableCaretOverlay {
@@ -1701,6 +1717,11 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if selectedImage != nil,
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+           handleImageKey(characters: event.characters ?? "", keyCode: event.keyCode) {
+            return
+        }
         // The reader taking the note back from a session that has not
         // reported its end. See `writingToolsIsWritingIntoAnotherNote`.
         (delegate as? LiveTextEditor.Coordinator)?.readerTypedInto(self)
@@ -2038,7 +2059,10 @@ final class HeftTextKit2View: NSTextView {
         // A caret drawn inside a table cell is this view's own; leaving the
         // native one on as well would put a second bar at the table's left
         // edge, on the line the collapsed source occupies.
-        let nativeCaretColor = showsBlock || tableCaretIsActive ? NSColor.clear : vimCaretColor
+        // A selected picture is the subject, and a caret blinking elsewhere
+        // would say typing goes there.
+        let nativeCaretColor = showsBlock || tableCaretIsActive || selectedImage != nil
+            ? NSColor.clear : vimCaretColor
         if !insertionPointColor.isEqual(nativeCaretColor) {
             insertionPointColor = nativeCaretColor
         }
@@ -2046,7 +2070,7 @@ final class HeftTextKit2View: NSTextView {
         // thing that knows where the cell is. The block cursor is derived from
         // TextKit's own geometry, and inside a collapsed table that geometry
         // describes a few hairline characters at the left margin.
-        guard showsBlock, !tableCaretIsActive else {
+        guard showsBlock, !tableCaretIsActive, selectedImage == nil else {
             vimBlockCursor.isHidden = true
             return
         }
@@ -2372,6 +2396,7 @@ final class HeftTextKit2View: NSTextView {
             // The drawn caret belongs to a focused editor, and nothing else
             // takes it down: it is a subview, not something TextKit manages.
             hideTableCaret()
+            selectImage(nil)
             updateVimCursor()
         }
         return accepted
@@ -2833,6 +2858,7 @@ final class HeftTextKit2View: NSTextView {
         if event.clickCount == 1, toggleTask(at: convert(event.locationInWindow, from: nil)) {
             return
         }
+        if takePictureClick(event) { return }
         if event.clickCount == 1, let dot = highlightDot(at: convert(event.locationInWindow, from: nil)) {
             highlightColorMenu(for: dot.span).popUp(
                 positioning: nil, at: NSPoint(x: dot.rect.minX, y: dot.rect.maxY + 4), in: self
@@ -3278,6 +3304,9 @@ final class HeftTextKit2View: NSTextView {
 
     override func didChangeText() {
         pendingSubstitution = nil
+        // Typing, undo or anything else rewriting the text leaves the range
+        // pointing at whatever is there now.
+        if !isEditingSelectedImage, selectedImage != nil { selectImage(nil) }
         super.didChangeText()
     }
 

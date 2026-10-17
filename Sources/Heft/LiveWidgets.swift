@@ -153,6 +153,9 @@ struct LiveLayout {
     /// line. The editor keeps these to tell an ordinary cursor move apart from
     /// one that crosses into or out of a span and so needs a restyle.
     var revealableSpans: [NSRange] = []
+    /// The source of every picture drawn as a block, keyed like `blocks`: a
+    /// click on the picture selects this range rather than revealing it.
+    var images: [Int: NSRange] = [:]
 
     /// Every drawn table in the note, in document order. The editor needs these
     /// outside a draw pass — to put the caret in a cell, to work out what a
