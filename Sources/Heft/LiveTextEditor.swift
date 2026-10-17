@@ -3303,10 +3303,21 @@ final class HeftTextKit2View: NSTextView {
             expansion: SubstitutionExpansion(noteTitle: noteTitle), endingWord: endingWord
         ) else { return false }
 
+        // Its own undo step, so ⌘Z puts back what was typed, as backspace
+        // does: the keystroke and the substitution share one event, and
+        // undoing that took the typed `>` away with the arrow. Only at the
+        // outermost level, where the event's group is; splitting a group
+        // somebody opened inside it would not separate anything.
+        if let undo = undoManager, undo.groupingLevel == 1 {
+            undo.endUndoGrouping()
+            undo.beginUndoGrouping()
+        }
+        breakUndoCoalescing()
         guard shouldChangeText(in: substitution.range, replacementString: substitution.replacement)
         else { return false }
         textStorage?.replaceCharacters(in: substitution.range, with: substitution.replacement)
         didChangeText()
+        breakUndoCoalescing()
         setSelectedRange(NSRange(location: substitution.caret, length: 0))
         // After both, since each of them clears it.
         pendingSubstitution = substitution
