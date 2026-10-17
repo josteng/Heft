@@ -3070,6 +3070,9 @@ final class HeftTextKit2View: NSTextView {
             insertText(markdown, replacementRange: selectedRange())
             return
         }
+        if let text = NSPasteboard.general.string(forType: .string), insertLinkPaste(text) {
+            return
+        }
         // Read here rather than passed in, the way auto-pairing reads its own
         // switches: the setting is app-wide and a paste is not hot.
         if TypingSettings.shared.trimsPastedListMarker,
@@ -3078,6 +3081,20 @@ final class HeftTextKit2View: NSTextView {
             return
         }
         pasteAsPlainText(sender)
+    }
+
+    /// Pastes a web address over selected words as a link to it, and says
+    /// whether it did. Apart from `paste` so a test can reach it without the
+    /// real pasteboard.
+    func insertLinkPaste(_ text: String) -> Bool {
+        let selection = selectedRange()
+        guard selection.length > 0, NSMaxRange(selection) <= (string as NSString).length,
+              let link = MarkdownEditing.linkPasting(
+                  text, over: (string as NSString).substring(with: selection)
+              )
+        else { return false }
+        insertText(link, replacementRange: selection)
+        return true
     }
 
     /// Inserts `text` as a paste onto the list line at the caret, when that

@@ -180,6 +180,31 @@ public enum MarkdownEditing {
         return (rest, replacing)
     }
 
+    /// `[selected](url)` when a web address is pasted over a selection of
+    /// words, as Obsidian does; nil when the paste should go in as it is.
+    ///
+    /// Only a single address with a scheme counts, and only over a selection
+    /// on one line that is not itself an address: replacing one link with
+    /// another is an ordinary paste.
+    public static func linkPasting(_ pasted: String, over selected: String) -> String? {
+        let address = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selected.isEmpty, !selected.contains(where: \.isNewline),
+              isWebAddress(address),
+              !isWebAddress(selected.trimmingCharacters(in: .whitespaces))
+        else { return nil }
+        // A `)` or `<` would end the destination early; angle brackets keep
+        // it whole.
+        let destination = address.contains(where: { "()<>".contains($0) }) ? "<\(address)>" : address
+        return "[\(selected)](\(destination))"
+    }
+
+    /// A scheme and a host, so `todo:fix` is text and not an address. An
+    /// address with a space in it does not parse at all.
+    private static func isWebAddress(_ text: String) -> Bool {
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "mailto" ? text.count > 7 : url.host?.isEmpty == false
+    }
+
     private static func firstLine(of text: String) -> String {
         String(text.prefix { $0 != "\n" && $0 != "\r" })
     }
