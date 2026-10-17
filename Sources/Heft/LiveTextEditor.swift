@@ -104,6 +104,7 @@ struct LiveTextEditor: NSViewRepresentable {
 
     func makeNSView(context nsContext: Context) -> NSScrollView {
         let textView = HeftTextKit2View(usingTextLayoutManager: true)
+        textView.fetchLinkTexts = { await LinkTitles.linkTexts(sentence: $0, note: $1, opening: $2) }
         textView.autoresizingMask = [NSView.AutoresizingMask.width]
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -1581,6 +1582,15 @@ final class HeftTextKit2View: NSTextView {
     /// which must not go to the network or the model.
     static var fetchPageTitle: (URL) async -> String? = LinkTitles.pageTitle
     static var fetchShortTitles: (String, URL) async -> [String] = LinkTitles.shortTitles
+    /// Where text after `|` is suggested from: the on-device model, given
+    /// the sentence, the note's name and its opening. Set where the app makes
+    /// its editor and nowhere else, so a view made anywhere else, a test's
+    /// included, never asks the model.
+    var fetchLinkTexts: ((String, String, String) async -> [String])?
+    /// Text the model suggested after `|`, for the link at `key`, and the
+    /// link one is being asked for, so each link asks once.
+    private var linkTextSuggestions: (key: String, texts: [String])?
+    private var linkTextPending: String?
     private var completionKind: CompletionKind = .wiki
 
     /// What the completion menu is currently offering. The panel is a private
@@ -3829,7 +3839,10 @@ final class HeftTextKit2View: NSTextView {
                 dismissLinkCompletion()
                 return
             }
+            // Suggestions arrive below the aliases, so a row already chosen
+            // keeps its place without anything here to hold it.
             completionItems = linkPartItems(for: part)
+            requestLinkTexts(for: part)
         case .callout:
             guard let callout = CalloutCompletionContext.detect(in: string, selection: selection)
             else {
@@ -3945,19 +3958,22 @@ final class HeftTextKit2View: NSTextView {
             : completionIndex.resolve(WikiLink(target: part.target), from: nil)
         switch part.part {
         case .text:
-            guard let ref else { return [] }
-            return part.matching(completionIndex.aliases(of: ref)).map {
+            // After `|` an embed takes a size, which nothing here suggests.
+            guard let ref, !part.isEmbed else { return [] }
+            let aliases = completionIndex.aliases(of: ref)
+            let suggested = linkTextSuggestions?.key == Self.linkTextKey(part)
+                ? linkTextSuggestions?.texts ?? [] : []
+            let fresh = suggested.filter { text in !aliases.contains { $0.lowercased() == text.lowercased() } }
+            return part.matching(aliases).map {
                 WikiCompletionItem(title: $0, detail: "Alias", symbol: "arrow.turn.down.right", destination: $0)
+            } + part.matching(fresh).map {
+                WikiCompletionItem(title: $0, detail: "Suggested", symbol: "sparkles", destination: $0)
             }
         case .heading:
             let source: String
             if let ref {
-                guard ref.isMarkdown else { return [] }
-                if linkPartSource?.url != ref.url {
-                    guard let text = try? String(contentsOf: ref.url, encoding: .utf8) else { return [] }
-                    linkPartSource = (ref.url, text)
-                }
-                source = linkPartSource?.text ?? ""
+                guard ref.isMarkdown, let text = noteText(of: ref) else { return [] }
+                source = text
             } else if part.target.isEmpty {
                 // `[[#` points into the note being written.
                 source = string
@@ -3973,6 +3989,45 @@ final class HeftTextKit2View: NSTextView {
                 )
             }
         }
+    }
+
+    private static func linkTextKey(_ part: LinkPartContext) -> String {
+        "\(part.linkStart)|\(part.target.lowercased())"
+    }
+
+    /// Asks the model, once per link, for text after `|` that fits the
+    /// sentence. The rows arrive under the aliases; a menu closed or moved
+    /// to another link by then ignores them.
+    private func requestLinkTexts(for part: LinkPartContext) {
+        let key = Self.linkTextKey(part)
+        guard part.part == .text, !part.isEmbed, !part.target.isEmpty,
+              TypingSettings.shared.suggestsShortLinkTitles, let fetch = fetchLinkTexts,
+              linkTextPending != key, linkTextSuggestions?.key != key,
+              let ref = completionIndex.resolve(WikiLink(target: part.target), from: nil), ref.isMarkdown
+        else { return }
+        linkTextPending = key
+        let opening = noteText(of: ref).map { NoteText.splitFrontmatter($0).body } ?? ""
+        let sentence = part.sentence(in: string)
+        Task { @MainActor [weak self] in
+            let texts = await fetch(sentence, ref.name, opening)
+            guard let self, self.linkTextPending == key else { return }
+            self.linkTextPending = nil
+            self.linkTextSuggestions = (key, texts)
+            guard self.completionIsActive,
+                  let current = LinkPartContext.detect(in: self.string, selection: self.selectedRange()),
+                  Self.linkTextKey(current) == key
+            else { return }
+            self.updateLinkCompletion(allowStart: false)
+        }
+    }
+
+    /// A note's text, read once while its link is being written.
+    private func noteText(of ref: NoteRef) -> String? {
+        if linkPartSource?.url != ref.url {
+            guard let text = try? String(contentsOf: ref.url, encoding: .utf8) else { return nil }
+            linkPartSource = (ref.url, text)
+        }
+        return linkPartSource?.text
     }
 
     /// Accepts the highlighted note and continues the link with `separator`:
@@ -4001,6 +4056,7 @@ final class HeftTextKit2View: NSTextView {
     private func dismissLinkCompletion() {
         linkTitleSession = nil
         linkPartSource = nil
+        linkTextPending = nil
         completionIsActive = false
         completionKind = .wiki
         completionItems = []

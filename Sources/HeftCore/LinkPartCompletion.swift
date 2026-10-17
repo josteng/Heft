@@ -20,13 +20,23 @@ public struct LinkPartContext: Equatable, Sendable {
     public let query: String
     public let queryRange: NSRange
     public let hasClosingBrackets: Bool
+    /// `![[`: after `|` an embed takes a size, not text.
+    public let isEmbed: Bool
+    /// Where the `[[` opening the link is, so a suggestion made for one link
+    /// is not offered in another.
+    public let linkStart: Int
 
-    public init(part: Part, target: String, query: String, queryRange: NSRange, hasClosingBrackets: Bool) {
+    public init(
+        part: Part, target: String, query: String, queryRange: NSRange, hasClosingBrackets: Bool,
+        isEmbed: Bool = false, linkStart: Int = 0
+    ) {
         self.part = part
         self.target = target
         self.query = query
         self.queryRange = queryRange
         self.hasClosingBrackets = hasClosingBrackets
+        self.isEmbed = isEmbed
+        self.linkStart = linkStart
     }
 
     /// The link part the caret is in, or nil. A block reference, `#^`, is
@@ -46,6 +56,7 @@ public struct LinkPartContext: Equatable, Sendable {
 
         let closer = NSRange(location: caret, length: min(2, text.length - caret))
         let closes = closer.length == 2 && text.substring(with: closer) == "]]"
+        let embed = opener.location > 0 && text.character(at: opener.location - 1) == UInt16(33)  // "!"
 
         if let bar = body.firstIndex(of: "|") {
             let query = String(body[body.index(after: bar)...])
@@ -56,7 +67,7 @@ public struct LinkPartContext: Equatable, Sendable {
             return Self(
                 part: .text, target: target, query: query,
                 queryRange: NSRange(location: caret - (query as NSString).length, length: (query as NSString).length),
-                hasClosingBrackets: closes
+                hasClosingBrackets: closes, isEmbed: embed, linkStart: opener.location
             )
         }
         if let hash = body.firstIndex(of: "#") {
@@ -65,7 +76,7 @@ public struct LinkPartContext: Equatable, Sendable {
             return Self(
                 part: .heading, target: String(body[..<hash]), query: query,
                 queryRange: NSRange(location: caret - (query as NSString).length, length: (query as NSString).length),
-                hasClosingBrackets: closes
+                hasClosingBrackets: closes, isEmbed: embed, linkStart: opener.location
             )
         }
         return nil
@@ -92,6 +103,15 @@ public struct LinkPartContext: Equatable, Sendable {
             replacement: replacement,
             selection: NSRange(location: queryRange.location + (value as NSString).length + 2, length: 0)
         )
+    }
+
+    /// The sentence the link is being written into: the line before `[[`,
+    /// its last few hundred characters, for suggesting text that fits it.
+    public func sentence(in source: String) -> String {
+        let text = source as NSString
+        let line = text.lineRange(for: NSRange(location: linkStart, length: 0))
+        let before = text.substring(with: NSRange(location: line.location, length: linkStart - line.location))
+        return String(before.suffix(300)).trimmingCharacters(in: .whitespaces)
     }
 
     /// A heading as a link can carry it: brackets and pipes would end the

@@ -342,3 +342,134 @@ struct LinkPartTests {
         #expect(view.visibleCompletions == ["ML", "Learning"])
     }
 }
+
+/// After `|`, text from the on-device model that fits the sentence, under
+/// the note's aliases.
+@MainActor
+@Suite("Suggested link text after |", .serialized)
+struct LinkTextSuggestionTests {
+
+    private func editor() throws -> (HeftTextKit2View, URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-linktext-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "---\naliases: [ML, Learning]\n---\n# Basics\nbody"
+            .write(to: root.appendingPathComponent("Machine Learning.md"), atomically: true, encoding: .utf8)
+        try "Plain notes are about nothing much."
+            .write(to: root.appendingPathComponent("Plain.md"), atomically: true, encoding: .utf8)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        view.completionIndex = VaultIndex.build(root: VaultScanner.scan(root: root))
+        return (view, root)
+    }
+
+    private final class Asked { var calls: [(sentence: String, note: String, opening: String)] = [] }
+
+    private func withFakeModel(_ body: (Asked) async throws -> Void) async rethrows {
+        let setting = TypingSettings.shared.suggestsShortLinkTitles
+        TypingSettings.shared.suggestsShortLinkTitles = true
+        defer { TypingSettings.shared.suggestsShortLinkTitles = setting }
+        try await body(Asked())
+    }
+
+    /// An editor whose model is the fake: it records what it was asked and
+    /// answers with two suggestions and a repeat of an alias.
+    private func editor(asking asked: Asked) throws -> (HeftTextKit2View, URL) {
+        let (view, root) = try editor()
+        view.fetchLinkTexts = { sentence, note, opening in
+            asked.calls.append((sentence, note, opening))
+            return ["Learning", "ML methods", "learning machines"]
+        }
+        return (view, root)
+    }
+
+    private func settle() async {
+        for _ in 0..<20 { await Task.yield() }
+    }
+
+    private func openText(_ view: HeftTextKit2View, _ text: String) {
+        view.string = text + "]]"
+        view.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+    }
+
+    @Test("A note without aliases gets the model's text, fitted to the sentence")
+    func suggestionsWithoutAliases() async throws {
+        try await withFakeModel { asked in
+            let (view, root) = try editor(asking: asked)
+            defer { try? FileManager.default.removeItem(at: root) }
+            openText(view, "I read about [[Plain|")
+            #expect(view.visibleCompletions.isEmpty)
+            await settle()
+            #expect(view.visibleCompletions == ["Learning", "ML methods", "learning machines"])
+            #expect(asked.calls.count == 1)
+            #expect(asked.calls.first?.sentence == "I read about")
+            #expect(asked.calls.first?.note == "Plain")
+            #expect(asked.calls.first?.opening.hasPrefix("Plain notes") == true)
+            view.insertNewline(nil)
+            #expect(view.string == "I read about [[Plain|Learning]]")
+        }
+    }
+
+    @Test("Aliases come first, and a suggestion repeating one is left out")
+    func aliasesFirst() async throws {
+        try await withFakeModel { asked in
+            let (view, root) = try editor(asking: asked)
+            defer { try? FileManager.default.removeItem(at: root) }
+            openText(view, "See [[Machine Learning|")
+            #expect(view.visibleCompletions == ["ML", "Learning"])
+            await settle()
+            #expect(view.visibleCompletions == ["ML", "Learning", "ML methods", "learning machines"])
+        }
+    }
+
+    @Test("A row chosen before the suggestions arrive stays chosen")
+    func choiceKept() async throws {
+        try await withFakeModel { asked in
+            let (view, root) = try editor(asking: asked)
+            defer { try? FileManager.default.removeItem(at: root) }
+            openText(view, "See [[Machine Learning|")
+            view.moveDown(nil)
+            await settle()
+            view.insertNewline(nil)
+            #expect(view.string == "See [[Machine Learning|Learning]]")
+        }
+    }
+
+    @Test("The sentence repeated back, or the note's whole name, is not link text")
+    func usableTexts() {
+        #expect(LinkTitles.usable(
+            ["Wie in der Studie von Miller2024", "Miller2024", "Miller2024 - Triage", "\"the triage study\""],
+            sentence: "Wie in der Studie von", note: "Miller2024 - Triage"
+        ) == ["Miller2024", "the triage study"])
+        #expect(LinkTitles.usable(["A", "B"], sentence: "", note: "N") == ["A", "B"])
+    }
+
+    @Test("Narrowing asks nothing more; an embed or the switch off asks nothing")
+    func asksOnce() async throws {
+        try await withFakeModel { asked in
+            let (view, root) = try editor(asking: asked)
+            defer { try? FileManager.default.removeItem(at: root) }
+            openText(view, "See [[Plain|")
+            await settle()
+            view.string = "See [[Plain|le]]"
+            view.setSelectedRange(NSRange(location: 14, length: 0))
+            view.updateLinkCompletion(allowStart: false)
+            await settle()
+            #expect(asked.calls.count == 1)
+            #expect(view.visibleCompletions == ["Learning", "learning machines"])
+
+            view.cancelOperation(nil)
+            openText(view, "See ![[Plain|")
+            await settle()
+            #expect(asked.calls.count == 1)
+            #expect(view.visibleCompletions.isEmpty)
+
+            TypingSettings.shared.suggestsShortLinkTitles = false
+            openText(view, "Other [[Plain|")
+            await settle()
+            #expect(asked.calls.count == 1)
+        }
+    }
+}

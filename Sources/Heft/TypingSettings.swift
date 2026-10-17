@@ -94,9 +94,11 @@ final class TypingSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(suggestsLinkTitles, forKey: Self.linkTitlesKey) }
     }
 
-    /// Whether that menu also offers short titles from Apple's on-device
-    /// model. Apart from the menu itself, as the rename field's suggestions
-    /// are: the page's own title is plain data, the short ones are made up.
+    /// Whether link text is also suggested by Apple's on-device model: short
+    /// titles for a pasted address, and after `|` in a link, text that fits
+    /// the sentence. Apart from the menus themselves, as the rename field's
+    /// suggestions are: a page's title or a note's aliases are plain data,
+    /// these are made up.
     @Published var suggestsShortLinkTitles: Bool {
         didSet { HeftDefaults.shared.set(suggestsShortLinkTitles, forKey: Self.shortLinkTitlesKey) }
     }
@@ -348,13 +350,12 @@ struct TypingSettingsView: View {
                     set: { settings.suggestsShortLinkTitles = $0 }
                 )) {
                     SettingLabel(
-                        "Short Titles from Apple Intelligence",
-                        detail: unavailable ?? "Adds shorter titles made from the page\u{2019}s own, "
-                            + "on this Mac."
+                        "Link Text from Apple Intelligence",
+                        detail: unavailable ?? "Short titles for a pasted address, and after | in a "
+                            + "link, text that fits your sentence. Made on this Mac."
                     )
                 }
-                .disabled(!settings.suggestsLinkTitles || unavailable != nil)
-                .padding(.leading, 20)
+                .disabled(unavailable != nil)
             } header: {
                 SectionHeading("Auto-Pairing")
             }
