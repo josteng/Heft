@@ -203,3 +203,131 @@ struct LinkContinuationTests {
         #expect(WikiCompletionContext.target(of: "Folder/Note") == "Folder/Note")
     }
 }
+
+/// After `|` a link offers its note's aliases; after `#`, its headings.
+@MainActor
+@Suite("Completing a link's text and heading")
+struct LinkPartTests {
+
+    private func detect(_ source: String, caret: Int? = nil) -> LinkPartContext? {
+        let location = caret ?? (source as NSString).length
+        return LinkPartContext.detect(in: source, selection: NSRange(location: location, length: 0))
+    }
+
+    @Test("The part after | or # is found, with the note it belongs to")
+    func detects() {
+        let text = detect("See [[Machine Learning|M")
+        #expect(text?.part == .text)
+        #expect(text?.target == "Machine Learning")
+        #expect(text?.query == "M")
+        #expect(text?.queryRange == NSRange(location: 23, length: 1))
+        #expect(detect("| [[Note\\|x")?.target == "Note")
+        #expect(detect("[[Note#Part|x")?.target == "Note")
+
+        let heading = detect("[[Note#Ba]]", caret: 9)
+        #expect(heading?.part == .heading)
+        #expect(heading?.target == "Note")
+        #expect(heading?.hasClosingBrackets == true)
+        #expect(detect("[[#Ba")?.target == "")
+
+        #expect(detect("[[Note#^block") == nil)
+        #expect(detect("[[Note]] then |x") == nil)
+        #expect(detect("[[Note") == nil)
+    }
+
+    @Test("Matches start with what was typed before they merely contain it")
+    func matching() throws {
+        let context = try #require(detect("[[N#ba"))
+        #expect(context.matching(["Kebab", "Basics", "basics", "Other"]) == ["Basics", "Kebab"])
+        #expect(try #require(detect("[[N#")).matching(["A", "B"]) == ["A", "B"])
+    }
+
+    @Test("A heading is written so the link still parses")
+    func linkableHeading() {
+        #expect(LinkPartContext.linkable(heading: "Notes [draft] | v2") == "Notes draft v2")
+        #expect(LinkPartContext.linkable(heading: "C# basics") == "C# basics")
+    }
+
+    private func editor() throws -> (HeftTextKit2View, URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-part-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "---\naliases: [ML, Learning]\n---\n# Basics\n## Deep [Nets]\nbody"
+            .write(to: root.appendingPathComponent("Machine Learning.md"), atomically: true, encoding: .utf8)
+        try "no aliases".write(to: root.appendingPathComponent("Plain.md"), atomically: true, encoding: .utf8)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        view.completionIndex = VaultIndex.build(root: VaultScanner.scan(root: root))
+        return (view, root)
+    }
+
+    private func open(_ view: HeftTextKit2View, _ before: String, _ query: String) {
+        let length = (before as NSString).length
+        view.string = before + "]]"
+        view.setSelectedRange(NSRange(location: length, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        view.string = before + query + "]]"
+        view.setSelectedRange(NSRange(location: length + (query as NSString).length, length: 0))
+        view.updateLinkCompletion(allowStart: false)
+    }
+
+    /// Types `query` after the caret, as keys narrowing the open menu do.
+    private func narrow(_ view: HeftTextKit2View, to query: String) {
+        let caret = view.selectedRange().location
+        view.string = (view.string as NSString).replacingCharacters(in: NSRange(location: caret, length: 0), with: query)
+        view.setSelectedRange(NSRange(location: caret + (query as NSString).length, length: 0))
+        view.updateLinkCompletion(allowStart: false)
+    }
+
+    @Test("| offers the note's aliases, and one is written as the link's text")
+    func aliasesAfterPipe() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "See [[", "mach")
+        view.insertText("|", replacementRange: view.selectedRange())
+        #expect(view.visibleCompletions == ["ML", "Learning"])
+        narrow(view, to: "l")
+        #expect(view.visibleCompletions == ["Learning", "ML"])
+        view.insertNewline(nil)
+        #expect(view.string == "See [[Machine Learning|Learning]]")
+        #expect(view.selectedRange() == NSRange(location: 33, length: 0))
+    }
+
+    @Test("# offers the note's headings, written so the link parses")
+    func headingsAfterHash() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "See [[", "mach")
+        view.insertText("#", replacementRange: view.selectedRange())
+        #expect(view.visibleCompletions == ["Basics", "Deep [Nets]"])
+        narrow(view, to: "deep")
+        view.insertNewline(nil)
+        #expect(view.string == "See [[Machine Learning#Deep Nets]]")
+    }
+
+    @Test("[[# offers the headings of the note being written")
+    func ownHeadings() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        view.string = "# Intro\n## Method\nSee [[#]]"
+        view.setSelectedRange(NSRange(location: 25, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        #expect(view.visibleCompletions == ["Intro", "Method"])
+    }
+
+    @Test("A note without aliases offers nothing, and | typed into a link opens the menu")
+    func noAliasesNoMenu() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        view.string = "[[Plain|]]"
+        view.setSelectedRange(NSRange(location: 8, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        #expect(view.visibleCompletions.isEmpty)
+
+        view.string = "[[Machine Learning|]]"
+        view.setSelectedRange(NSRange(location: 19, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        #expect(view.visibleCompletions == ["ML", "Learning"])
+    }
+}

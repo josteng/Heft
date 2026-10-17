@@ -1571,7 +1571,10 @@ final class HeftTextKit2View: NSTextView {
     /// What the open menu is completing. `[[`, `> [!` and `==` share the
     /// panel, and accepting a row has to re-detect the same one it was built
     /// from.
-    private enum CompletionKind { case wiki, callout, highlight, linkTitle }
+    private enum CompletionKind { case wiki, linkPart, callout, highlight, linkTitle }
+    /// The last note read for its headings, so typing after `#` does not
+    /// read the file again on every key.
+    private var linkPartSource: (url: URL, text: String)?
     /// The titles on offer for an address just pasted. See `LinkTitles`.
     var linkTitleSession: LinkTitleSession?
     /// Where page titles and short titles come from. Replaced in tests,
@@ -3770,6 +3773,9 @@ final class HeftTextKit2View: NSTextView {
         if let wiki = WikiCompletionContext.detect(in: string, selection: selection) {
             completionKind = .wiki
             query = wiki.query
+        } else if let part = LinkPartContext.detect(in: string, selection: selection) {
+            completionKind = .linkPart
+            query = part.query
         } else if let callout = CalloutCompletionContext.detect(in: string, selection: selection) {
             completionKind = .callout
             query = callout.query
@@ -3815,6 +3821,12 @@ final class HeftTextKit2View: NSTextView {
                     destination: destination + pipe + alias
                 )
             }
+        case .linkPart:
+            guard let part = LinkPartContext.detect(in: string, selection: selection) else {
+                dismissLinkCompletion()
+                return
+            }
+            completionItems = linkPartItems(for: part)
         case .callout:
             guard let callout = CalloutCompletionContext.detect(in: string, selection: selection)
             else {
@@ -3885,6 +3897,10 @@ final class HeftTextKit2View: NSTextView {
                 in: string, selection: selectedRange()
             ) else { return false }
             edit = context.accepting(destination)
+        case .linkPart:
+            guard let context = LinkPartContext.detect(in: string, selection: selectedRange())
+            else { return false }
+            edit = context.accepting(destination)
         case .callout:
             guard let context = CalloutCompletionContext.detect(
                 in: string, selection: selectedRange()
@@ -3909,6 +3925,45 @@ final class HeftTextKit2View: NSTextView {
         didChangeText()
         setSelectedRange(edit.selection)
         return true
+    }
+
+    /// What can follow the note in a link: its aliases after `|`, its
+    /// headings after `#`. Nothing for a note without aliases, so typing
+    /// the link's own text is not interrupted by an empty menu.
+    private func linkPartItems(for part: LinkPartContext) -> [WikiCompletionItem] {
+        let ref = part.target.isEmpty
+            ? nil
+            : completionIndex.resolve(WikiLink(target: part.target), from: nil)
+        switch part.part {
+        case .text:
+            guard let ref else { return [] }
+            return part.matching(completionIndex.aliases(of: ref)).map {
+                WikiCompletionItem(title: $0, detail: "Alias", symbol: "arrow.turn.down.right", destination: $0)
+            }
+        case .heading:
+            let source: String
+            if let ref {
+                guard ref.isMarkdown else { return [] }
+                if linkPartSource?.url != ref.url {
+                    guard let text = try? String(contentsOf: ref.url, encoding: .utf8) else { return [] }
+                    linkPartSource = (ref.url, text)
+                }
+                source = linkPartSource?.text ?? ""
+            } else if part.target.isEmpty {
+                // `[[#` points into the note being written.
+                source = string
+            } else {
+                return []
+            }
+            let headings = NoteText.headings(in: source)
+            return part.matching(headings.map(\.text)).map { name in
+                let level = headings.first { $0.text == name }?.level ?? 1
+                return WikiCompletionItem(
+                    title: name, detail: "H\(level)", symbol: "number",
+                    destination: LinkPartContext.linkable(heading: name)
+                )
+            }
+        }
     }
 
     /// Accepts the highlighted note and continues the link with `separator`:
@@ -3936,6 +3991,7 @@ final class HeftTextKit2View: NSTextView {
 
     private func dismissLinkCompletion() {
         linkTitleSession = nil
+        linkPartSource = nil
         completionIsActive = false
         completionKind = .wiki
         completionItems = []
