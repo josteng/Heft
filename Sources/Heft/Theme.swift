@@ -90,7 +90,23 @@ enum Theme {
     /// How strongly a tag's own colour tints the pill behind it. Shared by
     /// the live surface and the reading view so the two match.
     static let tagBackgroundOpacity = 0.14
-    static let highlightBackground = Color.yellow.opacity(0.30)
+    /// Behind `==text==`: the colour its emoji names, or yellow for a plain
+    /// one. Shared by the live surface and the reading view so the two match.
+    static func highlightBackground(_ color: HighlightColor?) -> NSColor {
+        highlightSwatch(color ?? .yellow).withAlphaComponent(0.30)
+    }
+
+    /// The colour itself, at full strength.
+    static func highlightSwatch(_ color: HighlightColor) -> NSColor {
+        switch color {
+        case .red: .systemRed
+        case .orange: .systemOrange
+        case .yellow: .systemYellow
+        case .green: .systemGreen
+        case .blue: .systemBlue
+        case .purple: .systemPurple
+        }
+    }
 
     // Heading accent colours are user-customisable via the Appearance
     // settings pane; see `AppearanceSettings.headingColor(_:)` and

@@ -180,6 +180,8 @@ public enum NoteText {
             String(match.output.2 ?? match.output.1)
         }
         t = t.replacing(#/\[([^\]]*)\]\([^)]*\)/#) { match in String(match.output.1) }
+        // A highlight's colour emoji is markup, not text.
+        t = t.replacing(#/==(?:🔴|🟠|🟡|🟢|🔵|🟣)\x{FE0F}?/#) { _ in "==" }
         for marker in ["**", "__", "*", "`", "==", "~~"] {
             t = t.replacingOccurrences(of: marker, with: "")
         }

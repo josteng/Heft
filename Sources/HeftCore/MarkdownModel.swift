@@ -101,7 +101,7 @@ public indirect enum MDInline: Sendable {
     case emphasis([MDInline])
     case strong([MDInline])
     case strikethrough([MDInline])
-    case highlight([MDInline])
+    case highlight([MDInline], color: HighlightColor?)
     case code(String)
     case link(destination: String?, children: [MDInline])
     case image(source: String?, alt: String)
@@ -517,7 +517,8 @@ public enum MarkdownModel {
             // `== ==` with nothing between is not a highlight.
             guard !inner.isEmpty else { break }
             if !before.isEmpty { result.append(.text(String(before))) }
-            result.append(.highlight([.text(String(inner))]))
+            let (color, highlighted) = HighlightColor.split(String(inner))
+            result.append(.highlight([.text(highlighted)], color: color))
             rest = rest[close.upperBound...]
         }
         if !rest.isEmpty { result.append(.text(String(rest))) }
@@ -562,7 +563,7 @@ public enum MarkdownModel {
             switch inline {
             case .text(let s): s
             case .code(let s): s
-            case .emphasis(let c), .strong(let c), .strikethrough(let c), .highlight(let c):
+            case .emphasis(let c), .strong(let c), .strikethrough(let c), .highlight(let c, _):
                 plainText(c)
             case .link(_, let c): plainText(c)
             case .image(_, let alt): alt

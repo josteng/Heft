@@ -180,8 +180,8 @@ enum InlineText {
                     append(c, style.with(bold: true))
                 case .strikethrough(let c):
                     append(c, style.with(strike: true))
-                case .highlight(let c):
-                    append(c, style.with(highlight: true))
+                case .highlight(let c, let color):
+                    append(c, style.with(highlight: true, highlightColor: color))
 
                 case .code(let s):
                     var run = AttributedString(s)
@@ -311,18 +311,21 @@ enum InlineText {
         var italic = false
         var strike = false
         var highlight = false
+        /// Nil for a plain highlight, in the theme's default colour.
+        var highlightColor: HighlightColor?
         var link: URL?
         var color: Color?
 
         func with(
             bold: Bool? = nil, italic: Bool? = nil, strike: Bool? = nil,
-            highlight: Bool? = nil, link: URL? = nil, color: Color? = nil
+            highlight: Bool? = nil, highlightColor: HighlightColor? = nil, link: URL? = nil, color: Color? = nil
         ) -> Style {
             var copy = self
             if let bold { copy.bold = bold }
             if let italic { copy.italic = italic }
             if let strike { copy.strike = strike }
             if let highlight { copy.highlight = highlight }
+            if let highlightColor { copy.highlightColor = highlightColor }
             if let link { copy.link = link }
             if let color { copy.color = color }
             return copy
@@ -341,7 +344,9 @@ enum InlineText {
         if style.italic { font = font.italic() }
         run.font = font
         if style.strike { run.strikethroughStyle = .single }
-        if style.highlight { run.backgroundColor = Theme.highlightBackground }
+        if style.highlight {
+            run.backgroundColor = Color(nsColor: Theme.highlightBackground(style.highlightColor))
+        }
         if let color = style.color {
             run.foregroundColor = color
         } else if context.colorfulFormatting, style.bold {

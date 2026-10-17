@@ -42,7 +42,9 @@ public struct MarkdownDecoration: Sendable, Equatable {
         case bold
         case italic
         case strikethrough
-        case highlight
+        /// `==text==`, with Obsidian's colour when an emoji follows the
+        /// opener. Nil is the theme's default.
+        case highlight(HighlightColor?)
         case inlineCode
         /// The whole parsed link, not just its target: an embed needs the
         /// `#Heading` and `#^block` parts to know which slice of the other
@@ -1545,7 +1547,17 @@ public enum LiveDecorator {
         result.append(contentsOf: pendingEmphasis(text, protected: protected, closedDelimiters: closedDelimiters))
 
         wrapped(#"~~(?=\S)([^\n]+?)(?<=\S)~~"#, 2, .strikethrough)
-        wrapped(#"==(?=\S)([^\n]+?)(?<=\S)=="#, 2, .highlight)
+        // The colour emoji after `==` is markup too: hidden with the
+        // markers, so `==🔴word==` reads as a red `word`.
+        for match in matches(#"==(?=\S)([^\n]+?)(?<=\S)=="#, text, excluding: protected) {
+            var syntax = [NSRange(location: match.location, length: 2),
+                          NSRange(location: NSMaxRange(match) - 2, length: 2)]
+            let color = HighlightColor.leading(in: text, at: match.location + 2)
+            if let color, match.length > 4 + color.length {
+                syntax.insert(NSRange(location: match.location + 2, length: color.length), at: 1)
+            }
+            result.append(MarkdownDecoration(range: match, syntax: syntax, style: .highlight(color?.color)))
+        }
 
         // Wikilinks and embeds. The alias marker `Target|` is hidden too, so the
         // reader sees just the alias, as Obsidian does.

@@ -917,10 +917,8 @@ enum LiveStyler {
             }
         case .strikethrough:
             storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
-        case .highlight:
-            storage.addAttribute(
-                .backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.30), range: range
-            )
+        case .highlight(let color):
+            storage.addAttribute(.backgroundColor, value: Theme.highlightBackground(color), range: range)
 
         case .inlineCode:
             // Size comes from whatever font is already there, so inline code

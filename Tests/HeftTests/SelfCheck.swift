@@ -383,7 +383,7 @@ public enum SelfCheck {
         expect(hiddenText("**bold**"), "****", "bold markers are hideable")
         expectTrue(styles("*italic*").contains(.italic), "decorator finds italic")
         expectTrue(styles("a_b_c").isEmpty, "underscores inside a word are not italic")
-        expectTrue(styles("==hi==").contains(.highlight), "decorator finds highlight")
+        expectTrue(styles("==hi==").contains(.highlight(nil)), "decorator finds highlight")
         expectTrue(
             styles(DailyNoteCapture.insertionMarker).contains(.comment),
             "decorator recognises an HTML comment"
