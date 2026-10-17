@@ -1572,7 +1572,7 @@ final class HeftTextKit2View: NSTextView {
     /// What the open menu is completing. `[[`, `> [!` and `==` share the
     /// panel, and accepting a row has to re-detect the same one it was built
     /// from.
-    private enum CompletionKind { case wiki, linkPart, callout, highlight, linkTitle }
+    private enum CompletionKind { case wiki, linkPart, callout, highlight, tag, linkTitle }
     /// The last note read for its headings, so typing after `#` does not
     /// read the file again on every key.
     private var linkPartSource: (url: URL, text: String)?
@@ -3795,6 +3795,9 @@ final class HeftTextKit2View: NSTextView {
         } else if HighlightCompletionContext.detect(in: string, selection: selection) != nil {
             completionKind = .highlight
             query = ""
+        } else if let tag = TagCompletionContext.detect(in: string, selection: selection) {
+            completionKind = .tag
+            query = tag.query
         } else if let session = linkTitleSession, session.link.isCurrent(in: string, caret: selection) {
             completionKind = .linkTitle
             query = ""
@@ -3853,6 +3856,18 @@ final class HeftTextKit2View: NSTextView {
         case .highlight:
             completionItems = [WikiCompletionItem(highlight: nil)]
                 + HighlightColor.allCases.map(WikiCompletionItem.init(highlight:))
+        case .tag:
+            guard let tag = TagCompletionContext.detect(in: string, selection: selection) else {
+                dismissLinkCompletion()
+                return
+            }
+            // Most used first, which is the index's own order.
+            completionItems = tag.suggestions(from: completionIndex.allTags).map {
+                WikiCompletionItem(
+                    title: $0, detail: "\(completionIndex.noteCount(forTag: $0))",
+                    symbol: "number", destination: $0
+                )
+            }
         case .linkTitle:
             guard let session = linkTitleSession else {
                 dismissLinkCompletion()
@@ -3933,6 +3948,10 @@ final class HeftTextKit2View: NSTextView {
                 in: string, selection: selectedRange()
             ) else { return false }
             edit = context.accepting(HighlightColor(rawValue: destination))
+        case .tag:
+            guard let context = TagCompletionContext.detect(in: string, selection: selectedRange())
+            else { return false }
+            edit = context.accepting(destination, in: string)
         case .linkTitle:
             guard let session = linkTitleSession,
                   session.link.isCurrent(in: string, caret: selectedRange())
