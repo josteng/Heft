@@ -446,7 +446,7 @@ enum LiveStyler {
                 reserving: size.height
             )
             layout.blocks[lineStart] = .image(image, size: size, lead: lead)
-            layout.images[lineStart] = range
+            layout.images[lineStart] = DrawnPicture(range: range, url: url)
 
         case .wikiLink(let link):
             guard link.isEmbed,
@@ -489,7 +489,7 @@ enum LiveStyler {
                 reserving: size.height
             )
             layout.blocks[lineStart] = .image(image, size: size, lead: lead)
-            layout.images[lineStart] = range
+            layout.images[lineStart] = DrawnPicture(range: range, url: hit.url)
 
         case .thematicBreak:
             // The dashes collapse to nothing, so without a reserved height the

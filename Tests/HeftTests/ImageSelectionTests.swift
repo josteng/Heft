@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Quartz
 import HeftCore
 import Testing
 @testable import Heft
@@ -298,6 +299,48 @@ struct ImageSelectionTests {
         }
     }
 
+    @Test("Space or a double-click opens the picture's file full size")
+    func opensFullSize() throws {
+        var shown: [URL] = []
+        let previous = HeftTextKit2View.showPicture
+        HeftTextKit2View.showPicture = { _, url in shown.append(url) }
+        defer { HeftTextKit2View.showPicture = previous }
+
+        try withEditor("intro\n\n![[shot.png]]\n\nafter") { view in
+            view.selectImage(NSRange(location: 7, length: 13))
+            #expect(press(view, " ", keyCode: 49))
+            #expect(shown.last?.lastPathComponent == "shot.png")
+            // Still selected, so Space again or the arrow keys keep working.
+            #expect(view.selectedImage == NSRange(location: 7, length: 13))
+
+            // What Quick Look is handed while it is up.
+            let panel = try #require(QLPreviewPanel.shared())
+            #expect(view.acceptsPreviewPanelControl(panel))
+            #expect(view.numberOfPreviewItems(in: panel) == 1)
+            #expect((view.previewPanel(panel, previewItemAt: 0) as? URL)?.lastPathComponent == "shot.png")
+
+            view.selectImage(nil)
+            #expect(!view.acceptsPreviewPanelControl(panel))
+            #expect(view.numberOfPreviewItems(in: panel) == 0)
+
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 700, height: 900),
+                styleMask: [.titled], backing: .buffered, defer: true
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView = view
+            view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+            let point = view.convert(try centre(of: view), to: nil)
+            let double = try #require(NSEvent.mouseEvent(
+                with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 1
+            ))
+            shown = []
+            #expect(view.takePictureClick(double))
+            #expect(shown.count == 1)
+        }
+    }
+
     /// Shrinking a picture at the end of a note shortens the note, the
     /// scroll view pulls the text down to stay in range, and the picture's
     /// corner moves under a pointer that did not. Measured in the text
@@ -326,7 +369,7 @@ struct ImageSelectionTests {
             view.textLayoutManager?.textViewportLayoutController.layoutViewport()
 
             let lineStart = try #require(view.liveLayout.images.keys.first)
-            view.selectImage(view.liveLayout.images[lineStart])
+            view.selectImage(view.liveLayout.images[lineStart]?.range)
             let frame = try #require(view.pictureFrame(lineStart: lineStart))
             let corner = CGPoint(x: frame.maxX, y: frame.maxY)
             #expect(view.beginPictureResize(at: corner))

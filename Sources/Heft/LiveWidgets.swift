@@ -141,6 +141,11 @@ enum ListGlyph {
 
 /// Widget placement for one restyle pass, keyed by the document offset of the
 /// line each widget belongs to.
+struct DrawnPicture: Equatable {
+    let range: NSRange
+    let url: URL
+}
+
 struct LiveLayout {
     var blocks: [Int: BlockWidget] = [:]
     /// Formulae drawn inside a line, keyed by that line's start offset.
@@ -153,9 +158,10 @@ struct LiveLayout {
     /// line. The editor keeps these to tell an ordinary cursor move apart from
     /// one that crosses into or out of a span and so needs a restyle.
     var revealableSpans: [NSRange] = []
-    /// The source of every picture drawn as a block, keyed like `blocks`: a
-    /// click on the picture selects this range rather than revealing it.
-    var images: [Int: NSRange] = [:]
+    /// Every picture drawn as a block, keyed like `blocks`: a click on the
+    /// picture selects its source rather than revealing it, and Space or a
+    /// double-click opens its file.
+    var images: [Int: DrawnPicture] = [:]
 
     /// Every drawn table in the note, in document order. The editor needs these
     /// outside a draw pass — to put the caret in a cell, to work out what a

@@ -1,5 +1,6 @@
 import AppKit
 import HeftCore
+import Quartz
 
 /// A picture in the note selected by a click, the way Obsidian selects one.
 ///
@@ -39,9 +40,9 @@ extension HeftTextKit2View {
 
     /// The drawn picture under `point`, if any.
     func picture(at point: CGPoint) -> (range: NSRange, frame: CGRect)? {
-        for (lineStart, range) in liveLayout.images {
+        for (lineStart, picture) in liveLayout.images {
             if let frame = pictureFrame(lineStart: lineStart), frame.contains(point) {
-                return (range, frame)
+                return (picture.range, frame)
             }
         }
         return nil
@@ -50,9 +51,11 @@ extension HeftTextKit2View {
     /// A click on a drawn picture selects it, and says so; any other click
     /// drops the selection and is left to the text.
     func takePictureClick(_ event: NSEvent) -> Bool {
-        if event.clickCount == 1, let picture = picture(at: convert(event.locationInWindow, from: nil)) {
+        if let picture = picture(at: convert(event.locationInWindow, from: nil)) {
             window?.makeFirstResponder(self)
             selectImage(picture.range)
+            // The first click selected it; the second opens it.
+            if event.clickCount == 2 { previewSelectedPicture() }
             return true
         }
         if selectedImage != nil { selectImage(nil) }
@@ -73,7 +76,7 @@ extension HeftTextKit2View {
             imageSelectionOverlayIfLoaded?.isHidden = true
             return
         }
-        guard let lineStart = liveLayout.images.first(where: { $0.value == range })?.key,
+        guard let lineStart = liveLayout.images.first(where: { $0.value.range == range })?.key,
               let frame = pictureFrame(lineStart: lineStart)
         else {
             // No longer drawn as a picture, so there is nothing to select.
@@ -110,6 +113,8 @@ extension HeftTextKit2View {
             // Delete or forward delete: the picture goes, with its line.
             selectImage(nil)
             applyPictureEdit(embed.removing(in: string), reselect: false)
+        case (" ", _):
+            previewSelectedPicture()
         case (_, 53):
             selectImage(nil)
         default:
@@ -123,7 +128,7 @@ extension HeftTextKit2View {
     /// the layout made of its own.
     private func currentWidth(of embed: ImageEmbed) -> Int {
         if let width = embed.width { return width }
-        let drawn = liveLayout.images.first { $0.value == embed.range }
+        let drawn = liveLayout.images.first { $0.value.range == embed.range }
             .flatMap { pictureFrame(lineStart: $0.key) }
         return Int((drawn?.width ?? 100).rounded())
     }
@@ -136,12 +141,28 @@ extension HeftTextKit2View {
         return max(1, rounded == width ? width + (up ? 1 : -1) : rounded)
     }
 
+    // MARK: - Full size
+
+    /// The selected picture's file.
+    var selectedPictureURL: URL? {
+        guard let range = selectedImage else { return nil }
+        return liveLayout.images.values.first { $0.range == range }?.url
+    }
+
+    /// Opens the selected picture full size, in Quick Look: zoom, full
+    /// screen and Open in Preview come with it, and it is what Space does
+    /// to a picture in the Finder.
+    func previewSelectedPicture() {
+        guard let url = selectedPictureURL else { return }
+        presentPicture(url)
+    }
+
     // MARK: - Dragging the handle
 
     /// The selected picture's frame, while it is drawn.
     func selectedPictureFrame() -> CGRect? {
         guard let range = selectedImage,
-              let lineStart = liveLayout.images.first(where: { $0.value == range })?.key
+              let lineStart = liveLayout.images.first(where: { $0.value.range == range })?.key
         else { return nil }
         return pictureFrame(lineStart: lineStart)
     }
@@ -299,5 +320,46 @@ final class ImageSelectionOverlay: NSView {
         handle.fill()
         handle.lineWidth = 2
         handle.stroke()
+    }
+}
+
+/// Quick Look asks the responder chain who supplies its items; the text view
+/// answers while a picture is selected.
+extension HeftTextKit2View: QLPreviewPanelDataSource {
+
+    /// Shows `url` in the shared Quick Look panel. Replaced in tests, which
+    /// must not put a panel on screen.
+    static var showPicture: (HeftTextKit2View, URL) -> Void = { view, _ in
+        guard let panel = QLPreviewPanel.shared() else { return }
+        if panel.isVisible {
+            panel.reloadData()
+        } else {
+            view.window?.makeFirstResponder(view)
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    func presentPicture(_ url: URL) {
+        Self.showPicture(self, url)
+    }
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+        selectedPictureURL != nil
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = self
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        panel.dataSource = nil
+    }
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        selectedPictureURL == nil ? 0 : 1
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        selectedPictureURL as NSURL?
     }
 }
