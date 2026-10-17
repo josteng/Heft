@@ -58,4 +58,48 @@ struct HighlightColorTests {
     func excerptDropsEmoji() {
         #expect(NoteText.excerpt("Buy ==🔵milk== today\n") == "Buy milk today")
     }
+
+    private func detect(_ source: String, caret: Int? = nil) -> HighlightCompletionContext? {
+        let location = caret ?? (source as NSString).length
+        return HighlightCompletionContext.detect(in: source, selection: NSRange(location: location, length: 0))
+    }
+
+    @Test("A freshly typed == offers colours")
+    func detectsOpener() {
+        #expect(detect("==")?.location == 2)
+        #expect(detect("Some ==")?.location == 7)
+        #expect(detect("==done== and ==")?.location == 15)
+        #expect(detect("==", caret: 2) != nil)
+        #expect(detect("==text", caret: 2) != nil)
+    }
+
+    @Test("A closer, a longer run, code and a selection offer nothing")
+    func ignoresWhatIsNotAnOpener() {
+        #expect(detect("==word==") == nil)
+        #expect(detect("===") == nil)
+        #expect(detect("===", caret: 2) == nil)
+        #expect(detect("=") == nil)
+        #expect(detect("`a ==") == nil)
+        #expect(detect("```\nif a ==") == nil)
+        #expect(detect("```\ncode\n```\n==")?.location == 15)
+        #expect(HighlightCompletionContext.detect(in: "==", selection: NSRange(location: 0, length: 2)) == nil)
+    }
+
+    private func accept(_ color: HighlightColor?, _ source: String, caret: Int) throws -> (String, Int) {
+        let edit = try #require(detect(source, caret: caret)).accepting(color)
+        let text = (source as NSString).replacingCharacters(in: edit.range, with: edit.replacement)
+        return (text, edit.selection.location)
+    }
+
+    @Test("Picking a colour writes its emoji and the closer, caret between")
+    func acceptingWritesEmojiAndCloser() throws {
+        #expect(try accept(.red, "Say ==", caret: 6) == ("Say ==🔴==", 8))
+        #expect(try accept(nil, "Say ==", caret: 6) == ("Say ====", 6))
+    }
+
+    @Test("A closer already on the line is not written twice")
+    func acceptingKeepsExistingCloser() throws {
+        #expect(try accept(.blue, "==word== x", caret: 2) == ("==🔵word== x", 4))
+        #expect(try accept(nil, "==word==", caret: 2) == ("==word==", 2))
+    }
 }

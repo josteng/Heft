@@ -1567,9 +1567,10 @@ final class HeftTextKit2View: NSTextView {
     var onNeedsRestyle: (() -> Void)?
     private var lastWidth: CGFloat = 0
     private var completionPanel: WikiCompletionPanel?
-    /// What the open menu is completing. `[[` and `> [!` share the panel, and
-    /// accepting a row has to re-detect the same one it was built from.
-    private enum CompletionKind { case wiki, callout }
+    /// What the open menu is completing. `[[`, `> [!` and `==` share the
+    /// panel, and accepting a row has to re-detect the same one it was built
+    /// from.
+    private enum CompletionKind { case wiki, callout, highlight }
     private var completionKind: CompletionKind = .wiki
 
     /// What the completion menu is currently offering. The panel is a private
@@ -3551,10 +3552,11 @@ final class HeftTextKit2View: NSTextView {
     }
 
     func updateLinkCompletion(allowStart: Bool) {
-        // Two things can be under the caret, and only one at a time: `[[` is a
-        // link and `> [!` is a callout. They go through one panel because they
-        // are the same interaction, and the kind is remembered so accepting a
-        // row knows which context to re-detect.
+        // Three things can be under the caret, and only one at a time: `[[`
+        // is a link, `> [!` a callout and `==` a highlight's colour. They go
+        // through one panel because they are the same interaction, and the
+        // kind is remembered so accepting a row knows which context to
+        // re-detect.
         let selection = selectedRange()
         let query: String
         if let wiki = WikiCompletionContext.detect(in: string, selection: selection) {
@@ -3563,6 +3565,9 @@ final class HeftTextKit2View: NSTextView {
         } else if let callout = CalloutCompletionContext.detect(in: string, selection: selection) {
             completionKind = .callout
             query = callout.query
+        } else if HighlightCompletionContext.detect(in: string, selection: selection) != nil {
+            completionKind = .highlight
+            query = ""
         } else {
             dismissLinkCompletion()
             return
@@ -3599,6 +3604,9 @@ final class HeftTextKit2View: NSTextView {
                 return
             }
             completionItems = callout.suggestions().map(WikiCompletionItem.init(callout:))
+        case .highlight:
+            completionItems = [WikiCompletionItem(highlight: nil)]
+                + HighlightColor.allCases.map(WikiCompletionItem.init(highlight:))
         }
 
         completionSelection = min(completionSelection, max(0, completionItems.count - 1))
@@ -3650,6 +3658,11 @@ final class HeftTextKit2View: NSTextView {
                 in: string, selection: selectedRange()
             ) else { return false }
             edit = context.accepting(destination)
+        case .highlight:
+            guard let context = HighlightCompletionContext.detect(
+                in: string, selection: selectedRange()
+            ) else { return false }
+            edit = context.accepting(HighlightColor(rawValue: destination))
         }
         completionIsActive = false
         completionPanel?.dismiss()

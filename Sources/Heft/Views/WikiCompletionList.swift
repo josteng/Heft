@@ -10,6 +10,9 @@ struct WikiCompletionItem {
     let title: String
     let detail: String
     let symbol: String
+    /// Draws the symbol in this colour, selected or not: a highlight row's
+    /// dot *is* its meaning.
+    var tint: Color?
     /// What accepting this row writes.
     let destination: String
 
@@ -40,6 +43,16 @@ struct WikiCompletionItem {
         detail = callout.matchedAlias ?? ""
         symbol = callout.kind.symbol
         destination = callout.insertion
+    }
+
+    /// A highlight colour, or nil for the theme's default, which writes
+    /// nothing.
+    init(highlight color: HighlightColor?) {
+        title = color?.title ?? "Default"
+        detail = ""
+        symbol = color == nil ? "circle" : "circle.fill"
+        tint = color.map { Color(nsColor: Theme.highlightSwatch($0)) }
+        destination = color?.emoji ?? ""
     }
 }
 
@@ -164,7 +177,10 @@ struct WikiCompletionRowView: View {
         HStack(spacing: 9) {
             Image(systemName: item.symbol)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .foregroundStyle(
+                    item.tint.map(AnyShapeStyle.init)
+                        ?? (selected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                )
                 .frame(width: 16, height: 16)
             CompletionColumns(onSplit: onColumns) {
                 Text(item.title)

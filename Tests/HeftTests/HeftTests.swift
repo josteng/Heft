@@ -1132,6 +1132,31 @@ struct CompletionSurfaceTests {
         #expect(view.visibleCompletions.isEmpty)
     }
 
+    @Test("Typing == offers the highlight colours, and a pick writes one")
+    func opensOnHighlightMarker() {
+        let (view, _) = editor()
+        view.string = "Say =="
+        view.setSelectedRange(NSRange(location: 6, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        #expect(view.visibleCompletions == ["Default", "Red", "Orange", "Yellow", "Green", "Blue", "Purple"])
+
+        view.moveDown(nil)
+        view.insertNewline(nil)
+        #expect(view.string == "Say ==🔴==")
+        #expect(view.selectedRange() == NSRange(location: 8, length: 0))
+        #expect(view.visibleCompletions.isEmpty)
+
+        // Text typed after the opener closes the menu rather than filtering it.
+        view.string = "Say =="
+        view.setSelectedRange(NSRange(location: 6, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        #expect(!view.visibleCompletions.isEmpty)
+        view.string = "Say ==w"
+        view.setSelectedRange(NSRange(location: 7, length: 0))
+        view.updateLinkCompletion(allowStart: false)
+        #expect(view.visibleCompletions.isEmpty)
+    }
+
     /// The menu must not appear in the middle of a word already being typed,
     /// which is what `allowStart` on a non-empty query would do.
     @Test("The menu only opens on a fresh marker")

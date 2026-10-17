@@ -48,3 +48,76 @@ public enum HighlightColor: String, Sendable, CaseIterable {
         return (leading.color, ns.substring(from: leading.length))
     }
 }
+
+/// A `==` that has just been typed to open a highlight, and what picking a
+/// colour for it writes.
+///
+/// Shaped like `CalloutCompletionContext`, so the editor drives it through the
+/// same panel. Unlike a callout there is nothing to filter: the menu is
+/// offered only while the caret sits right after the opener, and the first
+/// character of the highlighted text closes it, so typing on is never taken
+/// over by a colour.
+public struct HighlightCompletionContext: Equatable, Sendable {
+    /// Where the colour goes: right after the opening `==`.
+    public let location: Int
+    /// Whether a `==` already follows on the line, as when an existing run
+    /// of text is being highlighted rather than a fresh one typed.
+    public let hasClosingMarker: Bool
+
+    public init(location: Int, hasClosingMarker: Bool) {
+        self.location = location
+        self.hasClosingMarker = hasClosingMarker
+    }
+
+    /// Detects an opening `==` immediately before the caret, or nil.
+    ///
+    /// Not a closer, not part of a longer `===` run, and not inside code,
+    /// where `a == b` is a comparison and a menu would be in the way.
+    public static func detect(in source: String, selection: NSRange) -> Self? {
+        guard selection.length == 0 else { return nil }
+        let text = source as NSString
+        let caret = selection.location
+        guard caret >= 2, caret <= text.length else { return nil }
+        let equals = UInt16(61)
+        guard text.character(at: caret - 1) == equals, text.character(at: caret - 2) == equals
+        else { return nil }
+        if caret >= 3, text.character(at: caret - 3) == equals { return nil }
+        if caret < text.length, text.character(at: caret) == equals { return nil }
+
+        let line = text.lineRange(for: NSRange(location: caret, length: 0))
+        let before = text.substring(with: NSRange(location: line.location, length: caret - 2 - line.location))
+        // An odd number of markers before this one leaves a highlight open,
+        // so this pair closes it.
+        guard before.components(separatedBy: "==").count % 2 == 1 else { return nil }
+        // An odd number of backticks leaves an inline code span open.
+        guard before.filter({ $0 == "`" }).count % 2 == 0 else { return nil }
+        guard !isInsideFence(line.location, in: source) else { return nil }
+        let after = text.substring(with: NSRange(location: caret, length: NSMaxRange(line) - caret))
+        return Self(location: caret, hasClosingMarker: after.contains("=="))
+    }
+
+    /// The edit that gives the highlight `color`, or none for the theme's
+    /// default, which is a highlight written without an emoji.
+    ///
+    /// Writes the closing `==` too, with the caret between, as Obsidian does:
+    /// picking a colour is starting a highlight, and what follows is its text.
+    public func accepting(_ color: HighlightColor?) -> MarkdownEditing.Edit {
+        let emoji = color?.emoji ?? ""
+        return MarkdownEditing.Edit(
+            range: NSRange(location: location, length: 0),
+            replacement: hasClosingMarker ? emoji : emoji + "==",
+            selection: NSRange(location: location + (emoji as NSString).length, length: 0)
+        )
+    }
+
+    /// Whether the line starting at `lineStart` sits inside a fenced code
+    /// block, by the same open-and-close reading as `NoteText.forEachProseLine`.
+    private static func isInsideFence(_ lineStart: Int, in source: String) -> Bool {
+        var inside = false
+        for line in (source as NSString).substring(to: lineStart).split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { inside.toggle() }
+        }
+        return inside
+    }
+}
