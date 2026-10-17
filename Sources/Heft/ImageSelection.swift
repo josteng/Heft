@@ -83,7 +83,7 @@ extension HeftTextKit2View {
             return
         }
         let overlay = imageSelectionOverlay
-        overlay.frame = frame.insetBy(dx: -ImageSelectionOverlay.outset, dy: -ImageSelectionOverlay.outset)
+        overlay.frame = frame.insetBy(dx: -ImageSelectionOverlay.margin, dy: -ImageSelectionOverlay.margin)
         overlay.isHidden = false
         overlay.needsDisplay = true
     }
@@ -136,6 +136,75 @@ extension HeftTextKit2View {
         return max(1, rounded == width ? width + (up ? 1 : -1) : rounded)
     }
 
+    // MARK: - Dragging the handle
+
+    /// The selected picture's frame, while it is drawn.
+    func selectedPictureFrame() -> CGRect? {
+        guard let range = selectedImage,
+              let lineStart = liveLayout.images.first(where: { $0.value == range })?.key
+        else { return nil }
+        return pictureFrame(lineStart: lineStart)
+    }
+
+    /// Whether `point` is on the selected picture's resize handle. Grown past
+    /// the drawn dot, which is small so as not to cover the picture.
+    func isOnResizeHandle(_ point: CGPoint) -> Bool {
+        guard let frame = selectedPictureFrame() else { return false }
+        let reach = ImageSelectionOverlay.handleRadius + 5
+        return CGRect(x: frame.maxX - reach, y: frame.maxY - reach, width: reach * 2, height: reach * 2)
+            .contains(point)
+    }
+
+    /// Starts a drag on the handle, if `point` is on it.
+    func beginPictureResize(at point: CGPoint) -> Bool {
+        guard isOnResizeHandle(point), let frame = selectedPictureFrame() else { return false }
+        pictureResize = PictureResize(start: convert(point, to: nil), size: frame.size)
+        return true
+    }
+
+    /// Redraws the picture at the width the pointer has dragged it to, by
+    /// writing that width into its link: the picture on screen is always the
+    /// file's, even mid-drag. The whole drag is one mouse-down event, so it
+    /// undoes as one step.
+    ///
+    /// In window coordinates, not this view's. Shrinking a picture at the end
+    /// of a note shortens the note and the scroll view pulls the text down
+    /// under a pointer that has not moved; measured in the text's own
+    /// coordinates that read as more drag, which shrank the picture again.
+    func continuePictureResize(toWindowPoint point: CGPoint) {
+        guard let drag = pictureResize, let range = selectedImage,
+              let embed = ImageEmbed(string, range: range)
+        else { return }
+        let width = drag.width(at: point, limit: maximumPictureWidth())
+        guard width != Int(selectedPictureFrame()?.width.rounded() ?? -1) else { return }
+        resizeSelectedImage(embed, to: width)
+    }
+
+    func endPictureResize() {
+        pictureResize = nil
+    }
+
+    /// The widest a picture can be dragged: the text column.
+    private func maximumPictureWidth() -> Int {
+        let padding = textContainer?.lineFragmentPadding ?? 0
+        let column = (textContainer?.size.width ?? 600) - 2 * padding
+        // The picture's left edge already sits past the padding; only a
+        // list's indent beyond it narrows the room.
+        let start = selectedPictureFrame()?.minX ?? (textContainerInset.width + padding)
+        let indent = start - textContainerInset.width - padding
+        return max(16, Int(column - indent))
+    }
+
+    /// Runs the drag to the button's release. A tracking loop rather than
+    /// `mouseDragged`, which `NSTextView` claims for selecting text.
+    func trackPictureResize() {
+        while let event = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            continuePictureResize(toWindowPoint: event.locationInWindow)
+            if event.type == .leftMouseUp { break }
+        }
+        endPictureResize()
+    }
+
     func resizeSelectedImage(_ embed: ImageEmbed, to width: Int?) {
         applyPictureEdit(embed.resizing(toWidth: width), reselect: true)
     }
@@ -164,7 +233,25 @@ extension HeftTextKit2View {
     }
 }
 
-/// The ring around a selected picture.
+/// Where a drag on the handle started, in window coordinates, and the
+/// picture's size then.
+struct PictureResize {
+    let start: CGPoint
+    let size: CGSize
+
+    /// The width the drag has reached. Whichever way the pointer moved
+    /// further counts, so a corner can be pulled along either edge, and the
+    /// picture keeps its proportions either way. A window's y grows upwards,
+    /// so pulling the corner down is a fall in y.
+    func width(at point: CGPoint, limit: Int) -> Int {
+        let dx = point.x - start.x
+        let dy = (start.y - point.y) * (size.width / max(size.height, 1))
+        let delta = abs(dx) >= abs(dy) ? dx : dy
+        return min(limit, max(16, Int((size.width + delta).rounded())))
+    }
+}
+
+/// The ring around a selected picture, and the handle on its corner.
 ///
 /// A subview, like the table's caret, because selecting a picture changes
 /// neither its attributes nor its layout, and a fragment only redraws for
@@ -172,6 +259,10 @@ extension HeftTextKit2View {
 final class ImageSelectionOverlay: NSView {
     /// How far the ring sits outside the picture.
     static let outset: CGFloat = 3
+    static let handleRadius: CGFloat = 5
+    /// The view reaches past the ring by the handle's radius, so the handle
+    /// on the corner is not clipped.
+    static let margin: CGFloat = outset + handleRadius
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -189,12 +280,24 @@ final class ImageSelectionOverlay: NSView {
     override func draw(_ dirtyRect: NSRect) {
         // The picture's own corner radius plus the gap, so the two curves run
         // parallel.
+        let ringRect = bounds.insetBy(dx: Self.handleRadius + 1, dy: Self.handleRadius + 1)
         let ring = NSBezierPath(
-            roundedRect: bounds.insetBy(dx: 1, dy: 1),
+            roundedRect: ringRect,
             xRadius: 8 + Self.outset, yRadius: 8 + Self.outset
         )
         ring.lineWidth = 2
         NSColor.controlAccentColor.setStroke()
         ring.stroke()
+
+        // On the picture's own corner, which is where a drag measures from.
+        let corner = CGPoint(x: bounds.maxX - Self.margin, y: bounds.maxY - Self.margin)
+        let handle = NSBezierPath(ovalIn: CGRect(
+            x: corner.x - Self.handleRadius, y: corner.y - Self.handleRadius,
+            width: Self.handleRadius * 2, height: Self.handleRadius * 2
+        ))
+        NSColor.white.setFill()
+        handle.fill()
+        handle.lineWidth = 2
+        handle.stroke()
     }
 }

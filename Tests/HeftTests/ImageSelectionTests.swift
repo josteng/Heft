@@ -81,7 +81,7 @@ struct ImageSelectionTests {
             view.selectImage(hit.range)
             let overlay = try #require(view.imageSelectionOverlayIfLoaded)
             #expect(!overlay.isHidden)
-            #expect(overlay.frame == hit.frame.insetBy(dx: -3, dy: -3))
+            #expect(overlay.frame == hit.frame.insetBy(dx: -8, dy: -8))
             #expect(view.insertionPointColor == .clear)
             #expect(view.selectedRange() == NSRange(location: 0, length: 0))
 
@@ -100,7 +100,7 @@ struct ImageSelectionTests {
             #expect(view.string == "intro\n\n![[shot.png|44]]\n\nafter")
             #expect(view.selectedImage == NSRange(location: 7, length: 16))
             // The ring follows the new size.
-            #expect(view.imageSelectionOverlayIfLoaded?.frame.width == CGFloat(44 + 6))
+            #expect(view.imageSelectionOverlayIfLoaded?.frame.width == CGFloat(44 + 16))
             #expect(press(view, "-"))
             #expect(view.string == "intro\n\n![[shot.png|40]]\n\nafter")
             #expect(press(view, "0"))
@@ -242,6 +242,111 @@ struct ImageSelectionTests {
             ))
             view.keyDown(with: plus)
             #expect(view.string == "intro\n\n![[shot.png|44]]\n\nafter")
+        }
+    }
+
+    @Test("Dragging the handle resizes the picture as it goes")
+    func dragResizes() throws {
+        try withEditor("intro\n\n![[shot.png]]\n\nafter") { view in
+            let frame = try #require(view.pictureFrame(lineStart: 7))
+            let corner = CGPoint(x: frame.maxX, y: frame.maxY)
+            // Not selected yet: there is no handle to grab.
+            #expect(!view.beginPictureResize(at: corner))
+            view.selectImage(NSRange(location: 7, length: 13))
+            #expect(!view.beginPictureResize(at: CGPoint(x: frame.midX, y: frame.midY)))
+            #expect(view.beginPictureResize(at: corner))
+
+            view.continuePictureResize(toWindowPoint: view.convert(CGPoint(x: corner.x + 20, y: corner.y), to: nil))
+            #expect(view.string == "intro\n\n![[shot.png|60]]\n\nafter")
+            // Drawn at the new size already, and still selected and ringed.
+            #expect(view.pictureFrame(lineStart: 7)?.size == CGSize(width: 60, height: 45))
+            #expect(view.selectedImage == NSRange(location: 7, length: 16))
+            #expect(view.imageSelectionOverlayIfLoaded?.frame.width == CGFloat(60 + 16))
+
+            // Down by 30 is 40 across, at three by four.
+            view.continuePictureResize(toWindowPoint: view.convert(CGPoint(x: corner.x, y: corner.y + 30), to: nil))
+            #expect(view.string == "intro\n\n![[shot.png|80]]\n\nafter")
+            view.endPictureResize()
+            #expect(view.pictureResize == nil)
+        }
+    }
+
+    @Test("A drag stops at the column and at a usable minimum")
+    func dragLimits() throws {
+        try withEditor("intro\n\n![[shot.png]]\n\nafter") { view in
+            view.selectImage(NSRange(location: 7, length: 13))
+            let frame = try #require(view.pictureFrame(lineStart: 7))
+            let corner = CGPoint(x: frame.maxX, y: frame.maxY)
+            #expect(view.beginPictureResize(at: corner))
+            view.continuePictureResize(toWindowPoint: view.convert(CGPoint(x: corner.x + 5000, y: corner.y), to: nil))
+            let padding = try #require(view.textContainer).lineFragmentPadding
+            let column = Int(try #require(view.textContainer).size.width - 2 * padding)
+            #expect(view.string == "intro\n\n![[shot.png|\(column)]]\n\nafter")
+            view.continuePictureResize(toWindowPoint: view.convert(CGPoint(x: corner.x - 5000, y: corner.y), to: nil))
+            #expect(view.string == "intro\n\n![[shot.png|16]]\n\nafter")
+        }
+    }
+
+    @Test("The handle takes the resize pointer")
+    func handleCursor() throws {
+        try withEditor("intro\n\n![[shot.png]]\n\nafter") { view in
+            view.selectImage(NSRange(location: 7, length: 13))
+            let frame = try #require(view.pictureFrame(lineStart: 7))
+            let cursor = view.cursorOverride(at: CGPoint(x: frame.maxX, y: frame.maxY), among: [])
+            #expect(cursor != nil && cursor != .pointingHand && cursor != .arrow)
+            #expect(view.cursorOverride(at: CGPoint(x: frame.midX, y: frame.midY), among: []) == nil)
+        }
+    }
+
+    /// Shrinking a picture at the end of a note shortens the note, the
+    /// scroll view pulls the text down to stay in range, and the picture's
+    /// corner moves under a pointer that did not. Measured in the text
+    /// view's own coordinates, that read as more drag, which shrank the
+    /// picture again, which scrolled again.
+    @Test("A picture at the end of a scrolled note shrinks once for one drag")
+    func dragDoesNotFeedOnScrolling() throws {
+        let filler = String(repeating: "line\n", count: 60)
+        try withEditor(filler + "![[shot.png|200]]") { view in
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 700, height: 300),
+                styleMask: [.titled], backing: .buffered, defer: true
+            )
+            window.isReleasedWhenClosed = false
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 700, height: 300))
+            scroll.hasVerticalScroller = true
+            view.minSize = NSSize(width: 0, height: 0)
+            view.maxSize = NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude)
+            view.autoresizingMask = [.width]
+            scroll.documentView = view
+            window.contentView = scroll
+            view.restyleNow()
+            view.textLayoutManager?.ensureLayout(for: view.textLayoutManager!.documentRange)
+            view.sizeToFit()
+            view.scrollToEndOfDocument(nil)
+            view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+
+            let lineStart = try #require(view.liveLayout.images.keys.first)
+            view.selectImage(view.liveLayout.images[lineStart])
+            let frame = try #require(view.pictureFrame(lineStart: lineStart))
+            let corner = CGPoint(x: frame.maxX, y: frame.maxY)
+            #expect(view.beginPictureResize(at: corner))
+            let scrolledBefore = scroll.contentView.bounds.minY
+
+            // The pointer moves once, then is held still while events keep
+            // arriving, as they do mid-drag.
+            let held = view.convert(CGPoint(x: corner.x - 40, y: corner.y), to: nil)
+            view.continuePictureResize(toWindowPoint: held)
+            #expect(view.string.hasSuffix("![[shot.png|160]]"))
+
+            // The shorter note pulls the text down under the still pointer,
+            // as the scroll view does when the document shrinks beneath it.
+            for step in 1...3 {
+                scroll.contentView.scroll(to: CGPoint(x: 0, y: scrolledBefore - CGFloat(30 * step)))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                view.continuePictureResize(toWindowPoint: held)
+            }
+            #expect(scroll.contentView.bounds.minY == scrolledBefore - 90)
+            #expect(view.string.hasSuffix("![[shot.png|160]]"))
         }
     }
 

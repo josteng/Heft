@@ -1636,6 +1636,8 @@ final class HeftTextKit2View: NSTextView {
     /// Set while a picture command edits the text, so the edit does not
     /// count as the reader typing and drop the selection.
     var isEditingSelectedImage = false
+    /// A drag on the selected picture's handle, while it lasts.
+    var pictureResize: PictureResize?
     private var loadedImageSelectionOverlay: ImageSelectionOverlay?
     var imageSelectionOverlayIfLoaded: ImageSelectionOverlay? { loadedImageSelectionOverlay }
     var imageSelectionOverlay: ImageSelectionOverlay {
@@ -2753,6 +2755,9 @@ final class HeftTextKit2View: NSTextView {
     /// showed the I-beam over its buttons. Buttons take the arrow.
     func cursorOverride(at point: CGPoint, among rects: [CGRect]) -> NSCursor? {
         if isOverFormatBar(point) || isOverCompletionMenu(point) { return .arrow }
+        if isOnResizeHandle(point) {
+            return .frameResize(position: .bottomRight, directions: .all)
+        }
         // A highlight's colour dot opens a menu, as a checkbox ticks: the hand.
         if highlightDot(at: point) != nil { return .pointingHand }
         return pointerTarget(at: point, among: rects) != nil ? .pointingHand : nil
@@ -2856,6 +2861,11 @@ final class HeftTextKit2View: NSTextView {
         vimPreferredX = nil
         dismissLinkCompletion()
         if event.clickCount == 1, toggleTask(at: convert(event.locationInWindow, from: nil)) {
+            return
+        }
+        if event.clickCount == 1,
+           beginPictureResize(at: convert(event.locationInWindow, from: nil)) {
+            trackPictureResize()
             return
         }
         if takePictureClick(event) { return }
