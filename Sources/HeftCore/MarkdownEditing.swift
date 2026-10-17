@@ -247,7 +247,7 @@ public enum MarkdownEditing {
         let content = lines.filter {
             !text.substring(with: $0).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        guard !content.isEmpty else { return .nothing(keeping: range) }
+        guard !content.isEmpty else { return startingTask(on: lines.first, at: range, in: text, spanning: lines.count) }
 
         let parsed = content.map { ListLine(text.substring(with: $0)) }
 
@@ -279,6 +279,28 @@ public enum MarkdownEditing {
                 location: shifted(range.location, by: growth),
                 length: shifted(NSMaxRange(range), by: growth) - shifted(range.location, by: growth)
             )
+        )
+    }
+
+    /// ⌘L on an empty line starts a task there, as Obsidian does, keeping
+    /// any indentation so it nests where the caret was. Only for the one
+    /// line the caret is on: blank lines inside a selection stay blank, or
+    /// the gaps in a list grow stray empty tasks.
+    private static func startingTask(
+        on line: NSRange?, at range: NSRange, in text: NSString, spanning count: Int
+    ) -> Edit {
+        guard count <= 1 else { return .nothing(keeping: range) }
+        // The empty last line of a note has no range of its own.
+        let line = line ?? NSRange(location: range.location, length: 0)
+        let raw = text.substring(with: line)
+        let body = raw.trimmingCharacters(in: .newlines)
+        let indent = body.prefix { $0 == " " || $0 == "\t" }
+        let task = String(indent) + "- [ ] "
+        let content = NSRange(location: line.location, length: (body as NSString).length)
+        return Edit(
+            range: content,
+            replacement: task,
+            selection: NSRange(location: line.location + (task as NSString).length, length: 0)
         )
     }
 

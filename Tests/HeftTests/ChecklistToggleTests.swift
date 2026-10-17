@@ -94,9 +94,34 @@ struct ChecklistToggleTests {
         #expect(toggled(source, NSRange(location: 0, length: 3)) == "- [ ] milk\n- bread\n- eggs\n")
     }
 
-    @Test("A line with nothing on it is left alone entirely")
-    func emptySelectionDoesNothing() {
-        #expect(toggled("\n") == "\n")
+    @Test("An empty line becomes a task with the caret after its box")
+    func emptyLineStartsATask() {
+        let caret = NSRange(location: 7, length: 0)
+        let edit = MarkdownEditing.toggleChecklist(in: "- milk\n\n- eggs", range: caret)
+        #expect(edit.applied(to: "- milk\n\n- eggs") == "- milk\n- [ ] \n- eggs")
+        #expect(edit.selection == NSRange(location: 13, length: 0))
+        // The empty last line of a note, and one holding only indentation.
+        #expect(toggled("- milk\n", NSRange(location: 7, length: 0)) == "- milk\n- [ ] ")
+        #expect(toggled("- milk\n  ", NSRange(location: 9, length: 0)) == "- milk\n  - [ ] ")
+        #expect(toggled("", NSRange(location: 0, length: 0)) == "- [ ] ")
+    }
+
+    @MainActor
+    @Test("⌘L in the editor starts a task on an empty line")
+    func editorStartsATask() {
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        view.string = "- milk\n\n- eggs"
+        view.setSelectedRange(NSRange(location: 7, length: 0))
+        view.formatChecklist()
+        #expect(view.string == "- milk\n- [ ] \n- eggs")
+        #expect(view.selectedRange() == NSRange(location: 13, length: 0))
+    }
+
+    @Test("Several blank lines selected stay blank")
+    func blankSelectionDoesNothing() {
+        #expect(toggled("\n\n") == "\n\n")
     }
 
     @Test("The last line without a trailing newline still converts")
