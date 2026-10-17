@@ -3796,11 +3796,18 @@ final class HeftTextKit2View: NSTextView {
                 dismissLinkCompletion()
                 return
             }
-            let refs = completionIndex.linkSuggestions(
-                matching: wiki.query, forEmbed: wiki.isEmbed
-            )
-            completionItems = refs.map {
-                WikiCompletionItem(ref: $0, destination: completionIndex.linkDestination(for: $0))
+            let pipe = WikiCompletionContext.pipe(at: wiki.queryRange.location, in: string)
+            completionItems = completionIndex.linkMatches(matching: wiki.query, forEmbed: wiki.isEmbed).map {
+                let destination = completionIndex.linkDestination(for: $0.ref)
+                guard let alias = $0.alias else {
+                    return WikiCompletionItem(ref: $0.ref, destination: destination)
+                }
+                // Found by an alias: the alias is what was typed and what the
+                // link should read, so it is the row's name and the link text.
+                return WikiCompletionItem(
+                    title: alias, detail: "\u{2192} \($0.ref.name)", symbol: "arrow.turn.down.right",
+                    destination: destination + pipe + alias
+                )
             }
         case .callout:
             guard let callout = CalloutCompletionContext.detect(in: string, selection: selection)

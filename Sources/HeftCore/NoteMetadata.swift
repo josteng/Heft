@@ -101,6 +101,25 @@ public enum Frontmatter {
     }
 }
 
+/// The other names a note answers to: its `aliases` property, as Obsidian
+/// reads it, a list or a single name.
+public enum NoteAliases {
+    public static func all(in source: String) -> [String] {
+        guard let frontmatter = NoteText.splitFrontmatter(source).frontmatter else { return [] }
+        var seen = Set<String>()
+        var result: [String] = []
+        for property in Frontmatter.parse(frontmatter)
+        where property.key.lowercased() == "aliases" || property.key.lowercased() == "alias" {
+            for item in property.value.items {
+                let alias = item.trimmingCharacters(in: .whitespaces)
+                guard !alias.isEmpty, seen.insert(alias.lowercased()).inserted else { continue }
+                result.append(alias)
+            }
+        }
+        return result
+    }
+}
+
 /// Tags, wherever a note declares them.
 public enum NoteTags {
 

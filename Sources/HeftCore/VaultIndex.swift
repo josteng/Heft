@@ -78,6 +78,8 @@ struct ParsedNote: Codable, Sendable {
     /// Recent list shows it under every name, and reading each note again
     /// for that would cost what the fingerprint saves.
     let excerpt: String
+    /// The note's `aliases`, which `[[` finds it by as well as by its name.
+    let aliases: [String]
 
     /// Whether the note would contribute the same links, tags and attachment
     /// mentions as `other`, whatever the file's date says. Most saves are
@@ -85,6 +87,7 @@ struct ParsedNote: Codable, Sendable {
     /// out for the same reason, since it changes on every prose save.
     func sameContent(as other: ParsedNote) -> Bool {
         mentions == other.mentions && tags == other.tags && attachmentNames == other.attachmentNames
+            && aliases == other.aliases
     }
 
     static func parse(_ text: String, fingerprint: FileFingerprint?) -> ParsedNote {
@@ -103,7 +106,8 @@ struct ParsedNote: Codable, Sendable {
             mentions: mentions,
             tags: NoteTags.all(in: text),
             attachmentNames: AttachmentNames.mentioned(in: text),
-            excerpt: NoteText.excerpt(text)
+            excerpt: NoteText.excerpt(text),
+            aliases: NoteAliases.all(in: text)
         )
     }
 
@@ -112,7 +116,9 @@ struct ParsedNote: Codable, Sendable {
     /// same unreadable file again; the download that brings it back changes
     /// the fingerprint.
     static func unreadable(fingerprint: FileFingerprint?) -> ParsedNote {
-        ParsedNote(fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [], excerpt: "")
+        ParsedNote(
+            fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [], excerpt: "", aliases: []
+        )
     }
 }
 
@@ -125,6 +131,17 @@ extension VaultIndex {
             notesByTag: [:], tagSpelling: [:], tagsByPath: [:], attachmentUsage: [:],
             parsed: parsed, notesRead: 0
         )
+    }
+}
+
+/// A note `[[` offers, and the alias it was found by, if any.
+public struct LinkMatch: Equatable, Sendable {
+    public let ref: NoteRef
+    public let alias: String?
+
+    public init(ref: NoteRef, alias: String?) {
+        self.ref = ref
+        self.alias = alias
     }
 }
 
@@ -475,36 +492,58 @@ public final class VaultIndex: @unchecked Sendable {
     public func linkSuggestions(
         matching query: String, forEmbed: Bool, limit: Int = 8
     ) -> [NoteRef] {
+        linkMatches(matching: query, forEmbed: forEmbed, limit: limit).map(\.ref)
+    }
+
+    /// The aliases `ref` declares in its frontmatter.
+    public func aliases(of ref: NoteRef) -> [String] {
+        parsed[ref.relativePath]?.aliases ?? []
+    }
+
+    /// What `[[` offers for `query`: notes found by their name, and by each
+    /// of their aliases that matches, best first. A note found both ways is
+    /// offered both ways, as Obsidian lists it, so the reader picks which
+    /// one the link should read. An alias row carries its alias, so
+    /// accepting it can write `[[Note|Alias]]`; a name match outranks the
+    /// same kind of alias match.
+    public func linkMatches(
+        matching query: String, forEmbed: Bool, limit: Int = 8
+    ) -> [LinkMatch] {
         let candidates = forEmbed
             ? allFiles.filter { $0.isMarkdown || $0.kind == .image || $0.kind == .pdf }
             : notes
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else {
-            return Array(candidates.sorted(by: suggestionOrder).prefix(limit))
+            return candidates.sorted(by: suggestionOrder).prefix(limit).map { LinkMatch(ref: $0, alias: nil) }
         }
 
-        var scored: [(ref: NoteRef, score: Int)] = []
+        var scored: [(match: LinkMatch, score: Int)] = []
         for ref in candidates {
             let name = ref.name.lowercased()
             let path = ref.relativePath.lowercased()
-            let score: Int
-            if name == q { score = 500 }
-            else if name.hasPrefix(q) { score = 400 }
-            else if name.contains(q) { score = 300 }
-            else if path.contains(q) { score = 220 }
+            var nameScore = 0
+            if name == q { nameScore = 500 }
+            else if name.hasPrefix(q) { nameScore = 400 }
+            else if name.contains(q) { nameScore = 300 }
+            else if path.contains(q) { nameScore = 220 }
             else if let fuzzy = FuzzyMatch.score(query: q, candidate: name),
                     fuzzy >= max(36, q.count * 16) {
-                score = 100 + fuzzy
-            } else { continue }
-            scored.append((ref, score))
+                nameScore = 100 + fuzzy
+            }
+            if nameScore > 0 { scored.append((LinkMatch(ref: ref, alias: nil), nameScore)) }
+            for alias in ref.isMarkdown ? aliases(of: ref) : [] {
+                let lowered = alias.lowercased()
+                let score = lowered == q ? 480 : lowered.hasPrefix(q) ? 380 : lowered.contains(q) ? 280 : 0
+                if score > 0 { scored.append((LinkMatch(ref: ref, alias: alias), score)) }
+            }
         }
         return scored.sorted { left, right in
             left.score == right.score
-                ? suggestionOrder(left.ref, right.ref)
+                ? suggestionOrder(left.match.ref, right.match.ref)
                 : left.score > right.score
         }
         .prefix(limit)
-        .map(\.ref)
+        .map(\.match)
     }
 
     /// Uses a short basename when it resolves uniquely, otherwise a path.

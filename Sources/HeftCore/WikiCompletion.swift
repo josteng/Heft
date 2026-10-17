@@ -50,6 +50,14 @@ public struct WikiCompletionContext: Equatable, Sendable {
         )
     }
 
+    /// The separator before a link's own text: `|`, or `\|` in a table row,
+    /// where a bare pipe would end the cell.
+    public static func pipe(at location: Int, in source: String) -> String {
+        let text = source as NSString
+        let line = text.substring(with: text.lineRange(for: NSRange(location: min(location, text.length), length: 0)))
+        return line.trimmingCharacters(in: .whitespaces).hasPrefix("|") ? "\\|" : "|"
+    }
+
     /// Replaces the typed query and puts the caret after the complete link.
     public func accepting(_ destination: String) -> MarkdownEditing.Edit {
         let suffix = hasClosingBrackets ? "" : "]]"
