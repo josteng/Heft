@@ -17,7 +17,7 @@ final class WikiCompletionPanel: NSView {
 
     override init(frame frameRect: NSRect) {
         host = CompletionHostingView(rootView: Self.list(
-            rows: [], selected: 0, visibleRows: 0, growsUp: false, pick: { _ in }
+            rows: [], selected: 0, visibleRows: 0, growsUp: false, hint: nil, pick: { _ in }
         ))
         super.init(frame: frameRect)
         addSubview(host)
@@ -41,9 +41,10 @@ final class WikiCompletionPanel: NSView {
     }
 
     func show(
-        items: [WikiCompletionItem], selected: Int,
+        items: [WikiCompletionItem], selected: Int, hint: String? = nil,
         below anchor: NSRect, in textView: NSTextView
     ) {
+        let extra = hint == nil ? 0 : WikiCompletionMetrics.hintHeight
         let width = WikiCompletionMetrics.width
         let visible = Self.unobscured(textView).insetBy(dx: 6, dy: 6)
         let gap: CGFloat = 5
@@ -51,11 +52,11 @@ final class WikiCompletionPanel: NSView {
         let above = (anchor.minY - gap) - visible.minY
         // Below unless it only fits above, or neither and above has more
         // room; then as many rows as that side holds, and the rest scroll.
-        let full = WikiCompletionMetrics.height(rows: items.count)
+        let full = WikiCompletionMetrics.height(rows: items.count) + extra
         let growsUp = full > below && above > below
         let room = growsUp ? above : below
-        let shown = max(1, min(items.count, WikiCompletionMetrics.rows(fitting: room)))
-        let height = WikiCompletionMetrics.height(rows: shown)
+        let shown = max(1, min(items.count, WikiCompletionMetrics.rows(fitting: room - extra)))
+        let height = WikiCompletionMetrics.height(rows: shown) + extra
 
         var x = anchor.minX
         var y = growsUp ? anchor.minY - gap - height : anchor.maxY + gap
@@ -63,13 +64,13 @@ final class WikiCompletionPanel: NSView {
         y = min(max(y, visible.minY), max(visible.minY, visible.maxY - height))
 
         capacity = max(capacity, shown)
-        let frameHeight = WikiCompletionMetrics.height(rows: capacity)
+        let frameHeight = WikiCompletionMetrics.height(rows: capacity) + extra
         frame = NSRect(x: x, y: growsUp ? y + height - frameHeight : y, width: width, height: frameHeight)
         listRect = NSRect(x: 0, y: growsUp ? frameHeight - height : 0, width: width, height: height)
 
         host.rootView = Self.list(
             rows: WikiCompletionList.rows(for: items), selected: selected, visibleRows: shown,
-            growsUp: growsUp, pick: { [weak self] index in self?.onPick?(index) }
+            growsUp: growsUp, hint: hint, pick: { [weak self] index in self?.onPick?(index) }
         )
         needsLayout = true
     }
@@ -92,19 +93,19 @@ final class WikiCompletionPanel: NSView {
     func dismiss() {
         capacity = 0
         listRect = .zero
-        host.rootView = Self.list(rows: [], selected: 0, visibleRows: 0, growsUp: false, pick: { _ in })
+        host.rootView = Self.list(rows: [], selected: 0, visibleRows: 0, growsUp: false, hint: nil, pick: { _ in })
     }
 
     private static func list(
         rows: [WikiCompletionList.Row], selected: Int, visibleRows: Int, growsUp: Bool,
-        pick: @escaping (Int) -> Void
+        hint: String?, pick: @escaping (Int) -> Void
     ) -> WikiCompletionList {
         // Read straight from the settings: `.tint()` does not reach a view
         // painting its own highlight, and the list is rebuilt on every show,
         // so a changed accent is picked up without observing anything.
         WikiCompletionList(
             rows: rows, selected: selected, visibleRows: visibleRows, growsUp: growsUp,
-            accent: Color(nsColor: AppearanceSettings.shared.accentColor), pick: pick
+            accent: Color(nsColor: AppearanceSettings.shared.accentColor), hint: hint, pick: pick
         )
     }
 }

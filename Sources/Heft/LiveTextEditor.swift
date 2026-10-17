@@ -1590,6 +1590,9 @@ final class HeftTextKit2View: NSTextView {
     var visibleCompletions: [String] {
         completionIsActive ? completionItems.map(\.title) : []
     }
+    /// The hint under the open menu's rows, for the same reason.
+    var visibleCompletionHint: String? { completionIsActive ? completionHint : nil }
+    private var completionHint: String?
     private var completionItems: [WikiCompletionItem] = []
     private var completionSelection = 0
     private var completionIsActive = false
@@ -3867,8 +3870,14 @@ final class HeftTextKit2View: NSTextView {
             addSubview(panel)
             completionPanel = panel
         }
+        // `|` and `#` going on inside the link is the one thing the menu
+        // cannot show by its rows. Not in an embed, where `|` is a size.
+        let hint = completionKind == .wiki
+            && WikiCompletionContext.detect(in: string, selection: selection)?.isEmbed == false
+            ? "Type | to change the link\u{2019}s text, # to link a heading" : nil
+        completionHint = hint
         panel.show(
-            items: completionItems, selected: completionSelection,
+            items: completionItems, selected: completionSelection, hint: hint,
             below: anchor, in: self
         )
     }

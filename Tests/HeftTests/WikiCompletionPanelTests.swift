@@ -50,6 +50,19 @@ struct WikiCompletionPanelTests {
         #expect(panel.frame.height == WikiCompletionMetrics.height(rows: 2))
     }
 
+    @Test("A hint under the rows makes room for itself")
+    func hintAddsHeight() {
+        let (window, textView) = Self.editor()
+        defer { window.close() }
+        let panel = WikiCompletionPanel()
+        textView.addSubview(panel)
+        panel.show(items: Self.items(2), selected: 0, hint: "Type |", below: Self.anchor, in: textView)
+        #expect(panel.listRect.height == WikiCompletionMetrics.height(rows: 2) + WikiCompletionMetrics.hintHeight)
+        panel.dismiss()
+        panel.show(items: Self.items(2), selected: 0, below: Self.anchor, in: textView)
+        #expect(panel.listRect.height == WikiCompletionMetrics.height(rows: 2))
+    }
+
     @Test("Short of room, the menu stays clear of the toolbar and scrolls")
     func staysUnderTheToolbar() throws {
         let toolbar: CGFloat = 80

@@ -196,6 +196,17 @@ struct LinkContinuationTests {
         #expect(view.string == "See [[mach|")
     }
 
+    @Test("The link menu says what | and # do, except in an embed")
+    func hintShown() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "See [[", "mach")
+        #expect(view.visibleCompletionHint?.contains("|") == true)
+        open(view, "See ![[", "mach")
+        #expect(!view.visibleCompletions.isEmpty)
+        #expect(view.visibleCompletionHint == nil)
+    }
+
     @Test("The note a destination links to")
     func targetOfDestination() {
         #expect(WikiCompletionContext.target(of: "Machine Learning|ML") == "Machine Learning")

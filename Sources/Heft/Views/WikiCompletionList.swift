@@ -61,6 +61,8 @@ enum WikiCompletionMetrics {
     static let rowHeight: CGFloat = 34
     static let padding: CGFloat = 4
     static let rowCornerRadius: CGFloat = 6
+    /// The line under the rows saying what else the keys do.
+    static let hintHeight: CGFloat = 24
     /// The row's radius plus the inset, so the selected row's corners run
     /// parallel to the menu's.
     static let cornerRadius: CGFloat = rowCornerRadius + padding
@@ -95,6 +97,9 @@ struct WikiCompletionList: View {
     /// grows upwards.
     let growsUp: Bool
     let accent: Color
+    /// What the keys do besides choosing, under the rows: the link menu
+    /// says `|` and `#` go on inside the link, which nothing else would.
+    var hint: String?
     let pick: (Int) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -115,33 +120,44 @@ struct WikiCompletionList: View {
         let shape = RoundedRectangle(cornerRadius: WikiCompletionMetrics.cornerRadius, style: .continuous)
         VStack(spacing: 0) {
             if !rows.isEmpty {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                WikiCompletionRowView(
-                                    item: row.item, selected: index == selected,
-                                    hovered: hovered == row.id, accent: accent
-                                )
-                                    .contentShape(Rectangle())
-                                    .onHover { inside in
-                                        if inside {
-                                            hovered = row.id
-                                        } else if hovered == row.id {
-                                            hovered = nil
+                VStack(spacing: 0) {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                                    WikiCompletionRowView(
+                                        item: row.item, selected: index == selected,
+                                        hovered: hovered == row.id, accent: accent
+                                    )
+                                        .contentShape(Rectangle())
+                                        .onHover { inside in
+                                            if inside {
+                                                hovered = row.id
+                                            } else if hovered == row.id {
+                                                hovered = nil
+                                            }
                                         }
-                                    }
-                                    .onTapGesture { pick(index) }
-                                    .accessibilityAction { pick(index) }
-                                    .transition(.opacity)
+                                        .onTapGesture { pick(index) }
+                                        .accessibilityAction { pick(index) }
+                                        .transition(.opacity)
+                                }
                             }
                         }
+                        .scrollDisabled(rows.count <= visibleRows)
+                        .frame(height: CGFloat(min(rows.count, max(1, visibleRows))) * WikiCompletionMetrics.rowHeight)
+                        // Keeps the row the arrow keys reached in view.
+                        .onChange(of: selected) { reveal(in: proxy) }
+                        .onChange(of: rows.map(\.id)) { reveal(in: proxy) }
                     }
-                    .scrollDisabled(rows.count <= visibleRows)
-                    .frame(height: CGFloat(min(rows.count, max(1, visibleRows))) * WikiCompletionMetrics.rowHeight)
-                    // Keeps the row the arrow keys reached in view.
-                    .onChange(of: selected) { reveal(in: proxy) }
-                    .onChange(of: rows.map(\.id)) { reveal(in: proxy) }
+                    if let hint {
+                        Text(hint)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 9)
+                            .frame(height: WikiCompletionMetrics.hintHeight)
+                    }
                 }
                 .padding(WikiCompletionMetrics.padding)
                 .frame(width: WikiCompletionMetrics.width)
