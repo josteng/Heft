@@ -192,15 +192,19 @@ public enum MarkdownEditing {
               isWebAddress(address),
               !isWebAddress(selected.trimmingCharacters(in: .whitespaces))
         else { return nil }
-        // A `)` or `<` would end the destination early; angle brackets keep
-        // it whole.
+        return link(text: selected, to: address)
+    }
+
+    /// `[text](address)`. A `)` or `<` would end the destination early, so
+    /// such an address goes in angle brackets, which keep it whole.
+    public static func link(text: String, to address: String) -> String {
         let destination = address.contains(where: { "()<>".contains($0) }) ? "<\(address)>" : address
-        return "[\(selected)](\(destination))"
+        return "[\(text)](\(destination))"
     }
 
     /// A scheme and a host, so `todo:fix` is text and not an address. An
     /// address with a space in it does not parse at all.
-    private static func isWebAddress(_ text: String) -> Bool {
+    static func isWebAddress(_ text: String) -> Bool {
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "mailto" ? text.count > 7 : url.host?.isEmpty == false
     }

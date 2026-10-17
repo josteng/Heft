@@ -1571,7 +1571,13 @@ final class HeftTextKit2View: NSTextView {
     /// What the open menu is completing. `[[`, `> [!` and `==` share the
     /// panel, and accepting a row has to re-detect the same one it was built
     /// from.
-    private enum CompletionKind { case wiki, callout, highlight }
+    private enum CompletionKind { case wiki, callout, highlight, linkTitle }
+    /// The titles on offer for an address just pasted. See `LinkTitles`.
+    var linkTitleSession: LinkTitleSession?
+    /// Where page titles and short titles come from. Replaced in tests,
+    /// which must not go to the network or the model.
+    static var fetchPageTitle: (URL) async -> String? = LinkTitles.pageTitle
+    static var fetchShortTitles: (String, URL) async -> [String] = LinkTitles.shortTitles
     private var completionKind: CompletionKind = .wiki
 
     /// What the completion menu is currently offering. The panel is a private
@@ -3212,7 +3218,40 @@ final class HeftTextKit2View: NSTextView {
            insertTrimmingListMarker(text) {
             return
         }
+        let start = selectedRange().location
         pasteAsPlainText(sender)
+        if let text = NSPasteboard.general.string(forType: .string) {
+            offerLinkTitles(afterPasting: text, at: start)
+        }
+    }
+
+    /// After a web address was pasted on its own, opens the menu with what
+    /// it can be linked as. The site's name is there at once; the page's
+    /// title and the short titles arrive as they are found, and a menu that
+    /// has been closed or typed past by then stays closed.
+    func offerLinkTitles(afterPasting text: String, at location: Int) {
+        guard TypingSettings.shared.suggestsLinkTitles,
+              let link = PastedLink.after(pasting: text, at: location, in: string),
+              let url = URL(string: link.address)
+        else { return }
+        let session = LinkTitleSession(link: link)
+        linkTitleSession = session
+        completionIsActive = false
+        updateLinkCompletion(allowStart: true)
+        let id = session.id
+        Task { @MainActor [weak self] in
+            let title = PastedLink.cleanedTitle(await Self.fetchPageTitle(url))
+            guard let self, self.linkTitleSession?.id == id, let title else { return }
+            self.linkTitleSession?.pageTitle = title
+            self.updateLinkCompletion(allowStart: false)
+            guard TypingSettings.shared.suggestsShortLinkTitles else { return }
+            let short = await Self.fetchShortTitles(title, url)
+            guard self.linkTitleSession?.id == id else { return }
+            self.linkTitleSession?.shortTitles = LinkTitles.cleaned(
+                short.joined(separator: "\n"), avoiding: [title, link.siteName]
+            )
+            self.updateLinkCompletion(allowStart: false)
+        }
     }
 
     /// Pastes a web address over selected words as a link to it, and says
@@ -3731,6 +3770,9 @@ final class HeftTextKit2View: NSTextView {
         } else if HighlightCompletionContext.detect(in: string, selection: selection) != nil {
             completionKind = .highlight
             query = ""
+        } else if let session = linkTitleSession, session.link.isCurrent(in: string, caret: selection) {
+            completionKind = .linkTitle
+            query = ""
         } else {
             dismissLinkCompletion()
             return
@@ -3770,6 +3812,19 @@ final class HeftTextKit2View: NSTextView {
         case .highlight:
             completionItems = [WikiCompletionItem(highlight: nil)]
                 + HighlightColor.allCases.map(WikiCompletionItem.init(highlight:))
+        case .linkTitle:
+            guard let session = linkTitleSession else {
+                dismissLinkCompletion()
+                return
+            }
+            // Rows arrive above the one chosen, so the choice is kept by
+            // what it writes rather than by where it was.
+            let chosen = completionItems.indices.contains(completionSelection)
+                ? completionItems[completionSelection].destination : nil
+            completionItems = session.items
+            completionSelection = session.userMoved
+                ? completionItems.firstIndex { $0.destination == chosen } ?? 0
+                : 0
         }
 
         completionSelection = min(completionSelection, max(0, completionItems.count - 1))
@@ -3795,6 +3850,7 @@ final class HeftTextKit2View: NSTextView {
 
     private func moveLinkCompletion(_ delta: Int) -> Bool {
         guard completionIsActive, !completionItems.isEmpty else { return false }
+        if completionKind == .linkTitle { linkTitleSession?.userMoved = true }
         completionSelection = min(max(completionSelection + delta, 0), completionItems.count - 1)
         updateLinkCompletion(allowStart: false)
         return true
@@ -3826,7 +3882,13 @@ final class HeftTextKit2View: NSTextView {
                 in: string, selection: selectedRange()
             ) else { return false }
             edit = context.accepting(HighlightColor(rawValue: destination))
+        case .linkTitle:
+            guard let session = linkTitleSession,
+                  session.link.isCurrent(in: string, caret: selectedRange())
+            else { return false }
+            edit = session.link.linking(destination)
         }
+        linkTitleSession = nil
         completionIsActive = false
         completionPanel?.dismiss()
         guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return true }
@@ -3837,6 +3899,7 @@ final class HeftTextKit2View: NSTextView {
     }
 
     private func dismissLinkCompletion() {
+        linkTitleSession = nil
         completionIsActive = false
         completionKind = .wiki
         completionItems = []

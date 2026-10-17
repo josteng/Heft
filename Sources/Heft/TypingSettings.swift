@@ -87,6 +87,20 @@ final class TypingSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(trimsPastedListMarker, forKey: Self.pastedMarkerKey) }
     }
 
+    /// Whether pasting a web address on its own offers its page's title,
+    /// and short versions of it, to link it as. On by default; loading the
+    /// page to read its title is a visit the site sees, so it can be off.
+    @Published var suggestsLinkTitles: Bool {
+        didSet { HeftDefaults.shared.set(suggestsLinkTitles, forKey: Self.linkTitlesKey) }
+    }
+
+    /// Whether that menu also offers short titles from Apple's on-device
+    /// model. Apart from the menu itself, as the rename field's suggestions
+    /// are: the page's own title is plain data, the short ones are made up.
+    @Published var suggestsShortLinkTitles: Bool {
+        didSet { HeftDefaults.shared.set(suggestsShortLinkTitles, forKey: Self.shortLinkTitlesKey) }
+    }
+
     var config: SmartTypographyConfig {
         SmartTypographyConfig(
             isEnabled: substitutionsEnabled, enabledGroups: enabledGroups, custom: customRules
@@ -146,6 +160,8 @@ final class TypingSettings: ObservableObject {
     private static let bracketsKey = "dev.stenglein.Heft.typing.pairsBrackets"
     private static let markdownKey = "dev.stenglein.Heft.typing.pairsMarkdown"
     private static let pastedMarkerKey = "dev.stenglein.Heft.typing.trimsPastedListMarker"
+    private static let linkTitlesKey = "dev.stenglein.Heft.typing.suggestsLinkTitles"
+    private static let shortLinkTitlesKey = "dev.stenglein.Heft.typing.suggestsShortLinkTitles"
     private static let spellingKey = "dev.stenglein.Heft.typing.checksSpelling"
     private static let grammarKey = "dev.stenglein.Heft.typing.checksGrammar"
     private static let correctionKey = "dev.stenglein.Heft.typing.correctsSpelling"
@@ -169,6 +185,12 @@ final class TypingSettings: ObservableObject {
         trimsPastedListMarker = defaults.object(forKey: Self.pastedMarkerKey) == nil
             ? true
             : defaults.bool(forKey: Self.pastedMarkerKey)
+        suggestsLinkTitles = defaults.object(forKey: Self.linkTitlesKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.linkTitlesKey)
+        suggestsShortLinkTitles = defaults.object(forKey: Self.shortLinkTitlesKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.shortLinkTitlesKey)
         checksSpelling = defaults.object(forKey: Self.spellingKey) == nil
             ? true
             : defaults.bool(forKey: Self.spellingKey)
@@ -313,6 +335,26 @@ struct TypingSettingsView: View {
                             + "than two. The only aid here that leaves out something you copied."
                     )
                 }
+                Toggle(isOn: $settings.suggestsLinkTitles) {
+                    SettingLabel(
+                        "Suggest Link Titles",
+                        detail: "Pasting a web address on its own offers the page\u{2019}s title or "
+                            + "the site\u{2019}s name to link it as. Reading the title loads the page."
+                    )
+                }
+                let unavailable = OnDeviceModel.unavailableReason
+                Toggle(isOn: Binding(
+                    get: { settings.suggestsShortLinkTitles && unavailable == nil },
+                    set: { settings.suggestsShortLinkTitles = $0 }
+                )) {
+                    SettingLabel(
+                        "Short Titles from Apple Intelligence",
+                        detail: unavailable ?? "Adds shorter titles made from the page\u{2019}s own, "
+                            + "on this Mac."
+                    )
+                }
+                .disabled(!settings.suggestsLinkTitles || unavailable != nil)
+                .padding(.leading, 20)
             } header: {
                 SectionHeading("Auto-Pairing")
             }

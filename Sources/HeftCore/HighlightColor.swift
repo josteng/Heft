@@ -112,7 +112,7 @@ public struct HighlightCompletionContext: Equatable, Sendable {
 
     /// Whether the line starting at `lineStart` sits inside a fenced code
     /// block, by the same open-and-close reading as `NoteText.forEachProseLine`.
-    private static func isInsideFence(_ lineStart: Int, in source: String) -> Bool {
+    static func isInsideFence(_ lineStart: Int, in source: String) -> Bool {
         var inside = false
         for line in (source as NSString).substring(to: lineStart).split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
