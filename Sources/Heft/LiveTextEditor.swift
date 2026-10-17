@@ -3300,6 +3300,12 @@ final class HeftTextKit2View: NSTextView {
         let inserted = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
         let selection = selectedRange()
 
+        // `|` or `#` with the link menu open takes the highlighted note and
+        // goes on inside the link, as Obsidian's menu does.
+        if let inserted, inserted == "|" || inserted == "#", continueLinkCompletion(with: inserted) {
+            return
+        }
+
         // Closing a bracket or an emphasis marker as the opening one is typed.
         // `[[` needs no case of its own any more: the second `[` sees the `]`
         // the first one wrote, which is not a word character, so it pairs
@@ -3902,6 +3908,29 @@ final class HeftTextKit2View: NSTextView {
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
         setSelectedRange(edit.selection)
+        return true
+    }
+
+    /// Accepts the highlighted note and continues the link with `separator`:
+    /// its text after `|`, a heading after `#`. False when there is no row
+    /// to take, so the key is typed as it was meant: `[[New idea|text]]`
+    /// links a note that does not exist yet.
+    private func continueLinkCompletion(with separator: String) -> Bool {
+        guard completionIsActive, completionKind == .wiki,
+              completionItems.indices.contains(completionSelection),
+              let context = WikiCompletionContext.detect(in: string, selection: selectedRange())
+        else { return false }
+        let target = WikiCompletionContext.target(of: completionItems[completionSelection].destination)
+        let mark = separator == "|"
+            ? WikiCompletionContext.pipe(at: context.queryRange.location, in: string)
+            : separator
+        let edit = context.continuing(target, with: mark)
+        dismissLinkCompletion()
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return true }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+        didChangeText()
+        setSelectedRange(edit.selection)
+        updateLinkCompletion(allowStart: true)
         return true
     }
 

@@ -58,6 +58,29 @@ public struct WikiCompletionContext: Equatable, Sendable {
         return line.trimmingCharacters(in: .whitespaces).hasPrefix("|") ? "\\|" : "|"
     }
 
+    /// The note a completed destination links to: `Note` from `Note|Alias`
+    /// or `Note\|Alias`, as a row found by an alias writes both.
+    public static func target(of destination: String) -> String {
+        guard let bar = destination.firstIndex(of: "|") else { return destination }
+        var end = bar
+        if end > destination.startIndex, destination[destination.index(before: end)] == "\\" {
+            end = destination.index(before: end)
+        }
+        return String(destination[..<end])
+    }
+
+    /// Takes `target` and goes on inside the link: `[[Note|` for its text or
+    /// `[[Note#` for a heading, with the caret before the closing brackets,
+    /// which are written if they are not there yet.
+    public func continuing(_ target: String, with separator: String) -> MarkdownEditing.Edit {
+        let written = target + separator
+        return MarkdownEditing.Edit(
+            range: queryRange,
+            replacement: written + (hasClosingBrackets ? "" : "]]"),
+            selection: NSRange(location: queryRange.location + written.utf16.count, length: 0)
+        )
+    }
+
     /// Replaces the typed query and puts the caret after the complete link.
     public func accepting(_ destination: String) -> MarkdownEditing.Edit {
         let suffix = hasClosingBrackets ? "" : "]]"

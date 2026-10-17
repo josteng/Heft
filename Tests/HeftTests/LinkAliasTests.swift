@@ -106,3 +106,100 @@ struct LinkAliasTests {
         #expect(view.string == "See [[Machine Learning|ML]]")
     }
 }
+
+/// `|` or `#` with the link menu open takes the highlighted note and goes on
+/// inside the link, instead of Return closing it.
+@MainActor
+@Suite("Continuing a link from its menu")
+struct LinkContinuationTests {
+
+    private func editor() throws -> (HeftTextKit2View, URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-continue-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "---\naliases: [ML]\n---\n# Basics\nbody"
+            .write(to: root.appendingPathComponent("Machine Learning.md"), atomically: true, encoding: .utf8)
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        view.completionIndex = VaultIndex.build(root: VaultScanner.scan(root: root))
+        return (view, root)
+    }
+
+    /// Opens the menu the way typing `[[` does, then narrows it to `query`.
+    private func open(_ view: HeftTextKit2View, _ before: String, _ query: String, closer: String = "]]") {
+        let length = (before as NSString).length
+        view.string = before + closer
+        view.setSelectedRange(NSRange(location: length, length: 0))
+        view.updateLinkCompletion(allowStart: true)
+        view.string = before + query + closer
+        view.setSelectedRange(NSRange(location: length + (query as NSString).length, length: 0))
+        view.updateLinkCompletion(allowStart: false)
+    }
+
+    private func type(_ view: HeftTextKit2View, _ key: String) {
+        view.insertText(key, replacementRange: view.selectedRange())
+    }
+
+    @Test("| takes the highlighted note and leaves the caret for the link's text")
+    func pipeContinues() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "See [[", "mach")
+        #expect(view.visibleCompletions.first == "Machine Learning")
+        type(view, "|")
+        #expect(view.string == "See [[Machine Learning|]]")
+        #expect(view.selectedRange() == NSRange(location: 23, length: 0))
+    }
+
+    @Test("# does the same for a heading, and closes a link that was not closed")
+    func hashContinues() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "See [[", "mach", closer: "")
+        type(view, "#")
+        #expect(view.string == "See [[Machine Learning#]]")
+        #expect(view.selectedRange() == NSRange(location: 23, length: 0))
+    }
+
+    @Test("A row found by an alias continues with its note alone")
+    func aliasRowGivesTarget() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "See [[", "ML")
+        #expect(view.visibleCompletions.first == "ML")
+        type(view, "|")
+        #expect(view.string == "See [[Machine Learning|]]")
+    }
+
+    @Test("In a table the pipe is escaped")
+    func tablePipe() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "| [[", "mach")
+        type(view, "|")
+        #expect(view.string == "| [[Machine Learning\\|]]")
+    }
+
+    @Test("With nothing to take, or the menu closed, the key is typed")
+    func typedWhenNothingToTake() throws {
+        let (view, root) = try editor()
+        defer { try? FileManager.default.removeItem(at: root) }
+        open(view, "See [[", "zzzq", closer: "")
+        #expect(view.visibleCompletions.isEmpty)
+        type(view, "|")
+        #expect(view.string == "See [[zzzq|")
+
+        open(view, "See [[", "mach", closer: "")
+        view.cancelOperation(nil)
+        type(view, "|")
+        #expect(view.string == "See [[mach|")
+    }
+
+    @Test("The note a destination links to")
+    func targetOfDestination() {
+        #expect(WikiCompletionContext.target(of: "Machine Learning|ML") == "Machine Learning")
+        #expect(WikiCompletionContext.target(of: "Machine Learning\\|ML") == "Machine Learning")
+        #expect(WikiCompletionContext.target(of: "Folder/Note") == "Folder/Note")
+    }
+}
