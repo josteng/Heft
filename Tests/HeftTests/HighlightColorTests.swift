@@ -102,4 +102,30 @@ struct HighlightColorTests {
         #expect(try accept(.blue, "==word== x", caret: 2) == ("==🔵word== x", 4))
         #expect(try accept(nil, "==word==", caret: 2) == ("==word==", 2))
     }
+
+    @Test("The span under a location carries its dot and colour")
+    func spanAtLocation() throws {
+        let source = "Say ==🔴hot== and ==plain== now"
+        let red = try #require(HighlightSpan.at(8, in: source))
+        #expect(red == HighlightSpan(
+            range: NSRange(location: 4, length: 9), dot: NSRange(location: 6, length: 2), color: .red
+        ))
+        let plain = try #require(HighlightSpan.at(22, in: source))
+        #expect(plain.dot == nil)
+        #expect(plain.color == nil)
+        #expect(HighlightSpan.at(1, in: source) == nil)
+        // On a later line the range is still in the note's offsets.
+        #expect(HighlightSpan.at(12, in: "line\nSay ==🔴hot==")?.range.location == 9)
+    }
+
+    @Test("Recolouring swaps, removes or adds the emoji")
+    func recolouring() throws {
+        func apply(_ color: HighlightColor?, _ source: String) throws -> String {
+            let span = try #require(HighlightSpan.at(3, in: source))
+            return span.recoloring(color).applied(to: source)
+        }
+        #expect(try apply(.blue, "==🔴hot==") == "==🔵hot==")
+        #expect(try apply(nil, "==🔴hot==") == "==hot==")
+        #expect(try apply(.green, "==hot==") == "==🟢hot==")
+    }
 }

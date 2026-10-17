@@ -1157,6 +1157,53 @@ struct CompletionSurfaceTests {
         #expect(view.visibleCompletions.isEmpty)
     }
 
+    @Test("The colour menu ticks the current colour and a pick recolours")
+    func highlightColorMenu() throws {
+        let (view, _) = editor()
+        view.string = "Say ==🔴hot== now"
+        let span = try #require(HighlightSpan.at(8, in: view.string))
+        let menu = view.highlightColorMenu(for: span)
+        #expect(menu.items.map(\.title) == ["Default", "Red", "Orange", "Yellow", "Green", "Blue", "Purple"])
+        #expect(menu.items.filter { $0.state == .on }.map(\.title) == ["Red"])
+        // Every row shows its image, and a colour's is its own colour, not a
+        // template a menu would tint grey.
+        #expect(menu.items.allSatisfy { $0.image != nil })
+        #expect(menu.items.dropFirst().allSatisfy { $0.image?.isTemplate == false })
+        if #available(macOS 27, *) {
+            #expect(menu.items.allSatisfy { $0.preferredImageVisibility == .visible })
+        }
+
+        view.setHighlightColor(.purple, of: span)
+        #expect(view.string == "Say ==🟣hot== now")
+        #expect(view.selectedRange() == NSRange(location: 8, length: 0))
+        view.setHighlightColor(nil, of: try #require(HighlightSpan.at(8, in: view.string)))
+        #expect(view.string == "Say ==hot== now")
+    }
+
+    @Test("A click on the dot is found only while the dot is on screen")
+    func highlightDotHitTest() throws {
+        let (view, _) = editor()
+        view.string = "Say ==🔴hot== now\nnext line"
+        view.setSelectedRange(NSRange(location: 9, length: 0))
+        view.restyleNow()
+        // A click lands in a viewport already laid out. Headless, the first
+        // hit test would lay it out itself and answer the end of the text.
+        view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        let rect = try #require(view.rect(forSelection: NSRange(location: 6, length: 2)))
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        #expect(view.highlightDot(at: center)?.span.color == .red)
+        #expect(view.cursorOverride(at: center, among: []) == .pointingHand)
+        // The `h` just after it puts the insertion point beside the emoji,
+        // and is still a click on the words.
+        #expect(view.highlightDot(at: NSPoint(x: rect.maxX + 2, y: rect.midY)) == nil)
+
+        // Caret elsewhere: the emoji is collapsed, and the click is for the words.
+        view.setSelectedRange(NSRange(location: 20, length: 0))
+        view.restyleNow()
+        #expect(view.highlightDot(at: center) == nil)
+        #expect(view.cursorOverride(at: center, among: []) == nil)
+    }
+
     /// The menu must not appear in the middle of a word already being typed,
     /// which is what `allowStart` on a non-empty query would do.
     @Test("The menu only opens on a fresh marker")

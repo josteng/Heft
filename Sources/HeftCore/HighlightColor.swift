@@ -121,3 +121,54 @@ public struct HighlightCompletionContext: Equatable, Sendable {
         return inside
     }
 }
+
+/// One `==highlight==` in a note, found from a location inside it, and the
+/// edit that recolours it. What the colour dot and the context menu act on.
+public struct HighlightSpan: Equatable, Sendable {
+    /// The whole span, markers included.
+    public let range: NSRange
+    /// The colour emoji, when it has one.
+    public let dot: NSRange?
+    public let color: HighlightColor?
+
+    public init(range: NSRange, dot: NSRange?, color: HighlightColor?) {
+        self.range = range
+        self.dot = dot
+        self.color = color
+    }
+
+    /// The highlight that `location` falls in, its markers counting, or nil.
+    /// Read by the decorator, so what is found is what is drawn.
+    public static func at(_ location: Int, in source: String) -> Self? {
+        let text = source as NSString
+        guard location >= 0, location <= text.length else { return nil }
+        let line = text.lineRange(for: NSRange(location: min(location, text.length), length: 0))
+        let local = location - line.location
+        for decoration in LiveDecorator.decorations(in: text.substring(with: line)) {
+            guard case .highlight(let color) = decoration.style,
+                  local >= decoration.range.location, local <= NSMaxRange(decoration.range)
+            else { continue }
+            // The emoji is the one piece of syntax between the two markers.
+            let dot = decoration.syntax.count == 3 ? decoration.syntax[1] : nil
+            return Self(
+                range: NSRange(location: decoration.range.location + line.location, length: decoration.range.length),
+                dot: dot.map { NSRange(location: $0.location + line.location, length: $0.length) },
+                color: dot == nil ? nil : color
+            )
+        }
+        return nil
+    }
+
+    /// Gives the highlight `color`, or the default for nil, which is no
+    /// emoji. The caret goes just after the new colour, at the start of the
+    /// words, so the highlight stays revealed with its dot under the pointer.
+    public func recoloring(_ color: HighlightColor?) -> MarkdownEditing.Edit {
+        let emoji = color?.emoji ?? ""
+        let target = dot ?? NSRange(location: range.location + 2, length: 0)
+        return MarkdownEditing.Edit(
+            range: target,
+            replacement: emoji,
+            selection: NSRange(location: target.location + (emoji as NSString).length, length: 0)
+        )
+    }
+}

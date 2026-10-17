@@ -2425,6 +2425,15 @@ final class HeftTextKit2View: NSTextView {
         let point = convert(event.locationInWindow, from: nil)
         if let table = tableMenu(at: point) { return table }
         guard let menu = super.menu(for: event) else { return nil }
+        // A plain highlight has no dot to click, so its colour is here too.
+        let index = min(characterIndexForInsertion(at: point), (string as NSString).length)
+        if let span = HighlightSpan.at(index, in: string) {
+            let item = NSMenuItem(title: "Highlight Color", action: nil, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: "highlighter", accessibilityDescription: nil)
+            item.submenu = highlightColorMenu(for: span)
+            menu.insertItem(item, at: 0)
+            menu.insertItem(.separator(), at: 1)
+        }
         // Ask About Selection first, above AppKit's own items, while Ask is
         // on and something is selected.
         let selection = selectedRange()
@@ -2719,6 +2728,8 @@ final class HeftTextKit2View: NSTextView {
     /// showed the I-beam over its buttons. Buttons take the arrow.
     func cursorOverride(at point: CGPoint, among rects: [CGRect]) -> NSCursor? {
         if isOverFormatBar(point) || isOverCompletionMenu(point) { return .arrow }
+        // A highlight's colour dot opens a menu, as a checkbox ticks: the hand.
+        if highlightDot(at: point) != nil { return .pointingHand }
         return pointerTarget(at: point, among: rects) != nil ? .pointingHand : nil
     }
 
@@ -2820,6 +2831,12 @@ final class HeftTextKit2View: NSTextView {
         vimPreferredX = nil
         dismissLinkCompletion()
         if event.clickCount == 1, toggleTask(at: convert(event.locationInWindow, from: nil)) {
+            return
+        }
+        if event.clickCount == 1, let dot = highlightDot(at: convert(event.locationInWindow, from: nil)) {
+            highlightColorMenu(for: dot.span).popUp(
+                positioning: nil, at: NSPoint(x: dot.rect.minX, y: dot.rect.maxY + 4), in: self
+            )
             return
         }
         let point = convert(event.locationInWindow, from: nil)
@@ -3001,6 +3018,85 @@ final class HeftTextKit2View: NSTextView {
         textStorage?.replaceCharacters(in: target.box, with: replacement)
         didChangeText()
         return true
+    }
+
+    /// The highlight whose colour dot is under `point`, and where the dot is
+    /// drawn. Only while the dot is on screen: until the caret is in the
+    /// highlight it is collapsed markup, hairline-wide, so no click is inside
+    /// its rect and the click is for the words.
+    func highlightDot(at point: NSPoint) -> (span: HighlightSpan, rect: NSRect)? {
+        let text = string as NSString
+        guard text.length > 0 else { return nil }
+        let index = min(characterIndexForInsertion(at: point), text.length)
+        // The insertion point is either side of the emoji, depending on
+        // which half was clicked, and the emoji is two UTF-16 units.
+        for candidate in [index, index - 1, index - 2] where candidate >= 0 && candidate < text.length {
+            // Asked on every pointer move, so the line is only parsed when a
+            // colour emoji is actually there.
+            guard HighlightColor.leading(in: text, at: candidate) != nil
+                    || candidate > 0 && HighlightColor.leading(in: text, at: candidate - 1) != nil,
+                  let span = HighlightSpan.at(candidate, in: string), let dot = span.dot,
+                  NSLocationInRange(candidate, dot),
+                  let rect = rect(forSelection: dot), rect.contains(point)
+            else { continue }
+            return (span, rect)
+        }
+        return nil
+    }
+
+    private struct HighlightPick {
+        let span: HighlightSpan
+        let color: HighlightColor?
+    }
+
+    /// Default and the six colours, the current one ticked: what the dot and
+    /// the context menu offer.
+    func highlightColorMenu(for span: HighlightSpan) -> NSMenu {
+        let menu = NSMenu()
+        for color in [nil] + HighlightColor.allCases.map(Optional.some) {
+            let item = NSMenuItem(
+                title: color?.title ?? "Default", action: #selector(pickHighlightColor(_:)), keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = HighlightPick(span: span, color: color)
+            item.state = span.color == color ? .on : .off
+            item.image = if let color {
+                Self.swatch(Theme.highlightSwatch(color))
+            } else {
+                NSImage(systemSymbolName: "highlighter", accessibilityDescription: nil)
+            }
+            // macOS 27 hides menu item images unless asked; the dots are the
+            // point of this menu.
+            if #available(macOS 27, *) { item.preferredImageVisibility = .visible }
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// A filled dot in `color`. Drawn rather than a symbol, because a symbol
+    /// is a template image and a menu tints templates grey.
+    private static func swatch(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+    }
+
+    @objc private func pickHighlightColor(_ item: NSMenuItem) {
+        guard let pick = item.representedObject as? HighlightPick else { return }
+        setHighlightColor(pick.color, of: pick.span)
+    }
+
+    /// Recolours `span` as one undoable edit.
+    func setHighlightColor(_ color: HighlightColor?, of span: HighlightSpan) {
+        let edit = span.recoloring(color)
+        guard !edit.isEmpty, NSMaxRange(edit.range) <= (string as NSString).length,
+              shouldChangeText(in: edit.range, replacementString: edit.replacement)
+        else { return }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+        didChangeText()
+        setSelectedRange(edit.selection)
     }
 
     private static func listDepth<S: StringProtocol>(of leading: S) -> Int {
