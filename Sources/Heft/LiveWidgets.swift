@@ -826,6 +826,9 @@ enum CellText {
             var wanted: (width: Int?, height: Int?) = (nil, nil)
             if case .wikiLink(let link) = decoration.style {
                 wanted = (link.embedWidth, link.embedHeight)
+            } else if case .image(_, let alt) = decoration.style {
+                let parsed = ImageEmbed.markdownAlt(alt)
+                wanted = (parsed.width, parsed.height)
             }
             let attachment = NSTextAttachment()
             attachment.image = image

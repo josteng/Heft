@@ -118,6 +118,20 @@ struct PastedPictureTests {
         return layout.blocks[0]
     }
 
+    @Test("A Markdown image is drawn at the size in its alt text")
+    func markdownImageSize() throws {
+        try withPictureVault { _, context in
+            guard case .image(_, let sized, _)? = firstBlock("![a cat|20](shot.png)\n", context),
+                  case .image(_, let natural, _)? = firstBlock("![a cat](shot.png)\n", context)
+            else {
+                Issue.record("a Markdown image produced no picture")
+                return
+            }
+            #expect(sized == CGSize(width: 20, height: 15))
+            #expect(natural == CGSize(width: 40, height: 30))
+        }
+    }
+
     @Test("A picture pasted onto a bullet is drawn, and keeps its bullet")
     func drawsPictureOnABullet() throws {
         try withPictureVault { _, context in

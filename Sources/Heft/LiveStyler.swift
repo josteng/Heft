@@ -428,11 +428,19 @@ enum LiveStyler {
             growLineHeight(to: image.size.height + 2, forLineAt: range.location, in: storage, text: text)
             layout.inlineMath[lineStart, default: []].append((range.location, image))
 
-        case .image(let source, _):
+        case .image(let source, let alt):
             guard let url = context.resolveResource(source), let image = ImageCache.image(at: url)
             else { return }
             let lead = blockLead(range, text: text, lineStart: lineStart, in: storage, layout: layout)
-            let size = HeftLayoutFragment.displaySize(for: image)
+            // `![a cat|300](shot.png)`: the size Obsidian reads from the alt,
+            // with the same room as a wikilink's written size.
+            let wanted = ImageEmbed.markdownAlt(alt)
+            let size = HeftLayoutFragment.displaySize(
+                for: image, width: wanted.width, height: wanted.height,
+                maxWidth: wanted.width != nil || wanted.height != nil
+                    ? max(contentWidth - lead.indent, 1)
+                    : HeftLayoutFragment.maximumPictureWidth
+            )
             hideWhole(
                 range, in: storage, text: text, indent: lead.indent,
                 reserving: size.height

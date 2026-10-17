@@ -209,7 +209,11 @@ enum InlineText {
                 case .image(let source, let alt):
                     if let source, let url = context.resolveResource(source) {
                         flush()
-                        pieces.append(.image(url: url, width: nil, height: nil, alt: alt))
+                        let wanted = ImageEmbed.markdownAlt(alt)
+                        pieces.append(.image(
+                            url: url, width: wanted.width.map { CGFloat($0) },
+                            height: wanted.height.map { CGFloat($0) }, alt: wanted.alt
+                        ))
                     } else {
                         buffer += styled(alt.isEmpty ? "🖼︎" : alt, style, baseFont, context: context)
                     }
