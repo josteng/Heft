@@ -46,6 +46,7 @@ struct RecentView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
             }
+            ToolbarItem(placement: .topBarTrailing) { VaultMenu() }
         }
         .newNoteSheet($creating)
         #if DEBUG

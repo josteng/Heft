@@ -195,8 +195,10 @@ struct NoteEditingToolbar: ToolbarContent {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Undo", systemImage: "arrow.uturn.backward") { document.undo() }
                     .disabled(!document.canUndo)
+                    .tint(.primary)
                 Button("Redo", systemImage: "arrow.uturn.forward") { document.redo() }
                     .disabled(!document.canRedo)
+                    .tint(.primary)
             }
             ToolbarItem(placement: .primaryAction) {
                 // The system's own Done: a filled checkmark, as Notes shows it
@@ -207,8 +209,10 @@ struct NoteEditingToolbar: ToolbarContent {
             ToolbarItemGroup(placement: .primaryAction) {
                 if !findInMenu {
                     Button("Find in Note", systemImage: "magnifyingglass") { document.find() }
+                        .tint(.primary)
                 }
                 Menu("More", systemImage: "ellipsis") { menu }
+                    .tint(.primary)
             }
         }
     }
@@ -274,7 +278,15 @@ struct NoteContent: View {
                     document: document,
                     context: RenderContext(
                         index: vault.index, current: note, vaultRoot: root,
-                        strictLineBreaks: vault.settings.strictLineBreaks
+                        strictLineBreaks: vault.settings.strictLineBreaks,
+                        colorfulFormatting: vault.appearance.colorfulFormatting,
+                        accentColor: vault.appearance.accentColor,
+                        linkColor: vault.appearance.linkColor,
+                        tagColor: vault.appearance.tagColor,
+                        codeColor: vault.appearance.codeColor,
+                        boldColor: vault.appearance.boldColor,
+                        italicColor: vault.appearance.italicColor,
+                        headingColors: (1...6).map(vault.appearance.headingColor)
                     ),
                     scrolledDown: scrolledDown,
                     follow: { follow($0, from: note) },

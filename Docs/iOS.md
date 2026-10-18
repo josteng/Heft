@@ -20,7 +20,8 @@ view, `HEFT_IOS_CARET` and `HEFT_IOS_SELECT` give the editor the keyboard,
 `HEFT_IOS_TYPE` types through the delegate as the keyboard does (`⏎` is
 Return), `HEFT_IOS_ACTIONS` runs editor actions by name, and `HEFT_IOS_NEW`
 opens New Note with a name (`HEFT_IOS_NEW_KIND=folder` switches it to a folder, `HEFT_IOS_NEW_CONFIRM`
-also creates it). Point them at
+also creates it), and `HEFT_IOS_SETTINGS` opens Settings on a page (`root`,
+`appearance`, `vault`). Point them at
 a copy of a vault: the editor saves.
 
 ## The vault
@@ -31,6 +32,11 @@ the bookmark but iOS does not let it use it, so a share it cannot file is
 queued there and the app files it on its next scan. The app also publishes a
 note list there after every scan, which is both the share sheet's note
 search and what the app shows at launch before its own scan lands.
+
+The colours travel in the vault too, in `.heft/appearance.json` beside the
+pins: the phone has no colours of its own, and the Mac adopts the file when
+it reads a vault and writes it when its Appearance settings change. A vault
+the Mac opens with default colours gets no file.
 
 There is no file watcher on iOS. The app rescans on launch, on returning to
 the foreground and after its own writes, starting from the Mac's

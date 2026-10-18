@@ -7,7 +7,6 @@ struct FolderView: View {
     let path: String
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
-    @State private var choosingVault = false
     @State private var launched = false
     @State private var creating: NewNoteRequest?
 
@@ -35,22 +34,10 @@ struct FolderView: View {
                 NewNoteButton { creating = NewNoteRequest(folder: path) }
             }
             if path.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Refresh", systemImage: "arrow.clockwise") { vault.refresh() }
-                        Button("Change Vault…", systemImage: "folder.badge.gearshape") {
-                            choosingVault = true
-                        }
-                    } label: {
-                        Label("Vault", systemImage: "ellipsis")
-                    }
-                }
+                ToolbarItem(placement: .topBarTrailing) { VaultMenu() }
             }
         }
         .newNoteSheet($creating)
-        .fileImporter(isPresented: $choosingVault, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { vault.choose(url) }
-        }
         .onAppear(perform: applyLaunchRequest)
     }
 

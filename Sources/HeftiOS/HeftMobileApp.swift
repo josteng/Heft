@@ -140,6 +140,9 @@ struct MobileRootView: View {
                 }
             }
             .environment(\.mobileCapture) { capture = CaptureSheetRequest() }
+            // What the system draws blue takes the vault's accent; the bar's
+            // icons stay neutral, as iOS draws them whatever an app's colour.
+            .tint(vault.appearance.appTint)
             .sheet(item: $capture) { capture in
                 CaptureSheet(requested: capture.target)
             }
@@ -267,6 +270,7 @@ struct CaptureButton: View {
 
     var body: some View {
         Button("Capture", systemImage: "text.badge.plus", action: capture)
+            .tint(.primary)
     }
 }
 

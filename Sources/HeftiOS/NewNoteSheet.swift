@@ -15,6 +15,7 @@ struct NewNoteButton: View {
 
     var body: some View {
         Button("New Note", systemImage: "square.and.pencil", action: action)
+            .tint(.primary)
     }
 }
 

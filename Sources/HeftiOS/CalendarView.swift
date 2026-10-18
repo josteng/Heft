@@ -66,6 +66,7 @@ struct CalendarView: View {
                         .contentTransition(.numericText(value: month.timeIntervalSinceReferenceDate))
                         .fixedSize()
                 }
+                .tint(.primary)
                 .accessibilityHint(folded ? "Shows the whole month" : "Folds the month to one week")
             }
             .sharedBackgroundVisibility(.hidden)
@@ -78,6 +79,7 @@ struct CalendarView: View {
                         Button { goToToday() } label: {
                             Image(systemName: Self.todaySymbol)
                         }
+                        .tint(.primary)
                         .accessibilityLabel("Today")
                     }
                 }

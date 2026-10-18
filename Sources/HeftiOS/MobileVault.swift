@@ -20,6 +20,8 @@ final class MobileVault {
     private(set) var recent: [SharedVault.ListedNote] = []
     private(set) var pins = Pins()
     private(set) var settings = ObsidianSettings()
+    /// The vault's colours, shared with the Mac through `.heft/appearance.json`.
+    private(set) var appearance = AppearancePreferences()
     private(set) var isScanning = false
     /// Bumped whenever a scan lands, so an open note can re-read itself.
     private(set) var generation = 0
@@ -30,6 +32,7 @@ final class MobileVault {
     private var scanToken = 0
     /// How many more scans to run while iCloud is still downloading notes.
     private var downloadRetries = 0
+    private var appearanceWrite: Task<Void, Never>?
 
     init() {
         #if DEBUG
@@ -78,6 +81,7 @@ final class MobileVault {
         recent = SharedVault.noteList()
         tree = recent.isEmpty ? nil : Self.provisionalTree(recent, root: url)
         pins = Pins.load(from: url)
+        appearance = AppearancePreferences()
         frecency = FrecencyStore.notes(forVaultAt: url.path)
         downloadRetries = 3
         refresh()
@@ -98,6 +102,7 @@ final class MobileVault {
             // scan below already sees them.
             SharedVault.drainQueue(into: root)
             let settings = ObsidianSettings.load(vaultRoot: root)
+            let appearance = AppearancePreferences.load(fromVault: root)
             let tree = VaultScanner.scan(root: root)
             // iOS keeps iCloud files evicted far more readily than the Mac
             // does, so ask for every note that is not here yet. The index is
@@ -134,12 +139,13 @@ final class MobileVault {
             SharedVault.publishNoteList(listed)
             let pins = Pins.load(from: root)
             await self.land(token: token, tree: tree, index: index, settings: settings,
-                            listed: listed, pins: pins, pending: pending.count)
+                            appearance: appearance, listed: listed, pins: pins, pending: pending.count)
         }
     }
 
     private func land(token: Int, tree: VaultItem, index: VaultIndex, settings: ObsidianSettings,
-                      listed: [SharedVault.ListedNote], pins: Pins, pending: Int) {
+                      appearance: AppearancePreferences?, listed: [SharedVault.ListedNote],
+                      pins: Pins, pending: Int) {
         guard token == scanToken else { return }
         // Only what changed, so a rescan that found nothing new redraws nothing.
         if self.tree != tree { self.tree = tree }
@@ -147,6 +153,11 @@ final class MobileVault {
         if recent != listed { recent = listed }
         if self.pins != pins { self.pins = pins }
         self.settings = settings
+        // Not while a change made here is still waiting to be written: the
+        // file read by this scan is older than what is on screen.
+        if appearanceWrite == nil, let appearance, self.appearance != appearance {
+            self.appearance = appearance
+        }
         isScanning = false
         generation += 1
         if pending > 0, downloadRetries > 0 {
@@ -381,6 +392,24 @@ final class MobileVault {
             withIntermediateDirectories: false
         )
         refresh()
+    }
+
+    /// Shows the colours at once and writes the vault's file a moment after
+    /// the last change, since a colour picker reports every step of a drag.
+    func setAppearance(_ preferences: AppearancePreferences) {
+        guard preferences != appearance, let root else { return }
+        appearance = preferences
+        appearanceWrite?.cancel()
+        appearanceWrite = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            do {
+                try preferences.save(toVault: root)
+            } catch {
+                problem = "Heft could not save the colours: \(error.localizedDescription)"
+            }
+            appearanceWrite = nil
+        }
     }
 
     /// Today's note, made from the daily template when it does not exist.

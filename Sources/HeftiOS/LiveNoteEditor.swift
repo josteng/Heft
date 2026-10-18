@@ -89,6 +89,10 @@ struct LiveNoteEditor: UIViewRepresentable {
             let contextChanged = renderContext.map { !Self.sameSurface($0, editor.context) } ?? true
             renderContext = editor.context
             guard let textView else { return }
+            // The accent is the note's: the caret and selection take it, and
+            // the app's chrome keeps the system's, as on the Mac.
+            let caret = editor.context.accentColor == StyleDefaults.accentColor ? nil : editor.context.accentColor
+            if textView.tintColor != caret ?? textView.superview?.tintColor { textView.tintColor = caret }
             if loadedRevision != editor.document.revision {
                 load(editor.document.source ?? "", into: textView)
                 loadedRevision = editor.document.revision
@@ -164,6 +168,10 @@ struct LiveNoteEditor: UIViewRepresentable {
             a.index.allFiles.count == b.index.allFiles.count
                 && a.current?.relativePath == b.current?.relativePath
                 && a.strictLineBreaks == b.strictLineBreaks
+                && a.colorfulFormatting == b.colorfulFormatting
+                && [a.accentColor, a.linkColor, a.tagColor, a.codeColor, a.boldColor, a.italicColor]
+                    == [b.accentColor, b.linkColor, b.tagColor, b.codeColor, b.boldColor, b.italicColor]
+                && a.headingColors == b.headingColors
         }
 
         /// Replaces the text, keeping the caret where it was when it still fits.
