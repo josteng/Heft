@@ -64,9 +64,10 @@ Five targets:
   `PlatformText.swift` maps them to UIKit, and only what has no counterpart
   of the same shape is branched with `#if os(macOS)`.
 - `HeftiOS`: the iPhone and iPad companion. Browse, read, search, the daily
-  calendar, and capture, over `HeftCore`. Notes are rendered from
-  `MarkdownModel` and edited as plain text with an explicit save that refuses
-  a file changed elsewhere; the live surface stays on the Mac. The vault is a
+  calendar, and capture, over `HeftCore`. Notes open in the live surface,
+  `LiveNoteEditor`: a `UITextView` on TextKit 2 styled and drawn by
+  `HeftTextKit`, saving as it goes, and refusing a save over a file changed
+  elsewhere until the reader picks a version. The vault is a
   bookmark from the Files picker, and there is no watcher: it rescans.
   Two iOS extensions ride along: `HeftControls` (Control Center, Lock Screen
   and Action button capture) and `HeftShare` (the share sheet). The bookmark

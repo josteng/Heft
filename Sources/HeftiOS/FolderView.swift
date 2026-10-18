@@ -164,3 +164,18 @@ struct ImageFileView: View {
         }
     }
 }
+
+enum MobileImages {
+    /// Loads off the main thread and through a coordinator, so a picture
+    /// still in iCloud is fetched rather than drawn as nothing.
+    static func load(_ url: URL) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            var data: Data?
+            var error: NSError?
+            NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &error) {
+                data = try? Data(contentsOf: $0)
+            }
+            return data.flatMap(UIImage.init(data:))
+        }.value
+    }
+}

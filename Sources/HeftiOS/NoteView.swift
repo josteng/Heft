@@ -1,64 +1,131 @@
 import HeftCore
 import SwiftUI
 
-/// One note's text and its editing state, kept apart from any one screen so
-/// the note view and the calendar load, edit and save it the same way.
+/// One note's text and its saving, kept apart from any one screen so the
+/// note view and the calendar load, edit and save it the same way.
+///
+/// Edits save themselves a moment after typing stops, and when the note is
+/// left. A save only lands on the text it was based on: the Mac autosaves,
+/// iCloud brings that late, and quietly replacing what the Mac wrote is the
+/// one outcome worse than not saving. A refused save becomes a `conflict`
+/// for the reader to settle.
 @MainActor @Observable
 final class NoteDocument {
     let path: String
+    /// The text as last read or saved.
     private(set) var source: String?
+    /// Moves only when `source` is replaced from disk, which is the one time
+    /// the editor takes the text back rather than keeping its own.
+    private(set) var revision = 0
     private(set) var failure: String?
+    /// Whether the keyboard is up in the editor.
     var editing = false
-    var draft = ""
+    /// Moved to ask the editor for the keyboard.
+    private(set) var focusRequest = 0
+    private(set) var conflict = false
     var saveError: String?
+
+    /// What is on disk as far as this document knows; a save checks it.
+    @ObservationIgnored private var onDisk: String?
+    /// Typed and not yet saved. Not observed: a keystroke changes nothing
+    /// that any view draws.
+    @ObservationIgnored private var pending: String?
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private weak var vault: MobileVault?
 
     init(path: String) {
         self.path = path
     }
 
     func load(in vault: MobileVault) async {
+        self.vault = vault
+        // Unsaved typing wins until it is saved; a rescan arriving meanwhile
+        // must not put the old text back under the caret.
+        guard pending == nil else { return }
         guard let url = vault.note(at: path)?.url else {
             failure = "The note is no longer in the vault."
             return
         }
         do {
-            source = try await Task.detached { try MobileVault.read(url) }.value
+            let text = try await Task.detached { try MobileVault.read(url) }.value
+            onDisk = text
             failure = nil
+            if text != source {
+                source = text
+                revision += 1
+            }
         } catch {
             failure = error.localizedDescription
         }
     }
 
-    func beginEditing() {
-        draft = source ?? ""
-        editing = true
+    func focus() { focusRequest += 1 }
+
+    func edited(_ text: String) {
+        pending = text
+        saveSoon()
     }
 
-    func save(in vault: MobileVault) async {
-        guard let url = vault.note(at: path)?.url, let original = source else { return }
-        let text = draft
+    func saveSoon(immediately: Bool = false) {
+        guard pending != nil else { return }
+        saveTask?.cancel()
+        saveTask = Task {
+            if !immediately {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+            }
+            await save()
+        }
+    }
+
+    private func save() async {
+        guard let vault, let text = pending, let base = onDisk, !conflict,
+              let url = vault.note(at: path)?.url
+        else { return }
         do {
-            try await Task.detached {
-                try MobileVault.write(text, to: url, replacing: original)
-            }.value
+            try await Task.detached { try MobileVault.write(text, to: url, replacing: base) }.value
+            onDisk = text
             source = text
-            editing = false
+            if pending == text { pending = nil } else { saveSoon() }
+            vault.refresh()
+        } catch MobileWriteError.changedElsewhere {
+            conflict = true
+        } catch {
+            saveError = error.localizedDescription
+        }
+    }
+
+    /// Writes what was typed over the version that arrived meanwhile.
+    func keepMine() async {
+        guard let vault, let text = pending, let url = vault.note(at: path)?.url else { return }
+        do {
+            try await Task.detached { try MobileVault.overwrite(text, at: url) }.value
+            onDisk = text
+            source = text
+            pending = nil
+            conflict = false
             vault.refresh()
         } catch {
             saveError = error.localizedDescription
-            if case MobileWriteError.changedElsewhere = error {
-                // Show the newer text underneath; the draft stays put.
-                await load(in: vault)
-            }
         }
+    }
+
+    /// Drops what was typed for the version that arrived meanwhile.
+    func useTheirs() async {
+        guard let vault else { return }
+        pending = nil
+        conflict = false
+        await load(in: vault)
     }
 }
 
-/// A note, rendered, with an Edit button for the plain text underneath.
+/// A note, editable in place.
 struct NoteView: View {
     let path: String
     @Environment(MobileVault.self) private var vault
+    @Environment(\.mobilePush) private var push
     @State private var document: NoteDocument
+    @State private var showsBacklinks = false
 
     init(path: String) {
         self.path = path
@@ -67,48 +134,59 @@ struct NoteView: View {
 
     var body: some View {
         let note = vault.note(at: path)
+        let backlinks = vault.index.backlinks(to: path)
         NoteContent(document: document)
             .navigationTitle(note?.name ?? (path as NSString).lastPathComponent)
             // Inline, because most notes open with their own title as a heading
             // and a large bar title above it says the same thing twice.
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(document.editing)
-            .toolbar { NoteEditingToolbar(document: document) }
+            .toolbar {
+                if !backlinks.isEmpty, !document.editing {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Linked From", systemImage: "arrow.uturn.left") { showsBacklinks = true }
+                    }
+                }
+                NoteEditingToolbar(document: document)
+            }
+            .sheet(isPresented: $showsBacklinks) {
+                NavigationStack {
+                    ScrollView {
+                        BacklinksView(backlinks: backlinks) { source in
+                            showsBacklinks = false
+                            push(.note(source))
+                        }
+                        .padding()
+                    }
+                    .navigationTitle("Linked From")
+                    .navigationBarTitleDisplayMode(.inline)
+                }
+                .presentationDetents([.medium, .large])
+            }
             .onAppear {
                 if let note { vault.recordOpen(note) }
             }
     }
 }
 
-/// Edit, or Cancel and Save while editing: the same three buttons wherever
-/// a note is shown.
-///
-/// Edit is always there, only disabled while the note loads: a button that
-/// came and went with each note made the whole bar reflow, which flickered
-/// every time the calendar moved to another day.
+/// The pencil, which puts the keyboard in the note, and while typing the
+/// button that puts it away. Always present, so the bar does not reflow as
+/// notes load.
 struct NoteEditingToolbar: ToolbarContent {
     let document: NoteDocument
-    @Environment(MobileVault.self) private var vault
 
     var body: some ToolbarContent {
-        if document.editing {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel", systemImage: "xmark") { document.editing = false }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save", systemImage: "checkmark") { Task { await document.save(in: vault) } }
-            }
-        } else {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Edit", systemImage: "pencil") { document.beginEditing() }
+        ToolbarItem(placement: .primaryAction) {
+            if document.editing {
+                Button("Done", systemImage: "keyboard.chevron.compact.down") { document.editing = false }
+            } else {
+                Button("Edit", systemImage: "pencil") { document.focus() }
                     .disabled(document.source == nil)
             }
         }
     }
 }
 
-/// The note itself: the editor while editing, else the rendered text in a
-/// scroll view, else why it could not be read.
+/// The note itself, in the live editor, or why it could not be read.
 ///
 /// `scrolledDown` reports whether the reader has left the top, which the
 /// calendar uses to fold itself away above the note.
@@ -117,20 +195,29 @@ struct NoteContent: View {
     var scrolledDown: ((Bool) -> Void)? = nil
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var unresolved: String?
     /// Set only once loading has taken a moment, so a note that opens
     /// quickly never flashes a spinner first.
     @State private var slow = false
 
     var body: some View {
-        @Bindable var document = document
         Group {
-            if document.editing {
-                TextEditor(text: $document.draft)
-                    .font(.system(.body, design: .monospaced))
-                    .padding(.horizontal, 8)
-            } else if let source = document.source, let root = vault.root {
-                reader(source, root: root)
+            if document.source != nil, let root = vault.root {
+                let note = vault.note(at: document.path)
+                LiveNoteEditor(
+                    document: document,
+                    context: RenderContext(
+                        index: vault.index, current: note, vaultRoot: root,
+                        strictLineBreaks: vault.settings.strictLineBreaks
+                    ),
+                    scrolledDown: scrolledDown,
+                    follow: { follow($0, from: note) }
+                )
+                .overlay(alignment: .top) {
+                    if document.conflict { conflictBanner }
+                }
             } else if let failure = document.failure {
                 ContentUnavailableView("Can't Open Note", systemImage: "doc.questionmark",
                                        description: Text(failure))
@@ -145,9 +232,11 @@ struct NoteContent: View {
             }
         }
         .task(id: "\(document.path)#\(vault.generation)") {
-            // A rescan after this note's own save, or one that brought it
-            // down from iCloud, re-reads it; an edit in progress is left be.
-            if !document.editing { await document.load(in: vault) }
+            await document.load(in: vault)
+        }
+        .onDisappear { document.saveSoon(immediately: true) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { document.saveSoon(immediately: true) }
         }
         .alert("Not Saved", isPresented: .constant(document.saveError != nil)) {
             Button("OK") { document.saveError = nil }
@@ -161,86 +250,66 @@ struct NoteContent: View {
         }
     }
 
-    private func reader(_ source: String, root: URL) -> some View {
-        let note = vault.note(at: document.path)
-        let parsed = MarkdownModel.parse(source)
-        let context = MarkdownContext(index: vault.index, root: root, note: note)
-        let backlinks = vault.index.backlinks(to: document.path)
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                if let frontmatter = parsed.frontmatter {
-                    PropertiesView(properties: Frontmatter.parse(frontmatter))
-                }
-                MarkdownBlocksView(blocks: parsed.blocks, context: context)
-                if !backlinks.isEmpty {
-                    BacklinksView(backlinks: backlinks)
-                }
+    /// The note changed on another device while this one was being typed
+    /// into, so saving stopped rather than write over it.
+    private var conflictBanner: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Changed on another device", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+            Text("Your edits are not saved. Keep yours to replace the other version, or use theirs to drop your edits.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("Use Theirs") { Task { await document.useTheirs() } }
+                    .buttonStyle(.bordered)
+                Button("Keep Mine") { Task { await document.keepMine() } }
+                    .buttonStyle(.borderedProminent)
             }
-            .padding()
-            .frame(maxWidth: 720, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.contentOffset.y + geometry.contentInsets.top > 24
-        } action: { was, down in
-            // Movement only: a note that has just opened sits at the top,
-            // which is not the reader scrolling back up to it.
-            if was != down { scrolledDown?(down) }
-        }
-        .environment(\.openURL, OpenURLAction { url in follow(url, from: note) })
-        .refreshable { await document.load(in: vault) }
+        .padding()
+        .background(.regularMaterial, in: .rect(cornerRadius: 16))
+        .padding()
     }
 
-    private func follow(_ url: URL, from note: NoteRef?) -> OpenURLAction.Result {
-        guard let target = MarkdownInlines.target(of: url) else { return .systemAction }
-        switch target {
-        case .tag(let tag):
+    /// A wikilink arrives as the Mac's own `heft://follow?target=…` URL, a
+    /// tag as a search; anything else is a web address.
+    private func follow(_ url: URL, from note: NoteRef?) {
+        guard url.scheme == HeftURL.scheme else {
+            openURL(url)
+            return
+        }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        if let tag = items.first(where: { $0.name == "tag" })?.value {
             push(.tag(tag))
-        case .note(let link):
-            // `[[#Heading]]` points into this note, which is already open.
-            guard !link.target.isEmpty else { return .handled }
-            if let ref = vault.index.resolve(link, from: note) {
-                push(ref.kind == .image ? .image(ref.relativePath) : .note(ref.relativePath))
-            } else {
-                unresolved = link.target
-            }
+            return
         }
-        return .handled
-    }
-}
-
-private struct PropertiesView: View {
-    let properties: [NoteProperty]
-
-    var body: some View {
-        if !properties.isEmpty {
-            DisclosureGroup("Properties") {
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                    ForEach(properties) { property in
-                        GridRow {
-                            Text(property.key).foregroundStyle(.secondary)
-                            Text(property.value.display)
-                        }
-                        .font(.callout)
-                    }
-                }
-                .padding(.top, 6)
-            }
-            .tint(.secondary)
+        guard let target = items.first(where: { $0.name == "target" })?.value else { return }
+        var link = WikiLink(target: target)
+        if let mark = target.range(of: "#^") {
+            link = WikiLink(target: String(target[..<mark.lowerBound]),
+                            blockID: String(target[mark.upperBound...]))
+        } else if let mark = target.firstIndex(of: "#") {
+            link = WikiLink(target: String(target[..<mark]),
+                            heading: String(target[target.index(after: mark)...]))
+        }
+        // `[[#Heading]]` points into this note, which is already open.
+        guard !link.target.isEmpty else { return }
+        if let ref = vault.index.resolve(link, from: note) {
+            push(ref.kind == .image ? .image(ref.relativePath) : .note(ref.relativePath))
+        } else {
+            unresolved = link.target
         }
     }
 }
 
 private struct BacklinksView: View {
     let backlinks: [Backlink]
+    let open: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Linked from")
-                .font(.headline)
-                .foregroundStyle(.secondary)
             ForEach(backlinks) { backlink in
-                NavigationLink(value: MobileRoute.note(backlink.source.relativePath)) {
+                Button { open(backlink.source.relativePath) } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(backlink.source.name).font(.subheadline.weight(.semibold))
                         Text(backlink.context)
@@ -255,6 +324,5 @@ private struct BacklinksView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.top, 8)
     }
 }

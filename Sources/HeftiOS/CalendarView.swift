@@ -292,7 +292,7 @@ struct CalendarView: View {
         let inMonth = calendar.isDate(date, equalTo: month, toGranularity: .month)
         let exists = existing(date) != nil
         return Button {
-            if chosen, collapsed, document?.editing != true {
+            if chosen, collapsed {
                 withAnimation(Self.fold) { folded = false }
             } else {
                 select(date)
@@ -347,7 +347,9 @@ struct CalendarView: View {
     }
 
     private func select(_ date: Date) {
-        if document?.editing == true { return }
+        // Another day while typing: the keyboard goes, and the note being
+        // left saves as it disappears.
+        document?.editing = false
         withAnimation(.snappy(duration: 0.18)) {
             selected = calendar.startOfDay(for: date)
         }

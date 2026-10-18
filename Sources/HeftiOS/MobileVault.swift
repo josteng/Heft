@@ -272,6 +272,19 @@ final class MobileVault {
         try result.get()
     }
 
+    /// Writes `text` whatever the file holds now: what the reader chose when
+    /// told the note had changed on another device.
+    nonisolated static func overwrite(_ text: String, at url: URL) throws {
+        var coordinationError: NSError?
+        var result: Result<Void, Error> = .success(())
+        NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing,
+                                       error: &coordinationError) { coordinated in
+            result = Result { try text.write(to: coordinated, atomically: true, encoding: .utf8) }
+        }
+        if let coordinationError { throw coordinationError }
+        try result.get()
+    }
+
     /// Today's note, made from the daily template when it does not exist.
     /// `ensureNote` never overwrites, so tapping a day twice is harmless.
     func dailyNote(for date: Date) throws -> NoteRef {
