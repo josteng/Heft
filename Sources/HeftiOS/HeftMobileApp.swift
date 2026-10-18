@@ -254,6 +254,13 @@ struct MobileRootView: View {
     }
 
     private func applyLaunchRequest() {
+        if !usesSidebar {
+            switch BrowsingPreferences.shared.start {
+            case .recent: tab = .recent
+            case .files: tab = .files
+            case .today: tab = .calendar
+            }
+        }
         #if DEBUG
         // Screenshot hooks for a simulator run, where nothing can tap.
         let environment = ProcessInfo.processInfo.environment

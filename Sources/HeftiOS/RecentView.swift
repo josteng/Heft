@@ -58,7 +58,7 @@ struct RecentSections: View {
         let dating = RecentDating()
         let pinned = vault.pinnedNotes
         let pinnedPaths = Set(pinned.map(\.path))
-        let groups = dating.grouped(vault.recent.filter { !pinnedPaths.contains($0.path) },
+        let groups = dating.grouped(ordered.filter { !pinnedPaths.contains($0.path) },
                                     date: \.modified)
         if !pinned.isEmpty {
             Section {
@@ -73,6 +73,25 @@ struct RecentSections: View {
             }
         }
     }
+
+    /// By last edit, as the files say, or by when this device last opened
+    /// each: those first, dated by the opening, then the rest as edited.
+    private var ordered: [SharedVault.ListedNote] {
+        guard BrowsingPreferences.shared.recentOrder == .opened else { return vault.recent }
+        let opened = vault.openedAt
+        var seen: [SharedVault.ListedNote] = []
+        var rest: [SharedVault.ListedNote] = []
+        for note in vault.recent {
+            if let date = opened[note.path] {
+                var dated = note
+                dated.modified = date
+                seen.append(dated)
+            } else {
+                rest.append(note)
+            }
+        }
+        return seen.sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) } + rest
+    }
 }
 
 /// Title, then when and how it begins, then where it lives: the three
@@ -84,6 +103,26 @@ private struct RecentRow: View {
 
     var body: some View {
         NavigationLink(value: MobileRoute.note(note.path)) {
+            if BrowsingPreferences.shared.recentLayout == .compact {
+                // One line, as the Mac's compact list: the name, and where it
+                // lives after it.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(note.name).lineLimit(1)
+                    if !note.folder.isEmpty {
+                        Text(note.folder)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                preview
+            }
+        }
+        .itemActions(ItemRef(path: note.path, isFolder: false), perform)
+    }
+
+    private var preview: some View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(note.name)
                     .font(.headline)
@@ -108,8 +147,6 @@ private struct RecentRow: View {
                 }
             }
             .padding(.vertical, 2)
-        }
-        .itemActions(ItemRef(path: note.path, isFolder: false), perform)
     }
 }
 

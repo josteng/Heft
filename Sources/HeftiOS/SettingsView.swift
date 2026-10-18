@@ -5,11 +5,12 @@ import UIKit
 /// The pages of Settings, as the Mac has tabs: a list to pick one from, so a
 /// new page is a new row and not a longer form.
 enum SettingsPage: String, Hashable, CaseIterable {
-    case appearance, vault
+    case appearance, browsing, vault
 
     var title: String {
         switch self {
         case .appearance: "Appearance"
+        case .browsing: "Browsing"
         case .vault: "Vault"
         }
     }
@@ -17,6 +18,7 @@ enum SettingsPage: String, Hashable, CaseIterable {
     var symbol: String {
         switch self {
         case .appearance: "paintpalette"
+        case .browsing: "sidebar.left"
         case .vault: "books.vertical"
         }
     }
@@ -97,6 +99,7 @@ struct SettingsView: View {
             .navigationDestination(for: SettingsPage.self) { page in
                 switch page {
                 case .appearance: AppearanceSettingsView()
+                case .browsing: BrowsingSettingsView()
                 case .vault: VaultSettingsView()
                 }
             }
@@ -297,6 +300,40 @@ private struct SettingsPreview: View {
             if let font = run.2 { piece.font = font }
             line += piece
         }
+    }
+}
+
+/// Recent's order and rows, as the Mac's Appearance sets them, and where
+/// the app starts.
+private struct BrowsingSettingsView: View {
+    @Bindable private var preferences = BrowsingPreferences.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Ordered By", selection: $preferences.recentOrder) {
+                    ForEach(BrowsingPreferences.RecentOrder.allCases) { Text($0.title).tag($0) }
+                }
+                Picker("Rows", selection: $preferences.recentLayout) {
+                    ForEach(BrowsingPreferences.RecentLayout.allCases) { Text($0.title).tag($0) }
+                }
+            } header: {
+                Text("Recent")
+            } footer: {
+                Text("Last Edited follows the files' dates, so a note changed on another device rises too. "
+                    + "Last Opened is this device's own history. Preview shows the date, first line and folder.")
+            }
+            Section {
+                Picker("Start With", selection: $preferences.start) {
+                    ForEach(BrowsingPreferences.Start.allCases) { Text($0.title).tag($0) }
+                }
+            } footer: {
+                Text("What Heft shows when it opens. On an iPad it chooses the sidebar's list, "
+                    + "or opens today's note beside it.")
+            }
+        }
+        .navigationTitle("Browsing")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

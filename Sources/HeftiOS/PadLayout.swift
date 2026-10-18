@@ -232,8 +232,14 @@ struct PadRootView: View {
     }
 
     private func applyLaunchRequest() {
-        if selection == nil, day == nil, !lastNote.isEmpty, vault.note(at: lastNote) != nil {
-            selection = .note(lastNote)
+        switch BrowsingPreferences.shared.start {
+        case .today:
+            if selection == nil, day == nil { pick(Date()) }
+        case .recent, .files:
+            mode = BrowsingPreferences.shared.start == .files ? .files : .recent
+            if selection == nil, day == nil, !lastNote.isEmpty, vault.note(at: lastNote) != nil {
+                selection = .note(lastNote)
+            }
         }
         #if DEBUG
         let environment = ProcessInfo.processInfo.environment

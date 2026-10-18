@@ -150,6 +150,7 @@ final class MobileVault {
         tree = recent.isEmpty ? nil : Self.provisionalTree(recent, root: url)
         pins = Pins.load(from: url)
         appearance = AppearancePreferences()
+        loadOpenings()
         firstScan = true
         frecency = FrecencyStore.notes(forVaultAt: url.path)
         downloadRetries = 3
@@ -362,8 +363,32 @@ final class MobileVault {
         return NoteRef(url: root.appendingPathComponent(path), vaultRoot: root)
     }
 
+    /// When each note was last opened on this device, for Recent ordered by
+    /// Last Opened. Kept here, as the Mac keeps its own: opening a note leaves
+    /// nothing in the files to sync.
+    private(set) var openedAt: [String: Date] = [:]
+
+    private var openedKey: String? {
+        root.map { "dev.stenglein.Heft.iOS.openedAt.\($0.path)" }
+    }
+
+    private func loadOpenings() {
+        let stored = openedKey.flatMap { HeftDefaults.shared.dictionary(forKey: $0) as? [String: Double] } ?? [:]
+        openedAt = stored.mapValues(Date.init(timeIntervalSince1970:))
+    }
+
     func recordOpen(_ note: NoteRef) {
         frecency?.record(note.relativePath)
+        openedAt[note.relativePath] = Date()
+        // A bound, as the Mac's list of 100 has: the oldest drop off.
+        if openedAt.count > 200 {
+            for (path, _) in openedAt.sorted(by: { $0.value < $1.value }).prefix(openedAt.count - 200) {
+                openedAt[path] = nil
+            }
+        }
+        if let openedKey {
+            HeftDefaults.shared.set(openedAt.mapValues(\.timeIntervalSince1970), forKey: openedKey)
+        }
     }
 
     func familiarity(_ note: NoteRef) -> Double {
