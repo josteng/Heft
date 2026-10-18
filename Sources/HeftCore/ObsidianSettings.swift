@@ -44,6 +44,9 @@ public struct ObsidianSettings: Equatable, Sendable {
     /// break rather than a space. CommonMark says space; Obsidian does not,
     /// and matching the vault's own setting matters more than matching the spec.
     public var strictLineBreaks: Bool = false
+    /// Obsidian's "Default location for new notes". Its own default is the
+    /// vault root; "current" is beside the open note.
+    public var newNoteLocation: NewNoteLocation = .vaultRoot
 
     public init() {}
 
@@ -57,6 +60,13 @@ public struct ObsidianSettings: Equatable, Sendable {
             if let path = app["attachmentFolderPath"] as? String { settings.attachmentFolderPath = path }
             if let vim = app["vimMode"] as? Bool { settings.vimMode = vim }
             if let strict = app["strictLineBreaks"] as? Bool { settings.strictLineBreaks = strict }
+            switch app["newFileLocation"] as? String {
+            case "current": settings.newNoteLocation = .besideTheOpenNote
+            case "folder":
+                let folder = NewNoteLocation.normalised(app["newFileFolderPath"] as? String ?? "")
+                settings.newNoteLocation = folder.isEmpty ? .vaultRoot : .folder(folder)
+            default: break
+            }
         }
 
         if let daily = json(at: configDir.appendingPathComponent("daily-notes.json")) {
