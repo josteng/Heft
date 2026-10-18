@@ -22,6 +22,9 @@ struct FolderView: View {
                         row(item)
                     }
                 }
+                // A folder's list has no section heading, as Recent's "Today",
+                // and began right under the large title.
+                .contentMargins(.top, 26, for: .scrollContent)
                 .overlay {
                     if folder.children.isEmpty, !vault.isScanning {
                         ContentUnavailableView("Empty Folder", systemImage: "folder")
