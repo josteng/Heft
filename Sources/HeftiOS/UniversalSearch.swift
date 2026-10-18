@@ -319,25 +319,33 @@ struct UniversalSearchList: View {
     let model: SearchModel
     /// Puts text in the field, as "All matches" carries the query on.
     var setQuery: (String) -> Void = { _ in }
+    /// Notes as buttons rather than links, for a panel with no navigation
+    /// stack to push onto.
+    var asButtons = false
+    /// The row the keyboard has chosen, lit.
+    var highlighted: String?
+    /// The scope chips at the head of the list; the phone has them above
+    /// its keyboard instead.
+    var showsChips = true
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobileLibrary) private var library
     @Environment(\.mobilePush) private var push
 
     var body: some View {
         let commands = library.map(MobileCommand.all) ?? []
-        Section {
-            ScopeChips(model: model)
-                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-                .listRowBackground(Color.clear)
-                // On the row that is always there: on the sections, a query
-                // whose names found nothing had no view left to search text.
-                .task(id: "\(query)#\(model.scope?.title ?? "")#\(vault.generation)") {
-                    await model.searchText(query, vault: vault)
-                }
+        if showsChips {
+            Section {
+                ScopeChips(model: model)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    .listRowBackground(Color.clear)
+            }
         }
         ForEach(model.sections(for: query, vault: vault, commands: commands)) { section in
             Section {
-                ForEach(section.rows) { row in rowView(row) }
+                ForEach(section.rows) { row in
+                    rowView(row)
+                        .listRowBackground(highlighted == row.id ? Rectangle().fill(.tint.opacity(0.22)) : nil)
+                }
             } header: {
                 if let title = section.title { Text(title) }
             }
@@ -347,15 +355,25 @@ struct UniversalSearchList: View {
     @ViewBuilder
     private func rowView(_ row: SearchRow) -> some View {
         switch row {
+        case .note(let note) where asButtons:
+            Button { act(row) } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(note.name)
+                    if !note.folder.isEmpty {
+                        Text(note.folder).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .tint(.primary)
         case .note(let note):
             NoteRow(note: note)
+        case .hit(let hit) where asButtons:
+            Button { act(row) } label: { hitLabel(hit) }
+                .tint(.primary)
         case .hit(let hit):
-            NavigationLink(value: MobileRoute.note(hit.note.relativePath)) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(hit.note.name).font(.subheadline.weight(.semibold))
-                    Text(hit.preview).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
-                }
-            }
+            NavigationLink(value: MobileRoute.note(hit.note.relativePath)) { hitLabel(hit) }
         case .command(let command):
             Button { act(row) } label: { Label(command.title, systemImage: command.symbol) }
                 .tint(.primary)
@@ -378,6 +396,15 @@ struct UniversalSearchList: View {
         model.act(on: row, push: { push($0) }, setQuery: setQuery)
     }
 
+    private func hitLabel(_ hit: ContentMatch) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(hit.note.name).font(.subheadline.weight(.semibold))
+            Text(hit.preview).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+    }
+
     private func counted(_ title: String, _ symbol: String, _ count: Int) -> some View {
         HStack {
             Label(title, systemImage: symbol)
@@ -388,10 +415,32 @@ struct UniversalSearchList: View {
 
 }
 
-/// The scopes as chips under the field; the chosen one carries an ✕ to
-/// leave it, as Backspace in an empty field does on the Mac.
-private struct ScopeChips: View {
+extension View {
+    /// Text matches for the search, read in the background; on the list's
+    /// host, which is always there, where a section of results is not.
+    func searchingText(_ query: String, model: SearchModel) -> some View {
+        modifier(SearchTextTask(query: query, model: model))
+    }
+}
+
+private struct SearchTextTask: ViewModifier {
+    let query: String
     let model: SearchModel
+    @Environment(MobileVault.self) private var vault
+
+    func body(content: Content) -> some View {
+        content.task(id: "\(query)#\(model.scope?.title ?? "")#\(vault.generation)") {
+            await model.searchText(query, vault: vault)
+        }
+    }
+}
+
+/// The scopes as chips; the chosen one carries an ✕ to leave it, as
+/// Backspace in an empty field does on the Mac.
+struct ScopeChips: View {
+    let model: SearchModel
+    /// Full size above the phone's keyboard, smaller under a panel's field.
+    var large = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -416,12 +465,115 @@ private struct ScopeChips: View {
                 Text(scope.title)
                 if chosen { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
             }
-            .font(.subheadline)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .font(large ? .body : .subheadline)
+            .padding(.horizontal, large ? 14 : 12)
+            .padding(.vertical, large ? 9 : 6)
             .foregroundStyle(chosen ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
             .background(chosen ? AnyShapeStyle(.tint) : AnyShapeStyle(.fill.tertiary), in: .capsule)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The iPad's ⌘T: the Mac's search bar as a panel over the window, not a
+/// list in the sidebar, where it read as part of Files, Recent and Tags.
+/// Choosing a row opens it beside the sidebar and closes the panel, as do
+/// Esc and a tap outside it. ↑↓ and Return choose with a keyboard.
+struct SearchPanel: View {
+    @Binding var isPresented: Bool
+    /// Where a chosen note goes: the iPad's note pane.
+    let open: (MobileRoute) -> Void
+    @State private var query = ""
+    @State private var model = SearchModel()
+    @State private var selected = 0
+    @FocusState private var focused: Bool
+    @Environment(MobileVault.self) private var vault
+    @Environment(\.mobileLibrary) private var library
+
+    var body: some View {
+        let rows = flatRows
+        ZStack(alignment: .top) {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+                .onTapGesture { close() }
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: model.scope?.symbol ?? "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField(model.scope?.placeholder ?? BarScope.unscopedPlaceholder, text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.title3)
+                        .focused($focused)
+                        .submitLabel(.go)
+                        .onSubmit { choose(rows) }
+                        .onKeyPress(.downArrow) { move(1, in: rows); return .handled }
+                        .onKeyPress(.upArrow) { move(-1, in: rows); return .handled }
+                        .onKeyPress(.escape) { close(); return .handled }
+                    if !query.isEmpty {
+                        Button("Clear", systemImage: "xmark.circle.fill") { query = "" }
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                Divider()
+                List {
+                    UniversalSearchList(
+                        query: query, model: model, setQuery: { query = $0 },
+                        asButtons: true, highlighted: rows.indices.contains(selected) ? rows[selected].id : nil
+                    )
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .searchingText(query, model: model)
+                .environment(\.mobilePush) { route in
+                    open(route)
+                    close()
+                }
+            }
+            .frame(width: 620)
+            .frame(maxHeight: 560)
+            .glassEffect(in: .rect(cornerRadius: 26))
+            .padding(.top, 60)
+        }
+        .onAppear {
+            focused = true
+            #if DEBUG
+            if let preset = ProcessInfo.processInfo.environment["HEFT_IOS_QUERY"] { query = preset }
+            #endif
+        }
+        .onChange(of: query) { _, typed in
+            selected = 0
+            if model.enterScope(byTyping: typed) { query = "" }
+        }
+        .onChange(of: model.scope) { selected = 0 }
+    }
+
+    /// Every row in order, as the keyboard steps through them.
+    private var flatRows: [SearchRow] {
+        let commands = library.map(MobileCommand.all) ?? []
+        return model.sections(for: query, vault: vault, commands: commands).flatMap(\.rows)
+    }
+
+    private func move(_ step: Int, in rows: [SearchRow]) {
+        guard !rows.isEmpty else { return }
+        selected = min(max(selected + step, 0), rows.count - 1)
+    }
+
+    private func choose(_ rows: [SearchRow]) {
+        guard rows.indices.contains(selected) else { return }
+        let row = rows[selected]
+        model.act(on: row, push: { route in
+            open(route)
+            close()
+        }, setQuery: { query = $0 })
+        // A command closes the panel too; entering a scope keeps it open.
+        if case .command = row { close() }
+    }
+
+    private func close() {
+        isPresented = false
     }
 }

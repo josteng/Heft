@@ -50,7 +50,10 @@ The Search tab and the iPad sidebar's search are the Mac's ⌘T bar,
 the scopes and their prefixes, `CommandMatch` and `scoredSearch` ranking
 commands, tags, folders and notes on one scale, the standard start list
 before anything is typed, and text only once names found fewer than ten.
-Ask is left out; its agent runs on the Mac. Commands are iOS's own,
+Ask is left out; its agent runs on the Mac. On the iPad it is a panel over
+the window, `SearchPanel`, as ⌘T is on the Mac: in the sidebar it read as
+part of Files, Recent and Tags. On the phone the scope chips are a bar
+under the title; above the keyboard the tab's floating field covered them. Commands are iOS's own,
 `MobileCommand`, over the window's `LibraryActions`.
 
 ## The vault

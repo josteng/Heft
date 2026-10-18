@@ -37,15 +37,13 @@ struct PadRootView: View {
     /// keeps most of the sidebar.
     @SceneStorage("pad.calendar.expanded") private var calendarExpanded = false
     @Environment(\.mobileCapture) private var capture
-    @State private var query = ""
-    @State private var searchModel = SearchModel()
     @State private var settings: SettingsRequest?
+    @State private var showsSearch = false
     @State private var expandedFolders: Set<String> = []
     @State private var expandedTags: Set<String> = []
     @State private var creating: NewNoteRequest?
     @State private var action: ItemAction?
     @State private var detailPath: [MobileRoute] = []
-    @FocusState private var searching: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -79,6 +77,12 @@ struct PadRootView: View {
             }
         }
         .onAppear(perform: applyLaunchRequest)
+        .overlay {
+            if showsSearch {
+                SearchPanel(isPresented: $showsSearch) { open($0) }
+                    .environment(\.mobileLibrary, library)
+            }
+        }
         .focusedSceneValue(\.heftLibrary, library)
         .environment(\.mobileLibrary, library)
     }
@@ -90,13 +94,8 @@ struct PadRootView: View {
             newFolder: { creating = NewNoteRequest(folder: vault.newNoteFolder, makesFolder: true) },
             capture: capture,
             today: { pick(Date()) },
-            search: { searching = true },
-            show: { chosen in
-                query = ""
-                searchModel.scope = nil
-                searching = false
-                mode = chosen
-            },
+            search: { showsSearch = true },
+            show: { chosen in mode = chosen },
             toggleCalendar: { withAnimation(.snappy) { showsCalendar.toggle() } },
             calendarShown: showsCalendar,
             settings: { settings = SettingsRequest() },
@@ -118,17 +117,13 @@ struct PadRootView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             List(selection: $selection) {
-                if searching || !query.isEmpty || searchModel.scope != nil {
-                    UniversalSearchList(query: query, model: searchModel) { query = $0 }
-                } else {
-                    switch mode {
-                    case .recent:
-                        RecentSections { action = $0 }
-                    case .files:
-                        PadTreeRows(items: vault.tree?.children ?? [], expanded: $expandedFolders) { action = $0 }
-                    case .tags:
-                        PadTagRows(expanded: $expandedTags)
-                    }
+                switch mode {
+                case .recent:
+                    RecentSections { action = $0 }
+                case .files:
+                    PadTreeRows(items: vault.tree?.children ?? [], expanded: $expandedFolders) { action = $0 }
+                case .tags:
+                    PadTagRows(expanded: $expandedTags)
                 }
             }
             .overlay {
@@ -148,22 +143,6 @@ struct PadRootView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        // A button in the bar that opens into a field, as iPadOS 26 does it,
-        // so the sidebar's top is the pill and the list rather than chrome.
-        .searchable(text: $query, prompt: "Notes, #tags, text")
-        .searchToolbarBehavior(.minimize)
-        .searchFocused($searching)
-        .onChange(of: query) { _, typed in
-            if searchModel.enterScope(byTyping: typed) { query = "" }
-        }
-        .onChange(of: searching) { _, now in
-            if !now, query.isEmpty { searchModel.scope = nil }
-        }
-        .onSubmit(of: .search) {
-            if let row = searchModel.firstRow(for: query, vault: vault, commands: MobileCommand.all(library)) {
-                searchModel.act(on: row, push: { open($0) }, setQuery: { query = $0 })
-            }
-        }
         .sheet(item: $settings) { SettingsView(page: $0.page) }
         .navigationTitle(vault.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -178,6 +157,10 @@ struct PadRootView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Search", systemImage: "magnifyingglass") { showsSearch = true }
+                    .tint(.primary)
             }
         }
         .newNoteSheet($creating)
@@ -222,7 +205,6 @@ struct PadRootView: View {
         case .image:
             detailPath = [route]
         case .folder(let path):
-            query = ""
             mode = .files
             var parent = ""
             for part in path.split(separator: "/") {
@@ -231,7 +213,6 @@ struct PadRootView: View {
             }
             if selection == route { selection = nil }
         case .tag(let tag):
-            query = ""
             mode = .tags
             expandedTags.insert(tag)
             if selection == route { selection = nil }
@@ -275,7 +256,7 @@ struct PadRootView: View {
         if let shift = environment["HEFT_IOS_DAY"].flatMap(Int.init) {
             pick(Calendar.current.date(byAdding: .day, value: shift, to: Date()) ?? Date())
         }
-        if let preset = environment["HEFT_IOS_QUERY"] { query = preset }
+        if environment["HEFT_IOS_QUERY"] != nil { showsSearch = true }
         if environment["HEFT_IOS_PAD_MONTH"] != nil { calendarExpanded = true }
         #endif
     }

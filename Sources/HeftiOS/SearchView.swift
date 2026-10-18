@@ -13,7 +13,15 @@ struct SearchView: View {
 
     var body: some View {
         List {
-            UniversalSearchList(query: query, model: model) { query = $0 }
+            UniversalSearchList(query: query, model: model, setQuery: { query = $0 }, showsChips: false)
+        }
+        .searchingText(query, model: model)
+        // A bar under the title, staying put as the results scroll and
+        // without a list section's gap above it. Not above the keyboard:
+        // the tab's floating search field draws over anything put there.
+        .safeAreaBar(edge: .top) {
+            ScopeChips(model: model, large: true)
+                .padding(.bottom, 6)
         }
         .navigationTitle(model.scope?.title ?? "Search")
         .searchable(text: $query, prompt: model.scope?.placeholder ?? BarScope.unscopedPlaceholder)
