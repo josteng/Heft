@@ -206,6 +206,9 @@ that are not escapes, and treating `\frac` as one made the block stop
 matching. The price is that `` \` `` does not stop a code span opening, which
 CommonMark says it should, and that is a far smaller wrong than losing the
 maths. It runs before emphasis and links, which is the point of it.
+A link's label is the one place escapes do not disqualify a match: a page
+title with brackets is written `[\[Shop\] Sale](url)`, and CommonMark reads
+that as a link. An escaped opening bracket still stops one.
 
 ## A bullet pasted onto a bullet
 

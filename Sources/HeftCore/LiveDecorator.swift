@@ -676,6 +676,7 @@ public enum LiveDecorator {
         // Left to right and non-overlapping is also what makes `\\*` correct:
         // the escaped backslash is matched first and consumes both characters,
         // leaving the `*` free to emphasise, which is what CommonMark says.
+        var escapes: [NSRange] = []
         for match in matches(#"\\[!-/:-@\[-`{-~]"#, text, excluding: protected) {
             result.append(MarkdownDecoration(
                 range: match,
@@ -683,9 +684,10 @@ public enum LiveDecorator {
                 style: .escapedCharacter
             ))
             protected.insert(match)
+            escapes.append(match)
         }
 
-        result.append(contentsOf: inlineDecorations(text, protected: protected))
+        result.append(contentsOf: inlineDecorations(text, protected: protected, escapes: escapes))
         return result
     }
 
@@ -1496,7 +1498,9 @@ public enum LiveDecorator {
         return CharacterSet.punctuationCharacters.union(.symbols).contains(scalar)
     }
 
-    private static func inlineDecorations(_ text: NSString, protected initial: ProtectedRanges) -> [MarkdownDecoration] {
+    private static func inlineDecorations(
+        _ text: NSString, protected initial: ProtectedRanges, escapes: [NSRange] = []
+    ) -> [MarkdownDecoration] {
         var result: [MarkdownDecoration] = []
         var protected = initial
 
@@ -1686,13 +1690,13 @@ public enum LiveDecorator {
             protected.insert(match)
         }
 
-        for match in matches(#"\[([^\]\n]*)\]\(([^)\n]+)\)"#, text, excluding: protected) {
-            let raw = text.substring(with: match)
-            guard let close = raw.range(of: "](") else { continue }
+        for (match, label) in linkCandidates(text, protected: protected, escapes: escapes) {
             // Length of the label alone, excluding the opening bracket, so the
             // trailing `](url)` range starts exactly on the `]`.
-            let labelLength = raw.distance(from: raw.index(after: raw.startIndex), to: close.lowerBound)
-            let destination = String(raw[close.upperBound...].dropLast())
+            let labelLength = label.length
+            let destination = text.substring(with: NSRange(
+                location: NSMaxRange(label) + 2, length: NSMaxRange(match) - NSMaxRange(label) - 3
+            ))
             result.append(MarkdownDecoration(
                 range: match,
                 syntax: [
@@ -1880,6 +1884,41 @@ public enum LiveDecorator {
         let made = try! NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
         cache[pattern] = made
         return made
+    }
+
+    /// `[label](url)` spans, with the label's range.
+    ///
+    /// Unlike every other inline construct, a link's label may hold backslash
+    /// escapes: a page title with brackets in it is written as `[\[Shop\]
+    /// Sale](url)`, and CommonMark and Obsidian read that as a link. So the
+    /// escapes inside a label do not disqualify it, where the generic matcher
+    /// rejects anything touching a protected range. An escaped opening
+    /// bracket, or anything else protected, still does.
+    private static func linkCandidates(
+        _ text: NSString, protected: ProtectedRanges, escapes: [NSRange]
+    ) -> [(match: NSRange, label: NSRange)] {
+        let full = NSRange(location: 0, length: text.length)
+        return regex(#"\[((?:\\.|[^\]\\\n])*)\]\(([^)\n]+)\)"#)
+            .matches(in: text as String, range: full)
+            .compactMap { result in
+                let match = result.range
+                let label = result.range(at: 1)
+                let outside = [
+                    NSRange(location: match.location, length: label.location - match.location),
+                    NSRange(location: NSMaxRange(label), length: NSMaxRange(match) - NSMaxRange(label)),
+                ]
+                guard !outside.contains(where: protected.intersects) else { return nil }
+                var position = label.location
+                while position < NSMaxRange(label) {
+                    if let escape = escapes.first(where: { NSLocationInRange(position, $0) }) {
+                        position = NSMaxRange(escape)
+                        continue
+                    }
+                    if protected.intersects(NSRange(location: position, length: 1)) { return nil }
+                    position += 1
+                }
+                return (match, label)
+            }
     }
 
     private static func matches(
