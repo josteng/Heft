@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import HeftCore
 import SwiftUI
 
@@ -77,7 +81,13 @@ enum Theme {
     static let editorFont = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
     /// Live mode reads as prose, so it uses a proportional face; raw source
     /// stays monospaced.
+    /// 17 on a phone, which is what iOS sets body text at and what a thumb
+    /// reads at arm's length; 15 at a Mac's distance.
+    #if os(macOS)
     static let liveFont = NSFont.systemFont(ofSize: 15)
+    #else
+    static let liveFont = NSFont.systemFont(ofSize: 17)
+    #endif
     /// The focused block's source. Proportional at body size so swapping a
     /// rendered block for its source does not visibly reflow the page.
     static let blockEditorFont = NSFont.systemFont(ofSize: bodySize)

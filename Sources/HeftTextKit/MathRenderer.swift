@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import SwiftMath
 
 /// Typesets LaTeX to an image via SwiftMath.

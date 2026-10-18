@@ -58,6 +58,11 @@ Five targets:
 - `HeftCapture`: the App Intents extension. The two Spotlight captures run
   here, in a sandboxed process of their own, so that filing a line never
   launches or activates the app. Foundation and `HeftCore` only.
+- `HeftTextKit` (a folder, not a module): the live surface's styling and
+  drawing, `LiveStyler`, `LiveWidgets`, `Theme`, compiled into both the Mac
+  app and the iOS app. It is written against AppKit's names; on iOS
+  `PlatformText.swift` maps them to UIKit, and only what has no counterpart
+  of the same shape is branched with `#if os(macOS)`.
 - `HeftiOS`: the iPhone and iPad companion. Browse, read, search, the daily
   calendar, and capture, over `HeftCore`. Notes are rendered from
   `MarkdownModel` and edited as plain text with an explicit save that refuses

@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import HeftCore
 
 /// Where a styling pass sends the attributes it produces.
@@ -679,11 +683,15 @@ enum LiveStyler {
                     range: text.lineRange(for: NSRange(location: closingLocation, length: 0))
                 )
             }
+            // Token colours come from a highlighter that only exists for
+            // AppKit; on iOS a fence is drawn in the code colour alone.
+            #if os(macOS)
             if storage.writes {
                 CodeSyntaxHighlighting.apply(
                     to: storage.storage, decoration: decoration, language: language
                 )
             }
+            #endif
             if drawsWidgets {
                 addCodeBlockWidgets(
                     decoration: decoration,
@@ -948,13 +956,13 @@ enum LiveStyler {
                 range: range
             )
             if let url = InlineText.heftURL(link) {
-                storage.addAttributes([.link: url, .cursor: NSCursor.pointingHand], range: range)
+                storage.addAttributes(linkAttributes(url), range: range)
             }
 
         case .link(let destination):
             storage.addAttribute(.foregroundColor, value: context.linkColor, range: range)
             if let url = URL(string: destination), url.scheme != nil {
-                storage.addAttributes([.link: url, .cursor: NSCursor.pointingHand], range: range)
+                storage.addAttributes(linkAttributes(url), range: range)
             }
 
         case .image:
@@ -1210,6 +1218,15 @@ enum LiveStyler {
             )
         }
         storage.addAttribute(.foregroundColor, value: color, range: range)
+    }
+
+    /// A link, and on the Mac the pointing hand over it.
+    private static func linkAttributes(_ url: URL) -> [NSAttributedString.Key: Any] {
+        #if os(macOS)
+        [.link: url, .cursor: NSCursor.pointingHand]
+        #else
+        [.link: url]
+        #endif
     }
 
     private static func addTrait(

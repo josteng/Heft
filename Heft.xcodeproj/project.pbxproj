@@ -28,6 +28,7 @@
 		010000000000000000000019 /* libHeftCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* libHeftCore.a */; };
 		010000000000000000000020 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
 		010000000000000000000021 /* LinkTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000019 /* LinkTitles.swift */; };
+		010000000000000000000022 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* SwiftMath */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -135,6 +136,7 @@
 		040000000000000000000009 /* HeftControls */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftControls; sourceTree = "<group>"; };
 		040000000000000000000010 /* HeftiOSVault */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftiOSVault; sourceTree = "<group>"; };
 		040000000000000000000011 /* HeftShare */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftShare; sourceTree = "<group>"; };
+		040000000000000000000012 /* HeftTextKit */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftTextKit; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,6 +192,7 @@
 			files = (
 				010000000000000000000014 /* libHeftCore.a in Frameworks */,
 				010000000000000000000015 /* Markdown in Frameworks */,
+				010000000000000000000022 /* SwiftMath in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -224,6 +227,7 @@
 			isa = PBXGroup;
 			children = (
 				040000000000000000000001 /* Heft */,
+				040000000000000000000012 /* HeftTextKit */,
 				040000000000000000000002 /* HeftCore */,
 				040000000000000000000003 /* HeftTests */,
 				040000000000000000000004 /* HeftVimCore */,
@@ -301,6 +305,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				040000000000000000000001 /* Heft */,
+				040000000000000000000012 /* HeftTextKit */,
 			);
 			name = Heft;
 			packageProductDependencies = (
@@ -446,10 +451,12 @@
 				040000000000000000000007 /* HeftiOS */,
 				040000000000000000000008 /* HeftiOSShared */,
 				040000000000000000000010 /* HeftiOSVault */,
+				040000000000000000000012 /* HeftTextKit */,
 			);
 			name = HeftiOS;
 			packageProductDependencies = (
 				0D0000000000000000000001 /* Markdown */,
+				0D0000000000000000000002 /* SwiftMath */,
 			);
 			productName = HeftiOS;
 			productReference = 020000000000000000000012 /* HeftiOS.app */;

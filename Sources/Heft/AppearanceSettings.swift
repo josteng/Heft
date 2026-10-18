@@ -14,14 +14,12 @@ import HeftCore
 final class AppearanceSettings: ObservableObject {
     static let shared = AppearanceSettings()
 
-    static let defaultAccentColor = NSColor.controlAccentColor
-    static let defaultBoldColor = NSColor.systemRed
-    static let defaultItalicColor = NSColor.systemOrange
-    static let defaultCodeColor = NSColor.systemPink
+    static let defaultAccentColor = StyleDefaults.accentColor
+    static let defaultBoldColor = StyleDefaults.boldColor
+    static let defaultItalicColor = StyleDefaults.italicColor
+    static let defaultCodeColor = StyleDefaults.codeColor
     /// h1 through h6, in order.
-    static let defaultHeadingColors: [NSColor] = [
-        .systemRed, .systemOrange, .systemYellow, .systemGreen, .systemBlue, .systemPurple,
-    ]
+    static let defaultHeadingColors = StyleDefaults.headingColors
 
     @Published var customAccentColor: NSColor? {
         didSet { Self.persist(customAccentColor, key: Self.accentKey) }

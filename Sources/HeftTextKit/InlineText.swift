@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import HeftCore
 import SwiftUI
 
@@ -13,14 +17,14 @@ struct RenderContext {
     var colorfulFormatting: Bool = false
     /// User-customisable via the Appearance settings pane; default to the
     /// same values `AppearanceSettings` falls back to when nothing is set.
-    var accentColor: NSColor = AppearanceSettings.defaultAccentColor
-    var linkColor: NSColor = AppearanceSettings.defaultAccentColor
-    var tagColor: NSColor = AppearanceSettings.defaultAccentColor
-    var codeColor: NSColor = AppearanceSettings.defaultCodeColor
-    var boldColor: NSColor = AppearanceSettings.defaultBoldColor
-    var italicColor: NSColor = AppearanceSettings.defaultItalicColor
+    var accentColor: NSColor = StyleDefaults.accentColor
+    var linkColor: NSColor = StyleDefaults.accentColor
+    var tagColor: NSColor = StyleDefaults.accentColor
+    var codeColor: NSColor = StyleDefaults.codeColor
+    var boldColor: NSColor = StyleDefaults.boldColor
+    var italicColor: NSColor = StyleDefaults.italicColor
     /// h1 through h6, in order.
-    var headingColors: [NSColor] = AppearanceSettings.defaultHeadingColors
+    var headingColors: [NSColor] = StyleDefaults.headingColors
     /// Which version of the pictures on disk this context draws. Read when
     /// the context is built, so one built after a figure was replaced differs
     /// from the one before and every view holding it draws again.
@@ -48,7 +52,11 @@ struct RenderContext {
     /// so a context built there has to be told, or every colour baked into an
     /// image by that view is resolved against whatever was last current.
     static func appearance(for scheme: ColorScheme) -> NSAppearance? {
+        #if os(macOS)
         NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        #else
+        UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
+        #endif
     }
 
     func resolved(_ color: NSColor) -> NSColor {

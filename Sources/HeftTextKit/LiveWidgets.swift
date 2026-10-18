@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import HeftCore
 
 /// Things the editor draws itself, in place of markdown source it has hidden.
@@ -978,6 +982,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     /// during fragment drawing. Without this the gutter glyphs are painted in
     /// the light-mode palette and vanish against a dark editor.
     override func draw(at point: CGPoint, in context: CGContext) {
+        // UIKit sets the current traits while a view draws, so on iOS the
+        // system colours already resolve against the right appearance.
+        #if os(macOS)
         guard let appearance = textLayoutManager?.textContainer?.textView?.effectiveAppearance else {
             drawContents(at: point, in: context)
             return
@@ -985,6 +992,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         appearance.performAsCurrentDrawingAppearance {
             drawContents(at: point, in: context)
         }
+        #else
+        drawContents(at: point, in: context)
+        #endif
     }
 
     private func drawContents(at point: CGPoint, in context: CGContext) {
@@ -1243,6 +1253,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         let key = "\(name)|\(side)|\(tint.hexish)" as NSString
         if let hit = symbolCache.object(forKey: key) { return hit }
 
+        #if os(macOS)
         guard let glyph = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(
                 NSImage.SymbolConfiguration(pointSize: side * 0.86, weight: .semibold)
@@ -1258,6 +1269,24 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         tint.set()
         box.fill(using: .sourceIn)
         tinted.unlockFocus()
+        #else
+        // A template symbol tinted keeps its knocked-out detail, which is
+        // what the Mac gets from drawing the mask and filling `.sourceIn`.
+        let configuration = UIImage.SymbolConfiguration(pointSize: side * 0.86, weight: .semibold)
+        guard let glyph = UIImage(systemName: name, withConfiguration: configuration)?
+            .withTintColor(tint, renderingMode: .alwaysOriginal)
+        else { return nil }
+        let box = CGRect(x: 0, y: 0, width: side, height: side)
+        let tinted = UIGraphicsImageRenderer(size: box.size).image { _ in
+            let fitted = glyph.size
+            let scale = min(side / max(fitted.width, 1), side / max(fitted.height, 1))
+            let size = CGSize(width: fitted.width * scale, height: fitted.height * scale)
+            glyph.draw(in: CGRect(
+                x: (side - size.width) / 2, y: (side - size.height) / 2,
+                width: size.width, height: size.height
+            ))
+        }
+        #endif
 
         symbolCache.setObject(tinted, forKey: key)
         return tinted
@@ -1898,10 +1927,17 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         }
     }
 
+    /// Makes `context` the one string and image drawing goes to.
     private func withAppKitContext(_ context: CGContext, _ body: () -> Void) {
+        #if os(macOS)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
         body()
         NSGraphicsContext.restoreGraphicsState()
+        #else
+        UIGraphicsPushContext(context)
+        body()
+        UIGraphicsPopContext()
+        #endif
     }
 }

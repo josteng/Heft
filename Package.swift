@@ -49,7 +49,10 @@ let package = Package(
                 "SwiftMath",
                 .product(name: "MarkdownEngineCodeBlocks", package: "swift-markdown-engine"),
             ],
-            path: "Sources/Heft",
+            // HeftTextKit is the live surface's styling and drawing, shared
+            // with the iOS app, which compiles the same folder.
+            path: "Sources",
+            sources: ["Heft", "HeftTextKit"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // Gives the test process a preferences suite of its own before any
