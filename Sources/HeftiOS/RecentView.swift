@@ -35,12 +35,13 @@ struct RecentView: View {
         .overlay {
             if vault.recent.isEmpty {
                 if vault.isScanning {
-                    ProgressView("Reading your vault…")
+                    ProgressView(vault.status ?? "Reading your vault…")
                 } else {
                     ContentUnavailableView("No Notes Yet", systemImage: "doc.text")
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) { ScanStatus() }
         .navigationTitle("Recent")
         .refreshable { vault.refresh() }
         .toolbar {
@@ -98,5 +99,25 @@ private struct RecentRow: View {
             .padding(.vertical, 2)
         }
         .itemActions(ItemRef(path: note.path, isFolder: false), perform)
+    }
+}
+
+/// What a long first scan is doing, under a list that is already showing.
+struct ScanStatus: View {
+    @Environment(MobileVault.self) private var vault
+
+    var body: some View {
+        if let status = vault.status, !vault.recent.isEmpty {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(status)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .glassEffect()
+            .padding(.bottom, 6)
+        }
     }
 }

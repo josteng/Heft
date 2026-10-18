@@ -25,6 +25,14 @@ final class MobileVault {
     /// The vault's colours, shared with the Mac through `.heft/appearance.json`.
     private(set) var appearance = AppearancePreferences()
     private(set) var isScanning = false
+    /// Between choosing a folder and the vault being open: making the
+    /// bookmark to an iCloud folder can take a moment.
+    private(set) var isOpening = false
+    /// What a long first scan is doing, for the line under the list; nil
+    /// for an ordinary rescan, which is quick and says nothing.
+    private(set) var status: String?
+    /// Set when a vault is adopted, until its first scan has landed.
+    private var firstScan = false
     /// Bumped whenever a scan lands, so an open note can re-read itself.
     private(set) var generation = 0
     var problem: String?
@@ -43,7 +51,7 @@ final class MobileVault {
         // Lets a simulator launch open a vault without the picker:
         // `SIMCTL_CHILD_HEFT_IOS_VAULT=<path> xcrun simctl launch …`.
         if let path = ProcessInfo.processInfo.environment["HEFT_IOS_VAULT"], !path.isEmpty {
-            open(URL(fileURLWithPath: path), remember: false)
+            open(URL(fileURLWithPath: path))
             return
         }
         #endif
@@ -106,22 +114,30 @@ final class MobileVault {
         root.map { DailyNotes(vaultRoot: $0, settings: settings) }
     }
 
-    /// Opens a folder the Files picker handed over.
+    /// Opens a folder the Files picker handed over. The bookmark is made
+    /// off the main thread: for a folder in iCloud that took long enough
+    /// that choosing one looked like nothing had happened.
     func choose(_ url: URL) {
-        open(url, remember: true)
+        isOpening = true
+        problem = nil
+        accessed?.stopAccessingSecurityScopedResource()
+        let granted = url.startAccessingSecurityScopedResource()
+        Task {
+            let bookmark = await Task.detached { Result { try url.bookmarkData() } }.value
+            switch bookmark {
+            case .success(let data): SharedVault.remember(data)
+            case .failure(let error): problem = "Heft could not remember this folder: \(error.localizedDescription)"
+            }
+            accessed = granted ? url : nil
+            adopt(url)
+            isOpening = false
+        }
     }
 
-    private func open(_ url: URL, remember: Bool) {
+    /// A folder opened for this run only, as the debug launch does.
+    private func open(_ url: URL) {
         accessed?.stopAccessingSecurityScopedResource()
         accessed = url.startAccessingSecurityScopedResource() ? url : nil
-        // The bookmark has to be made while access is held, or it carries none.
-        if remember {
-            do {
-                SharedVault.remember(try url.bookmarkData())
-            } catch {
-                problem = "Heft could not remember this folder: \(error.localizedDescription)"
-            }
-        }
         adopt(url)
     }
 
@@ -134,6 +150,7 @@ final class MobileVault {
         tree = recent.isEmpty ? nil : Self.provisionalTree(recent, root: url)
         pins = Pins.load(from: url)
         appearance = AppearancePreferences()
+        firstScan = true
         frecency = FrecencyStore.notes(forVaultAt: url.path)
         downloadRetries = 3
         refresh()
@@ -167,17 +184,25 @@ final class MobileVault {
             // share sheet only needs names, and opening Heft right before a
             // share should be enough for it to have them.
             // Dates and excerpts carry over from the last list until the
-            // index has read the notes again.
-            SharedVault.publishNoteList(tree.flattened()
+            // index has read the notes again; a note never listed before
+            // takes its file's date.
+            let quick = tree.flattened()
                 .filter(\.isMarkdown)
                 .sorted { ($0.fingerprint?.modifiedNanoseconds ?? .min) > ($1.fingerprint?.modifiedNanoseconds ?? .min) }
                 .map { item in
                     let note = NoteRef(item: item)
                     let old = known[note.relativePath]
+                    let fileDate = item.fingerprint.map {
+                        Date(timeIntervalSince1970: Double($0.modifiedNanoseconds) / 1_000_000_000)
+                    }
                     return SharedVault.ListedNote(path: note.relativePath, name: note.name,
-                                                  folder: note.folder, modified: old?.modified,
+                                                  folder: note.folder, modified: old?.modified ?? fileDate,
                                                   excerpt: old?.excerpt)
-                })
+                }
+            SharedVault.publishNoteList(quick)
+            // A vault opened for the first time shows its notes now, rather
+            // than once every one of them has been read.
+            await self.preview(token: token, tree: tree, listed: quick, pending: pending.count)
             // The first build of a run starts from what the last one left on
             // disk, as the Mac does, so a launch reads only what changed.
             let base = previous.notes.isEmpty ? IndexCache.shared.load(vault: root) ?? previous : previous
@@ -192,6 +217,19 @@ final class MobileVault {
             let pins = Pins.load(from: root)
             await self.land(token: token, tree: tree, index: index, settings: settings,
                             appearance: appearance, listed: listed, pins: pins, pending: pending.count)
+        }
+    }
+
+    private func preview(token: Int, tree: VaultItem, listed: [SharedVault.ListedNote], pending: Int) {
+        guard token == scanToken else { return }
+        if self.tree == nil || recent.isEmpty {
+            self.tree = tree
+            recent = listed
+        }
+        if pending > 0 {
+            status = "Downloading \(pending) note\(pending == 1 ? "" : "s") from iCloud…"
+        } else if firstScan {
+            status = "Reading \(listed.count) notes…"
         }
     }
 
@@ -212,6 +250,9 @@ final class MobileVault {
             self.appearance = appearance
         }
         isScanning = false
+        firstScan = false
+        status = pending > 0 && downloadRetries > 0
+            ? "Downloading \(pending) note\(pending == 1 ? "" : "s") from iCloud…" : nil
         generation += 1
         if treeChanged || generation == 1 { donateToSpotlight() }
         publishToday()

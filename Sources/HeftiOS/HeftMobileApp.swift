@@ -295,8 +295,12 @@ struct VaultPickerView: View {
         } description: {
             Text("Choose the folder that holds your notes. For an Obsidian vault in iCloud, that is the vault's folder inside Obsidian in iCloud Drive.")
         } actions: {
-            Button("Choose Folder…") { picking = true }
-                .buttonStyle(.borderedProminent)
+            if vault.isOpening {
+                ProgressView("Opening your vault…")
+            } else {
+                Button("Choose Folder…") { picking = true }
+                    .buttonStyle(.borderedProminent)
+            }
             if let problem = vault.problem {
                 Text(problem).font(.footnote).foregroundStyle(.red)
             }

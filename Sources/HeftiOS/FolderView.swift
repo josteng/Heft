@@ -33,6 +33,7 @@ struct FolderView: View {
                 ContentUnavailableView("Folder Not Found", systemImage: "questionmark.folder")
             }
         }
+        .safeAreaInset(edge: .bottom) { if path.isEmpty { ScanStatus() } }
         .navigationTitle(path.isEmpty ? vault.name : (path as NSString).lastPathComponent)
         .refreshable { vault.refresh() }
         .toolbar {
