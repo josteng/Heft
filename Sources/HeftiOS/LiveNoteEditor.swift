@@ -37,6 +37,9 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.backgroundColor = .clear
         view.font = Theme.liveFont
         view.alwaysBounceVertical = true
+        // The note ends at the bar's edge as the search list does, rather
+        // than showing through the title and buttons.
+        view.topEdgeEffect.style = .hard
         view.keyboardDismissMode = .interactive
         // Markdown is typed literally: curled quotes and joined dashes would
         // change what the file says.
@@ -1646,7 +1649,9 @@ final class MobileTextView: UITextView {
     }
 
     override func layoutSubviews() {
-        let side = max(16, (bounds.width - 720) / 2)
+        // 20 at the least, the system's margin: at 16 a heading's accent,
+        // drawn 12 to the left of the text, sat against the screen's edge.
+        let side = max(20, (bounds.width - 720) / 2)
         let insets = UIEdgeInsets(top: topInset, left: side, bottom: 160, right: side)
         if textContainerInset != insets { textContainerInset = insets }
         super.layoutSubviews()
