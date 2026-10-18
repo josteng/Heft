@@ -63,6 +63,10 @@ Five targets:
   `MarkdownModel` and edited as plain text with an explicit save that refuses
   a file changed elsewhere; the live surface stays on the Mac. The vault is a
   bookmark from the Files picker, and there is no watcher: it rescans.
+  Two iOS extensions ride along: `HeftControls` (Control Center, Lock Screen
+  and Action button capture) and `HeftShare` (the share sheet). The bookmark
+  sits in an App Group so the share extension can reach the vault; a share
+  that still cannot is queued there and filed by the app.
 
 The dependencies are Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and
 swift-markdown-engine for its syntax-highlighting grammars.

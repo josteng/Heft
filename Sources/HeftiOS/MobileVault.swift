@@ -11,8 +11,6 @@ import Observation
 /// lives in the bookmark.
 @MainActor @Observable
 final class MobileVault {
-    static let bookmarkKey = "dev.stenglein.Heft.iOS.vaultBookmark"
-
     private(set) var root: URL?
     private(set) var tree: VaultItem?
     private(set) var index: VaultIndex = .empty
@@ -37,7 +35,7 @@ final class MobileVault {
             return
         }
         #endif
-        if let url = Self.bookmarkedRoot(startAccessing: true) {
+        if let url = SharedVault.bookmarkedRoot(startAccessing: true) {
             accessed = url
             adopt(url)
         }
@@ -47,23 +45,6 @@ final class MobileVault {
 
     var dailyNotes: DailyNotes? {
         root.map { DailyNotes(vaultRoot: $0, settings: settings) }
-    }
-
-    /// The vault the reader picked, resolved from its bookmark.
-    ///
-    /// Static and nonisolated because the capture intents need it too, and
-    /// they may run before any window exists. A caller that asks for access
-    /// owns it and must stop it when done.
-    nonisolated static func bookmarkedRoot(startAccessing: Bool) -> URL? {
-        guard let data = HeftDefaults.shared.data(forKey: bookmarkKey) else { return nil }
-        var stale = false
-        guard let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale)
-        else { return nil }
-        if startAccessing { _ = url.startAccessingSecurityScopedResource() }
-        if stale, let fresh = try? url.bookmarkData() {
-            HeftDefaults.shared.set(fresh, forKey: bookmarkKey)
-        }
-        return url
     }
 
     /// Opens a folder the Files picker handed over.
@@ -77,7 +58,7 @@ final class MobileVault {
         // The bookmark has to be made while access is held, or it carries none.
         if remember {
             do {
-                HeftDefaults.shared.set(try url.bookmarkData(), forKey: Self.bookmarkKey)
+                SharedVault.remember(try url.bookmarkData())
             } catch {
                 problem = "Heft could not remember this folder: \(error.localizedDescription)"
             }
@@ -104,6 +85,9 @@ final class MobileVault {
         let previous = index
         isScanning = true
         Task.detached(priority: .userInitiated) {
+            // Shares the extension could not write itself land first, so the
+            // scan below already sees them.
+            SharedVault.drainQueue(into: root)
             let settings = ObsidianSettings.load(vaultRoot: root)
             let tree = VaultScanner.scan(root: root)
             // iOS keeps iCloud files evicted far more readily than the Mac
@@ -114,6 +98,9 @@ final class MobileVault {
                 try? FileManager.default.startDownloadingUbiquitousItem(at: item.url)
             }
             let index = VaultIndex.build(root: tree, reusing: previous)
+            SharedVault.publishNoteList(index.notesByLastEdit.map {
+                SharedVault.ListedNote(path: $0.relativePath, name: $0.name, folder: $0.folder)
+            })
             await self.land(token: token, tree: tree, index: index, settings: settings,
                             pending: pending.count)
         }

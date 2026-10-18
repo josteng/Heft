@@ -121,7 +121,7 @@ struct CaptureSheet: View {
     private func add() {
         guard let root = vault.root, !isBlank else { return }
         do {
-            try MobileCapture.file(text, to: target, in: root, settings: vault.settings)
+            try MobileCapture.file(text, to: target, in: root)
             lastTarget = target
             filed.insert(Filed(text: text, target: target), at: 0)
             text = ""
@@ -134,25 +134,22 @@ struct CaptureSheet: View {
 }
 
 enum MobileCapture {
-    static func file(_ text: String, to target: CaptureTarget, in root: URL,
-                     settings: ObsidianSettings) throws {
-        switch target {
-        case .today:
-            try DailyNoteCapture(vaultRoot: root, settings: settings).capture(text)
-        case .inbox:
-            try InboxCapture(vaultRoot: root).capture(text)
-        }
+    static func file(_ text: String, to target: CaptureTarget, in root: URL) throws {
+        try SharedVault.file(text, to: target.destination, in: root)
     }
 
-    /// For an intent, which has no open vault: resolves the bookmark, holds
-    /// access for the one write, and lets it go.
+    /// For an intent, which has no open vault.
     static func fileFromIntent(_ text: String, to target: CaptureTarget) throws -> String {
-        guard let root = MobileVault.bookmarkedRoot(startAccessing: true) else {
-            throw InboxCaptureError.vaultUnavailable
+        try SharedVault.fileIntoBookmarkedVault(text, to: target.destination)
+    }
+}
+
+extension CaptureTarget {
+    var destination: SharedVault.Destination {
+        switch self {
+        case .today: .today
+        case .inbox: .inbox
         }
-        defer { root.stopAccessingSecurityScopedResource() }
-        try file(text, to: target, in: root, settings: ObsidianSettings.load(vaultRoot: root))
-        return root.lastPathComponent
     }
 }
 
