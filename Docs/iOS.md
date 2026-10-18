@@ -43,6 +43,16 @@ On a wide iPad the editor's tools are in the note's bar, and the strip
 above the keyboard shows only while it has suggestions: with a hardware
 keyboard it spanned the whole window, sidebar included.
 
+## Search
+
+The Search tab and the iPad sidebar's search are the Mac's ⌘T bar,
+`UniversalSearchList`, assembled from the core's pieces: `BarScope` for
+the scopes and their prefixes, `CommandMatch` and `scoredSearch` ranking
+commands, tags, folders and notes on one scale, the standard start list
+before anything is typed, and text only once names found fewer than ten.
+Ask is left out; its agent runs on the Mac. Commands are iOS's own,
+`MobileCommand`, over the window's `LibraryActions`.
+
 ## The vault
 
 The Files picker hands over a security-scoped folder, kept as a bookmark in

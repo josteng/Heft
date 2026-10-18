@@ -8,6 +8,11 @@ extension FocusedValues {
     @Entry var heftLibrary: LibraryActions?
 }
 
+extension EnvironmentValues {
+    /// The window's actions, for the search's commands.
+    @Entry var mobileLibrary: LibraryActions?
+}
+
 /// The iPad sidebar's actions, for the menu bar.
 struct LibraryActions {
     var newNote: () -> Void
@@ -18,6 +23,8 @@ struct LibraryActions {
     var show: (PadSidebarMode) -> Void
     var toggleCalendar: () -> Void
     var calendarShown: Bool
+    var settings: () -> Void
+    var refresh: () -> Void
 }
 
 /// The iPadOS menu bar, with the Mac's menus and the Mac's shortcuts, so a

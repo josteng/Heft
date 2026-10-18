@@ -133,6 +133,9 @@ struct MobileRootView: View {
     /// The iPad's note pane: a note, or a day from the sidebar's month.
     @State private var padSelection: MobileRoute?
     @State private var padDay: Date?
+    /// The phone's own New Note and Settings, for the search's commands.
+    @State private var creating: NewNoteRequest?
+    @State private var settings: SettingsRequest?
     private var request = CaptureRequest.shared
     private var noteRequest = NoteOpenRequest.shared
 
@@ -155,6 +158,14 @@ struct MobileRootView: View {
                 }
             }
             .environment(\.mobileCapture) { capture = CaptureSheetRequest() }
+            .environment(\.mobileLibrary, usesSidebar ? nil : phoneLibrary)
+            .sheet(item: $settings) { SettingsView(page: $0.page) }
+            // A note made from the search opens on Recent.
+            .newNoteSheet($creating)
+            .environment(\.mobilePush) { route in
+                tab = .recent
+                handedOff = route
+            }
             // What the system draws blue takes the vault's accent; the bar's
             // icons stay neutral, as iOS draws them whatever an app's colour.
             .tint(vault.appearance.appTint)
@@ -234,6 +245,23 @@ struct MobileRootView: View {
             CalendarDayRequest.shared.day = day
             tab = .calendar
         }
+    }
+
+    /// The phone's actions, for the search's commands; the iPad's sidebar
+    /// provides its own.
+    private var phoneLibrary: LibraryActions {
+        LibraryActions(
+            newNote: { creating = NewNoteRequest(folder: vault.newNoteFolder) },
+            newFolder: { creating = NewNoteRequest(folder: vault.newNoteFolder, makesFolder: true) },
+            capture: { capture = CaptureSheetRequest() },
+            today: { showDay(Date()) },
+            search: { tab = .search },
+            show: { mode in tab = mode == .files ? .files : .recent },
+            toggleCalendar: { tab = .calendar },
+            calendarShown: true,
+            settings: { settings = SettingsRequest() },
+            refresh: { vault.refresh() }
+        )
     }
 
     private var tabs: some View {

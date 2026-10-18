@@ -38,6 +38,8 @@ struct PadRootView: View {
     @SceneStorage("pad.calendar.expanded") private var calendarExpanded = false
     @Environment(\.mobileCapture) private var capture
     @State private var query = ""
+    @State private var searchModel = SearchModel()
+    @State private var settings: SettingsRequest?
     @State private var expandedFolders: Set<String> = []
     @State private var expandedTags: Set<String> = []
     @State private var creating: NewNoteRequest?
@@ -77,7 +79,13 @@ struct PadRootView: View {
             }
         }
         .onAppear(perform: applyLaunchRequest)
-        .focusedSceneValue(\.heftLibrary, LibraryActions(
+        .focusedSceneValue(\.heftLibrary, library)
+        .environment(\.mobileLibrary, library)
+    }
+
+    /// What this window can do, for the menu bar and the search's commands.
+    private var library: LibraryActions {
+        LibraryActions(
             newNote: { creating = NewNoteRequest(folder: vault.newNoteFolder) },
             newFolder: { creating = NewNoteRequest(folder: vault.newNoteFolder, makesFolder: true) },
             capture: capture,
@@ -85,11 +93,15 @@ struct PadRootView: View {
             search: { searching = true },
             show: { chosen in
                 query = ""
+                searchModel.scope = nil
+                searching = false
                 mode = chosen
             },
             toggleCalendar: { withAnimation(.snappy) { showsCalendar.toggle() } },
-            calendarShown: showsCalendar
-        ))
+            calendarShown: showsCalendar,
+            settings: { settings = SettingsRequest() },
+            refresh: { vault.refresh() }
+        )
     }
 
     // MARK: Sidebar
@@ -106,8 +118,8 @@ struct PadRootView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             List(selection: $selection) {
-                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    SearchResults(query: query)
+                if searching || !query.isEmpty || searchModel.scope != nil {
+                    UniversalSearchList(query: query, model: searchModel) { query = $0 }
                 } else {
                     switch mode {
                     case .recent:
@@ -141,6 +153,18 @@ struct PadRootView: View {
         .searchable(text: $query, prompt: "Notes, #tags, text")
         .searchToolbarBehavior(.minimize)
         .searchFocused($searching)
+        .onChange(of: query) { _, typed in
+            if searchModel.enterScope(byTyping: typed) { query = "" }
+        }
+        .onChange(of: searching) { _, now in
+            if !now, query.isEmpty { searchModel.scope = nil }
+        }
+        .onSubmit(of: .search) {
+            if let row = searchModel.firstRow(for: query, vault: vault, commands: MobileCommand.all(library)) {
+                searchModel.act(on: row, push: { open($0) }, setQuery: { query = $0 })
+            }
+        }
+        .sheet(item: $settings) { SettingsView(page: $0.page) }
         .navigationTitle(vault.name)
         .navigationBarTitleDisplayMode(.inline)
         // The keyboard belongs to the note beside it: without this the
