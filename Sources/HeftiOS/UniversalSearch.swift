@@ -154,11 +154,20 @@ final class SearchModel {
             Self.commandUse.record(command.id)
             RecentUses.record(RecentUses.commandKey(command.id))
             command.run()
-        case .tag(let tag, _): scope = .tag(tag); setQuery("")
-        case .folder(let path, _): scope = .folder(path); setQuery("")
-        case .scope(let chosen): scope = chosen; setQuery("")
+        case .tag(let tag, _): enter(.tag(tag), setQuery: setQuery)
+        case .folder(let path, _): enter(.folder(path), setQuery: setQuery)
+        case .scope(let chosen): enter(chosen, setQuery: setQuery)
         case .allText: scope = .contents
         }
+    }
+
+    /// Into a scope, counted as a use, so tags, folders and scopes rise in
+    /// Recent and Frequent as they do on the Mac.
+    private func enter(_ chosen: BarScope, setQuery: (String) -> Void) {
+        Self.commandUse.record(chosen.useKey)
+        RecentUses.record(chosen.useKey)
+        scope = chosen
+        setQuery("")
     }
 
     /// The row Return would choose: the first listed.
@@ -175,6 +184,7 @@ final class SearchModel {
             return term.isEmpty ? startSections(vault: vault, commands: commands)
                 : everything(term, vault: vault, commands: commands)
         case .notes:
+            guard !term.isEmpty else { return arranged(vault.index.notes, kind: .notes, vault: vault) }
             return [SearchSection(title: nil, rows: notes(term, in: vault.index.notes, vault: vault, limit: 100))]
         case .commands:
             let ranked = commands.compactMap { command -> (MobileCommand, Int)? in
@@ -197,6 +207,9 @@ final class SearchModel {
                 .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
             return [SearchSection(title: nil, rows: folders.map { .folder($0.0, count: folderCount($0.0, vault: vault)) })]
         case .tag, .folder:
+            if term.isEmpty {
+                return arranged(scopedNotes(vault), kind: isTag ? .tag : .folder, vault: vault)
+            }
             let names = notes(term, in: scopedNotes(vault), vault: vault, limit: 100)
             return [SearchSection(title: names.isEmpty ? nil : "Notes", rows: names)] + textSections(limit: nil)
         case .contents:
@@ -216,37 +229,78 @@ final class SearchModel {
         }
     }
 
-    /// Before anything is typed: what was pinned, the notes opened last,
-    /// then what is used most of anything, then the rest of the notes by
-    /// use: the Mac's standard start list.
+    /// Before anything is typed: the start list's rows from the top, each
+    /// of its kinds, by its order, and nothing a row above already listed;
+    /// the last fills the rest. The Mac's ⌘T list, set in Settings ▸ Search.
     private func startSections(vault: MobileVault, commands: [MobileCommand]) -> [SearchSection] {
+        let list = StartList.current
+        let uses = RecentUses.dates()
         var shown = Set<String>()
-        func fresh(_ rows: [SearchRow], _ limit: Int) -> [SearchRow] {
+        var sections: [SearchSection] = []
+        for (row, limit) in list.plan {
             var kept: [SearchRow] = []
-            for row in rows where !shown.contains(row.id) {
-                shown.insert(row.id)
-                kept.append(row)
+            for candidate in candidates(row, vault: vault, commands: commands, uses: uses)
+            where !shown.contains(candidate.id) {
+                shown.insert(candidate.id)
+                kept.append(candidate)
                 if kept.count == limit { break }
             }
-            return kept
+            if !kept.isEmpty { sections.append(SearchSection(title: row.title, rows: kept)) }
         }
-        let pinned = fresh(vault.pins.values(of: .note).compactMap { vault.note(at: $0) }.map(SearchRow.note)
-            + vault.pins.values(of: .folder).map { .folder($0, count: folderCount($0, vault: vault)) }, 10)
-        let opened = vault.openedAt
-        let recent = fresh(vault.index.notes.filter { opened[$0.relativePath] != nil }
-            .sorted { opened[$0.relativePath]! > opened[$1.relativePath]! }.map(SearchRow.note), 5)
-        // Notes and commands on one scale: each store's own score.
-        let usedNotes = vault.index.notes.map { (SearchRow.note($0), vault.familiarity($0)) }
-        let usedCommands = commands.map { (SearchRow.command($0), Self.commandUse.score($0.id)) }
-        let frequent = fresh((usedNotes + usedCommands).filter { $0.1 > 0 }
-            .sorted { $0.1 > $1.1 }.map(\.0), 12)
-        let rest = fresh(byUse(vault.index.notes, vault: vault).map(SearchRow.note), 60)
-        return [
-            SearchSection(title: "Pinned", rows: pinned),
-            SearchSection(title: "Recent", rows: recent),
-            SearchSection(title: "Frequent", rows: frequent),
-            SearchSection(title: "Notes", rows: rest),
-        ].filter { !$0.rows.isEmpty }
+        if sections.isEmpty {
+            sections = [SearchSection(title: "Notes", rows: byUse(vault.index.notes, vault: vault).prefix(60).map(SearchRow.note))]
+        }
+        return sections
+    }
+
+    /// One start row's items, in its order.
+    private func candidates(
+        _ row: StartList.Row, vault: MobileVault, commands: [MobileCommand], uses: [String: Date]
+    ) -> [SearchRow] {
+        let kinds = row.kinds
+        if row.order == .pinned {
+            var rows: [SearchRow] = []
+            if kinds.contains(.notes) {
+                rows += vault.pins.values(of: .note).compactMap { vault.note(at: $0) }.map(SearchRow.note)
+            }
+            if kinds.contains(.folders) {
+                rows += vault.pins.values(of: .folder).map { .folder($0, count: folderCount($0, vault: vault)) }
+            }
+            return rows
+        }
+        var scored: [(SearchRow, Double)] = []
+        let recent = row.order == .recent
+        func value(_ key: String) -> Double {
+            recent ? uses[key]?.timeIntervalSince1970 ?? 0 : Self.commandUse.score(key)
+        }
+        if kinds.contains(.notes) {
+            for note in vault.index.notes {
+                let score = recent
+                    ? vault.openedAt[note.relativePath]?.timeIntervalSince1970 ?? 0
+                    : vault.familiarity(note)
+                scored.append((.note(note), score))
+            }
+        }
+        if kinds.contains(.commands) {
+            for command in commands {
+                let key = recent ? RecentUses.commandKey(command.id) : command.id
+                scored.append((.command(command), value(key)))
+            }
+        }
+        if kinds.contains(.tags) {
+            for tag in vault.index.allTags {
+                scored.append((.tag(tag, count: vault.index.noteCount(forTag: tag)), value(BarScope.tag(tag).useKey)))
+            }
+        }
+        if kinds.contains(.folders) {
+            for path in vault.folderPaths where !path.isEmpty {
+                scored.append((.folder(path, count: folderCount(path, vault: vault)), value(BarScope.folder(path).useKey)))
+            }
+        }
+        if kinds.contains(.scopes) {
+            for scope in Self.chips { scored.append((.scope(scope), value(scope.useKey))) }
+        }
+        return scored.filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }.map(\.0)
     }
 
     /// Typed, with no scope: scopes, commands, tags, folders and notes in
@@ -285,6 +339,32 @@ final class SearchModel {
         // As the Mac: text only once names have found fewer than ten.
         if ranked.count < 10 { sections += textSections(limit: 8) }
         return sections.filter { !$0.rows.isEmpty }
+    }
+
+    private var isTag: Bool {
+        if case .tag = scope { return true }
+        return false
+    }
+
+    /// A scope's notes before anything is typed, in the order Settings ▸
+    /// Search sets for it: recent or frequent first, one of them alone, by
+    /// name, or by last edit.
+    private func arranged(_ pool: [NoteRef], kind: ScopeOrders.Kind, vault: MobileVault) -> [SearchSection] {
+        let order = ScopeOrders.current[kind]
+        let opened = vault.openedAt
+        let recent = opened.sorted { $0.value > $1.value }.map(\.key)
+        let result = order.arrange(
+            byUse(pool, vault: vault), recent: recent, limit: 200,
+            isUsed: { vault.familiarity($0) > 0 || opened[$0.relativePath] != nil },
+            edited: { vault.index.modificationDate(of: $0.relativePath) }
+        )
+        guard let heading = result.heading else {
+            return [SearchSection(title: nil, rows: result.all.map(SearchRow.note))]
+        }
+        return [
+            SearchSection(title: heading.title, rows: result.lead.map(SearchRow.note)),
+            SearchSection(title: "Other", rows: result.rest.map(SearchRow.note)),
+        ].filter { !$0.rows.isEmpty }
     }
 
     private func textSections(limit: Int?, heading: Bool = true) -> [SearchSection] {

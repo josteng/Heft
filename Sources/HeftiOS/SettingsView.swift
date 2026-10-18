@@ -5,12 +5,13 @@ import UIKit
 /// The pages of Settings, as the Mac has tabs: a list to pick one from, so a
 /// new page is a new row and not a longer form.
 enum SettingsPage: String, Hashable, CaseIterable {
-    case appearance, browsing, vault
+    case appearance, browsing, search, vault
 
     var title: String {
         switch self {
         case .appearance: "Appearance"
         case .browsing: "Browsing"
+        case .search: "Search"
         case .vault: "Vault"
         }
     }
@@ -19,6 +20,7 @@ enum SettingsPage: String, Hashable, CaseIterable {
         switch self {
         case .appearance: "paintpalette"
         case .browsing: "sidebar.left"
+        case .search: "magnifyingglass"
         case .vault: "books.vertical"
         }
     }
@@ -100,6 +102,7 @@ struct SettingsView: View {
                 switch page {
                 case .appearance: AppearanceSettingsView()
                 case .browsing: BrowsingSettingsView()
+                case .search: SearchSettingsView()
                 case .vault: VaultSettingsView()
                 }
             }
@@ -155,10 +158,10 @@ private struct AppearanceSettingsView: View {
                 }
                 .disabled(!appearance.colorfulFormatting)
             } footer: {
-                Text("Gives bold, italic and headings each their own color. "
-                    + "Shared with Heft on your Mac through the vault.")
+                Text("Gives bold, italic and headings each their own color.")
             }
         }
+        .syncBadge(synced: true)
         .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -332,8 +335,172 @@ private struct BrowsingSettingsView: View {
                     + "or opens today's note beside it.")
             }
         }
+        .syncBadge(synced: false)
         .navigationTitle("Browsing")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Whether a page's settings travel with the vault to the Mac, or stay on
+/// this device: an icon at the top right, explained when tapped.
+private struct SyncBadge: ViewModifier {
+    let synced: Bool
+    @State private var explains = false
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(synced ? "Synced" : "This Device Only",
+                       systemImage: synced ? "arrow.triangle.2.circlepath.icloud"
+                           : UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone") {
+                    explains = true
+                }
+                .tint(.primary)
+                .popover(isPresented: $explains) {
+                    Text(synced
+                         ? "Synced with Heft on your Mac, through the vault."
+                         : "Kept on this device only. Heft on your Mac has its own.")
+                        .font(.subheadline)
+                        .padding()
+                        .presentationCompactAdaptation(.popover)
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    func syncBadge(synced: Bool) -> some View { modifier(SyncBadge(synced: synced)) }
+}
+
+/// The Mac's Settings ▸ Search: what Search Everything lists before
+/// anything is typed, and each scope's order. This device's own, as on the
+/// Mac, which keeps its own.
+private struct SearchSettingsView: View {
+    @State private var list = StartList.current
+    @State private var orders = ScopeOrders.current
+    @State private var confirmsReset = false
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(Array(list.rows.enumerated()), id: \.element.id) { index, row in
+                    StartRowEditor(row: row, fillsRest: list.fillsRest(row)) { list.rows[index] = $0 }
+                }
+                .onMove { list.rows.move(fromOffsets: $0, toOffset: $1) }
+                .onDelete { list.rows.remove(atOffsets: $0) }
+                Button("Add Row", systemImage: "plus") {
+                    list.rows.append(.init(.recent, [.notes], count: 5))
+                }
+                Button("Reset to Standard", role: .destructive) { confirmsReset = true }
+                    .disabled(list.matches(.standard))
+            } header: {
+                Text("Search Everything")
+            } footer: {
+                Text("What it lists before anything is typed, from the top: recent, frequent or pinned, "
+                    + "of whichever kinds you choose. Something an earlier row lists is not listed again. "
+                    + "The last row fills the rest. Swipe to delete; Edit to reorder.")
+            }
+            Section {
+                ForEach(ScopeOrders.Kind.allCases) { kind in
+                    ScopeOrderRows(kind: kind, order: Binding(
+                        get: { orders[kind] },
+                        set: { orders[kind] = $0 }
+                    ))
+                }
+            } header: {
+                Text("Inside a Scope")
+            } footer: {
+                Text("What each lists before anything is typed. Typing always ranks by match.")
+            }
+        }
+        .syncBadge(synced: false)
+        .navigationTitle("Search")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { EditButton() }
+        .onChange(of: list) { list.save(in: HeftDefaults.shared) }
+        .onChange(of: orders) { orders.save(in: HeftDefaults.shared) }
+        .confirmationDialog("Reset Search Everything to the standard list?", isPresented: $confirmsReset,
+                            titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { list = .standard }
+        } message: {
+            Text("Your rows are replaced by pinned, recent notes, then what you use most, then every note.")
+        }
+    }
+}
+
+/// One start row: its order, its kinds, and how many it lists.
+private struct StartRowEditor: View {
+    let row: StartList.Row
+    let fillsRest: Bool
+    let changed: (StartList.Row) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Menu {
+                    Picker("Order", selection: Binding(
+                        get: { row.order },
+                        set: { value in var next = row; next.order = value; changed(next) }
+                    )) {
+                        ForEach(StartList.Order.allCases) { Text($0.title).tag($0) }
+                    }
+                } label: {
+                    Text(row.order.title).font(.headline)
+                }
+                Menu {
+                    // Chats are Ask's, which is the Mac's.
+                    ForEach(StartList.Kind.allCases.filter { $0 != .chats }) { kind in
+                        Toggle(kind.title, isOn: Binding(
+                            get: { row.kinds.contains(kind) },
+                            set: { on in
+                                var next = row
+                                if on { next.kinds.insert(kind) } else { next.kinds.remove(kind) }
+                                changed(next)
+                            }
+                        ))
+                    }
+                } label: {
+                    Text(row.kindsSummary).lineLimit(1)
+                }
+                Spacer()
+            }
+            if fillsRest {
+                Text("Fills the rest").font(.footnote).foregroundStyle(.secondary)
+            } else {
+                Stepper("\(row.count) at most", value: Binding(
+                    get: { row.count },
+                    set: { value in changed(.init(id: row.id, row.order, row.kinds, count: value)) }
+                ), in: StartList.countRange)
+                .font(.subheadline)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// One scope's order before typing, and, where it is split, how many lead
+/// on a row of its own.
+private struct ScopeOrderRows: View {
+    let kind: ScopeOrders.Kind
+    @Binding var order: QuickOpenOrder
+
+    var body: some View {
+        Picker(kind.title, selection: Binding(
+            get: { order.mode },
+            set: { order = order.with(mode: $0) }
+        )) {
+            ForEach(QuickOpenOrder.Mode.choices(lastEdited: kind.listsNotes)) { Text($0.title).tag($0) }
+        }
+        .padding(.leading, kind.isNested ? 12 : 0)
+        if order.mode.isSplit {
+            Stepper("\(order.count) first", value: Binding(
+                get: { order.count },
+                set: { order = QuickOpenOrder(lead: order.lead, count: $0) }
+            ), in: 1...QuickOpenOrder.countRange.upperBound)
+            .foregroundStyle(.secondary)
+            .padding(.leading, kind.isNested ? 24 : 12)
+        }
     }
 }
 
