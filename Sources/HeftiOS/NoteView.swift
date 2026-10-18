@@ -191,6 +191,7 @@ struct NoteView: View {
     @Environment(\.mobileClose) private var close
     @State private var document: NoteDocument
     @State private var action: ItemAction?
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(path: String, startsTyping: Bool = false) {
         self.path = path
@@ -219,6 +220,26 @@ struct NoteView: View {
             // Inline, because most notes open with their own title as a heading
             // and a large bar title above it says the same thing twice.
             .navigationBarTitleDisplayMode(.inline)
+            // On the left, beside the back button, reading or typing alike:
+            // centred, it jumped aside whenever typing widened the buttons.
+            // The bar's own title stays for VoiceOver and the back menu.
+            .toolbar(removing: .title)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    // As wide as the name up to what the buttons leave; a
+                    // toolbar item is otherwise squeezed to a letter or two.
+                    Text(note?.name ?? (path as NSString).lastPathComponent)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .frame(maxWidth: 200, alignment: .leading)
+                        .fixedSize()
+                        // Beside the sidebar there is no back button to
+                        // follow, and flush to its edge the name looked cut.
+                        .padding(.leading, sizeClass == .regular ? 12 : 0)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            }
             .onAppear {
                 if let note { vault.recordOpen(note) }
             }
