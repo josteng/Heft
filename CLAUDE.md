@@ -43,7 +43,9 @@ Four targets:
 
 - `HeftCore`: pure logic. Never imports AppKit or SwiftUI. Parsing, the link index,
   the vault scanner, moment.js date formatting, live-mode decorations, the file
-  watcher, the draft mirror, the frecency ranking, and the agent CLI.
+  watcher, the draft mirror, the frecency ranking, and the agent CLI. It builds
+  for iOS too; the few macOS-only parts (FSEvents, Obsidian's vault registry,
+  finding `claude`) are fenced with `#if os(macOS)`.
 - `HeftVimCore`: Foundation-only modal editing grammar. It returns edits and
   selections but never owns an editor buffer or imports AppKit. Anything it
   cannot answer from the text alone — which lines are on screen for `H M L`,

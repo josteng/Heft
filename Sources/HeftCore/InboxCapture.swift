@@ -110,12 +110,17 @@ public enum VaultContentChangeNotification {
     public static let name = Notification.Name("dev.stenglein.Heft.vaultContentDidChange")
 
     public static func post(for vaultRoot: URL) {
+        #if os(macOS)
         DistributedNotificationCenter.default().postNotificationName(
             name,
             object: vaultRoot.standardizedFileURL.path,
             userInfo: nil,
             deliverImmediately: true
         )
+        #else
+        // iOS has no distributed centre; an intent there runs in the app.
+        NotificationCenter.default.post(name: name, object: vaultRoot.standardizedFileURL.path)
+        #endif
     }
 }
 

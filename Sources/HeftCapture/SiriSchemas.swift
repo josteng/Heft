@@ -32,7 +32,7 @@ enum SiriSchemaError: LocalizedError {
     }
 }
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 @AppIntent(schema: .notes.createNote)
 struct SiriCreateNoteIntent {
     static let isAssistantOnly = true
@@ -76,7 +76,7 @@ struct SiriCreateNoteIntent {
     }
 }
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 @AppIntent(schema: .notes.appendText)
 struct SiriAppendTextIntent {
     static let isAssistantOnly = true
@@ -111,7 +111,7 @@ struct SiriAppendTextIntent {
 /// base, which is a diff to read and one click to take or drop, and is what
 /// the proposal system exists for. Writing Tools rewriting a selection needs
 /// none of this: that suggestion is in front of you before you accept it.
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 @AppIntent(schema: .notes.updateNote)
 struct SiriUpdateNoteIntent {
     static let isAssistantOnly = true

@@ -17,7 +17,7 @@ import Foundation
 // equivalent here. An account is one synthetic stand-in for the vault itself,
 // since the schema puts folders inside accounts and Heft has one vault.
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 @AppEntity(schema: .notes.account)
 public struct SiriAccountEntity {
     public static let isAssistantOnly = true
@@ -34,7 +34,7 @@ public struct SiriAccountEntity {
     }
 }
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 public struct SiriAccountQuery: EntityStringQuery {
     public init() {}
 
@@ -54,7 +54,7 @@ public struct SiriAccountQuery: EntityStringQuery {
     }
 }
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 @AppEntity(schema: .notes.folder)
 public struct SiriFolderEntity: IndexedEntity {
     public static let isAssistantOnly = true
@@ -77,7 +77,7 @@ public struct SiriFolderEntity: IndexedEntity {
     }
 }
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 public struct SiriFolderQuery: EntityStringQuery {
     public init() {}
 
@@ -104,7 +104,7 @@ public struct SiriFolderQuery: EntityStringQuery {
 }
 
 /// The vault, read the way the schema entities need it.
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 enum SiriSchemaVault {
     static func folders(in vault: URL) -> [String] {
         let index = VaultIndex.open(vaultAt: vault)
@@ -140,7 +140,7 @@ enum SiriSchemaVault {
     }
 }
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 @AppEntity(schema: .notes.note)
 public struct SiriNoteEntity: IndexedEntity {
     // No `isAssistantOnly` here. It is documented only for intents, as a
@@ -225,7 +225,7 @@ public struct SiriNoteEntity: IndexedEntity {
     }
 }
 
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 public struct SiriNoteQuery: EntityStringQuery {
     public init() {}
 

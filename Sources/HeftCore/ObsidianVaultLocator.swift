@@ -1,5 +1,8 @@
 import Foundation
 
+// Both places it looks are under a Mac home folder. On iOS the reader picks
+// the vault folder once and it is kept as a bookmark instead.
+#if os(macOS)
 /// Finds vaults the user already has, so first launch can offer them instead
 /// of opening a file picker into an empty home folder.
 public enum ObsidianVaultLocator {
@@ -65,3 +68,4 @@ public enum ObsidianVaultLocator {
         }
     }
 }
+#endif

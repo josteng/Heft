@@ -128,7 +128,7 @@ struct HeftCaptureShortcuts: AppShortcutsProvider {
         // say about something, it queried its own index, found nothing of
         // Heft's, and answered so. A phrase cannot carry free text, so the
         // question comes as a second turn.
-        if #available(macOS 27.0, *) {
+        if #available(macOS 27.0, iOS 27.0, *) {
             AppShortcut(
                 intent: FindNotesIntent(),
                 phrases: [

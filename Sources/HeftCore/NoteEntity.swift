@@ -291,7 +291,7 @@ public enum NoteIndexing {
     ) async -> Int {
         guard !notes.isEmpty else { return 0 }
         do {
-            if #available(macOS 27.0, *), let vaultRoot {
+            if #available(macOS 27.0, iOS 27.0, *), let vaultRoot {
                 let shared = vaultIndex ?? VaultIndex.open(vaultAt: vaultRoot)
                 let entities = notes.map { SiriNoteEntity($0, in: vaultRoot, index: shared) }
                 try await (index ?? Self.index).indexAppEntities(entities)
@@ -313,7 +313,7 @@ public enum NoteIndexing {
 ///
 /// Gated, because `CSSearchableIndexDescription` arrived in macOS 27 and Heft
 /// still runs on 26, where donating alone is all there is.
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 extension NoteEntityQuery: IndexedEntityQuery {
 
     public func reindexAllEntities(indexDescription: CSSearchableIndexDescription) async throws {

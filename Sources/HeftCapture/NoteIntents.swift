@@ -130,7 +130,7 @@ struct TodaysNoteIntent: AppIntent {
 ///
 /// Returns the schema note rather than `NoteEntity`, so what Siri gets back
 /// is the same kind of thing it creates and appends to, content included.
-@available(macOS 27.0, *)
+@available(macOS 27.0, iOS 27.0, *)
 struct FindNotesIntent: AppIntent {
     static let title: LocalizedStringResource = "Find Notes"
     static let description = IntentDescription(

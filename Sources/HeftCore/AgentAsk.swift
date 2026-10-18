@@ -401,6 +401,7 @@ public struct AgentStreamParser: Sendable {
     }
 }
 
+#if os(macOS)
 /// Where the reader's `claude` is. An app opened from the Dock does not get
 /// the shell's PATH, so the usual places are looked in first, then the login
 /// shell is asked.
@@ -440,6 +441,7 @@ public enum AgentLocator {
         return URL(fileURLWithPath: found)
     }
 }
+#endif
 
 extension Array where Element: Hashable {
     /// The elements in order, each once.

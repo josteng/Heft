@@ -9,7 +9,7 @@ import PackageDescription
 // Heft is the macOS shell: SwiftUI, NSTextView, FSEvents.
 let package = Package(
     name: "Heft",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("26.0"), .iOS("26.0")],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
         // Pure-Swift LaTeX typesetting. Chosen over LaTeXSwiftUI/MathJaxSwift

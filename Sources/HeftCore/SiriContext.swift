@@ -28,7 +28,7 @@ public enum SiriContext {
     /// the ones a phrasing about a note maps onto. `NoteEntity` knows a name
     /// and a folder, which answers where a note is and nothing else.
     public static func note(_ relativePath: String) -> EntityIdentifier {
-        if #available(macOS 27.0, *) {
+        if #available(macOS 27.0, iOS 27.0, *) {
             return EntityIdentifier(for: SiriNoteEntity.self, identifier: relativePath)
         }
         return EntityIdentifier(for: NoteEntity.self, identifier: relativePath)
@@ -36,14 +36,14 @@ public enum SiriContext {
 
     /// The vault root itself is a folder too, and its path is the empty
     /// string, which is what `SiriFolderEntity` calls the vault.
-    @available(macOS 27.0, *)
+    @available(macOS 27.0, iOS 27.0, *)
     public static func folder(
         _ relativePath: String, in vault: URL?, capture: URL? = CaptureVaultPreference.url
     ) -> EntityIdentifier? {
         resolves(vault, capture: capture) ? folder(relativePath) : nil
     }
 
-    @available(macOS 27.0, *)
+    @available(macOS 27.0, iOS 27.0, *)
     public static func folder(_ relativePath: String) -> EntityIdentifier {
         EntityIdentifier(for: SiriFolderEntity.self, identifier: relativePath)
     }

@@ -1,5 +1,7 @@
 import Foundation
 
+// FSEvents is macOS only; iOS has no equivalent that covers a whole subtree.
+#if os(macOS)
 /// Watches the vault subtree and reports coalesced change notifications.
 ///
 /// FSEvents rather than a `DispatchSource` per file: the vault is hundreds of
@@ -78,3 +80,4 @@ public final class VaultWatcher {
 
     deinit { stop() }
 }
+#endif
