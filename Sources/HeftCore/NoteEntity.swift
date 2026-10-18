@@ -107,7 +107,12 @@ public struct NoteEntityQuery: EntityQuery, EntityStringQuery, Sendable {
 
     public init() {}
 
-    private var vault: URL? { CaptureVaultPreference.url }
+    /// Where the vault is: the Mac's capture vault, unless the host says
+    /// otherwise. The phone reaches its vault through a bookmark the Mac
+    /// has no idea of, and points this at it.
+    nonisolated(unsafe) public static var vaultLocator: @Sendable () -> URL? = { CaptureVaultPreference.url }
+
+    private var vault: URL? { Self.vaultLocator() }
 
     func vaultIndex() -> (root: URL, index: VaultIndex)? { index() }
 
