@@ -36,6 +36,7 @@ struct CalendarView: View {
     @State private var swipedAt = Date.distantPast
 
     private let calendar = Calendar.current
+    private var dayRequest = CalendarDayRequest.shared
     private static let fold = Animation.smooth(duration: 0.35)
     private static let rowHeight: CGFloat = 40
 
@@ -120,6 +121,11 @@ struct CalendarView: View {
                 if bandShown, let bandDay { show(week: weekStart(of: bandDay)) }
                 bandShown = false
             }
+        }
+        .onChange(of: dayRequest.day, initial: true) { _, day in
+            guard let day else { return }
+            dayRequest.day = nil
+            select(day)
         }
         .onChange(of: vault.generation) { _, _ in
             // A note made from the template, or one that arrived from
@@ -455,4 +461,12 @@ struct CalendarView: View {
             problem = error.localizedDescription
         }
     }
+}
+
+/// A day to show, from outside the calendar: a daily note handed over from
+/// the Mac or asked for by an intent opens on its day here.
+@MainActor @Observable
+final class CalendarDayRequest {
+    static let shared = CalendarDayRequest()
+    var day: Date?
 }

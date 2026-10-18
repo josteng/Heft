@@ -181,19 +181,27 @@ struct MobileRootView: View {
             .onChange(of: noteRequest.path, initial: true) { _, path in
                 guard let path else { return }
                 noteRequest.path = nil
-                capture = nil
-                quickCapture = nil
-                tab = .recent
-                handedOff = .note(path)
+                show(path)
             }
             .onContinueUserActivity(HandoffNote.activityType) { activity in
                 guard let note = HandoffNote(userInfo: activity.userInfo) else { return }
-                capture = nil
-                quickCapture = nil
-                tab = .recent
-                handedOff = .note(note.path)
+                show(note.path)
             }
             .onAppear(perform: applyLaunchRequest)
+        }
+    }
+
+    /// A note from outside the app: a daily note on its day in the
+    /// calendar, anything else on Recent.
+    private func show(_ path: String) {
+        capture = nil
+        quickCapture = nil
+        if let day = vault.dailyDate(of: path) {
+            CalendarDayRequest.shared.day = day
+            tab = .calendar
+        } else {
+            tab = .recent
+            handedOff = .note(path)
         }
     }
 

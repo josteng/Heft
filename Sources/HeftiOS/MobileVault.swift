@@ -654,6 +654,22 @@ final class MobileVault {
         refresh()
     }
 
+    /// The day a daily note is for, found by writing nearby dates in the
+    /// vault's own format: the format has no parser, and a note handed over
+    /// from the Mac is about a day within a year or two of today.
+    func dailyDate(of path: String) -> Date? {
+        guard let dailyNotes else { return nil }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        for distance in 0...730 {
+            for sign in distance == 0 ? [1] : [1, -1] {
+                guard let day = calendar.date(byAdding: .day, value: sign * distance, to: today) else { continue }
+                if dailyNotes.relativePath(for: day) == path { return day }
+            }
+        }
+        return nil
+    }
+
     /// Today's note, made from the daily template when it does not exist.
     /// `ensureNote` never overwrites, so tapping a day twice is harmless.
     func dailyNote(for date: Date) throws -> NoteRef {
