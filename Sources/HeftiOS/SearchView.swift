@@ -28,6 +28,9 @@ struct SearchView: View {
             .padding(.bottom, 6)
             .animation(.easeOut(duration: 0.2), value: model.scope)
         }
+        // Results end at the bar's edge rather than showing through the
+        // field and chips, as Mail's list ends under its toolbar.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: query) { _, typed in
             if model.enterScope(byTyping: typed) { query = "" }
