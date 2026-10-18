@@ -146,6 +146,11 @@ struct LiveNoteEditor: UIViewRepresentable {
                         textView.insertText(typed)
                     }
                 }
+                // In one go, as a paste arrives.
+                if let pasted = environment["HEFT_IOS_PASTE"],
+                   self.textView(textView, shouldChangeTextIn: textView.selectedRange, replacementText: pasted) {
+                    textView.insertText(pasted)
+                }
                 for action in (environment["HEFT_IOS_ACTIONS"] ?? "").split(separator: ",") {
                     switch action {
                     case "bullets": self.bullets()
@@ -350,7 +355,40 @@ struct LiveNoteEditor: UIViewRepresentable {
             }
             let delta = (text as NSString).length - range.length
             pendingShift = (NSMaxRange(range), delta)
+            // More than a character at once is a paste or a dictation, never
+            // typing; a web address arriving that way is offered as a link.
+            pendingPaste = (text as NSString).length > 1 ? (range.location, text) : nil
             return true
+        }
+
+        private var pendingPaste: (location: Int, text: String)?
+        /// An address just pasted, and what it could read as a link: the
+        /// site's name at once, the page's title and short versions of it
+        /// once they arrive, as the Mac's menu offers them.
+        private var pastedLink: PastedLink?
+        private var pastedTitles: [String] = []
+
+        private func notePaste(in textView: UITextView) {
+            guard let paste = pendingPaste else { return }
+            pendingPaste = nil
+            guard let link = PastedLink.after(pasting: paste.text, at: paste.location, in: textView.text),
+                  let url = URL(string: link.address)
+            else { return }
+            pastedLink = link
+            pastedTitles = []
+            Task { [weak self] in
+                guard let title = await LinkTitles.pageTitle(url) else { return }
+                self?.offerTitles([title], for: link)
+                let short = await LinkTitles.shortTitles(title, url)
+                self?.offerTitles([title] + short, for: link)
+            }
+        }
+
+        private func offerTitles(_ titles: [String], for link: PastedLink) {
+            guard pastedLink == link else { return }
+            var seen = Set<String>()
+            pastedTitles = titles.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            updateSuggestions()
         }
 
         /// Return in a list or a quote: the next line gets the marker, an
@@ -401,6 +439,7 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             guard let view = textView as? MobileTextView else { return }
+            notePaste(in: view)
             restyle(view)
             document?.edited(view.text)
             document?.updateUndo()
@@ -715,7 +754,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// A completion offered in the strip: what it shows, and what
         /// accepting it writes for the link or tag being typed.
         private struct Suggestion: Equatable {
-            enum Kind { case link, linkPart, tag, callout, color }
+            enum Kind { case link, linkPart, pastedTitle, tag, callout, color }
             var title: String
             var detail: String
             var destination: String
@@ -738,7 +777,13 @@ struct LiveNoteEditor: UIViewRepresentable {
             let text = textView.text ?? ""
             let selection = textView.selectedRange
             var found: [Suggestion] = []
-            if let wiki = WikiCompletionContext.detect(in: text, selection: selection) {
+            if let pasted = pastedLink, !pasted.isCurrent(in: text, caret: selection) { pastedLink = nil }
+            if let pasted = pastedLink {
+                found = (pastedTitles + [pasted.siteName]).map {
+                    Suggestion(title: $0, detail: $0 == pasted.siteName ? "Site" : "Title",
+                               destination: $0, kind: .pastedTitle, symbol: "link")
+                }
+            } else if let wiki = WikiCompletionContext.detect(in: text, selection: selection) {
                 let pipe = WikiCompletionContext.pipe(at: wiki.queryRange.location, in: text)
                 if wiki.query.isEmpty {
                     found = index.notesByLastEdit.prefix(12).map {
@@ -882,6 +927,10 @@ struct LiveNoteEditor: UIViewRepresentable {
             case .linkPart:
                 guard let context = LinkPartContext.detect(in: text, selection: selection) else { return }
                 apply(context.accepting(suggestion.destination))
+            case .pastedTitle:
+                guard let pasted = pastedLink, pasted.isCurrent(in: text, caret: selection) else { return }
+                pastedLink = nil
+                apply(pasted.linking(suggestion.destination))
             case .callout:
                 guard let context = CalloutCompletionContext.detect(in: text, selection: selection) else { return }
                 Self.calloutUse.record(suggestion.destination)

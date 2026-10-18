@@ -28,6 +28,7 @@
 		010000000000000000000019 /* libHeftCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* libHeftCore.a */; };
 		010000000000000000000020 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
 		010000000000000000000021 /* LinkTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000019 /* LinkTitles.swift */; };
+		010000000000000000000023 /* LinkTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000019 /* LinkTitles.swift */; };
 		010000000000000000000022 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* SwiftMath */; };
 /* End PBXBuildFile section */
 
@@ -623,7 +624,7 @@
 		0F0000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000006 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		0F0000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0F0000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000023 /* LinkTitles.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000009 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000021 /* LinkTitles.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
