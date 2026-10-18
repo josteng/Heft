@@ -1,0 +1,81 @@
+import HeftCore
+import SwiftUI
+
+/// Where the app opens: pinned notes, then every note by when it was last
+/// written, grouped Today, Yesterday, Previous 7 Days and on, the way Notes
+/// and the Mac's Recent list group theirs.
+///
+/// Drawn from `MobileVault.recent`, which a launch fills from the last run's
+/// snapshot, so the list is there before the vault has been scanned.
+struct RecentView: View {
+    @Environment(MobileVault.self) private var vault
+
+    var body: some View {
+        let dating = RecentDating()
+        let pinned = vault.pinnedNotes
+        let pinnedPaths = Set(pinned.map(\.path))
+        let groups = dating.grouped(vault.recent.filter { !pinnedPaths.contains($0.path) },
+                                    date: \.modified)
+        List {
+            if !pinned.isEmpty {
+                Section {
+                    ForEach(pinned) { RecentRow(note: $0, dating: dating) }
+                } header: {
+                    Label("Pinned", systemImage: "pin.fill")
+                }
+            }
+            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                Section(group.section.map(dating.title(of:)) ?? "") {
+                    ForEach(group.items) { RecentRow(note: $0, dating: dating) }
+                }
+            }
+        }
+        .overlay {
+            if vault.recent.isEmpty {
+                if vault.isScanning {
+                    ProgressView("Reading your vault…")
+                } else {
+                    ContentUnavailableView("No Notes Yet", systemImage: "doc.text")
+                }
+            }
+        }
+        .navigationTitle("Recent")
+        .refreshable { vault.refresh() }
+    }
+}
+
+/// Title, then when and how it begins, then where it lives: the three
+/// things the eye uses to tell one note from the next.
+private struct RecentRow: View {
+    let note: SharedVault.ListedNote
+    let dating: RecentDating
+
+    var body: some View {
+        NavigationLink(value: MobileRoute.note(note.path)) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(note.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let modified = note.modified {
+                        Text(dating.label(for: modified))
+                            .foregroundStyle(.primary.opacity(0.8))
+                    }
+                    Text(note.excerpt ?? "")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .font(.subheadline)
+                if !note.folder.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder")
+                        Text(note.folder).lineLimit(1)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+}

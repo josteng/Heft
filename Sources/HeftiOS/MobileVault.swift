@@ -14,6 +14,11 @@ final class MobileVault {
     private(set) var root: URL?
     private(set) var tree: VaultItem?
     private(set) var index: VaultIndex = .empty
+    /// Every note, newest edit first, with its date and opening lines. Read
+    /// from the last run's snapshot at launch, so the list is there at once,
+    /// and replaced when this run's scan lands.
+    private(set) var recent: [SharedVault.ListedNote] = []
+    private(set) var pins = Pins()
     private(set) var settings = ObsidianSettings()
     private(set) var isScanning = false
     /// Bumped whenever a scan lands, so an open note can re-read itself.
@@ -68,8 +73,11 @@ final class MobileVault {
 
     private func adopt(_ url: URL) {
         root = url
-        tree = nil
         index = .empty
+        // The last run's picture of the vault, until the scan says otherwise.
+        recent = SharedVault.noteList()
+        tree = recent.isEmpty ? nil : Self.provisionalTree(recent, root: url)
+        pins = Pins.load(from: url)
         frecency = FrecencyStore.notes(forVaultAt: url.path)
         downloadRetries = 3
         refresh()
@@ -83,6 +91,7 @@ final class MobileVault {
         scanToken += 1
         let token = scanToken
         let previous = index
+        let known = Dictionary(recent.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         isScanning = true
         Task.detached(priority: .userInitiated) {
             // Shares the extension could not write itself land first, so the
@@ -100,24 +109,43 @@ final class MobileVault {
             // Straight from the folder scan, before the index is built: the
             // share sheet only needs names, and opening Heft right before a
             // share should be enough for it to have them.
+            // Dates and excerpts carry over from the last list until the
+            // index has read the notes again.
             SharedVault.publishNoteList(tree.flattened()
                 .filter(\.isMarkdown)
                 .sorted { ($0.fingerprint?.modifiedNanoseconds ?? .min) > ($1.fingerprint?.modifiedNanoseconds ?? .min) }
                 .map { item in
                     let note = NoteRef(item: item)
-                    return SharedVault.ListedNote(path: note.relativePath, name: note.name, folder: note.folder)
+                    let old = known[note.relativePath]
+                    return SharedVault.ListedNote(path: note.relativePath, name: note.name,
+                                                  folder: note.folder, modified: old?.modified,
+                                                  excerpt: old?.excerpt)
                 })
-            let index = VaultIndex.build(root: tree, reusing: previous)
+            // The first build of a run starts from what the last one left on
+            // disk, as the Mac does, so a launch reads only what changed.
+            let base = previous.notes.isEmpty ? IndexCache.shared.load(vault: root) ?? previous : previous
+            let index = VaultIndex.build(root: tree, reusing: base)
+            if index.notesRead > 0 { IndexCache.shared.save(index, vault: root) }
+            let listed = index.notesByLastEdit.map {
+                SharedVault.ListedNote(path: $0.relativePath, name: $0.name, folder: $0.folder,
+                                       modified: index.modificationDate(of: $0.relativePath),
+                                       excerpt: index.excerpt(of: $0.relativePath))
+            }
+            SharedVault.publishNoteList(listed)
+            let pins = Pins.load(from: root)
             await self.land(token: token, tree: tree, index: index, settings: settings,
-                            pending: pending.count)
+                            listed: listed, pins: pins, pending: pending.count)
         }
     }
 
     private func land(token: Int, tree: VaultItem, index: VaultIndex, settings: ObsidianSettings,
-                      pending: Int) {
+                      listed: [SharedVault.ListedNote], pins: Pins, pending: Int) {
         guard token == scanToken else { return }
-        self.tree = tree
+        // Only what changed, so a rescan that found nothing new redraws nothing.
+        if self.tree != tree { self.tree = tree }
         self.index = index
+        if recent != listed { recent = listed }
+        if self.pins != pins { self.pins = pins }
         self.settings = settings
         isScanning = false
         generation += 1
@@ -136,6 +164,51 @@ final class MobileVault {
     }
 
     // MARK: Notes
+
+    /// Folders and notes from a saved list of note paths: enough to browse
+    /// while the real scan runs. Folders holding no note are missing from it
+    /// until then.
+    static func provisionalTree(_ notes: [SharedVault.ListedNote], root: URL) -> VaultItem {
+        final class Node {
+            var folders: [String: Node] = [:]
+            var notes: [SharedVault.ListedNote] = []
+        }
+        let top = Node()
+        for note in notes {
+            var node = top
+            for part in note.folder.split(separator: "/").map(String.init) {
+                if let next = node.folders[part] {
+                    node = next
+                } else {
+                    let next = Node()
+                    node.folders[part] = next
+                    node = next
+                }
+            }
+            node.notes.append(note)
+        }
+        func item(_ node: Node, path: String, name: String) -> VaultItem {
+            let folders = node.folders.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+                .map { key in
+                    item(node.folders[key]!, path: path.isEmpty ? key : "\(path)/\(key)", name: key)
+                }
+            let files = node.notes
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                .map {
+                    VaultItem(url: root.appendingPathComponent($0.path), relativePath: $0.path,
+                              kind: .markdown, name: $0.name)
+                }
+            return VaultItem(url: path.isEmpty ? root : root.appendingPathComponent(path),
+                             relativePath: path, kind: .folder, name: name,
+                             children: folders + files)
+        }
+        return item(top, path: "", name: root.lastPathComponent)
+    }
+
+    var pinnedNotes: [SharedVault.ListedNote] {
+        let byPath = Dictionary(recent.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        return pins.values(of: .note).compactMap { byPath[$0] }
+    }
 
     func folder(at path: String) -> VaultItem? {
         guard let tree else { return nil }

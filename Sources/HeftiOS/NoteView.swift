@@ -13,6 +13,9 @@ struct NoteView: View {
     @State private var draft = ""
     @State private var saveError: String?
     @State private var unresolved: String?
+    /// Set only once loading has taken a moment, so a note that opens
+    /// quickly never flashes a spinner first.
+    @State private var slow = false
 
     var body: some View {
         let note = vault.note(at: path)
@@ -26,8 +29,14 @@ struct NoteView: View {
             } else if let failure {
                 ContentUnavailableView("Can't Open Note", systemImage: "doc.questionmark",
                                        description: Text(failure))
-            } else {
+            } else if slow {
                 ProgressView("Loading from iCloud…")
+            } else {
+                Color.clear
+                    .task {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        slow = true
+                    }
             }
         }
         .navigationTitle(note?.name ?? (path as NSString).lastPathComponent)

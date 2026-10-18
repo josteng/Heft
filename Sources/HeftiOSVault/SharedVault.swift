@@ -115,11 +115,14 @@ enum SharedVault {
 
     // MARK: Note list
 
-    /// A note the share sheet can offer, from the app's last scan.
+    /// A note as the app last saw it: what the share sheet offers, and what
+    /// the app shows at launch before its first scan of this run lands.
     struct ListedNote: Codable, Identifiable, Hashable {
         var path: String
         var name: String
         var folder: String
+        var modified: Date?
+        var excerpt: String?
         var id: String { path }
     }
 

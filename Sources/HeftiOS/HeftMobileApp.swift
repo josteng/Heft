@@ -44,7 +44,7 @@ extension EnvironmentValues {
 }
 
 enum MobileTab: Hashable {
-    case files, calendar, search
+    case recent, files, calendar, search
 }
 
 extension EnvironmentValues {
@@ -110,7 +110,7 @@ final class MobileSceneDelegate: NSObject, UIWindowSceneDelegate {
 
 struct MobileRootView: View {
     @Environment(MobileVault.self) private var vault
-    @State private var tab: MobileTab = .files
+    @State private var tab: MobileTab = .recent
     @State private var capture: CaptureSheetRequest?
     @State private var quickCapture: CaptureSheetRequest?
     @Environment(\.scenePhase) private var scenePhase
@@ -121,6 +121,9 @@ struct MobileRootView: View {
             VaultPickerView()
         } else {
             TabView(selection: $tab) {
+                Tab("Recent", systemImage: "clock", value: .recent) {
+                    MobileStack { RecentView() }
+                }
                 Tab("Files", systemImage: "folder", value: .files) {
                     MobileStack { FolderView(path: "") }
                 }
@@ -168,6 +171,7 @@ struct MobileRootView: View {
         // Screenshot hooks for a simulator run, where nothing can tap.
         let environment = ProcessInfo.processInfo.environment
         switch environment["HEFT_IOS_TAB"] {
+        case "files": tab = .files
         case "calendar": tab = .calendar
         case "search": tab = .search
         default: break
