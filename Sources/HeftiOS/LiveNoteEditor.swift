@@ -365,6 +365,10 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// An address just pasted, and what it could read as a link: the
         /// site's name at once, the page's title and short versions of it
         /// once they arrive, as the Mac's menu offers them.
+        /// Where the caret was left by a link just completed from `[[`,
+        /// while it is still there: the strip then asks whether a heading or
+        /// other text should follow the note's name.
+        private var justLinked: Int?
         private var pastedLink: PastedLink?
         private var pastedTitles: [String] = []
 
@@ -754,7 +758,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// A completion offered in the strip: what it shows, and what
         /// accepting it writes for the link or tag being typed.
         private struct Suggestion: Equatable {
-            enum Kind { case link, linkPart, pastedTitle, tag, callout, color }
+            enum Kind { case link, linkFollowUp, linkPart, pastedTitle, tag, callout, color }
             var title: String
             var detail: String
             var destination: String
@@ -778,7 +782,15 @@ struct LiveNoteEditor: UIViewRepresentable {
             let selection = textView.selectedRange
             var found: [Suggestion] = []
             if let pasted = pastedLink, !pasted.isCurrent(in: text, caret: selection) { pastedLink = nil }
-            if let pasted = pastedLink {
+            if let linked = justLinked, selection != NSRange(location: linked, length: 0) { justLinked = nil }
+            if justLinked != nil {
+                found = [
+                    Suggestion(title: "Heading", detail: "#", destination: "#", kind: .linkFollowUp,
+                               symbol: "number"),
+                    Suggestion(title: "Link Text", detail: "|", destination: "|", kind: .linkFollowUp,
+                               symbol: "textformat"),
+                ]
+            } else if let pasted = pastedLink {
                 found = (pastedTitles + [pasted.siteName]).map {
                     Suggestion(title: $0, detail: $0 == pasted.siteName ? "Site" : "Title",
                                destination: $0, kind: .pastedTitle, symbol: "link")
@@ -924,6 +936,23 @@ struct LiveNoteEditor: UIViewRepresentable {
             case .link:
                 guard let context = WikiCompletionContext.detect(in: text, selection: selection) else { return }
                 apply(context.accepting(suggestion.destination))
+                // Not for a link that already says which text it shows.
+                let caret = textView.selectedRange
+                let now = textView.text as NSString
+                if caret.length == 0, caret.location >= 2, !suggestion.destination.contains("|"),
+                   now.substring(with: NSRange(location: caret.location - 2, length: 2)) == "]]" {
+                    justLinked = caret.location
+                }
+            case .linkFollowUp:
+                // Inside the link, before its `]]`, where the heading or text
+                // suggestions then take over.
+                guard let linked = justLinked, linked >= 2 else { return }
+                justLinked = nil
+                let at = linked - 2
+                apply(MarkdownEditing.Edit(
+                    range: NSRange(location: at, length: 0), replacement: suggestion.destination,
+                    selection: NSRange(location: at + 1, length: 0)
+                ))
             case .linkPart:
                 guard let context = LinkPartContext.detect(in: text, selection: selection) else { return }
                 apply(context.accepting(suggestion.destination))
