@@ -31,6 +31,8 @@ struct PadRootView: View {
     @Environment(MobileVault.self) private var vault
     @SceneStorage("pad.mode") private var mode: PadSidebarMode = .recent
     @SceneStorage("pad.calendar") private var showsCalendar = true
+    /// The note this window last showed, to show again when it reopens.
+    @SceneStorage("pad.note") private var lastNote = ""
     /// The month starts folded to one week, as on the phone, so the list
     /// keeps most of the sidebar.
     @SceneStorage("pad.calendar.expanded") private var calendarExpanded = false
@@ -67,6 +69,7 @@ struct PadRootView: View {
                 day = nil
                 detailPath = []
                 revealInTree(path)
+                lastNote = path
             default:
                 // A folder or tag chosen from search opens in the sidebar,
                 // not in the note pane.
@@ -108,6 +111,10 @@ struct PadRootView: View {
                     ProgressView(vault.status ?? "Reading your vault…")
                 }
             }
+            // Said outright: inside the stack the list is no longer the
+            // column's own, and fell back to taller, padded rows.
+            .listStyle(.sidebar)
+            .environment(\.defaultMinListRowHeight, 36)
             .refreshable { vault.refresh() }
             ScanStatus()
             if showsCalendar {
@@ -225,6 +232,9 @@ struct PadRootView: View {
     }
 
     private func applyLaunchRequest() {
+        if selection == nil, day == nil, !lastNote.isEmpty, vault.note(at: lastNote) != nil {
+            selection = .note(lastNote)
+        }
         #if DEBUG
         let environment = ProcessInfo.processInfo.environment
         if let raw = environment["HEFT_IOS_PAD_MODE"], let chosen = PadSidebarMode(rawValue: raw) {
