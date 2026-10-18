@@ -242,8 +242,9 @@ struct NoteEditingToolbar: ToolbarContent {
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some ToolbarContent {
-        // On a wide iPad the keyboard strip's tools live here instead.
-        if UIDevice.current.userInterfaceIdiom == .pad, sizeClass == .regular {
+        // On a wide iPad the keyboard strip's tools live here instead, and
+        // like it only while the note is being written in.
+        if UIDevice.current.userInterfaceIdiom == .pad, sizeClass == .regular, document.editing {
             PadNoteTools(document: document)
         }
         if document.editing {
