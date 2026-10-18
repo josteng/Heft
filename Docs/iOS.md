@@ -23,7 +23,8 @@ opens New Note with a name (`HEFT_IOS_NEW_KIND=folder` switches it to a folder, 
 also creates it), `HEFT_IOS_SETTINGS` opens Settings on a page (`root`,
 `appearance`, `vault`), `HEFT_IOS_ITEM_ACTION=rename|move|delete:<path>`
 asks for one in Files, and `HEFT_IOS_RUN` carries one out after the first
-scan (`rename:<path>:<name>`, `move:<path>:<folder>`, `delete:<path>`). Point them at
+scan (`rename:<path>:<name>`, `move:<path>:<folder>`, `delete:<path>`). `HEFT_IOS_OPEN=<path>` opens a note the
+way the Open Note intent does. Point them at
 a copy of a vault: the editor saves.
 
 ## The vault
@@ -48,6 +49,11 @@ Obsidian keeps what it deletes.
 A photo or file added from the keyboard strip goes where the Mac's standard
 attachment plan puts it, named as the Mac names a pasted picture, and is
 embedded on a line of its own after the caret's line.
+
+Notes are donated to Spotlight after a scan that changed the tree, as
+`NoteEntity`s; a tap on one runs `MobileOpenNoteIntent`, which is also the
+Shortcuts and Siri action. The entity query finds the vault through
+`NoteEntityQuery.vaultLocator`, which the app points at its bookmark.
 
 There is no file watcher on iOS. The app rescans on launch, on returning to
 the foreground and after its own writes, starting from the Mac's

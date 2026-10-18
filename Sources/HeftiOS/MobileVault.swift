@@ -54,6 +54,25 @@ final class MobileVault {
 
     var name: String { root?.lastPathComponent ?? "Heft" }
 
+    /// The open vault, for intents and their entity queries, which run
+    /// outside any view. Set with `root`.
+    nonisolated(unsafe) static var currentRoot: URL?
+    private var donation: Task<Void, Never>?
+
+    /// Tells Spotlight about the vault's notes, so a search there finds one
+    /// and a tap on it opens it through `MobileOpenNoteIntent`. Coalesced,
+    /// since iCloud delivers a vault in bursts of rescans.
+    private func donateToSpotlight() {
+        guard let root else { return }
+        let notes = index.notes, index = index
+        donation?.cancel()
+        donation = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await NoteIndexing.donate(notes, in: root, vaultIndex: index)
+        }
+    }
+
     var dailyNotes: DailyNotes? {
         root.map { DailyNotes(vaultRoot: $0, settings: settings) }
     }
@@ -79,6 +98,7 @@ final class MobileVault {
 
     private func adopt(_ url: URL) {
         root = url
+        Self.currentRoot = url
         index = .empty
         // The last run's picture of the vault, until the scan says otherwise.
         recent = SharedVault.noteList()
@@ -151,7 +171,8 @@ final class MobileVault {
                       pins: Pins, pending: Int) {
         guard token == scanToken else { return }
         // Only what changed, so a rescan that found nothing new redraws nothing.
-        if self.tree != tree { self.tree = tree }
+        let treeChanged = self.tree != tree
+        if treeChanged { self.tree = tree }
         self.index = index
         if recent != listed { recent = listed }
         if self.pins != pins { self.pins = pins }
@@ -163,6 +184,7 @@ final class MobileVault {
         }
         isScanning = false
         generation += 1
+        if treeChanged || generation == 1 { donateToSpotlight() }
         #if DEBUG
         runLaunchOperation()
         #endif

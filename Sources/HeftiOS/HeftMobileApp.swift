@@ -14,6 +14,11 @@ struct HeftMobileApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // Intents resolve notes in this process, sometimes before a window:
+        // the vault on screen, else the bookmarked one.
+        NoteEntityQuery.vaultLocator = {
+            MobileVault.currentRoot ?? SharedVault.bookmarkedRoot(startAccessing: true)
+        }
         HeftMobileShortcuts.updateAppShortcutParameters()
     }
 
@@ -121,6 +126,7 @@ struct MobileRootView: View {
     @State private var handedOff: MobileRoute?
     @Environment(\.scenePhase) private var scenePhase
     private var request = CaptureRequest.shared
+    private var noteRequest = NoteOpenRequest.shared
 
     var body: some View {
         if vault.root == nil {
@@ -172,6 +178,14 @@ struct MobileRootView: View {
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { quickCapture = nil }
             }
+            .onChange(of: noteRequest.path, initial: true) { _, path in
+                guard let path else { return }
+                noteRequest.path = nil
+                capture = nil
+                quickCapture = nil
+                tab = .recent
+                handedOff = .note(path)
+            }
             .onContinueUserActivity(HandoffNote.activityType) { activity in
                 guard let note = HandoffNote(userInfo: activity.userInfo) else { return }
                 capture = nil
@@ -193,6 +207,8 @@ struct MobileRootView: View {
         case "search": tab = .search
         default: break
         }
+        // The path an Open Note intent takes, without Shortcuts.
+        if let path = environment["HEFT_IOS_OPEN"] { NoteOpenRequest.shared.path = path }
         if environment["HEFT_IOS_CAPTURE"] != nil {
             if environment["HEFT_IOS_QUICK"] != nil {
                 quickCapture = CaptureSheetRequest(target: .inbox)

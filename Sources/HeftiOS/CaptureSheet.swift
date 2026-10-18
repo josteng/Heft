@@ -213,5 +213,14 @@ struct HeftMobileShortcuts: AppShortcutsProvider {
             shortTitle: "Capture",
             systemImageName: "tray.and.arrow.down"
         )
+        AppShortcut(
+            intent: MobileOpenNoteIntent(),
+            phrases: [
+                "Open \(\.$target) in \(.applicationName)",
+                "Open a note in \(.applicationName)",
+            ],
+            shortTitle: "Open Note",
+            systemImageName: "doc.text"
+        )
     }
 }
