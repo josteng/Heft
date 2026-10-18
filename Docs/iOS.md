@@ -65,6 +65,9 @@ instead of setting `window.userActivity`, which Siri's pointer uses.
 - Restyle after a caret move or focus on the next run-loop pass, never
   inside the delegate callback: rewriting attributes while UIKit places a
   tap's caret makes it drop the tap, and the caret lands at the end.
+- A range selection keeps the caret's reveal. Revealing the lines under a
+  dragged handle changed their height mid-drag, and the text view scrolled
+  to chase the handle.
 - The calendar folds on the reader's own scrolling only. Folding resizes
   the note, which moves its scroll offset, and reacting to that made the
   two flicker against each other.

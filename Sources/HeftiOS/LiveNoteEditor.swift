@@ -200,8 +200,20 @@ struct LiveNoteEditor: UIViewRepresentable {
             let source = textView.text as NSString
             let selection = textView.selectedRange
             // Reading shows every mark hidden; only the line being written
-            // into shows its source.
-            let reveal = textView.isFirstResponder ? Reveal(selection: selection, in: source) : .none
+            // into shows its source. A range keeps the caret's reveal: one
+            // that followed the selection showed each line's markup as a
+            // handle was dragged over it, so the lines grew under the finger
+            // and the text view scrolled to chase the handle. The Mac holds
+            // its restyle for the whole mouse drag for the same reason.
+            let reveal: Reveal
+            if !textView.isFirstResponder {
+                reveal = .none
+            } else if selection.length > 0 {
+                reveal = styled.flatMap { $0.source.isEqual(to: source as String) ? $0.reveal : nil }
+                    ?? Reveal(selection: NSRange(location: selection.location, length: 0), in: source)
+            } else {
+                reveal = Reveal(selection: selection, in: source)
+            }
 
             var context = renderContext
             context.appearance = textView.traitCollection
