@@ -247,6 +247,7 @@ struct NoteContent: View {
     /// Set where the screen's bar has its own button, as the calendar's has
     /// Capture.
     var findInMenu = false
+    var topInset: CGFloat = 12
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
     @Environment(\.openURL) private var openURL
@@ -269,7 +270,8 @@ struct NoteContent: View {
                         strictLineBreaks: vault.settings.strictLineBreaks
                     ),
                     scrolledDown: scrolledDown,
-                    follow: { follow($0, from: note) }
+                    follow: { follow($0, from: note) },
+                    topInset: topInset
                 )
                 .overlay(alignment: .top) {
                     if document.conflict { conflictBanner }

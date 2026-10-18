@@ -75,7 +75,7 @@ struct CalendarView: View {
             if document?.editing != true {
                 if !showsToday {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { select(Date()) } label: {
+                        Button { goToToday() } label: {
                             Image(systemName: Self.todaySymbol)
                         }
                         .accessibilityLabel("Today")
@@ -142,9 +142,26 @@ struct CalendarView: View {
     /// before that, where the newer symbol would draw nothing.
     private static let todaySymbol = UIImage(systemName: "calendar.day") == nil ? "calendar" : "calendar.day"
 
-    /// Today is selected and its month is the one on show.
+    /// Today is selected and on show: in the month, or in the folded
+    /// strip's seven days, which scroll away from it on their own.
     private var showsToday: Bool {
-        calendar.isDateInToday(selected) && calendar.isDate(month, equalTo: Date(), toGranularity: .month)
+        guard calendar.isDateInToday(selected) else { return false }
+        if bandShown, let bandDay {
+            let end = calendar.date(byAdding: .day, value: 7, to: bandDay) ?? bandDay
+            return (bandDay..<end).contains(calendar.startOfDay(for: Date()))
+        }
+        return calendar.isDate(month, equalTo: Date(), toGranularity: .month)
+    }
+
+    /// Back to today, scrolling a folded strip to its week.
+    private func goToToday() {
+        select(Date())
+        guard bandShown else { return }
+        let week = weekStart(of: selected)
+        if abs(calendar.dateComponents([.day], from: bandOrigin, to: week).day ?? 0) > 170 {
+            bandOrigin = week
+        }
+        withAnimation(.smooth) { bandDay = week }
     }
 
     private func weekStart(of date: Date) -> Date {
@@ -383,7 +400,7 @@ struct CalendarView: View {
                 } else {
                     unfold()
                 }
-            }, findInMenu: true)
+            }, findInMenu: true, topInset: 20)
             .id(document.path)
         } else {
             ContentUnavailableView {

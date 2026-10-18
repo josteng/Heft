@@ -18,11 +18,14 @@ struct LiveNoteEditor: UIViewRepresentable {
     var scrolledDown: ((Bool) -> Void)?
     /// A link tapped while reading.
     var follow: (URL) -> Void
+    /// Room above the first line, more under the calendar's divider.
+    var topInset: CGFloat = 12
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> MobileTextView {
         let view = MobileTextView(usingTextLayoutManager: true)
+        view.topInset = topInset
         let coordinator = context.coordinator
         coordinator.textView = view
         view.delegate = coordinator
@@ -1193,9 +1196,11 @@ struct LiveNoteEditor: UIViewRepresentable {
 /// Keeps a phone's text at a readable measure on an iPad: past 720 points
 /// the side margins grow rather than the lines.
 final class MobileTextView: UITextView {
+    var topInset: CGFloat = 12
+
     override func layoutSubviews() {
         let side = max(16, (bounds.width - 720) / 2)
-        let insets = UIEdgeInsets(top: 12, left: side, bottom: 160, right: side)
+        let insets = UIEdgeInsets(top: topInset, left: side, bottom: 160, right: side)
         if textContainerInset != insets { textContainerInset = insets }
         super.layoutSubviews()
     }
