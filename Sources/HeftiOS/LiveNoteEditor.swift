@@ -971,6 +971,11 @@ struct LiveNoteEditor: UIViewRepresentable {
                     self?.accept(position)
                 })
                 button.widthAnchor.constraint(lessThanOrEqualToConstant: 220).isActive = true
+                // Each as wide as its own text when the row scrolls: the row's
+                // width is not fixed then, and a button free to stretch took
+                // the slack, leaving a wide empty gap beside a short title.
+                button.setContentHuggingPriority(suggestions.count <= 3 ? .defaultLow : .required,
+                                                 for: .horizontal)
                 suggestionRow.addArrangedSubview(button)
             }
             let few = suggestions.count <= 3
