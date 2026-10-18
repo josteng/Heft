@@ -1,6 +1,8 @@
 import HeftCore
+import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// The live surface on iOS: the Mac's styling and widget drawing, in a
 /// `UITextView` on the same TextKit 2 stack.
@@ -20,6 +22,8 @@ struct LiveNoteEditor: UIViewRepresentable {
     var follow: (URL) -> Void
     /// Room above the first line, more under the calendar's divider.
     var topInset: CGFloat = 12
+    /// Saves a picture or file for this note and answers the embed to write.
+    var attach: ((EditorAttachment) throws -> String)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -61,6 +65,9 @@ struct LiveNoteEditor: UIViewRepresentable {
         private var renderContext: RenderContext?
         private var scrolledDown: ((Bool) -> Void)?
         private var follow: ((URL) -> Void)?
+        private var attach: ((EditorAttachment) throws -> String)?
+        /// Where the caret was when a picker took the keyboard away.
+        private var attachAt: NSRange?
 
         private var layout = LiveLayout()
         private var styled: RestyleScope.Snapshot?
@@ -86,6 +93,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             editor.document.textView = textView
             scrolledDown = editor.scrolledDown
             follow = editor.follow
+            attach = editor.attach
             let contextChanged = renderContext.map { !Self.sameSurface($0, editor.context) } ?? true
             renderContext = editor.context
             guard let textView else { return }
@@ -142,6 +150,16 @@ struct LiveNoteEditor: UIViewRepresentable {
                     switch action {
                     case "bullets": self.bullets()
                     case "checklist": self.checklist()
+                    case "attach":
+                        // A generated picture, through the same path a photo takes.
+                        let image = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 140)).image { context in
+                            UIColor.systemTeal.setFill()
+                            context.fill(CGRect(x: 0, y: 0, width: 240, height: 140))
+                        }
+                        self.attachAt = textView.selectedRange
+                        if let data = image.jpegData(compressionQuality: 0.85) {
+                            self.insertAttachment(.image(data, extension: "jpg"))
+                        }
                     case "indent": self.indent()
                     case "outdent": self.outdent()
                     case "format": self.toggleFormatPanel()
@@ -488,6 +506,8 @@ struct LiveNoteEditor: UIViewRepresentable {
         private enum Target {
             case checkbox(line: NSRange)
             case link(URL)
+            /// A drawn picture, whose source is hidden under it.
+            case picture(NSRange)
         }
 
         private func target(at point: CGPoint, in textView: MobileTextView) -> Target? {
@@ -513,6 +533,12 @@ struct LiveNoteEditor: UIViewRepresentable {
                 if inContainer.x <= LiveStyler.listIndent(depth: depth) + 6 {
                     return .checkbox(line: line)
                 }
+            }
+            // A picture covers its own source, so a tap on it has no text to
+            // land in; it puts the caret after the embed instead, which shows
+            // the source to edit, as a line being written does.
+            if let picture = layout.images[line.location] {
+                return .picture(picture.range)
             }
             // A link answers while reading. Once the text has the keyboard, a
             // tap on a link is a tap to place the caret in it, as on the Mac.
@@ -548,6 +574,13 @@ struct LiveNoteEditor: UIViewRepresentable {
                 toggleCheckbox(on: line, in: textView)
             case .link(let url):
                 follow?(url)
+            case .picture(let range):
+                if !textView.isFirstResponder { textView.becomeFirstResponder() }
+                // After UIKit has placed the tap's own caret.
+                DispatchQueue.main.async {
+                    textView.selectedRange = NSRange(location: NSMaxRange(range), length: 0)
+                }
+                return
             }
             // The text view takes the same tap as a request for the keyboard;
             // a box ticked or a link followed while reading is not one.
@@ -611,6 +644,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                 // phone, and indent is in Aa beside outdent.
                 ("number", "Tag", #selector(startTag)),
                 ("text.quote", "Quote", #selector(quote)),
+                ("photo.on.rectangle", "Add Photo or File", #selector(noAction)),
                 ("bold", "Bold", #selector(bold)),
                 ("italic", "Italic", #selector(italic)),
                 ("strikethrough", "Strikethrough", #selector(strikethrough)),
@@ -624,7 +658,12 @@ struct LiveNoteEditor: UIViewRepresentable {
             stack.translatesAutoresizingMaskIntoConstraints = false
             for (index, tool) in tools.enumerated() {
                 let button = Self.toolButton(symbol: tool.0, label: tool.1, size: 19)
-                button.addTarget(self, action: tool.2, for: .touchUpInside)
+                if tool.0 == "photo.on.rectangle" {
+                    button.menu = attachMenu()
+                    button.showsMenuAsPrimaryAction = true
+                } else {
+                    button.addTarget(self, action: tool.2, for: .touchUpInside)
+                }
                 // Five and a bit across a phone, so the sixth shows there is more.
                 button.widthAnchor.constraint(equalToConstant: 74).isActive = true
                 if index == 0 { formatButton = button }
@@ -1075,6 +1114,77 @@ struct LiveNoteEditor: UIViewRepresentable {
             ))
         }
 
+        // MARK: Photos and files
+
+        @objc private func noAction() {}
+
+        /// The photo library, the camera, or any file; each is copied into
+        /// the vault where the Mac would put it, and embedded at the caret.
+        private func attachMenu() -> UIMenu {
+            var actions = [
+                UIAction(title: "Photo Library", image: UIImage(systemName: "photo.on.rectangle")) { [weak self] _ in
+                    var configuration = PHPickerConfiguration()
+                    configuration.filter = .images
+                    configuration.selectionLimit = 0
+                    let picker = PHPickerViewController(configuration: configuration)
+                    picker.delegate = self
+                    self?.presentPicker(picker)
+                },
+            ]
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                actions.append(UIAction(title: "Take Photo", image: UIImage(systemName: "camera")) { [weak self] _ in
+                    let picker = UIImagePickerController()
+                    picker.sourceType = .camera
+                    picker.delegate = self
+                    self?.presentPicker(picker)
+                })
+            }
+            actions.append(UIAction(title: "Choose File", image: UIImage(systemName: "doc")) { [weak self] _ in
+                let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+                picker.allowsMultipleSelection = true
+                picker.delegate = self
+                self?.presentPicker(picker)
+            })
+            return UIMenu(children: actions)
+        }
+
+        private func presentPicker(_ picker: UIViewController) {
+            guard let textView, var top = textView.window?.rootViewController else { return }
+            while let presented = top.presentedViewController { top = presented }
+            attachAt = textView.selectedRange
+            top.present(picker, animated: true)
+        }
+
+        /// The embed on a line of its own, and the keyboard back after it.
+        /// A caret inside a line puts it after that line rather than at the
+        /// caret: splitting the line could cut a link or a span in two.
+        private func insertAttachment(_ attachment: EditorAttachment) {
+            guard let textView, let attach else { return }
+            do {
+                let link = try attach(attachment)
+                let text = textView.text as NSString
+                var at = attachAt ?? textView.selectedRange
+                at.location = min(at.location, text.length)
+                let line = text.lineRange(for: NSRange(location: at.location, length: 0))
+                var lineEnd = NSMaxRange(line)
+                if lineEnd > line.location, text.character(at: lineEnd - 1) == 10 { lineEnd -= 1 }
+                if at.location != line.location {
+                    at = NSRange(location: lineEnd, length: 0)
+                }
+                let before = at.location > 0 && text.character(at: at.location - 1) != 10 ? "\n" : ""
+                let end = NSMaxRange(at)
+                let after = end < text.length && text.character(at: end) == 10 ? "" : "\n"
+                if !textView.isFirstResponder { textView.becomeFirstResponder() }
+                replace(at, with: before + link + after, in: textView)
+                let caret = at.location + (before + link + after as NSString).length
+                textView.selectedRange = NSRange(location: caret, length: 0)
+                attachAt = NSRange(location: caret, length: 0)
+                restyle(textView)
+            } catch {
+                document?.saveError = error.localizedDescription
+            }
+        }
+
         /// `> ` in front of every selected line, or off them all when every
         /// one already has it.
         @objc private func quote() {
@@ -1223,5 +1333,52 @@ final class MobileTextView: UITextView {
         let insets = UIEdgeInsets(top: topInset, left: side, bottom: 160, right: side)
         if textContainerInset != insets { textContainerInset = insets }
         super.layoutSubviews()
+    }
+}
+
+/// What the keyboard strip hands over to be saved into the vault.
+enum EditorAttachment {
+    case image(Data, extension: String)
+    case file(URL)
+}
+
+extension LiveNoteEditor.Coordinator: PHPickerViewControllerDelegate, UIImagePickerControllerDelegate,
+    UINavigationControllerDelegate, UIDocumentPickerDelegate
+{
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        for result in results {
+            let provider = result.itemProvider
+            // A screenshot stays a PNG; a photo becomes a JPEG, which every
+            // device and Obsidian can show, where HEIC is not certain to be.
+            let png = provider.hasItemConformingToTypeIdentifier(UTType.png.identifier)
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                guard let data else { return }
+                Task { @MainActor [weak self] in
+                    if png {
+                        self?.insertAttachment(.image(data, extension: "png"))
+                    } else if let jpeg = UIImage(data: data)?.jpegData(compressionQuality: 0.85) {
+                        self?.insertAttachment(.image(jpeg, extension: "jpg"))
+                    }
+                }
+            }
+        }
+    }
+
+    func imagePickerController(
+        _ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+    ) {
+        picker.dismiss(animated: true)
+        if let image = info[.originalImage] as? UIImage, let jpeg = image.jpegData(compressionQuality: 0.85) {
+            insertAttachment(.image(jpeg, extension: "jpg"))
+        }
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        for url in urls { insertAttachment(.file(url)) }
     }
 }

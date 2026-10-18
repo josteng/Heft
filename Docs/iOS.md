@@ -45,6 +45,10 @@ on the Mac. Deleting tries the system Trash, which for iCloud Drive is the
 Files app's Recently Deleted, and falls back to the vault's `.trash`, where
 Obsidian keeps what it deletes.
 
+A photo or file added from the keyboard strip goes where the Mac's standard
+attachment plan puts it, named as the Mac names a pasted picture, and is
+embedded on a line of its own after the caret's line.
+
 There is no file watcher on iOS. The app rescans on launch, on returning to
 the foreground and after its own writes, starting from the Mac's
 `IndexCache` so a scan reads only what changed.

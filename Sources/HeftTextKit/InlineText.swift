@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 #else
+import ImageIO
 import UIKit
 #endif
 import HeftCore
@@ -414,7 +415,11 @@ enum ImageCache {
             guard url.isFileURL else { return nil }
             let stamp = Self.stamp(of: url)
             if let hit = lock.withLock({ cache[url] }), hit.stamp == stamp { return hit.image }
+            #if os(macOS)
             let image = NSImage(contentsOf: url)
+            #else
+            let image = Self.decodedPicture(at: url)
+            #endif
             lock.withLock {
                 // Plain eviction, as for embeds: a vault's pictures are not
                 // worth an LRU, only a bound.
@@ -423,6 +428,24 @@ enum ImageCache {
             }
             return image
         }
+
+        #if !os(macOS)
+        /// A picture decoded once, at no more than 2048 pixels on its long
+        /// side. `UIImage(contentsOfFile:)` decodes lazily and again for each
+        /// draw, so a twelve-megapixel photo in a note was decoded over and
+        /// over while the note scrolled and was typed in.
+        private static func decodedPicture(at url: URL) -> NSImage? {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let picture = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                      kCGImageSourceCreateThumbnailFromImageAlways: true,
+                      kCGImageSourceCreateThumbnailWithTransform: true,
+                      kCGImageSourceThumbnailMaxPixelSize: 2048,
+                      kCGImageSourceShouldCacheImmediately: true,
+                  ] as CFDictionary)
+            else { return NSImage(contentsOfFile: url.path) }
+            return NSImage(cgImage: picture)
+        }
+        #endif
 
         /// Drops every picture whose file changed or went away, and says
         /// whether there was one. A stat per cached file; called on vault

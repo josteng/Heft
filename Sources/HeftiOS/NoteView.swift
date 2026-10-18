@@ -321,7 +321,13 @@ struct NoteContent: View {
                     ),
                     scrolledDown: scrolledDown,
                     follow: { follow($0, from: note) },
-                    topInset: topInset
+                    topInset: topInset,
+                    attach: { [vault, path = document.path] attachment in
+                        switch attachment {
+                        case .image(let data, let ext): try vault.attachImage(data, extension: ext, to: path)
+                        case .file(let url): try vault.attachFile(at: url, to: path)
+                        }
+                    }
                 )
                 .overlay(alignment: .top) {
                     if document.conflict { conflictBanner }

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import HeftCore
 import Observation
@@ -441,6 +442,68 @@ final class MobileVault {
         }
     }
     #endif
+
+    // MARK: Attachments
+
+    /// Where a file attached to `noteURL` goes: the Mac's standard plan, so
+    /// a photo taken on the phone lands beside the ones pasted on the Mac.
+    private func attachmentDirectory(for noteURL: URL, in root: URL) throws -> URL {
+        let folder = AttachmentDestination.folder(of: noteURL, in: root)
+        let chosen = AttachmentDestination(
+            rules: AttachmentPlan.standard.rules, vaultRoot: root, settings: settings
+        ).resolve(noteURL: noteURL, learned: index.attachmentDestination(near: folder))
+        guard !chosen.folder.isEmpty else { return root }
+        let url = root.appendingPathComponent(chosen.folder, isDirectory: true)
+        if chosen.needsCreating {
+            guard chosen.rule.mayCreate else { return root }
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        return url
+    }
+
+    /// Saves a picture for the note at `notePath` and answers the embed to
+    /// write. Named as the Mac names a pasted one, with a short hash of the
+    /// bytes, so saving the same picture twice keeps one file.
+    func attachImage(_ data: Data, extension ext: String, to notePath: String) throws -> String {
+        guard let root, let note = note(at: notePath) else { throw MobileVaultActionError.missing }
+        let directory = try attachmentDirectory(for: note.url, in: root)
+        let digest = SHA256.hash(data: data).prefix(6).map { String(format: "%02x", $0) }.joined()
+        let stem = "Pasted image " + MomentFormat.format(Date(), pattern: "YYYYMMDDHHmmss")
+        let target = directory.appendingPathComponent("\(stem) \(digest).\(ext)")
+        if !FileManager.default.fileExists(atPath: target.path) {
+            try Self.writeNew(data, to: target)
+        }
+        refresh()
+        return AttachmentDestination.link(to: target, from: note.url, vaultRoot: root, settings: settings)
+    }
+
+    /// Copies a file in under its own name, `Name copy` when that is taken.
+    func attachFile(at source: URL, to notePath: String) throws -> String {
+        guard let root, let note = note(at: notePath) else { throw MobileVaultActionError.missing }
+        let directory = try attachmentDirectory(for: note.url, in: root)
+        let ext = source.pathExtension
+        let stem = source.deletingPathExtension().lastPathComponent
+        let taken = { (name: String) in
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path)
+        }
+        let name = taken(source.lastPathComponent)
+            ? VaultOperations.uniqueName(base: stem + " copy", extension: ext, isTaken: taken)
+            : source.lastPathComponent
+        let target = directory.appendingPathComponent(name)
+        try Self.writeNew(try Data(contentsOf: source), to: target)
+        refresh()
+        return AttachmentDestination.link(to: target, from: note.url, vaultRoot: root, settings: settings)
+    }
+
+    private nonisolated static func writeNew(_ data: Data, to url: URL) throws {
+        var coordinationError: NSError?
+        var result: Result<Void, Error> = .success(())
+        NSFileCoordinator().coordinate(writingItemAt: url, options: [], error: &coordinationError) { coordinated in
+            result = Result { try data.write(to: coordinated, options: .withoutOverwriting) }
+        }
+        if let coordinationError { throw coordinationError }
+        try result.get()
+    }
 
     // MARK: Renaming, moving, deleting
 
