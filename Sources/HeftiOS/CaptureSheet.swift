@@ -2,53 +2,99 @@ import AppIntents
 import HeftCore
 import SwiftUI
 
-/// Where a capture goes: today's daily note, or the vault's inbox note.
-enum CaptureTarget: String, CaseIterable, Identifiable {
-    case today, inbox
-    var id: String { rawValue }
-}
-
-/// A line or two, filed without opening anything: the same append the Mac's
-/// Spotlight captures do, through `DailyNoteCapture` and `InboxCapture`.
+/// A line or two, filed with as little ceremony as possible: the same
+/// append the Mac's Spotlight captures do, through `DailyNoteCapture` and
+/// `InboxCapture`.
+///
+/// Return files the line rather than starting another, and the field stays
+/// open for the next, the way quick-capture apps behave: a capture is a
+/// thought per line, and a newline in one was never wanted. Opened from a
+/// control or a Home Screen quick action it fills the screen; from inside
+/// the app it is a sheet.
 struct CaptureSheet: View {
     @Environment(MobileVault.self) private var vault
     @Environment(\.dismiss) private var dismiss
     @AppStorage("dev.stenglein.Heft.iOS.captureTarget", store: HeftDefaults.shared)
-    private var target: CaptureTarget = .today
-    @State private var text = ""
+    private var lastTarget: CaptureTarget = .today
+    /// Set when a control asked for one destination; otherwise the last used.
+    var requested: CaptureTarget?
+    var fullScreen = false
+
+    @State private var target: CaptureTarget = .today
+    /// Kept across launches, so a line typed but not filed is still there
+    /// when the panel next opens, however the app was left.
+    @AppStorage("dev.stenglein.Heft.iOS.captureDraft", store: HeftDefaults.shared)
+    private var text = ""
     @State private var problem: String?
+    @State private var filed: [Filed] = []
     @FocusState private var focused: Bool
+
+    private struct Filed: Identifiable {
+        let id = UUID()
+        let text: String
+        let target: CaptureTarget
+    }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("What's on your mind?", text: $text, axis: .vertical)
-                        .lineLimit(4...12)
-                        .focused($focused)
-                }
-                Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
                     Picker("Add to", selection: $target) {
                         Text("Today's Note").tag(CaptureTarget.today)
                         Text(inboxName).tag(CaptureTarget.inbox)
                     }
                     .pickerStyle(.segmented)
-                } footer: {
-                    if let problem { Text(problem).foregroundStyle(.red) }
+
+                    TextField("What's on your mind?", text: $text, axis: .vertical)
+                        .font(.title3)
+                        .focused($focused)
+                        .submitLabel(.done)
+                        .onChange(of: text) { _, new in
+                            if new.hasSuffix("\n") {
+                                text = String(new.dropLast())
+                                add()
+                            }
+                        }
+
+                    if let problem {
+                        Label(problem, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
+                    ForEach(filed) { line in
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(line.text).lineLimit(2)
+                                Text(line.target == .today ? "Today's Note" : inboxName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        }
+                        .foregroundStyle(.secondary)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                .padding()
+                .animation(.snappy, value: filed.count)
             }
+            .scrollDismissesKeyboard(.never)
             .navigationTitle("Capture")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(filed.isEmpty ? "Cancel" : "Done") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add", action: add)
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(isBlank)
                 }
             }
+            .sensoryFeedback(.success, trigger: filed.count)
             .onAppear {
+                target = requested ?? lastTarget
                 focused = true
                 #if DEBUG
                 if let preset = ProcessInfo.processInfo.environment["HEFT_IOS_CAPTURE"] {
@@ -57,7 +103,11 @@ struct CaptureSheet: View {
                 #endif
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents(fullScreen ? [.large] : [.medium, .large])
+    }
+
+    private var isBlank: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var inboxName: String {
@@ -69,11 +119,14 @@ struct CaptureSheet: View {
     }
 
     private func add() {
-        guard let root = vault.root else { return }
+        guard let root = vault.root, !isBlank else { return }
         do {
             try MobileCapture.file(text, to: target, in: root, settings: vault.settings)
+            lastTarget = target
+            filed.insert(Filed(text: text, target: target), at: 0)
+            text = ""
+            problem = nil
             vault.refresh()
-            dismiss()
         } catch {
             problem = error.localizedDescription
         }

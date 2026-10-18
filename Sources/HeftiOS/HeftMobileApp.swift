@@ -1,5 +1,6 @@
 import HeftCore
 import SwiftUI
+import UIKit
 
 /// The iOS companion: browse, read, search, the calendar, and capture.
 ///
@@ -8,6 +9,7 @@ import SwiftUI
 /// when it is, as plain text with an explicit save.
 @main
 struct HeftMobileApp: App {
+    @UIApplicationDelegateAdaptor private var delegate: MobileAppDelegate
     @State private var vault = MobileVault()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -45,10 +47,74 @@ enum MobileTab: Hashable {
     case files, calendar, search
 }
 
+extension EnvironmentValues {
+    /// Opens the capture sheet; the small toolbar button on each tab uses it.
+    @Entry var mobileCapture: () -> Void = {}
+}
+
+/// One sheet request, so the sheet can be told which destination to start on.
+struct CaptureSheetRequest: Identifiable {
+    let id = UUID()
+    var target: CaptureTarget?
+}
+
+/// Home Screen quick actions: long-press the icon for the two captures.
+/// The scene delegate exists for them alone, since SwiftUI has no hook for
+/// a quick action chosen while the app is already running.
+final class MobileAppDelegate: NSObject, UIApplicationDelegate {
+    static let actions: [(type: String, title: String, symbol: String, target: CaptureTarget)] = [
+        ("dev.stenglein.HeftMobile.captureToday", "Add to Today", "calendar.badge.plus", .today),
+        ("dev.stenglein.HeftMobile.captureInbox", "Capture to Inbox", "tray.and.arrow.down", .inbox),
+    ]
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        application.shortcutItems = Self.actions.map {
+            UIApplicationShortcutItem(
+                type: $0.type, localizedTitle: $0.title, localizedSubtitle: nil,
+                icon: UIApplicationShortcutIcon(systemImageName: $0.symbol)
+            )
+        }
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting session: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        if let item = options.shortcutItem { Self.perform(item) }
+        let configuration = UISceneConfiguration(name: nil, sessionRole: session.role)
+        configuration.delegateClass = MobileSceneDelegate.self
+        return configuration
+    }
+
+    @discardableResult
+    static func perform(_ item: UIApplicationShortcutItem) -> Bool {
+        guard let action = actions.first(where: { $0.type == item.type }) else { return false }
+        CaptureRequest.shared.target = action.target
+        return true
+    }
+}
+
+final class MobileSceneDelegate: NSObject, UIWindowSceneDelegate {
+    func windowScene(
+        _ windowScene: UIWindowScene, performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        completionHandler(MobileAppDelegate.perform(shortcutItem))
+    }
+}
+
 struct MobileRootView: View {
     @Environment(MobileVault.self) private var vault
     @State private var tab: MobileTab = .files
-    @State private var capturing = false
+    @State private var capture: CaptureSheetRequest?
+    @State private var quickCapture: CaptureSheetRequest?
+    @Environment(\.scenePhase) private var scenePhase
+    private var request = CaptureRequest.shared
 
     var body: some View {
         if vault.root == nil {
@@ -65,14 +131,33 @@ struct MobileRootView: View {
                     MobileStack { SearchView() }
                 }
             }
-            .tabViewBottomAccessory {
-                Button { capturing = true } label: {
-                    Label("Capture", systemImage: "square.and.pencil")
-                        .frame(maxWidth: .infinity)
+            .environment(\.mobileCapture) { capture = CaptureSheetRequest() }
+            .sheet(item: $capture) { capture in
+                CaptureSheet(requested: capture.target)
+            }
+            .fullScreenCover(item: $quickCapture) { capture in
+                CaptureSheet(requested: capture.target, fullScreen: true)
+            }
+            .onChange(of: request.target, initial: true) { _, target in
+                guard let target else { return }
+                request.target = nil
+                // Arriving from a control or the Home Screen, the panel is the
+                // first thing seen: no slide up over a library nobody asked for.
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    capture = nil
+                    quickCapture = CaptureSheetRequest(target: target)
                 }
             }
-            .sheet(isPresented: $capturing) {
-                CaptureSheet()
+            .onChange(of: scenePhase) { _, phase in
+                // The full-screen panel is a one-off: leaving the app without
+                // Done means coming back to the library, not to the panel.
+                // An unfiled line survives as the capture draft.
+                guard phase == .background, quickCapture != nil else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { quickCapture = nil }
             }
             .onAppear(perform: applyLaunchRequest)
         }
@@ -87,7 +172,13 @@ struct MobileRootView: View {
         case "search": tab = .search
         default: break
         }
-        if environment["HEFT_IOS_CAPTURE"] != nil { capturing = true }
+        if environment["HEFT_IOS_CAPTURE"] != nil {
+            if environment["HEFT_IOS_QUICK"] != nil {
+                quickCapture = CaptureSheetRequest(target: .inbox)
+            } else {
+                capture = CaptureSheetRequest()
+            }
+        }
         #endif
     }
 }
@@ -101,6 +192,9 @@ struct MobileStack<Root: View>: View {
     var body: some View {
         NavigationStack(path: $path) {
             root
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) { CaptureButton() }
+                }
                 .navigationDestination(for: MobileRoute.self) { route in
                     switch route {
                     case .folder(let folder): FolderView(path: folder)
@@ -134,5 +228,13 @@ struct VaultPickerView: View {
         .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { vault.choose(url) }
         }
+    }
+}
+
+private struct CaptureButton: View {
+    @Environment(\.mobileCapture) private var capture
+
+    var body: some View {
+        Button("Capture", systemImage: "square.and.pencil", action: capture)
     }
 }

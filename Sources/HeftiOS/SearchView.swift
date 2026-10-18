@@ -10,6 +10,7 @@ struct SearchView: View {
     @Environment(MobileVault.self) private var vault
     @State private var query = ""
     @State private var text: ContentSearchResult = .empty()
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         List {
@@ -61,10 +62,14 @@ struct SearchView: View {
         }
         .navigationTitle("Search")
         .searchable(text: $query, prompt: "Notes, #tags, text")
+        // The search tab collapses its field into the tab bar, which left the
+        // tab looking like a list of recent notes; it opens ready to type.
+        .searchFocused($fieldFocused)
         .task(id: "\(trimmed)#\(vault.generation)") {
             await searchText()
         }
         .onAppear {
+            fieldFocused = true
             #if DEBUG
             if query.isEmpty, let preset = ProcessInfo.processInfo.environment["HEFT_IOS_QUERY"] {
                 query = preset
