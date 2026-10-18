@@ -39,6 +39,13 @@ final class NoteDocument {
     var formatState = FormatState()
     /// The colour the highlighter uses, shown on the popover's dot.
     var highlightColor: HighlightColor?
+    /// What the editor suggests while a link, tag or callout is typed, for
+    /// the iPad, which shows them in the note's pane.
+    var suggestionChips: [SuggestionChip] = []
+
+    func acceptSuggestion(_ position: Int) {
+        (textView as? MobileTextView)?.onAcceptSuggestion?(position)
+    }
     private(set) var canUndo = false
     private(set) var canRedo = false
 
@@ -372,6 +379,9 @@ struct NoteContent: View {
                                findInMenu: findInMenu) {
                 showsBacklinks = true
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if !document.suggestionChips.isEmpty { SuggestionBar(document: document) }
         }
         .preference(key: TypingInNoteKey.self, value: document.editing)
         .onAppear { onScreen = true }

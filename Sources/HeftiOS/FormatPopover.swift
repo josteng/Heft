@@ -28,10 +28,22 @@ struct FormatButton: View {
 
 private struct FormatPopover: View {
     let document: NoteDocument
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         let state = document.formatState
         VStack(alignment: .leading, spacing: 14) {
+            // Closed from here as well as by tapping away, as Notes' panel is.
+            HStack {
+                Text("Format").font(.title3.bold())
+                Spacer()
+                Button("Close", systemImage: "xmark") { dismiss() }
+                    .labelStyle(.iconOnly)
+                    .font(.body.weight(.semibold))
+                    .frame(width: 34, height: 34)
+                    .background(.fill.tertiary, in: .circle)
+                    .buttonStyle(.plain)
+            }
             HStack(spacing: 6) {
                 style(.title, "Title", .title2.bold(), on: state.headingLevel == 1)
                 style(.heading, "Heading", .title3.bold(), on: state.headingLevel == 2)
@@ -153,5 +165,45 @@ struct PadNoteTools: ToolbarContent {
             .tint(.primary)
         }
         ToolbarSpacer(.fixed, placement: .primaryAction)
+    }
+}
+
+/// Link, tag and callout suggestions at the foot of the note on the iPad,
+/// above the keyboard, where on the phone the keyboard's strip has them.
+struct SuggestionBar: View {
+    let document: NoteDocument
+
+    var body: some View {
+        let chips = document.suggestionChips
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(chips.indices, id: \.self) { index in
+                    let chip = chips[index]
+                    Button { document.acceptSuggestion(index) } label: {
+                        HStack(spacing: 6) {
+                            if let symbol = chip.symbol {
+                                Image(systemName: symbol)
+                                    .foregroundStyle(chip.tint.map { AnyShapeStyle(Color(uiColor: $0)) } ?? AnyShapeStyle(.primary))
+                            }
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(chip.title).font(.subheadline).lineLimit(1)
+                                if !chip.detail.isEmpty {
+                                    Text(chip.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: 240)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+        }
+        .frame(height: 52)
+        .glassEffect(in: .capsule)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 }

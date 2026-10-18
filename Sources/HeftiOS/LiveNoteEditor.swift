@@ -53,6 +53,8 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.onFormat = { [weak coordinator] tool in coordinator?.applyTool(tool) }
         view.onAttach = { [weak coordinator] source in coordinator?.startAttach(source) }
         view.onWidthClass = { [weak coordinator] in coordinator?.updateAccessory() }
+        view.onAcceptSuggestion = { [weak coordinator] position in coordinator?.acceptSuggestion(position) }
+        coordinator.fillShortcutsBar(of: view)
         view.isOnPicture = { [weak coordinator, weak view] point in
             guard let coordinator, let view else { return false }
             return coordinator.pictureRange(at: point, in: view) != nil
@@ -777,14 +779,19 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// only suggestions on a wide iPad, whose tools are in the bar.
         var accessory: UIView?
 
-        /// On a wide iPad the tools are in the note's toolbar, and a strip
-        /// across the whole window, shown even with a hardware keyboard, is
-        /// only worth it while it has suggestions to offer.
+        /// On a wide iPad the tools are in the note's toolbar and the
+        /// suggestions above the keyboard in the note's own pane: a strip as
+        /// the keyboard's accessory spans the whole window, sidebar too, and
+        /// shows even with a hardware keyboard.
         func updateAccessory() {
             guard let textView else { return }
             let toolsInBar = textView.traitCollection.userInterfaceIdiom == .pad
                 && textView.traitCollection.horizontalSizeClass == .regular
-            let wanted = toolsInBar && suggestions.isEmpty ? nil : accessory
+            let chips = toolsInBar
+                ? suggestions.map { SuggestionChip(title: $0.title, detail: $0.detail, symbol: $0.symbol, tint: $0.tint) }
+                : []
+            if document?.suggestionChips != chips { document?.suggestionChips = chips }
+            let wanted = toolsInBar ? nil : accessory
             guard textView.inputAccessoryView !== wanted else { return }
             textView.inputAccessoryView = wanted
             if textView.isFirstResponder { textView.reloadInputViews() }
@@ -1006,6 +1013,28 @@ struct LiveNoteEditor: UIViewRepresentable {
             suggestionScroll.isHidden = !showing
             barScroll.isHidden = showing
             suggestionScroll.setContentOffset(CGPoint(x: -suggestionScroll.contentInset.left, y: 0), animated: false)
+        }
+
+        func acceptSuggestion(_ position: Int) { accept(position) }
+
+        /// The iPad's shortcuts bar, which UIKit fills with bold, italic and
+        /// underline: Markdown has no underline, so Heft's own instead.
+        func fillShortcutsBar(of textView: MobileTextView) {
+            let items: [(String, String, FormatTool)] = [
+                ("bold", "Bold", .bold), ("italic", "Italic", .italic),
+                ("strikethrough", "Strikethrough", .strikethrough), ("highlighter", "Highlight", .highlight),
+            ]
+            let buttons = items.map { symbol, title, tool in
+                let item = UIBarButtonItem(image: UIImage(systemName: symbol), primaryAction: UIAction { [weak self] _ in
+                    self?.perform(tool)
+                })
+                item.accessibilityLabel = title
+                return item
+            }
+            textView.inputAssistantItem.leadingBarButtonGroups = []
+            textView.inputAssistantItem.trailingBarButtonGroups = [
+                UIBarButtonItemGroup(barButtonItems: buttons, representativeItem: nil),
+            ]
         }
 
         private func accept(_ position: Int) {
@@ -1540,6 +1569,7 @@ final class MobileTextView: UITextView {
     /// as the attributes UIKit would set on rich text.
     var onFormat: ((FormatTool) -> Void)?
     var onAttach: ((AttachSource) -> Void)?
+    var onAcceptSuggestion: ((Int) -> Void)?
     /// Called when the window's width class changes, as entering Split View.
     var onWidthClass: (() -> Void)?
     private var watchingWidth = false
@@ -1666,4 +1696,12 @@ enum AttachSource: CaseIterable {
         case .file: "doc"
         }
     }
+}
+
+/// A suggestion as the iPad's note pane shows it, above the keyboard.
+struct SuggestionChip: Equatable {
+    var title: String
+    var detail: String
+    var symbol: String?
+    var tint: UIColor?
 }
