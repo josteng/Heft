@@ -31,6 +31,8 @@ struct SettingsRequest: Identifiable {
 /// Settings and Refresh, on the two screens a library opens on: Recent,
 /// where the app starts, and the top of Files.
 struct VaultMenu: View {
+    /// The iPad's month at the foot of its sidebar, shown or hidden here.
+    var calendarShown: Binding<Bool>?
     @Environment(MobileVault.self) private var vault
     @State private var settings: SettingsRequest?
     /// The launch hook opens Settings once, on whichever screen shows first.
@@ -38,6 +40,11 @@ struct VaultMenu: View {
 
     var body: some View {
         Menu {
+            if let calendarShown {
+                Button(calendarShown.wrappedValue ? "Hide Calendar" : "Show Calendar", systemImage: "calendar") {
+                    withAnimation(.snappy) { calendarShown.wrappedValue.toggle() }
+                }
+            }
             Button("Settings", systemImage: "gearshape") { settings = SettingsRequest() }
             Button("Refresh", systemImage: "arrow.clockwise") { vault.refresh() }
         } label: {

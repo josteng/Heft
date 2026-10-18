@@ -50,6 +50,9 @@ extension EnvironmentValues {
     @Entry var mobilePush: (MobileRoute) -> Void = { _ in }
     /// Swaps the screen on top for another, as when its note was renamed.
     @Entry var mobileReplace: (MobileRoute) -> Void = { _ in }
+    /// Closes the note on show, as when it was deleted: a pop on the phone,
+    /// clearing the note pane on the iPad. Nil means the screen's dismiss.
+    @Entry var mobileClose: (() -> Void)?
 }
 
 enum MobileTab: Hashable {
@@ -125,26 +128,29 @@ struct MobileRootView: View {
     /// A note open on the Mac, chosen from the app switcher.
     @State private var handedOff: MobileRoute?
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The iPad's note pane: a note, or a day from the sidebar's month.
+    @State private var padSelection: MobileRoute?
+    @State private var padDay: Date?
     private var request = CaptureRequest.shared
     private var noteRequest = NoteOpenRequest.shared
+
+    /// The sidebar layout, on an iPad wide enough for it. Narrowed in Split
+    /// View or Slide Over it is the phone's tabs, as on an iPhone, which
+    /// keeps its tabs in landscape too.
+    private var usesSidebar: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && sizeClass == .regular
+    }
 
     var body: some View {
         if vault.root == nil {
             VaultPickerView()
         } else {
-            TabView(selection: $tab) {
-                Tab("Recent", systemImage: "clock", value: .recent) {
-                    MobileStack(incoming: $handedOff) { RecentView() }
-                }
-                Tab("Files", systemImage: "folder", value: .files) {
-                    MobileStack { FolderView(path: "") }
-                }
-                Tab("Calendar", systemImage: "calendar", value: .calendar) {
-                    // The calendar places Capture itself, after Today.
-                    MobileStack(showsCapture: false) { CalendarView() }
-                }
-                Tab(value: .search, role: .search) {
-                    MobileStack { SearchView() }
+            Group {
+                if usesSidebar {
+                    PadRootView(selection: $padSelection, day: $padDay)
+                } else {
+                    tabs
                 }
             }
             .environment(\.mobileCapture) { capture = CaptureSheetRequest() }
@@ -189,8 +195,7 @@ struct MobileRootView: View {
                 if url.host() == "today" {
                     capture = nil
                     quickCapture = nil
-                    CalendarDayRequest.shared.day = Date()
-                    tab = .calendar
+                    showDay(Date())
                 } else if let path = HeftURL.openedPath(in: url),
                           let note = HandoffNote(userInfo: ["path": path]) {
                     show(note.path)
@@ -210,11 +215,41 @@ struct MobileRootView: View {
         capture = nil
         quickCapture = nil
         if let day = vault.dailyDate(of: path) {
-            CalendarDayRequest.shared.day = day
-            tab = .calendar
+            showDay(day)
+        } else if usesSidebar {
+            padDay = nil
+            padSelection = .note(path)
         } else {
             tab = .recent
             handedOff = .note(path)
+        }
+    }
+
+    private func showDay(_ day: Date) {
+        if usesSidebar {
+            padSelection = nil
+            padDay = Calendar.current.startOfDay(for: day)
+        } else {
+            CalendarDayRequest.shared.day = day
+            tab = .calendar
+        }
+    }
+
+    private var tabs: some View {
+        TabView(selection: $tab) {
+            Tab("Recent", systemImage: "clock", value: .recent) {
+                MobileStack(incoming: $handedOff) { RecentView() }
+            }
+            Tab("Files", systemImage: "folder", value: .files) {
+                MobileStack { FolderView(path: "") }
+            }
+            Tab("Calendar", systemImage: "calendar", value: .calendar) {
+                // The calendar places Capture itself, after Today.
+                MobileStack(showsCapture: false) { CalendarView() }
+            }
+            Tab(value: .search, role: .search) {
+                MobileStack { SearchView() }
+            }
         }
     }
 

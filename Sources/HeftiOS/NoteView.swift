@@ -166,6 +166,7 @@ struct NoteView: View {
     @Environment(\.mobilePush) private var push
     @Environment(\.mobileReplace) private var replace
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.mobileClose) private var close
     @State private var document: NoteDocument
     @State private var action: ItemAction?
 
@@ -189,7 +190,7 @@ struct NoteView: View {
             } done: { outcome in
                 switch outcome {
                 case .moved(let path): replace(.note(path))
-                case .deleted: dismiss()
+                case .deleted: if let close { close() } else { dismiss() }
                 }
             }
             .navigationTitle(note?.name ?? (path as NSString).lastPathComponent)
@@ -237,6 +238,7 @@ struct NoteEditingToolbar: ToolbarContent {
                 if !findInMenu {
                     Button("Find in Note", systemImage: "magnifyingglass") { document.find() }
                         .tint(.primary)
+                        .keyboardShortcut("f")
                 }
                 Menu("More", systemImage: "ellipsis") { menu }
                     .tint(.primary)

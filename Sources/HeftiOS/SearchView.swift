@@ -7,13 +7,38 @@ import SwiftUI
 /// the same `VaultIndex.scoredSearch` and `ContentSearch` underneath it
 /// rather than the bar itself.
 struct SearchView: View {
-    @Environment(MobileVault.self) private var vault
     @State private var query = ""
-    @State private var text: ContentSearchResult = .empty()
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
         List {
+            SearchResults(query: query)
+        }
+        .navigationTitle("Search")
+        .searchable(text: $query, prompt: "Notes, #tags, text")
+        // The search tab collapses its field into the tab bar, which left the
+        // tab looking like a list of recent notes; it opens ready to type.
+        .searchFocused($fieldFocused)
+        .onAppear {
+            fieldFocused = true
+            #if DEBUG
+            if query.isEmpty, let preset = ProcessInfo.processInfo.environment["HEFT_IOS_QUERY"] {
+                query = preset
+            }
+            #endif
+        }
+    }
+}
+
+/// What a query finds, as list sections: the phone's Search tab and the
+/// iPad's sidebar search show the same results.
+struct SearchResults: View {
+    let query: String
+    @Environment(MobileVault.self) private var vault
+    @State private var text: ContentSearchResult = .empty()
+
+    var body: some View {
+        Group {
             if trimmed.isEmpty {
                 Section("Recently Edited") {
                     ForEach(vault.index.notesByLastEdit.prefix(25)) { NoteRow(note: $0) }
@@ -60,21 +85,8 @@ struct SearchView: View {
                 }
             }
         }
-        .navigationTitle("Search")
-        .searchable(text: $query, prompt: "Notes, #tags, text")
-        // The search tab collapses its field into the tab bar, which left the
-        // tab looking like a list of recent notes; it opens ready to type.
-        .searchFocused($fieldFocused)
         .task(id: "\(trimmed)#\(vault.generation)") {
             await searchText()
-        }
-        .onAppear {
-            fieldFocused = true
-            #if DEBUG
-            if query.isEmpty, let preset = ProcessInfo.processInfo.environment["HEFT_IOS_QUERY"] {
-                query = preset
-            }
-            #endif
         }
     }
 

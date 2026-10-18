@@ -27,6 +27,15 @@ scan (`rename:<path>:<name>`, `move:<path>:<folder>`, `delete:<path>`). `HEFT_IO
 way the Open Note intent does. Point them at
 a copy of a vault: the editor saves.
 
+## iPad
+
+At full width the iPad has the Mac's layout, `PadRootView`: a sidebar with
+the Files, Recent and Tags pill, search and the month at its foot, and the
+note beside it. Narrowed in Split View or Slide Over it has the phone's
+tabs; so does an iPhone in landscape. The sidebar reuses the phone's lists:
+their rows are `NavigationLink(value:)`, which in a `List(selection:)`
+select instead of pushing. `HEFT_IOS_PAD_MODE` picks the pill's mode.
+
 ## The vault
 
 The Files picker hands over a security-scoped folder, kept as a bookmark in

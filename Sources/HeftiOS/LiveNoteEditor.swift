@@ -49,6 +49,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         tap.delegate = coordinator
         view.addGestureRecognizer(tap)
         view.ownTap = tap
+        view.onFormat = { [weak coordinator] tool in coordinator?.applyTool(tool) }
         view.isOnPicture = { [weak coordinator, weak view] point in
             guard let coordinator, let view else { return false }
             return coordinator.pictureRange(at: point, in: view) != nil
@@ -1098,6 +1099,9 @@ struct LiveNoteEditor: UIViewRepresentable {
             formatButton?.configuration = configuration
         }
 
+        /// A hardware keyboard's shortcut, through the same path as the panel.
+        func applyTool(_ tool: FormatTool) { perform(tool) }
+
         private func perform(_ tool: FormatTool) {
             switch tool {
             case .title: setHeading(1)
@@ -1507,6 +1511,30 @@ final class MobileTextView: UITextView {
     var topInset: CGFloat = 12
     /// The editor's own tap, which handles a picture itself.
     weak var ownTap: UIGestureRecognizer?
+    /// ⌘B and ⌘I from a hardware keyboard, written as Markdown rather than
+    /// as the attributes UIKit would set on rich text.
+    var onFormat: ((FormatTool) -> Void)?
+
+    override var keyCommands: [UIKeyCommand]? {
+        [
+            UIKeyCommand(title: "Bold", action: #selector(toggleBoldface(_:)), input: "b", modifierFlags: .command),
+            UIKeyCommand(title: "Italic", action: #selector(toggleItalics(_:)), input: "i", modifierFlags: .command),
+            UIKeyCommand(title: "Highlight", action: #selector(highlightSelection(_:)), input: "h",
+                         modifierFlags: [.command, .shift]),
+        ]
+    }
+
+    override func toggleBoldface(_ sender: Any?) { onFormat?(.bold) }
+    override func toggleItalics(_ sender: Any?) { onFormat?(.italic) }
+    @objc func highlightSelection(_ sender: Any?) { onFormat?(.highlight) }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(toggleBoldface(_:)) || action == #selector(toggleItalics(_:))
+            || action == #selector(highlightSelection(_:)) {
+            return isEditable && isFirstResponder
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
     var isOnPicture: (CGPoint) -> Bool = { _ in false }
 
     /// UIKit's own taps and presses would put a caret into the source a

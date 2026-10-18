@@ -13,24 +13,8 @@ struct RecentView: View {
     @State private var action: ItemAction?
 
     var body: some View {
-        let dating = RecentDating()
-        let pinned = vault.pinnedNotes
-        let pinnedPaths = Set(pinned.map(\.path))
-        let groups = dating.grouped(vault.recent.filter { !pinnedPaths.contains($0.path) },
-                                    date: \.modified)
         List {
-            if !pinned.isEmpty {
-                Section {
-                    ForEach(pinned) { RecentRow(note: $0, dating: dating) { action = $0 } }
-                } header: {
-                    Label("Pinned", systemImage: "pin.fill")
-                }
-            }
-            ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
-                Section(group.section.map(dating.title(of:)) ?? "") {
-                    ForEach(group.items) { RecentRow(note: $0, dating: dating) { action = $0 } }
-                }
-            }
+            RecentSections { action = $0 }
         }
         .overlay {
             if vault.recent.isEmpty {
@@ -61,6 +45,33 @@ struct RecentView: View {
             }
         }
         #endif
+    }
+}
+
+/// Pinned notes, then the rest grouped by when they were written: the
+/// phone's Recent tab and the iPad's sidebar both list them this way.
+struct RecentSections: View {
+    let perform: (ItemAction) -> Void
+    @Environment(MobileVault.self) private var vault
+
+    var body: some View {
+        let dating = RecentDating()
+        let pinned = vault.pinnedNotes
+        let pinnedPaths = Set(pinned.map(\.path))
+        let groups = dating.grouped(vault.recent.filter { !pinnedPaths.contains($0.path) },
+                                    date: \.modified)
+        if !pinned.isEmpty {
+            Section {
+                ForEach(pinned) { RecentRow(note: $0, dating: dating, perform: perform) }
+            } header: {
+                Label("Pinned", systemImage: "pin.fill")
+            }
+        }
+        ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+            Section(group.section.map(dating.title(of:)) ?? "") {
+                ForEach(group.items) { RecentRow(note: $0, dating: dating, perform: perform) }
+            }
+        }
     }
 }
 
