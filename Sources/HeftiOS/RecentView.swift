@@ -27,6 +27,9 @@ struct RecentView: View {
         }
         .safeAreaInset(edge: .bottom) { ScanStatus() }
         .navigationTitle("Recent")
+        // The browser role sets the bar's title on the left, so scrolled it
+        // stays there rather than shrinking into the middle by the buttons.
+        .toolbarRole(.browser)
         .refreshable { vault.refresh() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

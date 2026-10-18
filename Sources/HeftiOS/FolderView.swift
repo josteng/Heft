@@ -35,6 +35,7 @@ struct FolderView: View {
         }
         .safeAreaInset(edge: .bottom) { if path.isEmpty { ScanStatus() } }
         .navigationTitle(path.isEmpty ? vault.name : (path as NSString).lastPathComponent)
+        .toolbarRole(.browser)
         .refreshable { vault.refresh() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -134,6 +135,7 @@ struct TagView: View {
             NoteRow(note: note)
         }
         .navigationTitle("#\(tag)")
+        .toolbarRole(.browser)
     }
 }
 
