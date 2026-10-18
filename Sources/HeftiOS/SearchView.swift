@@ -11,6 +11,9 @@ struct SearchView: View {
     @State private var query = ""
     @State private var model = SearchModel()
     @FocusState private var fieldFocused: Bool
+    /// Whether the keyboard is up, for the close button; the field's focus
+    /// state does not update from inside the bar it sits in.
+    @State private var typing = false
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobileLibrary) private var library
     @Environment(\.mobilePush) private var push
@@ -32,6 +35,12 @@ struct SearchView: View {
         // field and chips, as Mail's list ends under its toolbar.
         .scrollEdgeEffectStyle(.hard, for: .top)
         .toolbar(.hidden, for: .navigationBar)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            typing = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            typing = false
+        }
         .onChange(of: query) { _, typed in
             if model.enterScope(byTyping: typed) { query = "" }
         }
@@ -70,6 +79,25 @@ struct SearchView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .glassEffect(in: .capsule)
+        .safeAreaInset(edge: .trailing, spacing: 8) {
+            // Out of the search, as the system's search tab closes: what was
+            // typed and the scope go, and so does the keyboard.
+            if typing || !query.isEmpty || model.scope != nil {
+                Button("Close", systemImage: "xmark") {
+                    query = ""
+                    model.scope = nil
+                    fieldFocused = false
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+                .labelStyle(.iconOnly)
+                .font(.body.weight(.medium))
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .tint(.primary)
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: typing || !query.isEmpty || model.scope != nil)
         .padding(.horizontal, 16)
     }
 }
