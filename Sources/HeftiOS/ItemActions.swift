@@ -14,19 +14,24 @@ struct ItemRef: Hashable {
 }
 
 enum ItemAction: Identifiable {
-    case rename(ItemRef), move(ItemRef), delete(ItemRef)
+    case rename(ItemRef), move(ItemRef), delete(ItemRef), duplicate(ItemRef)
+    /// A new note, or folder, in `folder`: the menu's New Note Here.
+    case create(inFolder: String, folder: Bool)
 
     var id: String {
         switch self {
         case .rename(let item): "rename:" + item.path
         case .move(let item): "move:" + item.path
         case .delete(let item): "delete:" + item.path
+        case .duplicate(let item): "duplicate:" + item.path
+        case .create(let folder, let makesFolder): "create:\(makesFolder):" + folder
         }
     }
 
     var item: ItemRef {
         switch self {
-        case .rename(let item), .move(let item), .delete(let item): item
+        case .rename(let item), .move(let item), .delete(let item), .duplicate(let item): item
+        case .create(let folder, _): ItemRef(path: folder, isFolder: true)
         }
     }
 }
@@ -66,23 +71,85 @@ private struct ItemRowActions: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .contextMenu {
-                if !item.isFolder {
-                    let pinned = vault.isPinned(item.path)
-                    Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
-                        vault.togglePin(item.path)
-                    }
-                    .tint(.primary)
-                    Divider()
-                }
-                ItemActionButtons(item: item, perform: perform)
-            }
+            .contextMenu { ItemMenu(item: item, perform: perform) }
             .swipeActions(edge: .trailing) {
                 // Not the destructive role: that removes the row before the
                 // confirmation has been answered.
                 Button("Delete", systemImage: "trash") { perform(.delete(item)) }
                     .tint(.red)
             }
+    }
+}
+
+/// A row's long-press, or right-click, menu: the Mac's file and folder
+/// menus, less what iOS has no place for (the Finder, a terminal path,
+/// another app to open in).
+struct ItemMenu: View {
+    let item: ItemRef
+    let perform: (ItemAction) -> Void
+    @Environment(MobileVault.self) private var vault
+    @Environment(\.mobilePush) private var push
+
+    var body: some View {
+        let parent = (item.path as NSString).deletingLastPathComponent
+        Group {
+            if !item.isFolder {
+                let pinned = vault.isPinned(item.path)
+                Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+                    vault.togglePin(item.path)
+                }
+                Divider()
+                Button("New Note Here", systemImage: "square.and.pencil") {
+                    perform(.create(inFolder: parent, folder: false))
+                }
+            } else {
+                Button("New Note", systemImage: "square.and.pencil") {
+                    perform(.create(inFolder: item.path, folder: false))
+                }
+                Button("New Folder", systemImage: "folder.badge.plus") {
+                    perform(.create(inFolder: item.path, folder: true))
+                }
+            }
+            Divider()
+            Button("Rename…", systemImage: "pencil") { perform(.rename(item)) }
+            Button("Move to…", systemImage: "folder") { perform(.move(item)) }
+            Button("Duplicate", systemImage: "plus.square.on.square") { perform(.duplicate(item)) }
+            Divider()
+            if !item.isFolder {
+                Button("Copy Wikilink", systemImage: "link") {
+                    UIPasteboard.general.string = NoteDrag.link(to: item.path, in: vault)
+                }
+            }
+            Button("Copy Path", systemImage: "arrow.right.doc.on.clipboard") {
+                UIPasteboard.general.string = item.path
+            }
+            if !item.isFolder, let url = vault.note(at: item.path)?.url {
+                ShareLink(item: url) { Label("Share…", systemImage: "square.and.arrow.up") }
+                Button("Show in Folder", systemImage: "folder") { push(.folder(parent)) }
+            }
+        }
+        .tint(.primary)
+        Divider()
+        Button("Delete", systemImage: "trash", role: .destructive) { perform(.delete(item)) }
+            .tint(.red)
+    }
+}
+
+/// A day in a calendar: its note's menu, or the offer to make it.
+struct DayMenu: View {
+    let date: Date
+    let perform: (ItemAction) -> Void
+    @Environment(MobileVault.self) private var vault
+
+    var body: some View {
+        if let path = vault.dailyNotes?.relativePath(for: date), vault.index.note(atRelativePath: path) != nil {
+            ItemMenu(item: ItemRef(path: path, isFolder: false), perform: perform)
+        } else {
+            Button("Create Note", systemImage: "calendar.badge.plus") {
+                _ = try? vault.dailyNote(for: date)
+            }
+            .tint(.primary)
+        }
     }
 }
 
@@ -114,6 +181,7 @@ private struct ItemActionHost: ViewModifier {
     @State private var current: ItemAction?
     @State private var problem: String?
     @State private var notice: String?
+    @State private var creating: NewNoteRequest?
 
     func body(content: Content) -> some View {
         content
@@ -156,8 +224,16 @@ private struct ItemActionHost: ViewModifier {
             .onChange(of: action?.id, initial: true) {
                 guard let action else { return }
                 current = action
-                if case .rename(let item) = action { newName = item.name }
+                switch action {
+                case .rename(let item): newName = item.name
+                case .duplicate: run(action)
+                case .create(let folder, let makesFolder):
+                    creating = NewNoteRequest(folder: folder, makesFolder: makesFolder)
+                    self.action = nil
+                default: break
+                }
             }
+            .newNoteSheet($creating)
     }
 
     private func presented(_ kind: KeyPath<ItemAction, Bool>) -> Binding<Bool> {
@@ -197,6 +273,10 @@ private struct ItemActionHost: ViewModifier {
                 case .delete(let item):
                     try vault.delete(item.path)
                     done(.deleted)
+                case .duplicate(let item):
+                    _ = try vault.duplicate(item.path)
+                case .create:
+                    break
                 }
                 if let summary = vault.lastSummary {
                     vault.lastSummary = nil

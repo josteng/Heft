@@ -30,6 +30,7 @@ struct CalendarView: View {
     /// it shows, so scrolling does not rebuild the days under the finger.
     @State private var bandOrigin = Date()
     @State private var problem: String?
+    @State private var action: ItemAction?
     /// When the last swipe ended. A finger lifting off a swipe lands on a
     /// day, and a day button takes that lift for a tap: paging a month
     /// opened whatever day was under the thumb.
@@ -132,6 +133,7 @@ struct CalendarView: View {
             // iCloud, replaces the empty-day prompt once it is indexed.
             if document == nil { openSelected() }
         }
+        .itemActionHost($action)
         .alert("Can't Create Daily Note", isPresented: .constant(problem != nil)) {
             Button("OK") { problem = nil }
         } message: {
@@ -392,6 +394,7 @@ struct CalendarView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
+        .contextMenu { DayMenu(date: date) { action = $0 } }
         .accessibilityValue(exists ? "Has a note" : "")
         .accessibilityAddTraits(chosen ? .isSelected : [])
     }

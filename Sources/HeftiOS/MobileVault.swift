@@ -557,6 +557,7 @@ final class MobileVault {
             case ("move", 3): _ = try move(parts[1], into: parts[2])
             case ("move", 2): _ = try move(parts[1], into: "")
             case ("delete", 2): try delete(parts[1])
+            case ("duplicate", 2): _ = try duplicate(parts[1])
             default: problem = "Unknown HEFT_IOS_RUN: \(request)"
             }
         } catch {
@@ -717,6 +718,23 @@ final class MobileVault {
             pins = current
         }
         if !isFolder { frecency?.move(old, to: new) }
+    }
+
+    /// A copy beside the original, `Name copy` as on the Mac.
+    func duplicate(_ path: String) throws -> String {
+        guard let root, let item = item(at: path) else { throw MobileVaultActionError.missing }
+        let parent = (path as NSString).deletingLastPathComponent
+        let plan = VaultOperations.planCopy(path, into: parent, isFolder: item.isFolder) { candidate in
+            FileManager.default.fileExists(atPath: root.appendingPathComponent(candidate).path)
+        }
+        switch plan {
+        case .success(let copy):
+            try FileManager.default.copyItem(at: item.url, to: root.appendingPathComponent(copy.to))
+            refresh()
+            return copy.to
+        case .failure(let refusal):
+            throw MobileVaultActionError.refused(refusal)
+        }
     }
 
     /// Moves a note or folder to the Trash: the Files app's Recently

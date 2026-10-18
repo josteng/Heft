@@ -132,7 +132,7 @@ struct PadRootView: View {
             ScanStatus()
             if showsCalendar {
                 Divider()
-                PadMonth(chosen: day, expanded: $calendarExpanded) { pick($0) }
+                PadMonth(chosen: day, expanded: $calendarExpanded, perform: { action = $0 }) { pick($0) }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -345,6 +345,7 @@ private struct PadTagRows: View {
 private struct PadMonth: View {
     let chosen: Date?
     @Binding var expanded: Bool
+    let perform: (ItemAction) -> Void
     let pick: (Date) -> Void
     @Environment(MobileVault.self) private var vault
     /// Any day in what is showing: its week when folded, its month open.
@@ -442,6 +443,7 @@ private struct PadMonth: View {
         // A trackpad's pointer lights the day under it, as the system's
         // own buttons do.
         .hoverEffect(.highlight)
+        .contextMenu { DayMenu(date: date, perform: perform) }
         .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
     }
 
