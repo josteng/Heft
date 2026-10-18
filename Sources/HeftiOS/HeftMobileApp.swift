@@ -239,6 +239,6 @@ private struct CaptureButton: View {
     @Environment(\.mobileCapture) private var capture
 
     var body: some View {
-        Button("Capture", systemImage: "square.and.pencil", action: capture)
+        Button("Capture", systemImage: "text.badge.plus", action: capture)
     }
 }
