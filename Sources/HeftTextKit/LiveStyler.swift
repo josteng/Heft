@@ -443,7 +443,7 @@ enum LiveStyler {
                 for: image, width: wanted.width, height: wanted.height,
                 maxWidth: wanted.width != nil || wanted.height != nil
                     ? max(contentWidth - lead.indent, 1)
-                    : HeftLayoutFragment.maximumPictureWidth
+                    : min(HeftLayoutFragment.maximumPictureWidth, max(contentWidth - lead.indent, 1))
             )
             hideWhole(
                 range, in: storage, text: text, indent: lead.indent,
@@ -486,7 +486,9 @@ enum LiveStyler {
                 for: image, width: link.embedWidth, height: link.embedHeight,
                 maxWidth: asked
                     ? max(contentWidth - lead.indent, 1)
-                    : HeftLayoutFragment.maximumPictureWidth
+                    // The cap, or the column where that is narrower: a phone's
+                    // column is, and the picture ran off its edge.
+                    : min(HeftLayoutFragment.maximumPictureWidth, max(contentWidth - lead.indent, 1))
             )
             hideWhole(
                 range, in: storage, text: text, indent: lead.indent,

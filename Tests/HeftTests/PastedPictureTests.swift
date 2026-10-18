@@ -98,6 +98,14 @@ struct PastedPictureTests {
         let png = NSBitmapImageRep(data: image.tiffRepresentation!)!
             .representation(using: .png, properties: [:])!
         try png.write(to: root.appendingPathComponent("shot.png"))
+        let wide = NSImage(size: NSSize(width: 800, height: 200))
+        wide.lockFocus()
+        NSColor.systemTeal.setFill()
+        NSRect(x: 0, y: 0, width: 800, height: 200).fill()
+        wide.unlockFocus()
+        try NSBitmapImageRep(data: wide.tiffRepresentation!)!
+            .representation(using: .png, properties: [:])!
+            .write(to: root.appendingPathComponent("wide.png"))
         try "body".write(
             to: root.appendingPathComponent("note.md"), atomically: true, encoding: .utf8
         )
@@ -107,13 +115,15 @@ struct PastedPictureTests {
     }
 
     /// The widget the surface would draw on the line `source` begins with.
-    private func firstBlock(_ source: String, _ context: RenderContext) -> BlockWidget? {
+    private func firstBlock(
+        _ source: String, _ context: RenderContext, width: CGFloat = 600
+    ) -> BlockWidget? {
         let storage = NSTextStorage(string: source)
         let layout = LiveStyler.apply(
             to: storage,
             reveal: .none,
             context: context,
-            contentWidth: 600
+            contentWidth: width
         )
         return layout.blocks[0]
     }
@@ -129,6 +139,22 @@ struct PastedPictureTests {
             }
             #expect(sized == CGSize(width: 20, height: 15))
             #expect(natural == CGSize(width: 40, height: 30))
+        }
+    }
+
+    @Test("An unsized picture fits a narrow column, and stops at the cap in a wide one")
+    func fitsTheColumn() throws {
+        try withPictureVault { _, context in
+            for source in ["![[wide.png]]\n", "![](wide.png)\n"] {
+                guard case .image(_, let narrow, _)? = firstBlock(source, context, width: 300),
+                      case .image(_, let roomy, _)? = firstBlock(source, context, width: 900)
+                else {
+                    Issue.record("\(source) produced no picture")
+                    continue
+                }
+                #expect(narrow.width <= 300, "\(source)")
+                #expect(roomy.width == HeftLayoutFragment.maximumPictureWidth, "\(source)")
+            }
         }
     }
 
