@@ -199,11 +199,25 @@ struct PadRootView: View {
         }
     }
 
+    /// What the Mac shows with no note open: how many notes, and the two
+    /// ways in, Quick Open and today's note.
     private var nothingChosen: some View {
-        ContentUnavailableView(
-            "No Note Selected", systemImage: "doc.text",
-            description: Text("Choose a note in the sidebar, or press ⌘N for a new one.")
-        )
+        let count = vault.index.notes.count
+        return VStack(spacing: 14) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 44, weight: .light))
+                .foregroundStyle(.tertiary)
+            Text("\(count == 1 ? "1 note" : "\(count) notes") in \(vault.name)")
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("Quick Open…") { library.search(.notes) }
+                Button("Today's Note") { library.today() }
+            }
+            .buttonStyle(.glass)
+            .tint(.primary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: Routing
