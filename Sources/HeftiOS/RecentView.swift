@@ -10,6 +10,7 @@ import SwiftUI
 struct RecentView: View {
     @Environment(MobileVault.self) private var vault
     @State private var creating: NewNoteRequest?
+    @State private var action: ItemAction?
 
     var body: some View {
         let dating = RecentDating()
@@ -20,14 +21,14 @@ struct RecentView: View {
         List {
             if !pinned.isEmpty {
                 Section {
-                    ForEach(pinned) { RecentRow(note: $0, dating: dating) }
+                    ForEach(pinned) { RecentRow(note: $0, dating: dating) { action = $0 } }
                 } header: {
                     Label("Pinned", systemImage: "pin.fill")
                 }
             }
             ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
                 Section(group.section.map(dating.title(of:)) ?? "") {
-                    ForEach(group.items) { RecentRow(note: $0, dating: dating) }
+                    ForEach(group.items) { RecentRow(note: $0, dating: dating) { action = $0 } }
                 }
             }
         }
@@ -49,6 +50,7 @@ struct RecentView: View {
             ToolbarItem(placement: .topBarTrailing) { VaultMenu() }
         }
         .newNoteSheet($creating)
+        .itemActionHost($action)
         #if DEBUG
         .onAppear {
             let environment = ProcessInfo.processInfo.environment
@@ -66,6 +68,7 @@ struct RecentView: View {
 private struct RecentRow: View {
     let note: SharedVault.ListedNote
     let dating: RecentDating
+    let perform: (ItemAction) -> Void
 
     var body: some View {
         NavigationLink(value: MobileRoute.note(note.path)) {
@@ -94,5 +97,6 @@ private struct RecentRow: View {
             }
             .padding(.vertical, 2)
         }
+        .itemActions(ItemRef(path: note.path, isFolder: false), perform)
     }
 }

@@ -106,6 +106,18 @@ final class NoteDocument {
         }
     }
 
+    /// Whatever was typed, written before the file is renamed or moved.
+    func saveNow() async {
+        saveTask?.cancel()
+        await save()
+    }
+
+    /// Typing that will never be written: the note is being deleted.
+    func abandon() {
+        saveTask?.cancel()
+        pending = nil
+    }
+
     private func save() async {
         guard let vault, let text = pending, let base = onDisk, !conflict,
               let url = vault.note(at: path)?.url
@@ -152,7 +164,10 @@ struct NoteView: View {
     let path: String
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
+    @Environment(\.mobileReplace) private var replace
+    @Environment(\.dismiss) private var dismiss
     @State private var document: NoteDocument
+    @State private var action: ItemAction?
 
     init(path: String, startsTyping: Bool = false) {
         self.path = path
@@ -166,6 +181,17 @@ struct NoteView: View {
     var body: some View {
         let note = vault.note(at: path)
         NoteContent(document: document)
+            .environment(\.noteItemAction) { action = $0 }
+            .itemActionHost($action) { action in
+                // Typing is written first, so the file moves with it; a note
+                // being deleted keeps none.
+                if case .delete = action { document.abandon() } else { await document.saveNow() }
+            } done: { outcome in
+                switch outcome {
+                case .moved(let path): replace(.note(path))
+                case .deleted: dismiss()
+                }
+            }
             .navigationTitle(note?.name ?? (path as NSString).lastPathComponent)
             // Inline, because most notes open with their own title as a heading
             // and a large bar title above it says the same thing twice.
@@ -189,6 +215,7 @@ struct NoteEditingToolbar: ToolbarContent {
     var showBacklinks: () -> Void = {}
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
+    @Environment(\.noteItemAction) private var itemAction
 
     var body: some ToolbarContent {
         if document.editing {
@@ -241,6 +268,10 @@ struct NoteEditingToolbar: ToolbarContent {
             Button("Show in Folder", systemImage: "folder") {
                 push(.folder(note.folder))
             }
+        }
+        if let itemAction {
+            Divider()
+            ItemActionButtons(item: ItemRef(path: path, isFolder: false), perform: itemAction)
         }
     }
 }

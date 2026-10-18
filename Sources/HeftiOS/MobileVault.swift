@@ -26,6 +26,8 @@ final class MobileVault {
     /// Bumped whenever a scan lands, so an open note can re-read itself.
     private(set) var generation = 0
     var problem: String?
+    /// What the last rename or move repointed, to tell the reader once.
+    var lastSummary: String?
 
     private var accessed: URL?
     private var frecency: FrecencyStore?
@@ -160,6 +162,9 @@ final class MobileVault {
         }
         isScanning = false
         generation += 1
+        #if DEBUG
+        runLaunchOperation()
+        #endif
         if pending > 0, downloadRetries > 0 {
             downloadRetries -= 1
             Task {
@@ -412,6 +417,158 @@ final class MobileVault {
         }
     }
 
+    #if DEBUG
+    private var launchOperationRan = false
+
+    /// `HEFT_IOS_RUN=rename:<path>:<name>`, `move:<path>:<folder>` or
+    /// `delete:<path>`, once the first scan has an index to repoint with.
+    private func runLaunchOperation() {
+        guard !launchOperationRan, !index.notes.isEmpty,
+              let request = ProcessInfo.processInfo.environment["HEFT_IOS_RUN"]
+        else { return }
+        launchOperationRan = true
+        let parts = request.split(separator: ":", maxSplits: 2).map(String.init)
+        do {
+            switch (parts.first, parts.count) {
+            case ("rename", 3): _ = try rename(parts[1], to: parts[2])
+            case ("move", 3): _ = try move(parts[1], into: parts[2])
+            case ("move", 2): _ = try move(parts[1], into: "")
+            case ("delete", 2): try delete(parts[1])
+            default: problem = "Unknown HEFT_IOS_RUN: \(request)"
+            }
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+    #endif
+
+    // MARK: Renaming, moving, deleting
+
+    /// The file or folder at a vault-relative path, from the last scan.
+    func item(at path: String) -> VaultItem? {
+        guard let tree else { return nil }
+        if path.isEmpty { return tree }
+        return tree.flattened().first { $0.relativePath == path }
+    }
+
+    /// Renames a note or folder in place and answers its new path. Links to
+    /// it, or to anything inside it, are repointed as on the Mac.
+    func rename(_ path: String, to name: String) throws -> String {
+        guard let item = item(at: path) else { throw MobileVaultActionError.missing }
+        let plan = VaultOperations.planRename(item, to: name) { [root] candidate in
+            guard let root else { return false }
+            return FileManager.default.fileExists(atPath: root.appendingPathComponent(candidate).path)
+        }
+        switch plan {
+        case .success(let move):
+            return try perform(move, of: item)
+        case .failure(.alreadyExists) where Self.differsOnlyInCase(item, name):
+            // "groceries" for `Groceries.md`: the file system calls that the
+            // same name, and links already find it either way.
+            return try changeCase(of: item, to: name)
+        case .failure(let refusal):
+            throw MobileVaultActionError.refused(refusal)
+        }
+    }
+
+    /// Moves a note or folder into `folder` and answers its new path.
+    func move(_ path: String, into folder: String) throws -> String {
+        guard let item = item(at: path) else { throw MobileVaultActionError.missing }
+        let plan = VaultOperations.planMove(path, into: folder, isFolder: item.isFolder) { [root] candidate in
+            guard let root else { return false }
+            return FileManager.default.fileExists(atPath: root.appendingPathComponent(candidate).path)
+        }
+        switch plan {
+        case .success(let move): return try perform(move, of: item)
+        case .failure(let refusal): throw MobileVaultActionError.refused(refusal)
+        }
+    }
+
+    private func perform(_ move: VaultOperations.Move, of item: VaultItem) throws -> String {
+        guard let root else { throw DailyNoteCaptureError.vaultUnavailable }
+        guard move.from != move.to else { return move.to }
+        // Links are found through the index; one still being built would
+        // find none, and the move would leave them pointing at nothing.
+        if index.notes.isEmpty, isScanning {
+            throw MobileVaultActionError.refused(.stillLoading(name: item.name))
+        }
+        let summary = try VaultRename.perform(item: item, to: move.to, index: index, vaultRoot: root)
+        followMove(from: move.from, to: move.to, isFolder: item.isFolder)
+        lastSummary = summary.notes > 0 ? VaultOperations.repointSummary(summary) : nil
+        refresh()
+        return move.to
+    }
+
+    private static func differsOnlyInCase(_ item: VaultItem, _ name: String) -> Bool {
+        guard let destination = VaultOperations.destination(for: item, named: name) else { return false }
+        return destination != item.relativePath
+            && destination.lowercased() == item.relativePath.lowercased()
+    }
+
+    /// Through a temporary name, since a direct move to a name that differs
+    /// only in case is a move onto itself.
+    private func changeCase(of item: VaultItem, to name: String) throws -> String {
+        guard let root, let destination = VaultOperations.destination(for: item, named: name) else {
+            throw MobileVaultActionError.missing
+        }
+        let target = root.appendingPathComponent(destination)
+        let step = item.url.deletingLastPathComponent()
+            .appendingPathComponent(".heft-rename-\(UUID().uuidString)")
+        try FileManager.default.moveItem(at: item.url, to: step)
+        try FileManager.default.moveItem(at: step, to: target)
+        followMove(from: item.relativePath, to: destination, isFolder: item.isFolder)
+        refresh()
+        return destination
+    }
+
+    /// Pins and the ranking follow a note to where it went.
+    private func followMove(from old: String, to new: String, isFolder: Bool) {
+        guard let root else { return }
+        var current = Pins.load(from: root)
+        let before = current
+        current.move(isFolder ? .folder : .note, from: old, to: new)
+        if current != before {
+            try? current.save(to: root)
+            pins = current
+        }
+        if !isFolder { frecency?.move(old, to: new) }
+    }
+
+    /// Moves a note or folder to the Trash: the Files app's Recently
+    /// Deleted when iOS allows it for this folder, else the vault's own
+    /// `.trash`, which is where Obsidian keeps what it deletes.
+    func delete(_ path: String) throws {
+        guard let root, let item = item(at: path) else { throw MobileVaultActionError.missing }
+        var coordinationError: NSError?
+        var result: Result<Void, Error> = .success(())
+        NSFileCoordinator().coordinate(writingItemAt: item.url, options: .forDeleting,
+                                       error: &coordinationError) { url in
+            result = Result {
+                do {
+                    try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                } catch {
+                    let trash = root.appendingPathComponent(".trash", isDirectory: true)
+                    try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+                    let name = VaultOperations.uniqueName(
+                        base: url.deletingPathExtension().lastPathComponent,
+                        extension: item.isFolder ? "" : (item.url.pathExtension)
+                    ) { FileManager.default.fileExists(atPath: trash.appendingPathComponent($0).path) }
+                    try FileManager.default.moveItem(at: url, to: trash.appendingPathComponent(name))
+                }
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        try result.get()
+        var current = Pins.load(from: root)
+        let pin = Pins.Pin(item.isFolder ? .folder : .note, path)
+        if current.contains(pin) {
+            _ = current.toggle(pin)
+            try? current.save(to: root)
+            pins = current
+        }
+        refresh()
+    }
+
     /// Today's note, made from the daily template when it does not exist.
     /// `ensureNote` never overwrites, so tapping a day twice is harmless.
     func dailyNote(for date: Date) throws -> NoteRef {
@@ -433,6 +590,18 @@ enum MobileFolderError: LocalizedError {
         switch self {
         case .unusableName(let name): "\(name) is not a name a folder can have."
         case .taken(let name): "There is already something called \(name) here."
+        }
+    }
+}
+
+enum MobileVaultActionError: LocalizedError {
+    case missing
+    case refused(VaultOperations.Refusal)
+
+    var errorDescription: String? {
+        switch self {
+        case .missing: "It is no longer in the vault."
+        case .refused(let refusal): refusal.message
         }
     }
 }

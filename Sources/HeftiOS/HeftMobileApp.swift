@@ -43,6 +43,8 @@ extension EnvironmentValues {
     /// Pushes onto whichever stack the view is in; a link inside a note uses
     /// it to open the note it names.
     @Entry var mobilePush: (MobileRoute) -> Void = { _ in }
+    /// Swaps the screen on top for another, as when its note was renamed.
+    @Entry var mobileReplace: (MobileRoute) -> Void = { _ in }
 }
 
 enum MobileTab: Hashable {
@@ -234,6 +236,9 @@ struct MobileStack<Root: View>: View {
                 }
         }
         .environment(\.mobilePush) { path.append($0) }
+        .environment(\.mobileReplace) { route in
+            if path.isEmpty { path = [route] } else { path[path.count - 1] = route }
+        }
         .onChange(of: incoming.wrappedValue, initial: true) { _, route in
             guard let route else { return }
             incoming.wrappedValue = nil

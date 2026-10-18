@@ -9,12 +9,18 @@ struct FolderView: View {
     @Environment(\.mobilePush) private var push
     @State private var launched = false
     @State private var creating: NewNoteRequest?
+    @State private var action: ItemAction?
 
     var body: some View {
         Group {
             if let folder = vault.folder(at: path) {
                 List(folder.children) { item in
-                    row(item)
+                    if item.isFolder || item.kind == .markdown || item.kind == .image {
+                        row(item)
+                            .itemActions(ItemRef(path: item.relativePath, isFolder: item.isFolder)) { action = $0 }
+                    } else {
+                        row(item)
+                    }
                 }
                 .overlay {
                     if folder.children.isEmpty, !vault.isScanning {
@@ -38,6 +44,7 @@ struct FolderView: View {
             }
         }
         .newNoteSheet($creating)
+        .itemActionHost($action)
         .onAppear(perform: applyLaunchRequest)
     }
 
@@ -93,6 +100,20 @@ struct FolderView: View {
         guard path.isEmpty, !launched else { return }
         launched = true
 
+        if let request = ProcessInfo.processInfo.environment["HEFT_IOS_ITEM_ACTION"] {
+            // After the scan, as a reader's long press would be.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            let parts = request.split(separator: ":", maxSplits: 1).map(String.init)
+            if parts.count == 2 {
+                let item = ItemRef(path: parts[1], isFolder: !parts[1].lowercased().hasSuffix(".md"))
+                switch parts[0] {
+                case "rename": action = .rename(item)
+                case "move": action = .move(item)
+                default: action = .delete(item)
+                }
+            }
+            }
+        }
         if let note = ProcessInfo.processInfo.environment["HEFT_IOS_NOTE"] {
             push(.note(note))
         }
