@@ -276,6 +276,9 @@ struct AppearanceSettingsView: View {
     var body: some View {
         Form {
             Section {
+                AppearancePreview(appearance: appearance)
+            }
+            Section {
                 colorRow(
                     "Accent Color",
                     detail: "The caret and checkboxes. Follows your macOS accent color, "

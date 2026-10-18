@@ -252,14 +252,16 @@ enum PDFExport {
     ///
     /// Built exactly the way the window builds one — same view class, same
     /// coordinator, same styler — because anything else is a second renderer
-    /// by another name.
+    /// by another name. `onScreen` is for a view that stays on screen, the
+    /// Appearance preview: drawn in that appearance, on no background, and
+    /// with its markup left collapsed rather than flattened for a PDF's text.
     static func renderView(
-        text: String, context: RenderContext, width: CGFloat
+        text: String, context: RenderContext, width: CGFloat, onScreen: NSAppearance? = nil
     ) -> NSTextView {
         var context = context
         // Paper is light. Resolved here so every colour the styler bakes into
         // a widget or a formula is the one that belongs on white.
-        let paper = NSAppearance(named: .aqua)
+        let paper = onScreen ?? NSAppearance(named: .aqua)
         context.appearance = paper
 
         let editor = LiveTextEditor(
@@ -283,7 +285,7 @@ enum PDFExport {
         view.isEditable = false
         view.isSelectable = false
         view.isRichText = false
-        view.drawsBackground = true
+        view.drawsBackground = onScreen == nil
         view.backgroundColor = .white
         // The frame is the printable width; the view's own `setFrameSize`
         // then puts a `viewInset` gutter on each side and the container tracks
@@ -337,7 +339,7 @@ enum PDFExport {
         // So each collapsed character is replaced by a zero-width space
         // instead. Same character count, so every offset, widget key and
         // reserved height survives untouched; nothing readable left behind.
-        flattenCollapsedText(in: view)
+        if onScreen == nil { flattenCollapsedText(in: view) }
 
         view.sizeToFit()
 
