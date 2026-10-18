@@ -33,6 +33,8 @@ struct SettingsRequest: Identifiable {
 struct VaultMenu: View {
     /// The iPad's month at the foot of its sidebar, shown or hidden here.
     var calendarShown: Binding<Bool>?
+    /// Capture, where the bar has no button of its own for it.
+    var capture: (() -> Void)?
     @Environment(MobileVault.self) private var vault
     @State private var settings: SettingsRequest?
     /// The launch hook opens Settings once, on whichever screen shows first.
@@ -40,6 +42,9 @@ struct VaultMenu: View {
 
     var body: some View {
         Menu {
+            if let capture {
+                Button("Capture", systemImage: "text.badge.plus", action: capture)
+            }
             if let calendarShown {
                 Button(calendarShown.wrappedValue ? "Hide Calendar" : "Show Calendar", systemImage: "calendar") {
                     withAnimation(.snappy) { calendarShown.wrappedValue.toggle() }

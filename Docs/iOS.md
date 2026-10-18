@@ -34,7 +34,8 @@ the Files, Recent and Tags pill, search and the month at its foot, and the
 note beside it. Narrowed in Split View or Slide Over it has the phone's
 tabs; so does an iPhone in landscape. The sidebar reuses the phone's lists:
 their rows are `NavigationLink(value:)`, which in a `List(selection:)`
-select instead of pushing. `HEFT_IOS_PAD_MODE` picks the pill's mode.
+select instead of pushing. `HEFT_IOS_PAD_MODE` picks the pill's mode, and
+`HEFT_IOS_PAD_MONTH` opens the month.
 
 ## The vault
 

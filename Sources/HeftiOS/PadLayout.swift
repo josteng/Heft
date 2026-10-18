@@ -31,6 +31,10 @@ struct PadRootView: View {
     @Environment(MobileVault.self) private var vault
     @SceneStorage("pad.mode") private var mode: PadSidebarMode = .recent
     @SceneStorage("pad.calendar") private var showsCalendar = true
+    /// The month starts folded to one week, as on the phone, so the list
+    /// keeps most of the sidebar.
+    @SceneStorage("pad.calendar.expanded") private var calendarExpanded = false
+    @Environment(\.mobileCapture) private var capture
     @State private var query = ""
     @State private var expandedFolders: Set<String> = []
     @State private var expandedTags: Set<String> = []
@@ -74,54 +78,58 @@ struct PadRootView: View {
 
     // MARK: Sidebar
 
+    /// The pill, the list and the month stacked rather than layered: as
+    /// overlays on the list, rows scrolled on under the pill and the month,
+    /// and showed through them.
     private var sidebar: some View {
-        List(selection: $selection) {
-            if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                SearchResults(query: query)
-            } else {
-                switch mode {
-                case .recent:
-                    RecentSections { action = $0 }
-                case .files:
-                    PadTreeRows(items: vault.tree?.children ?? [], expanded: $expandedFolders) { action = $0 }
-                case .tags:
-                    PadTagRows(expanded: $expandedTags)
-                }
-            }
-        }
-        .overlay {
-            if vault.recent.isEmpty, vault.isScanning {
-                ProgressView(vault.status ?? "Reading your vault…")
-            }
-        }
-        .searchable(text: $query, placement: .sidebar, prompt: "Notes, #tags, text")
-        .searchFocused($searching)
-        .safeAreaInset(edge: .top) {
+        VStack(spacing: 0) {
             Picker("Show", selection: $mode) {
                 ForEach(PadSidebarMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
-            .padding(.bottom, 6)
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
-                ScanStatus()
-                if showsCalendar {
-                    PadMonth(chosen: day) { pick($0) }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+            .padding(.vertical, 8)
+            List(selection: $selection) {
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    SearchResults(query: query)
+                } else {
+                    switch mode {
+                    case .recent:
+                        RecentSections { action = $0 }
+                    case .files:
+                        PadTreeRows(items: vault.tree?.children ?? [], expanded: $expandedFolders) { action = $0 }
+                    case .tags:
+                        PadTagRows(expanded: $expandedTags)
+                    }
                 }
             }
+            .overlay {
+                if vault.recent.isEmpty, vault.isScanning {
+                    ProgressView(vault.status ?? "Reading your vault…")
+                }
+            }
+            .refreshable { vault.refresh() }
+            ScanStatus()
+            if showsCalendar {
+                Divider()
+                PadMonth(chosen: day, expanded: $calendarExpanded) { pick($0) }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        // A button in the bar that opens into a field, as iPadOS 26 does it,
+        // so the sidebar's top is the pill and the list rather than chrome.
+        .searchable(text: $query, prompt: "Notes, #tags, text")
+        .searchToolbarBehavior(.minimize)
+        .searchFocused($searching)
         .navigationTitle(vault.name)
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { vault.refresh() }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                CaptureButton()
+            ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
                     .keyboardShortcut("n")
-                VaultMenu(calendarShown: $showsCalendar)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                VaultMenu(calendarShown: $showsCalendar, capture: capture)
             }
         }
         // Shortcuts with nowhere to show: ⌘K to search, ⌘⇧T for today.
@@ -222,6 +230,7 @@ struct PadRootView: View {
             pick(Calendar.current.date(byAdding: .day, value: shift, to: Date()) ?? Date())
         }
         if let preset = environment["HEFT_IOS_QUERY"] { query = preset }
+        if environment["HEFT_IOS_PAD_MONTH"] != nil { calendarExpanded = true }
         #endif
     }
 }
@@ -295,26 +304,42 @@ private struct PadTagRows: View {
     }
 }
 
-/// The month at the foot of the sidebar, as the Mac keeps it there: a dot
-/// for each day with a note, and a tap to open that day beside it.
+/// The calendar at the foot of the sidebar, as the Mac keeps it there: a
+/// dot for each day with a note, and a tap to open that day beside it.
+/// Folded to the week by default, as on the phone; the title opens the
+/// month, and a swipe or the arrows page by what is showing.
 private struct PadMonth: View {
     let chosen: Date?
+    @Binding var expanded: Bool
     let pick: (Date) -> Void
     @Environment(MobileVault.self) private var vault
-    @State private var month = Calendar.current.dateInterval(of: .month, for: Date())!.start
+    /// Any day in what is showing: its week when folded, its month open.
+    @State private var anchor = Date()
 
     private let calendar = Calendar.current
 
     var body: some View {
         VStack(spacing: 6) {
             HStack {
-                Text(month.formatted(.dateTime.month(.wide).year()))
-                    .font(.headline)
-                    .contentTransition(.numericText(value: month.timeIntervalSinceReferenceDate))
+                Button {
+                    withAnimation(.smooth(duration: 0.3)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(anchor.formatted(.dateTime.month(.wide).year()))
+                            .font(.headline)
+                            .contentTransition(.numericText(value: anchor.timeIntervalSinceReferenceDate))
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(expanded ? "Folds the month to one week" : "Shows the whole month")
                 Spacer()
                 Group {
-                    Button("Previous Month", systemImage: "chevron.left") { page(-1) }
-                    Button("Next Month", systemImage: "chevron.right") { page(1) }
+                    Button(expanded ? "Previous Month" : "Previous Week", systemImage: "chevron.left") { page(-1) }
+                    Button(expanded ? "Next Month" : "Next Week", systemImage: "chevron.right") { page(1) }
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
@@ -335,20 +360,24 @@ private struct PadMonth: View {
                 }
             }
         }
-        .padding(12)
-        // Solid enough to read over the list scrolling under it, as the
-        // Mac's sidebar calendar is.
-        .background(.regularMaterial, in: .rect(cornerRadius: 22))
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .contentShape(.rect)
+        // Up and down page, as the phone's calendar does; sideways too,
+        // since the folded week reads as a strip.
+        .gesture(DragGesture(minimumDistance: 20).onEnded { drag in
+            let x = drag.translation.width, y = drag.translation.height
+            if abs(y) > abs(x), abs(y) > 30 { page(y < 0 ? 1 : -1) }
+            else if abs(x) > 30 { page(x < 0 ? 1 : -1) }
+        })
         .onChange(of: chosen) { _, chosen in
-            guard let chosen, !calendar.isDate(chosen, equalTo: month, toGranularity: .month) else { return }
-            withAnimation(.snappy) { month = calendar.dateInterval(of: .month, for: chosen)?.start ?? month }
+            guard let chosen else { return }
+            withAnimation(.snappy) { anchor = chosen }
         }
     }
 
     private func cell(_ date: Date) -> some View {
-        let inMonth = calendar.isDate(date, equalTo: month, toGranularity: .month)
+        let inMonth = !expanded || calendar.isDate(date, equalTo: anchor, toGranularity: .month)
         let isChosen = chosen.map { calendar.isDate($0, inSameDayAs: date) } ?? false
         let isToday = calendar.isDateInToday(date)
         let hasNote = vault.dailyNotes.map { vault.index.note(atRelativePath: $0.relativePath(for: date)) != nil } ?? false
@@ -374,7 +403,7 @@ private struct PadMonth: View {
 
     private func page(_ direction: Int) {
         withAnimation(.snappy) {
-            month = calendar.date(byAdding: .month, value: direction, to: month) ?? month
+            anchor = calendar.date(byAdding: expanded ? .month : .weekOfYear, value: direction, to: anchor) ?? anchor
         }
     }
 
@@ -385,18 +414,26 @@ private struct PadMonth: View {
         return Array(symbols[first...] + symbols[..<first])
     }
 
-    /// Whole weeks touching the month, so every row has seven days.
+    /// The week holding `anchor` when folded; open, every whole week
+    /// touching its month, so each row has seven days.
     private var weeks: [[Date]] {
-        guard let interval = calendar.dateInterval(of: .month, for: month),
-              var start = calendar.dateInterval(of: .weekOfYear, for: interval.start)?.start
-        else { return [] }
-        var weeks: [[Date]] = []
-        while start < interval.end {
-            weeks.append((0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) })
-            guard let next = calendar.date(byAdding: .day, value: 7, to: start) else { break }
-            start = next
+        func week(from start: Date) -> [Date] {
+            (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
         }
-        return weeks
+        guard !expanded else {
+            guard let interval = calendar.dateInterval(of: .month, for: anchor),
+                  var start = calendar.dateInterval(of: .weekOfYear, for: interval.start)?.start
+            else { return [] }
+            var weeks: [[Date]] = []
+            while start < interval.end {
+                weeks.append(week(from: start))
+                guard let next = calendar.date(byAdding: .day, value: 7, to: start) else { break }
+                start = next
+            }
+            return weeks
+        }
+        guard let start = calendar.dateInterval(of: .weekOfYear, for: anchor)?.start else { return [] }
+        return [week(from: start)]
     }
 }
 
