@@ -2,6 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.stenglein.HeftMobile.url</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>heft</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Heft saves the photo you take into the vault and adds it to the note.</string>
 	<key>NSUserActivityTypes</key>

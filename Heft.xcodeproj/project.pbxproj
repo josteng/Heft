@@ -898,6 +898,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/HeftControls.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -919,6 +920,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/HeftControls.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;

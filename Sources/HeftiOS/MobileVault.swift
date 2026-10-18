@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import HeftCore
 import Observation
+import WidgetKit
 
 /// The open vault on iOS: the folder, its tree and index, and its settings.
 ///
@@ -58,6 +59,34 @@ final class MobileVault {
     /// outside any view. Set with `root`.
     nonisolated(unsafe) static var currentRoot: URL?
     private var donation: Task<Void, Never>?
+
+    /// Today's note for the widget, which cannot read the vault itself.
+    /// Written and the widget reloaded only when something it shows changed.
+    private func publishToday() {
+        guard let dailyNotes else { return }
+        let day = Calendar.current.startOfDay(for: Date())
+        let path = dailyNotes.relativePath(for: day)
+        let url = note(at: path)?.url
+        let title = (path as NSString).lastPathComponent.replacingOccurrences(of: ".md", with: "")
+        Task.detached(priority: .utility) {
+            let text = url.flatMap { try? MobileVault.read($0) }
+            // What comes just before where a capture goes: above the last
+            // marker when the template has one, else the end of the note.
+            let written = text.map { text -> String in
+                guard let marker = text.range(of: DailyNoteCapture.insertionMarker, options: .backwards)
+                else { return text }
+                return String(text[..<marker.lowerBound])
+            }
+            let snapshot = TodaySnapshot(
+                day: day, title: title, exists: text != nil,
+                lines: written.map { TodaySnapshot.lines(from: $0, latest: true) } ?? [],
+                opening: text.map { TodaySnapshot.lines(from: $0) } ?? []
+            )
+            guard snapshot != TodaySnapshot.load() else { return }
+            snapshot.save()
+            WidgetCenter.shared.reloadTimelines(ofKind: TodaySnapshot.widgetKind)
+        }
+    }
 
     /// Tells Spotlight about the vault's notes, so a search there finds one
     /// and a tap on it opens it through `MobileOpenNoteIntent`. Coalesced,
@@ -185,6 +214,7 @@ final class MobileVault {
         isScanning = false
         generation += 1
         if treeChanged || generation == 1 { donateToSpotlight() }
+        publishToday()
         #if DEBUG
         runLaunchOperation()
         #endif

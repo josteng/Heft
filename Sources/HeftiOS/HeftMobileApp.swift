@@ -183,6 +183,19 @@ struct MobileRootView: View {
                 noteRequest.path = nil
                 show(path)
             }
+            // `heft://today` from the widget, and `heft://open?path=` from a
+            // note Siri or Shortcuts shows, the link `NoteEntity` carries.
+            .onOpenURL { url in
+                if url.host() == "today" {
+                    capture = nil
+                    quickCapture = nil
+                    CalendarDayRequest.shared.day = Date()
+                    tab = .calendar
+                } else if let path = HeftURL.openedPath(in: url),
+                          let note = HandoffNote(userInfo: ["path": path]) {
+                    show(note.path)
+                }
+            }
             .onContinueUserActivity(HandoffNote.activityType) { activity in
                 guard let note = HandoffNote(userInfo: activity.userInfo) else { return }
                 show(note.path)

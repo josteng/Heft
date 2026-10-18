@@ -55,6 +55,11 @@ Notes are donated to Spotlight after a scan that changed the tree, as
 Shortcuts and Siri action. The entity query finds the vault through
 `NoteEntityQuery.vaultLocator`, which the app points at its bookmark.
 
+The Today widget cannot open the vault either: the app writes
+`TodaySnapshot` to the App Group after each scan and save, and the widget
+draws that. `heft://today` and `heft://open?path=` open the calendar or a
+note.
+
 There is no file watcher on iOS. The app rescans on launch, on returning to
 the foreground and after its own writes, starting from the Mac's
 `IndexCache` so a scan reads only what changed.

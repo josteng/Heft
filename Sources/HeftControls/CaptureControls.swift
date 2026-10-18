@@ -10,6 +10,7 @@ struct HeftControls: WidgetBundle {
     var body: some Widget {
         CaptureTodayControl()
         CaptureInboxControl()
+        TodayWidget()
     }
 }
 
