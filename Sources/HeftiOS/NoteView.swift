@@ -154,9 +154,13 @@ struct NoteView: View {
     @Environment(\.mobilePush) private var push
     @State private var document: NoteDocument
 
-    init(path: String) {
+    init(path: String, startsTyping: Bool = false) {
         self.path = path
-        _document = State(initialValue: NoteDocument(path: path))
+        let document = NoteDocument(path: path)
+        // Asked before the editor exists; it takes the keyboard on its first
+        // update after the text has loaded.
+        if startsTyping { document.focus() }
+        _document = State(initialValue: document)
     }
 
     var body: some View {

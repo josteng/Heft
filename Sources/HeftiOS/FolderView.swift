@@ -9,6 +9,7 @@ struct FolderView: View {
     @Environment(\.mobilePush) private var push
     @State private var choosingVault = false
     @State private var launched = false
+    @State private var creating: NewNoteRequest?
 
     var body: some View {
         Group {
@@ -30,6 +31,9 @@ struct FolderView: View {
         .navigationTitle(path.isEmpty ? vault.name : (path as NSString).lastPathComponent)
         .refreshable { vault.refresh() }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NewNoteButton { creating = NewNoteRequest(folder: path) }
+            }
             if path.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -43,6 +47,7 @@ struct FolderView: View {
                 }
             }
         }
+        .newNoteSheet($creating)
         .fileImporter(isPresented: $choosingVault, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { vault.choose(url) }
         }
@@ -100,6 +105,7 @@ struct FolderView: View {
         #if DEBUG
         guard path.isEmpty, !launched else { return }
         launched = true
+
         if let note = ProcessInfo.processInfo.environment["HEFT_IOS_NOTE"] {
             push(.note(note))
         }

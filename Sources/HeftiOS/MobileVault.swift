@@ -303,6 +303,86 @@ final class MobileVault {
         try result.get()
     }
 
+    /// Where New Note starts when it is not made inside a folder: the vault's
+    /// own Obsidian setting, which syncs, rather than the Mac's preference,
+    /// which stays on the Mac. With no note open, "beside the open note" is
+    /// the root.
+    var newNoteFolder: String {
+        settings.newNoteLocation.directory(openNoteFolder: nil, focus: nil)
+    }
+
+    /// Every folder, vault-relative and in sidebar order, for choosing where
+    /// a note goes. The configured folder is offered even before it exists.
+    var folderPaths: [String] {
+        var paths = [""]
+        func walk(_ item: VaultItem) {
+            for child in item.children where child.isFolder {
+                paths.append(child.relativePath)
+                walk(child)
+            }
+        }
+        if let tree { walk(tree) }
+        if !paths.contains(newNoteFolder) { paths.append(newNoteFolder) }
+        return paths
+    }
+
+    /// Makes an empty note called `name` in `folder` and answers its path.
+    ///
+    /// A name already taken opens that note instead, as on the Mac: the name
+    /// is the title links use, so a numbered copy would be a second note
+    /// nobody meant. Only an existing folder or the configured one is used;
+    /// the latter is created, since naming it was asking for notes to go there.
+    func createNote(named name: String, in folder: String) throws -> (path: String, existed: Bool) {
+        guard let root else { throw DailyNoteCaptureError.vaultUnavailable }
+        var stem = VaultOperations.sanitise(name)
+        if stem.lowercased().hasSuffix(".md") { stem = String(stem.dropLast(3)) }
+        guard !stem.isEmpty, !stem.contains("/"), stem != ".", stem != ".." else {
+            throw NoteCreation.Failure.unusableName(name)
+        }
+        let folder = NewNoteLocation.normalised(folder)
+        let directory = folder.isEmpty ? root : root.appendingPathComponent(folder, isDirectory: true)
+        let prefix = folder.isEmpty ? "" : folder + "/"
+        // By listing rather than `fileExists`, which takes "groceries" for a
+        // new name beside `Groceries.md`; the write below would then refuse.
+        let taken = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        if let existing = taken.first(where: { $0.caseInsensitiveCompare(stem + ".md") == .orderedSame }) {
+            return (prefix + existing, true)
+        }
+        let url = directory.appendingPathComponent(stem + ".md")
+        let path = prefix + stem + ".md"
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var coordinationError: NSError?
+        var result: Result<Void, Error> = .success(())
+        NSFileCoordinator().coordinate(writingItemAt: url, options: [], error: &coordinationError) { coordinated in
+            result = Result { try Data().write(to: coordinated, options: .withoutOverwriting) }
+        }
+        if let coordinationError { throw coordinationError }
+        try result.get()
+        frecency?.record(path)
+        refresh()
+        return (path, false)
+    }
+
+    /// Makes an empty folder called `name` inside `parent`.
+    func createFolder(named name: String, in parent: String) throws {
+        guard let root else { throw DailyNoteCaptureError.vaultUnavailable }
+        let stem = VaultOperations.sanitise(name)
+        guard !stem.isEmpty, !stem.contains("/"), !stem.hasPrefix(".") else {
+            throw MobileFolderError.unusableName(name)
+        }
+        let parent = NewNoteLocation.normalised(parent)
+        let directory = parent.isEmpty ? root : root.appendingPathComponent(parent, isDirectory: true)
+        let taken = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        guard !taken.contains(where: { $0.caseInsensitiveCompare(stem) == .orderedSame }) else {
+            throw MobileFolderError.taken(stem)
+        }
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(stem, isDirectory: true),
+            withIntermediateDirectories: false
+        )
+        refresh()
+    }
+
     /// Today's note, made from the daily template when it does not exist.
     /// `ensureNote` never overwrites, so tapping a day twice is harmless.
     func dailyNote(for date: Date) throws -> NoteRef {
@@ -313,6 +393,18 @@ final class MobileVault {
             throw DailyNoteCaptureError.vaultUnavailable
         }
         return note
+    }
+}
+
+enum MobileFolderError: LocalizedError {
+    case unusableName(String)
+    case taken(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unusableName(let name): "\(name) is not a name a folder can have."
+        case .taken(let name): "There is already something called \(name) here."
+        }
     }
 }
 

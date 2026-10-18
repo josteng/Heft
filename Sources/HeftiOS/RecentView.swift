@@ -9,6 +9,7 @@ import SwiftUI
 /// snapshot, so the list is there before the vault has been scanned.
 struct RecentView: View {
     @Environment(MobileVault.self) private var vault
+    @State private var creating: NewNoteRequest?
 
     var body: some View {
         let dating = RecentDating()
@@ -41,6 +42,21 @@ struct RecentView: View {
         }
         .navigationTitle("Recent")
         .refreshable { vault.refresh() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
+            }
+        }
+        .newNoteSheet($creating)
+        #if DEBUG
+        .onAppear {
+            let environment = ProcessInfo.processInfo.environment
+            if let name = environment["HEFT_IOS_NEW"] {
+                creating = NewNoteRequest(folder: vault.newNoteFolder, name: name,
+                                          makesFolder: environment["HEFT_IOS_NEW_KIND"] == "folder")
+            }
+        }
+        #endif
     }
 }
 

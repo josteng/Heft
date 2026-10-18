@@ -33,6 +33,8 @@ struct HeftMobileApp: App {
 enum MobileRoute: Hashable {
     case folder(String)
     case note(String)
+    /// A note just made, opened with the keyboard up.
+    case newNote(String)
     case tag(String)
     case image(String)
 }
@@ -211,6 +213,7 @@ struct MobileStack<Root: View>: View {
                     switch route {
                     case .folder(let folder): FolderView(path: folder)
                     case .note(let note): NoteView(path: note)
+                    case .newNote(let note): NoteView(path: note, startsTyping: true)
                     case .tag(let tag): TagView(tag: tag)
                     case .image(let image): ImageFileView(path: image)
                     }
