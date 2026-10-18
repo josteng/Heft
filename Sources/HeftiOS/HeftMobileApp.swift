@@ -128,7 +128,8 @@ struct MobileRootView: View {
                     MobileStack { FolderView(path: "") }
                 }
                 Tab("Calendar", systemImage: "calendar", value: .calendar) {
-                    MobileStack { CalendarView() }
+                    // The calendar places Capture itself, after Today.
+                    MobileStack(showsCapture: false) { CalendarView() }
                 }
                 Tab(value: .search, role: .search) {
                     MobileStack { SearchView() }
@@ -190,15 +191,22 @@ struct MobileRootView: View {
 /// A navigation stack that knows every route, so a link followed from a note
 /// in any tab lands in that tab.
 struct MobileStack<Root: View>: View {
+    var showsCapture = true
     @ViewBuilder var root: Root
     @State private var path: [MobileRoute] = []
+    /// A note on the root screen has the keyboard: capture is for getting a
+    /// line in without a note open, so it gives the bar to undo and Done.
+    @State private var typing = false
 
     var body: some View {
         NavigationStack(path: $path) {
             root
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) { CaptureButton() }
+                    if showsCapture, !typing {
+                        ToolbarItem(placement: .topBarTrailing) { CaptureButton() }
+                    }
                 }
+                .onPreferenceChange(TypingInNoteKey.self) { typing = $0 }
                 .navigationDestination(for: MobileRoute.self) { route in
                     switch route {
                     case .folder(let folder): FolderView(path: folder)
@@ -235,10 +243,18 @@ struct VaultPickerView: View {
     }
 }
 
-private struct CaptureButton: View {
+struct CaptureButton: View {
     @Environment(\.mobileCapture) private var capture
 
     var body: some View {
         Button("Capture", systemImage: "text.badge.plus", action: capture)
+    }
+}
+
+/// Raised by a note being typed into, for the stack around it.
+struct TypingInNoteKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
     }
 }

@@ -1,5 +1,6 @@
 import HeftCore
 import SwiftUI
+import UIKit
 
 /// The daily notes, with the day's note right under its calendar.
 ///
@@ -40,31 +41,55 @@ struct CalendarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             grid
             Divider().padding(.top, 8)
             note
         }
-        .navigationTitle(selected.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+        .navigationTitle(month.formatted(.dateTime.month(.wide).year()))
         .navigationBarTitleDisplayMode(.inline)
+        // Shown on the left instead; the bar's own centred title stays as
+        // the screen's name for VoiceOver.
+        .toolbar(removing: .title)
         .toolbar {
-            // Drawn here rather than left to the bar, which cannot animate
-            // its title: the digits roll forward or back with the day, as
-            // the Mac's calendar rolls its month.
-            ToolbarItem(placement: .principal) {
-                Text(selected.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                    .font(.headline)
-                    .contentTransition(.numericText(value: selected.timeIntervalSinceReferenceDate))
-            }
-            if !calendar.isDateInToday(selected) {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Today") { select(Date()) }
+            // The month on the left, as Calendar has it, and the only title:
+            // a day's name above a month row said nearly the same thing
+            // twice. The day is marked in the grid, and a daily note's own
+            // heading names it. Tapping it folds or opens the calendar, and
+            // its digits roll as the months page.
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    if folded { unfold() } else { fold() }
+                } label: {
+                    Text(month.formatted(.dateTime.month(.wide).year()))
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .contentTransition(.numericText(value: month.timeIntervalSinceReferenceDate))
+                        .fixedSize()
                 }
+                .accessibilityHint(folded ? "Shows the whole month" : "Folds the month to one week")
+            }
+            .sharedBackgroundVisibility(.hidden)
+            // Today first, so the group grows to the left when it appears,
+            // and only away from today and not while typing. Capture is
+            // placed here rather than by the tab so it can come after it.
+            if document?.editing != true {
+                if !showsToday {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { select(Date()) } label: {
+                            Image(systemName: Self.todaySymbol)
+                        }
+                        .accessibilityLabel("Today")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) { CaptureButton() }
             }
         }
         .onAppear {
             openSelected()
             #if DEBUG
+            if let shift = ProcessInfo.processInfo.environment["HEFT_IOS_DAY"].flatMap(Int.init) {
+                select(calendar.date(byAdding: .day, value: shift, to: Date()) ?? Date())
+            }
             if ProcessInfo.processInfo.environment["HEFT_IOS_FOLDED"] != nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { fold() }
                 if ProcessInfo.processInfo.environment["HEFT_IOS_UNFOLD"] != nil {
@@ -113,29 +138,13 @@ struct CalendarView: View {
 
     /// The month's name, which tapping folds, between arrows that page it;
     /// gone while folded, when the selected day is what opens it again.
-    private var header: some View {
-        HStack {
-            Button { page(-1) } label: {
-                Image(systemName: "chevron.left").frame(width: 44, height: 44)
-            }
-            Button {
-                if folded { unfold() } else { fold() }
-            } label: {
-                Text(month.formatted(.dateTime.month(.wide).year()))
-                    .foregroundStyle(.primary)
-                    .contentTransition(.numericText(value: month.timeIntervalSinceReferenceDate))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-            }
-            Button { page(1) } label: {
-                Image(systemName: "chevron.right").frame(width: 44, height: 44)
-            }
-        }
-        .font(.title3.weight(.semibold))
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 8)
-        .frame(height: collapsed ? 0 : 50, alignment: .top)
-        .opacity(collapsed ? 0 : 1)
-        .clipped()
+    /// A calendar with one day marked, which iOS 27 has; the plain calendar
+    /// before that, where the newer symbol would draw nothing.
+    private static let todaySymbol = UIImage(systemName: "calendar.day") == nil ? "calendar" : "calendar.day"
+
+    /// Today is selected and its month is the one on show.
+    private var showsToday: Bool {
+        calendar.isDateInToday(selected) && calendar.isDate(month, equalTo: Date(), toGranularity: .month)
     }
 
     private func weekStart(of date: Date) -> Date {
@@ -170,6 +179,14 @@ struct CalendarView: View {
         }
         .contentShape(.rect)
         .simultaneousGesture(swipes)
+        // Swiping is the only paging on screen; VoiceOver pages by adjusting.
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: page(1)
+            case .decrement: page(-1)
+            @unknown default: break
+            }
+        }
     }
 
     private var weeksGrid: some View {
@@ -198,8 +215,11 @@ struct CalendarView: View {
                 }
             }
             .animation(nil, value: month)
-            .offset(x: slide)
-            .opacity(1 - min(abs(slide) / 400, 0.6))
+            .offset(y: slide)
+            .opacity(1 - min(abs(slide) / 240, 0.7))
+            // A month sliding out stays inside the calendar rather than over
+            // the month's name or the note.
+            .clipped()
         }
         .padding(.horizontal)
         .padding(.top, 4)
@@ -236,43 +256,38 @@ struct CalendarView: View {
         .padding(.top, 4)
     }
 
-    /// Sideways on the open month, the grid follows the finger and past a
-    /// short flick turns the page. Up folds the calendar and down opens
-    /// it, open or folded; the strip scrolls sideways by itself.
+    /// Up and down page the month, as Calendar on iOS does: the weeks
+    /// follow the finger and a short flick turns the page. Folding is left
+    /// to the note's scrolling and to the month's name, and the folded strip
+    /// scrolls sideways by itself.
     private var swipes: some Gesture {
         DragGesture(minimumDistance: 15)
             .onChanged { drag in
-                guard !collapsed, abs(drag.translation.width) > abs(drag.translation.height) else { return }
-                slide = drag.translation.width
+                guard !collapsed, abs(drag.translation.height) > abs(drag.translation.width) else { return }
+                slide = drag.translation.height
             }
             .onEnded { drag in
                 swipedAt = Date()
-                let across = drag.predictedEndTranslation.width
-                let down = drag.predictedEndTranslation.height
-                if abs(drag.translation.height) > abs(drag.translation.width) {
-                    if down < -40, !collapsed {
-                        fold()
-                    } else if down > 40, collapsed, document?.editing != true {
-                        unfold()
-                    }
-                    withAnimation(.snappy) { slide = 0 }
-                } else if !collapsed, abs(across) > 80 {
-                    page(across < 0 ? 1 : -1)
+                let along = drag.predictedEndTranslation.height
+                if !collapsed, abs(drag.translation.height) > abs(drag.translation.width), abs(along) > 60 {
+                    page(along < 0 ? 1 : -1)
                 } else {
                     withAnimation(.snappy) { slide = 0 }
                 }
             }
     }
 
+    /// Slides the weeks out the way the finger went and the next month in
+    /// from the other side.
     private func page(_ direction: Int) {
-        let width: CGFloat = 420
+        let distance: CGFloat = 220
         withAnimation(.easeIn(duration: 0.12)) {
-            slide = -CGFloat(direction) * width
+            slide = -CGFloat(direction) * distance
         } completion: {
             var still = Transaction()
             still.disablesAnimations = true
             withTransaction(still) {
-                slide = CGFloat(direction) * width
+                slide = CGFloat(direction) * distance
             }
             // Animated for the title, which rolls to the new month; the
             // weeks keep out of it and simply slide in.
@@ -361,14 +376,14 @@ struct CalendarView: View {
     @ViewBuilder
     private var note: some View {
         if let document {
-            NoteContent(document: document) { down in
+            NoteContent(document: document, scrolledDown: { down in
                 guard down != folded else { return }
                 if down {
                     fold()
                 } else {
                     unfold()
                 }
-            }
+            }, findInMenu: true)
             .id(document.path)
         } else {
             ContentUnavailableView {

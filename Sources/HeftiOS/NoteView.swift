@@ -179,6 +179,9 @@ struct NoteView: View {
 struct NoteEditingToolbar: ToolbarContent {
     let document: NoteDocument
     var backlinkCount = 0
+    /// Find behind "…" rather than beside it, where the bar already has a
+    /// button of its own to make room for.
+    var findInMenu = false
     var showBacklinks: () -> Void = {}
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
@@ -198,7 +201,9 @@ struct NoteEditingToolbar: ToolbarContent {
             }
         } else {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button("Find in Note", systemImage: "magnifyingglass") { document.find() }
+                if !findInMenu {
+                    Button("Find in Note", systemImage: "magnifyingglass") { document.find() }
+                }
                 Menu("More", systemImage: "ellipsis") { menu }
             }
         }
@@ -208,6 +213,9 @@ struct NoteEditingToolbar: ToolbarContent {
     private var menu: some View {
         let path = document.path
         let pinned = vault.isPinned(path)
+        if findInMenu {
+            Button("Find in Note", systemImage: "magnifyingglass") { document.find() }
+        }
         Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
             vault.togglePin(path)
         }
@@ -236,6 +244,9 @@ struct NoteEditingToolbar: ToolbarContent {
 struct NoteContent: View {
     let document: NoteDocument
     var scrolledDown: ((Bool) -> Void)? = nil
+    /// Set where the screen's bar has its own button, as the calendar's has
+    /// Capture.
+    var findInMenu = false
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
     @Environment(\.openURL) private var openURL
@@ -277,10 +288,12 @@ struct NoteContent: View {
             }
         }
         .toolbar {
-            NoteEditingToolbar(document: document, backlinkCount: backlinks.count) {
+            NoteEditingToolbar(document: document, backlinkCount: backlinks.count,
+                               findInMenu: findInMenu) {
                 showsBacklinks = true
             }
         }
+        .preference(key: TypingInNoteKey.self, value: document.editing)
         .sheet(isPresented: $showsBacklinks) {
             NavigationStack {
                 ScrollView {
