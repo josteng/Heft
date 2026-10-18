@@ -13,8 +13,18 @@ struct RecentView: View {
     @State private var action: ItemAction?
 
     var body: some View {
-        List {
-            RecentSections { action = $0 }
+        ScrollViewReader { proxy in
+            List {
+                RecentSections { action = $0 }
+            }
+            #if DEBUG
+            // Scrolled to a note at launch, to see the bar as it is mid-list.
+            .task {
+                guard let id = ProcessInfo.processInfo.environment["HEFT_IOS_SCROLL_TO"] else { return }
+                try? await Task.sleep(for: .seconds(1))
+                proxy.scrollTo(id, anchor: .top)
+            }
+            #endif
         }
         .overlay {
             if vault.recent.isEmpty {

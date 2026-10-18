@@ -16,7 +16,7 @@ Nothing can tap the simulator from a script, so DEBUG builds read launch
 variables (`SIMCTL_CHILD_` prefixed for `simctl launch`) that set a screen
 up for a screenshot: `HEFT_IOS_VAULT` opens a folder without the picker,
 `HEFT_IOS_TAB`, `HEFT_IOS_NOTE`, `HEFT_IOS_DAY`, `HEFT_IOS_FOLDED` place the
-view, `HEFT_IOS_CARET` and `HEFT_IOS_SELECT` give the editor the keyboard,
+view, `HEFT_IOS_SCROLL_TO=<path>` scrolls Recent to a note, `HEFT_IOS_CARET` and `HEFT_IOS_SELECT` give the editor the keyboard,
 `HEFT_IOS_TYPE` types through the delegate as the keyboard does (`⏎` is
 Return), `HEFT_IOS_PASTE` inserts its text at once as a paste does, `HEFT_IOS_ACTIONS` runs editor actions by name, and `HEFT_IOS_NEW`
 opens New Note with a name (`HEFT_IOS_NEW_KIND=folder` switches it to a folder, `HEFT_IOS_NEW_CONFIRM`
