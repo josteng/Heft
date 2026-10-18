@@ -1,4 +1,3 @@
-import LinkPresentation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -13,7 +12,8 @@ final class ShareViewController: UIViewController {
             let shared = await SharedContent.markdown(from: items)
             let host = UIHostingController(rootView: ShareView(
                 initialText: shared.text,
-                untitledURL: shared.untitledURL,
+                url: shared.url,
+                pageTitle: shared.title,
                 finish: { [weak self] in
                     self?.extensionContext?.completeRequest(returningItems: nil)
                 },
@@ -34,9 +34,10 @@ final class ShareViewController: UIViewController {
 enum SharedContent {
     /// A page as `[Title](url)`, text as it came. Safari passes the page title
     /// as the item's content text; an app that shares only the address gets
-    /// the bare URL, which Obsidian links as it is, and `untitledURL` so the
-    /// sheet can look the title up.
-    static func markdown(from items: [NSExtensionItem]) async -> (text: String, untitledURL: URL?) {
+    /// the bare URL, which Obsidian links as it is, and the sheet looks the
+    /// title up.
+    static func markdown(from items: [NSExtensionItem]) async
+        -> (text: String, url: URL?, title: String?) {
         var url: URL?
         var text: String?
         var title: String?
@@ -55,30 +56,21 @@ enum SharedContent {
             }
         }
         guard let url, url.scheme != "file" else {
-            return ((text ?? title ?? "").trimmingCharacters(in: .whitespacesAndNewlines), nil)
+            return ((text ?? title ?? "").trimmingCharacters(in: .whitespacesAndNewlines), nil, nil)
         }
         let label = (title ?? text)?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let label, !label.isEmpty, label != url.absoluteString else {
-            return (url.absoluteString, url)
+            return (url.absoluteString, url, nil)
         }
-        return (link(label, url), nil)
+        return (link(label, url), url, label)
     }
 
+    /// Brackets in the title become parentheses rather than being escaped:
+    /// `\[` is valid markdown, but not every editor reads a link around it,
+    /// and a title reads the same either way.
     static func link(_ label: String, _ url: URL) -> String {
-        let escaped = label.replacingOccurrences(of: "[", with: "\\[")
-            .replacingOccurrences(of: "]", with: "\\]")
-        return "[\(escaped)](\(url.absoluteString))"
+        let plain = label.replacingOccurrences(of: "[", with: "(")
+            .replacingOccurrences(of: "]", with: ")")
+        return "[\(plain)](\(url.absoluteString))"
     }
-
-    /// The page's title, or nil if it does not come quickly.
-    static func title(of url: URL) async -> String? {
-        let provider = LPMetadataProvider()
-        provider.timeout = 4
-        let title = try? await provider.startFetchingMetadata(for: url).title
-        return title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-    }
-}
-
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

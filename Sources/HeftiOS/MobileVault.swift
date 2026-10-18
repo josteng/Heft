@@ -97,10 +97,17 @@ final class MobileVault {
             for item in pending {
                 try? FileManager.default.startDownloadingUbiquitousItem(at: item.url)
             }
+            // Straight from the folder scan, before the index is built: the
+            // share sheet only needs names, and opening Heft right before a
+            // share should be enough for it to have them.
+            SharedVault.publishNoteList(tree.flattened()
+                .filter(\.isMarkdown)
+                .sorted { ($0.fingerprint?.modifiedNanoseconds ?? .min) > ($1.fingerprint?.modifiedNanoseconds ?? .min) }
+                .map { item in
+                    let note = NoteRef(item: item)
+                    return SharedVault.ListedNote(path: note.relativePath, name: note.name, folder: note.folder)
+                })
             let index = VaultIndex.build(root: tree, reusing: previous)
-            SharedVault.publishNoteList(index.notesByLastEdit.map {
-                SharedVault.ListedNote(path: $0.relativePath, name: $0.name, folder: $0.folder)
-            })
             await self.land(token: token, tree: tree, index: index, settings: settings,
                             pending: pending.count)
         }
