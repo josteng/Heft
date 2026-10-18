@@ -240,14 +240,15 @@ final class VaultSession: ObservableObject {
         reloadTask = Task { [weak self] in
             if !immediately { try? await Task.sleep(for: .milliseconds(400)) }
             guard !Task.isCancelled else { return }
-            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings, [NoteRef]) in
+            let scanned = await Task.detached(priority: .userInitiated) { () -> (VaultItem, VaultIndex, ObsidianSettings, [NoteRef], AppearancePreferences?) in
                 let tree = VaultScanner.scan(root: root)
                 // The first build of a process starts from what the last one
                 // left on disk, so a cold start reads only what changed since.
                 let base = previous.notes.isEmpty ? cache.load(vault: root) ?? previous : previous
                 let index = VaultIndex.build(root: tree, reusing: base)
                 if index.notesRead > 0 { cache.save(index, vault: root) }
-                return (tree, index, ObsidianSettings.load(vaultRoot: root), index.notesByLastEdit)
+                return (tree, index, ObsidianSettings.load(vaultRoot: root), index.notesByLastEdit,
+                        AppearancePreferences.load(fromVault: root))
             }.value
             guard !Task.isCancelled, let self else { return }
             latestIndex = scanned.1
@@ -259,6 +260,9 @@ final class VaultSession: ObservableObject {
             if treeChanged { tree = scanned.0 }
             if treeChanged || !scanned.1.answersMatch(index) { index = scanned.1 }
             if settings != scanned.2 { settings = scanned.2 }
+            // Colours chosen on the phone arrive with the scan their file
+            // change caused.
+            AppearanceSync.read(scanned.4, in: root)
             // What makes a note findable by Siri rather than merely nameable
             // in a Heft action. Only when the tree moved: the notes Spotlight
             // is told about are the files that exist, and editing one changes
@@ -373,6 +377,9 @@ final class VaultRegistry: ObservableObject {
         // never reorders.
         recordRecentVault(root.path)
         if let existing = sessions[root.path]?.value { return existing }
+        AppearanceSync.openVaults = { [weak self] in
+            MainActor.assumeIsolated { self?.sessions.values.compactMap { $0.value?.root } ?? [] }
+        }
         let session = VaultSession(root: root)
         sessions[root.path] = WeakSession(session)
         HeftDefaults.shared.set(root.path, forKey: CaptureVaultPreference.defaultsKey)

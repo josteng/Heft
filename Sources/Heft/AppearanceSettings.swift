@@ -22,29 +22,47 @@ final class AppearanceSettings: ObservableObject {
     static let defaultHeadingColors = StyleDefaults.headingColors
 
     @Published var customAccentColor: NSColor? {
-        didSet { Self.persist(customAccentColor, key: Self.accentKey) }
+        didSet {
+            Self.persist(customAccentColor, key: Self.accentKey)
+            AppearanceSync.changed()
+        }
     }
     /// Separate from `customAccentColor` so links can be recoloured without
     /// also recolouring the caret and checkboxes; `nil` falls back to
     /// whatever the accent colour currently is, not to a fixed constant, so
     /// an un-set link colour still tracks an accent change.
     @Published var customLinkColor: NSColor? {
-        didSet { Self.persist(customLinkColor, key: Self.linkKey) }
+        didSet {
+            Self.persist(customLinkColor, key: Self.linkKey)
+            AppearanceSync.changed()
+        }
     }
     /// Falls back to the accent colour for the same reason links do: a tag is
     /// something to click through, and reads as one when it shares their
     /// colour.
     @Published var customTagColor: NSColor? {
-        didSet { Self.persist(customTagColor, key: Self.tagKey) }
+        didSet {
+            Self.persist(customTagColor, key: Self.tagKey)
+            AppearanceSync.changed()
+        }
     }
     @Published var customCodeColor: NSColor? {
-        didSet { Self.persist(customCodeColor, key: Self.codeKey) }
+        didSet {
+            Self.persist(customCodeColor, key: Self.codeKey)
+            AppearanceSync.changed()
+        }
     }
     @Published var customBoldColor: NSColor? {
-        didSet { Self.persist(customBoldColor, key: Self.boldKey) }
+        didSet {
+            Self.persist(customBoldColor, key: Self.boldKey)
+            AppearanceSync.changed()
+        }
     }
     @Published var customItalicColor: NSColor? {
-        didSet { Self.persist(customItalicColor, key: Self.italicKey) }
+        didSet {
+            Self.persist(customItalicColor, key: Self.italicKey)
+            AppearanceSync.changed()
+        }
     }
     /// One slot per heading level (index 0 = h1); `nil` entries fall back to
     /// `defaultHeadingColors`. A single array, rather than six named
@@ -55,6 +73,7 @@ final class AppearanceSettings: ObservableObject {
             for (index, color) in customHeadingColors.enumerated() {
                 Self.persist(color, key: Self.headingKey(index))
             }
+            AppearanceSync.changed()
         }
     }
     /// Was per-window on `AppModel` until every open window's copy could
@@ -63,6 +82,7 @@ final class AppearanceSettings: ObservableObject {
     @Published var colorfulFormattingEnabled: Bool {
         didSet {
             HeftDefaults.shared.set(colorfulFormattingEnabled, forKey: Self.colorfulFormattingKey)
+            AppearanceSync.changed()
         }
     }
 
