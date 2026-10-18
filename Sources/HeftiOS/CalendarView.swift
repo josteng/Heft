@@ -42,11 +42,12 @@ struct CalendarView: View {
     private static let rowHeight: CGFloat = 40
 
     var body: some View {
-        VStack(spacing: 0) {
-            grid
-            Divider().padding(.top, 8)
-            note
-        }
+        // The note runs under the month, as a list runs under a bar, and
+        // ends at its edge rather than at a rule.
+        note
+            .safeAreaBar(edge: .top) {
+                grid.padding(.bottom, 8)
+            }
         .navigationTitle(month.formatted(.dateTime.month(.wide).year()))
         .navigationBarTitleDisplayMode(.inline)
         // Shown on the left instead; the bar's own centred title stays as
