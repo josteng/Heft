@@ -1579,6 +1579,7 @@ final class MobileTextView: UITextView {
         super.didMoveToWindow()
         guard window != nil, !watchingWidth else { return }
         watchingWidth = true
+        watchKeyboard()
         registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (view: MobileTextView, _: UITraitCollection) in
             view.onWidthClass?()
         }
@@ -1607,6 +1608,41 @@ final class MobileTextView: UITextView {
             return false
         }
         return super.gestureRecognizerShouldBegin(recognizer)
+    }
+
+    /// The editor runs on under the keyboard and whatever floats on it,
+    /// as the iPad's shortcuts bar does with a hardware keyboard, and is
+    /// padded by what covers it instead: shrunk to stop above them, it left
+    /// that strip as empty window, black behind the bar's glass.
+    ///
+    /// Optional, and so nil until set: this view is made through UIKit's
+    /// `init(usingTextLayoutManager:)`, which skips Swift's initial values,
+    /// and an array left as zeroed memory crashed when read.
+    private var keyboardWatch: [NSObjectProtocol]?
+
+    private func watchKeyboard() {
+        guard keyboardWatch == nil else { return }
+        keyboardWatch = []
+        let center = NotificationCenter.default
+        for name in [UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardWillHideNotification] {
+            keyboardWatch?.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+                MainActor.assumeIsolated { self?.keyboardMoved(to: name == UIResponder.keyboardWillHideNotification ? nil : frame) }
+            })
+        }
+    }
+
+    private func keyboardMoved(to frame: CGRect?) {
+        var covered: CGFloat = 0
+        if let frame, let window {
+            let mine = convert(bounds, to: window)
+            let keyboard = window.convert(frame, from: window.screen.coordinateSpace)
+            covered = max(0, mine.maxY - keyboard.minY)
+        }
+        guard contentInset.bottom != covered else { return }
+        contentInset.bottom = covered
+        verticalScrollIndicatorInsets.bottom = covered
+        if isFirstResponder { scrollRangeToVisible(selectedRange) }
     }
 
     override func layoutSubviews() {

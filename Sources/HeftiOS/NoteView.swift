@@ -359,6 +359,9 @@ struct NoteContent: View {
                         }
                     }
                 )
+                // Under the keyboard rather than above it; the editor pads
+                // itself by what covers it.
+                .ignoresSafeArea(.keyboard, edges: .bottom)
                 .overlay(alignment: .top) {
                     if document.conflict { conflictBanner }
                 }
