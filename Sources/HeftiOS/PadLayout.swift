@@ -263,6 +263,7 @@ private struct PadTreeRows: View {
     let items: [VaultItem]
     @Binding var expanded: Set<String>
     let perform: (ItemAction) -> Void
+    @Environment(MobileVault.self) private var vault
 
     var body: some View {
         ForEach(items) { item in
@@ -278,12 +279,23 @@ private struct PadTreeRows: View {
                 } label: {
                     Label(item.name, systemImage: expanded.contains(item.relativePath) ? "folder.fill" : "folder")
                         .itemActions(ItemRef(path: item.relativePath, isFolder: true), perform)
+                        // A note dropped here moves into this folder, its
+                        // links repointed as Move does.
+                        .dropDestination(for: String.self) { texts, _ in
+                            var moved = false
+                            for text in texts {
+                                guard let note = NoteDrag.note(in: text, vault: vault) else { continue }
+                                if (try? vault.move(note.relativePath, into: item.relativePath)) != nil { moved = true }
+                            }
+                            return moved
+                        }
                 }
             } else if item.kind == .markdown {
                 NavigationLink(value: MobileRoute.note(item.relativePath)) {
                     Label(item.name, systemImage: "doc.text")
                 }
                 .itemActions(ItemRef(path: item.relativePath, isFolder: false), perform)
+                .draggableNote(item.relativePath, vault: vault)
             } else if item.kind == .image {
                 NavigationLink(value: MobileRoute.image(item.relativePath)) {
                     Label(item.name, systemImage: "photo")

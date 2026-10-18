@@ -319,3 +319,30 @@ private struct RenameSheet: View {
         rename()
     }
 }
+
+@MainActor
+extension View {
+    /// A note's row can be dragged: into a note it writes a link to it,
+    /// onto a folder in the iPad's tree it moves it there.
+    func draggableNote(_ path: String, vault: MobileVault) -> some View {
+        draggable(NoteDrag.link(to: path, in: vault))
+    }
+}
+
+/// What a dragged note carries: its link as text, which any text view takes
+/// as a drop, and which a folder can resolve back to the note.
+@MainActor
+enum NoteDrag {
+    static func link(to path: String, in vault: MobileVault) -> String {
+        guard let note = vault.note(at: path) else { return path }
+        return "[[\(vault.index.linkDestination(for: note))]]"
+    }
+
+    /// The note a dropped `[[link]]` names, if it is one.
+    static func note(in text: String, vault: MobileVault) -> NoteRef? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[["), trimmed.hasSuffix("]]") else { return nil }
+        let target = String(trimmed.dropFirst(2).dropLast(2))
+        return vault.index.resolve(WikiLink(target: target), from: nil)
+    }
+}

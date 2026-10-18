@@ -100,6 +100,7 @@ private struct RecentRow: View {
     let note: SharedVault.ListedNote
     let dating: RecentDating
     let perform: (ItemAction) -> Void
+    @Environment(MobileVault.self) private var vault
 
     var body: some View {
         NavigationLink(value: MobileRoute.note(note.path)) {
@@ -120,6 +121,7 @@ private struct RecentRow: View {
             }
         }
         .itemActions(ItemRef(path: note.path, isFolder: false), perform)
+        .draggableNote(note.path, vault: vault)
     }
 
     private var preview: some View {
