@@ -220,6 +220,7 @@ struct NoteView: View {
             // Inline, because most notes open with their own title as a heading
             // and a large bar title above it says the same thing twice.
             .navigationBarTitleDisplayMode(.inline)
+            .background(HidesTabBarWhenPushed())
             // On the left, beside the back button, reading or typing alike:
             // centred, it jumped aside whenever typing widened the buttons.
             // The bar's own title stays for VoiceOver and the back menu.
@@ -535,3 +536,32 @@ private struct BacklinksView: View {
     }
 }
 
+/// A note takes the whole screen, as Notes and Mail open one. The tab bar
+/// controller hides its bar, animated, as a note appears, and shows it again
+/// as the back animation starts, unless the screen coming back is a note too.
+/// SwiftUI's toolbar visibility brought the bar back only once the pop had
+/// finished, and `hidesBottomBarWhenPushed` is read before a SwiftUI screen
+/// can set it. The calendar's note is the tab's own content, never pushed,
+/// so it keeps the bar.
+private struct HidesTabBarWhenPushed: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Marker { Marker() }
+    func updateUIViewController(_ controller: Marker, context: Context) {}
+
+    final class Marker: UIViewController {
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            tabBarController?.setTabBarHidden(true, animated: animated)
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            guard let coming = navigationController?.topViewController,
+                  !Self.holdsMarker(coming) else { return }
+            tabBarController?.setTabBarHidden(false, animated: animated)
+        }
+
+        private static func holdsMarker(_ controller: UIViewController) -> Bool {
+            controller is Marker || controller.children.contains(where: holdsMarker)
+        }
+    }
+}
