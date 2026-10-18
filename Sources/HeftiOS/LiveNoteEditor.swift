@@ -1170,6 +1170,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             case .outdent: outdent()
             case .indent: indent()
             case .quote: quote()
+            case .link: wikiLink()
             }
             refreshFormatState()
         }
@@ -1582,15 +1583,6 @@ final class MobileTextView: UITextView {
             view.onWidthClass?()
         }
         onWidthClass?()
-    }
-
-    override var keyCommands: [UIKeyCommand]? {
-        [
-            UIKeyCommand(title: "Bold", action: #selector(toggleBoldface(_:)), input: "b", modifierFlags: .command),
-            UIKeyCommand(title: "Italic", action: #selector(toggleItalics(_:)), input: "i", modifierFlags: .command),
-            UIKeyCommand(title: "Highlight", action: #selector(highlightSelection(_:)), input: "h",
-                         modifierFlags: [.command, .shift]),
-        ]
     }
 
     override func toggleBoldface(_ sender: Any?) { onFormat?(.bold) }

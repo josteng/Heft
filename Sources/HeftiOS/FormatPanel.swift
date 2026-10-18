@@ -12,6 +12,9 @@ enum FormatTool: Hashable {
     case task, bullets, numbers
     case outdent, indent
     case quote, callout
+    /// `[[ ]]` at the caret, or around the selection; from ⌘K and the
+    /// menu bar, which the panel itself has no button for.
+    case link
 }
 
 /// What applies where the caret is, which the panel shows filled in.

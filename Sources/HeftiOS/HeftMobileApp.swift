@@ -27,6 +27,7 @@ struct HeftMobileApp: App {
             MobileRootView()
                 .environment(vault)
         }
+        .commands { HeftMenuCommands() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { vault.returnedToForeground() }
         }

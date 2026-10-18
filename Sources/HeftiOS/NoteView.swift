@@ -385,6 +385,7 @@ struct NoteContent: View {
             if !document.suggestionChips.isEmpty { SuggestionBar(document: document) }
         }
         .preference(key: TypingInNoteKey.self, value: document.editing)
+        .focusedSceneValue(\.heftNote, document)
         .onAppear { onScreen = true }
         .onDisappear { onScreen = false }
         // The Mac shows this note in its Dock while it is open here.

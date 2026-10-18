@@ -77,6 +77,19 @@ struct PadRootView: View {
             }
         }
         .onAppear(perform: applyLaunchRequest)
+        .focusedSceneValue(\.heftLibrary, LibraryActions(
+            newNote: { creating = NewNoteRequest(folder: vault.newNoteFolder) },
+            newFolder: { creating = NewNoteRequest(folder: vault.newNoteFolder, makesFolder: true) },
+            capture: capture,
+            today: { pick(Date()) },
+            search: { searching = true },
+            show: { chosen in
+                query = ""
+                mode = chosen
+            },
+            toggleCalendar: { withAnimation(.snappy) { showsCalendar.toggle() } },
+            calendarShown: showsCalendar
+        ))
     }
 
     // MARK: Sidebar
@@ -141,19 +154,7 @@ struct PadRootView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
-                    .keyboardShortcut("n")
             }
-        }
-        // Shortcuts with nowhere to show: ⌘K to search, ⌘⇧T for today.
-        .background {
-            Group {
-                Button("Search") { searching = true }
-                    .keyboardShortcut("k")
-                Button("Today") { pick(Date()) }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
-            }
-            .opacity(0)
-            .accessibilityHidden(true)
         }
         .newNoteSheet($creating)
         .itemActionHost($action)

@@ -36,6 +36,9 @@ tabs; so does an iPhone in landscape. The sidebar reuses the phone's lists:
 their rows are `NavigationLink(value:)`, which in a `List(selection:)`
 select instead of pushing. `HEFT_IOS_PAD_MODE` picks the pill's mode, and
 `HEFT_IOS_PAD_MONTH` opens the month, `HEFT_IOS_PAD_FORMAT` the Aa popover.
+The iPadOS menu bar has the Mac's File, Format and View items with the
+Mac's shortcuts (`HeftMenuCommands`), acting on the focused window's note
+and sidebar through focused scene values.
 On a wide iPad the editor's tools are in the note's bar, and the strip
 above the keyboard shows only while it has suggestions: with a hardware
 keyboard it spanned the whole window, sidebar included.
