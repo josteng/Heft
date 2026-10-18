@@ -39,6 +39,7 @@ struct PadRootView: View {
     @Environment(\.mobileCapture) private var capture
     @State private var settings: SettingsRequest?
     @State private var showsSearch = false
+    @State private var searchModel = SearchModel()
     @State private var expandedFolders: Set<String> = []
     @State private var expandedTags: Set<String> = []
     @State private var creating: NewNoteRequest?
@@ -79,7 +80,7 @@ struct PadRootView: View {
         .onAppear(perform: applyLaunchRequest)
         .overlay {
             if showsSearch {
-                SearchPanel(isPresented: $showsSearch) { open($0) }
+                SearchPanel(isPresented: $showsSearch, open: { open($0) }, model: searchModel)
                     .environment(\.mobileLibrary, library)
             }
         }
@@ -94,12 +95,22 @@ struct PadRootView: View {
             newFolder: { creating = NewNoteRequest(folder: vault.newNoteFolder, makesFolder: true) },
             capture: capture,
             today: { pick(Date()) },
-            search: { showsSearch = true },
+            search: { scope in
+                searchModel.scope = scope
+                showsSearch = true
+            },
             show: { chosen in mode = chosen },
             toggleCalendar: { withAnimation(.snappy) { showsCalendar.toggle() } },
             calendarShown: showsCalendar,
             settings: { settings = SettingsRequest() },
-            refresh: { vault.refresh() }
+            refresh: { vault.refresh() },
+            numbered: { number in
+                if showsSearch {
+                    searchModel.choose(chip: number)
+                } else if let chosen = [PadSidebarMode.files, .recent, .tags].dropFirst(number - 1).first {
+                    mode = chosen
+                }
+            }
         )
     }
 
@@ -159,7 +170,10 @@ struct PadRootView: View {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Search", systemImage: "magnifyingglass") { showsSearch = true }
+                Button("Search", systemImage: "magnifyingglass") {
+                    searchModel.scope = nil
+                    showsSearch = true
+                }
                     .tint(.primary)
             }
         }

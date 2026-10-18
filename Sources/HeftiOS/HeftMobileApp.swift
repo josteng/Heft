@@ -255,7 +255,7 @@ struct MobileRootView: View {
             newFolder: { creating = NewNoteRequest(folder: vault.newNoteFolder, makesFolder: true) },
             capture: { capture = CaptureSheetRequest() },
             today: { showDay(Date()) },
-            search: { tab = .search },
+            search: { _ in tab = .search },
             show: { mode in tab = mode == .files ? .files : .recent },
             toggleCalendar: { tab = .calendar },
             calendarShown: true,

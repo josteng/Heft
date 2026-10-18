@@ -19,12 +19,17 @@ struct LibraryActions {
     var newFolder: () -> Void
     var capture: () -> Void
     var today: () -> Void
-    var search: () -> Void
+    /// Opens the search, in a scope or none: ⌘T everything, ⌘O notes,
+    /// ⌘P commands, ⇧⌘F text, as the Mac's four doors into its one bar.
+    var search: (BarScope?) -> Void
     var show: (PadSidebarMode) -> Void
     var toggleCalendar: () -> Void
     var calendarShown: Bool
     var settings: () -> Void
     var refresh: () -> Void
+    /// ⌘1…⌘3: the sidebar's views, or the search's scopes while it is open,
+    /// as the same keys choose the bar's chips on the Mac.
+    var numbered: (Int) -> Void = { _ in }
 }
 
 /// The iPadOS menu bar, with the Mac's menus and the Mac's shortcuts, so a
@@ -78,11 +83,15 @@ struct HeftMenuCommands: Commands {
             .disabled(note == nil)
         }
         CommandGroup(after: .sidebar) {
-            Button("Files") { library?.show(.files) }.keyboardShortcut("1")
-            Button("Recent") { library?.show(.recent) }.keyboardShortcut("2")
-            Button("Tags") { library?.show(.tags) }.keyboardShortcut("3")
+            Button("Files") { library?.numbered(1) }.keyboardShortcut("1")
+            Button("Recent") { library?.numbered(2) }.keyboardShortcut("2")
+            Button("Tags") { library?.numbered(3) }.keyboardShortcut("3")
             Divider()
-            Button("Search") { library?.search() }.keyboardShortcut("t")
+            Button("Search Everything") { library?.search(nil) }.keyboardShortcut("t")
+            Button("Quick Open") { library?.search(.notes) }.keyboardShortcut("o")
+            Button("Command Palette") { library?.search(.commands) }.keyboardShortcut("p")
+            Button("Search Vault Text") { library?.search(.contents) }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             Button(library?.calendarShown == false ? "Show Calendar" : "Hide Calendar") {
                 library?.toggleCalendar()
             }

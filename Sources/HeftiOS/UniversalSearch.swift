@@ -87,6 +87,13 @@ final class SearchModel {
 
     static let commandUse = FrecencyStore(key: "dev.stenglein.Heft.iOS.commandUse")
 
+    /// ⌘1…⌘5: the chip with that number, or no scope when it is the one
+    /// already chosen.
+    func choose(chip number: Int) {
+        guard let chip = BarScope.chip(number: number), chip != .ask else { return }
+        scope = scope == chip ? nil : chip
+    }
+
     /// A prefix typed alone into an unscoped field enters its scope, as on
     /// the Mac, and is taken out of the field.
     func enterScope(byTyping query: String) -> Bool {
@@ -335,9 +342,10 @@ struct UniversalSearchList: View {
         let commands = library.map(MobileCommand.all) ?? []
         if showsChips {
             Section {
-                ScopeChips(model: model)
+                ScopeChips(model: model, numbered: asButtons)
                     .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                     .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
         }
         ForEach(model.sections(for: query, vault: vault, commands: commands)) { section in
@@ -345,6 +353,9 @@ struct UniversalSearchList: View {
                 ForEach(section.rows) { row in
                     rowView(row)
                         .listRowBackground(highlighted == row.id ? Rectangle().fill(.tint.opacity(0.22)) : nil)
+                        // The panel has none, as the Mac's bar has none: a
+                        // plain list drew them under some rows and not others.
+                        .listRowSeparator(asButtons ? .hidden : .automatic)
                 }
             } header: {
                 if let title = section.title { Text(title) }
@@ -441,6 +452,8 @@ struct ScopeChips: View {
     let model: SearchModel
     /// Full size above the phone's keyboard, smaller under a panel's field.
     var large = false
+    /// ⌘1… beside each, where a hardware keyboard chooses them.
+    var numbered = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -463,6 +476,9 @@ struct ScopeChips: View {
             HStack(spacing: 4) {
                 Image(systemName: scope.symbol)
                 Text(scope.title)
+                if numbered, !chosen, let number = scope.chipNumber {
+                    Text("⌘\(number)").font(.caption2).foregroundStyle(.secondary)
+                }
                 if chosen { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
             }
             .font(large ? .body : .subheadline)
@@ -483,8 +499,9 @@ struct SearchPanel: View {
     @Binding var isPresented: Bool
     /// Where a chosen note goes: the iPad's note pane.
     let open: (MobileRoute) -> Void
+    /// Held by the window, so the menu bar's ⌘1… can choose its scope.
+    let model: SearchModel
     @State private var query = ""
-    @State private var model = SearchModel()
     @State private var selected = 0
     @FocusState private var focused: Bool
     @Environment(MobileVault.self) private var vault
@@ -509,6 +526,14 @@ struct SearchPanel: View {
                         .onKeyPress(.downArrow) { move(1, in: rows); return .handled }
                         .onKeyPress(.upArrow) { move(-1, in: rows); return .handled }
                         .onKeyPress(.escape) { close(); return .handled }
+                        // ⌘1–⌘3 come through the menu bar; these two have no
+                        // menu item of their own.
+                        .onKeyPress(keys: ["4", "5"]) { press in
+                            guard press.modifiers.contains(.command),
+                                  let number = Int(String(press.key.character)) else { return .ignored }
+                            model.choose(chip: number)
+                            return .handled
+                        }
                     if !query.isEmpty {
                         Button("Clear", systemImage: "xmark.circle.fill") { query = "" }
                             .labelStyle(.iconOnly)
@@ -539,6 +564,7 @@ struct SearchPanel: View {
             .padding(.top, 60)
         }
         .onAppear {
+            // The scope is the opener's: none for ⌘T, notes for ⌘O.
             focused = true
             #if DEBUG
             if let preset = ProcessInfo.processInfo.environment["HEFT_IOS_QUERY"] { query = preset }
