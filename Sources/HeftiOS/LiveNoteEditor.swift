@@ -66,6 +66,9 @@ struct LiveNoteEditor: UIViewRepresentable {
         private var loadedRevision = -1
         private var focusRequest = 0
         private var wasScrolledDown = false
+        /// Until when a fold just reported is still animating; the view is
+        /// changing size under the scroll position meanwhile.
+        private var settlingUntil = Date.distantPast
         /// How far the text has moved since the widgets were computed: an
         /// edit lands before the restyle that follows it, and a fragment laid
         /// out in between looks its widget up by an offset that has moved.
@@ -349,10 +352,39 @@ struct LiveNoteEditor: UIViewRepresentable {
             document?.saveSoon(immediately: true)
         }
 
+        /// Folding the calendar resizes this view, which moves the scroll
+        /// position by itself; reacting to that made the two flicker against
+        /// each other. So only the reader's own scrolling counts, and the
+        /// fold waits out its animation before anything changes again.
+        ///
+        /// A drag into the note folds, however short the note: a daily note
+        /// is usually shorter than the screen, and the rubber band is the
+        /// only way into it. Opening again is where the loop was. A short
+        /// note springs back to its top after every stretch, and that return
+        /// is not the reader asking for the calendar, so it opens only on a
+        /// pull past the top. A note long enough to scroll opens on reaching
+        /// the top, by finger or by a flick coasting there.
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            let down = scrollView.contentOffset.y + scrollView.adjustedContentInset.top > 24
-            guard down != wasScrolledDown else { return }
+            guard scrolledDown != nil, scrollView.isDragging || scrollView.isDecelerating,
+                  Date() >= settlingUntil
+            else { return }
+            let inset = scrollView.adjustedContentInset
+            let offset = scrollView.contentOffset.y + inset.top
+            let room = scrollView.contentSize.height + inset.top + inset.bottom - scrollView.bounds.height
+            let pulled = offset < -12 && scrollView.isDragging
+            let down: Bool
+            if pulled {
+                down = false
+            } else if !wasScrolledDown {
+                down = offset > 40
+            } else {
+                down = room > 1 ? offset > 0 : true
+            }
+            // A pull always reports: a note opened under an already folded
+            // calendar never saw it fold.
+            guard down != wasScrolledDown || pulled else { return }
             wasScrolledDown = down
+            settlingUntil = Date().addingTimeInterval(0.45)
             scrolledDown?(down)
         }
 

@@ -29,6 +29,10 @@ struct CalendarView: View {
     /// it shows, so scrolling does not rebuild the days under the finger.
     @State private var bandOrigin = Date()
     @State private var problem: String?
+    /// When the last swipe ended. A finger lifting off a swipe lands on a
+    /// day, and a day button takes that lift for a tap: paging a month
+    /// opened whatever day was under the thumb.
+    @State private var swipedAt = Date.distantPast
 
     private let calendar = Calendar.current
     private static let fold = Animation.smooth(duration: 0.35)
@@ -65,8 +69,9 @@ struct CalendarView: View {
             openSelected()
             #if DEBUG
             if ProcessInfo.processInfo.environment["HEFT_IOS_FOLDED"] != nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    withAnimation(Self.fold) { folded = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { fold() }
+                if ProcessInfo.processInfo.environment["HEFT_IOS_UNFOLD"] != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { unfold() }
                 }
             }
             #endif
@@ -80,8 +85,10 @@ struct CalendarView: View {
                 show(week: weekStart(of: selected))
                 bandDay = shownWeek
                 bandOrigin = shownWeek
+                // `fold()` hands over when its animation has settled; this
+                // covers folding for the keyboard, which is not animated.
                 Task {
-                    try? await Task.sleep(for: .milliseconds(380))
+                    try? await Task.sleep(for: .milliseconds(700))
                     if collapsed { bandShown = true }
                 }
             } else {
@@ -115,7 +122,7 @@ struct CalendarView: View {
                 Image(systemName: "chevron.left").frame(width: 44, height: 44)
             }
             Button {
-                withAnimation(Self.fold) { folded.toggle() }
+                if folded { unfold() } else { fold() }
             } label: {
                 Text(month.formatted(.dateTime.month(.wide).year()))
                     .foregroundStyle(.primary)
@@ -242,13 +249,14 @@ struct CalendarView: View {
                 slide = drag.translation.width
             }
             .onEnded { drag in
+                swipedAt = Date()
                 let across = drag.predictedEndTranslation.width
                 let down = drag.predictedEndTranslation.height
                 if abs(drag.translation.height) > abs(drag.translation.width) {
                     if down < -40, !collapsed {
-                        withAnimation(Self.fold) { folded = true }
+                        fold()
                     } else if down > 40, collapsed, document?.editing != true {
-                        withAnimation(Self.fold) { folded = false }
+                        unfold()
                     }
                     withAnimation(.snappy) { slide = 0 }
                 } else if !collapsed, abs(across) > 80 {
@@ -278,6 +286,38 @@ struct CalendarView: View {
         }
     }
 
+    /// Folds to the selected week, and hands over to the strip only once
+    /// the animation has settled. The spring keeps moving a point or two
+    /// past its nominal duration, and a strip arriving on a timer met the
+    /// row before it had, which showed as a small hop.
+    private func fold() {
+        guard !folded else { return }
+        withAnimation(Self.fold) {
+            folded = true
+        } completion: {
+            if collapsed { bandShown = true }
+        }
+    }
+
+    /// Opens a folded calendar the way it folded, in reverse.
+    ///
+    /// The strip goes first, giving way to the grid still folded on the
+    /// week it was scrolled to; only on the next pass does the grid open.
+    /// Swapping and opening in one step drew the grid already open, which
+    /// was a jump where folding was an animation.
+    private func unfold() {
+        guard folded else { return }
+        if bandShown {
+            if let bandDay { show(week: weekStart(of: bandDay)) }
+            bandShown = false
+            DispatchQueue.main.async {
+                withAnimation(Self.fold) { folded = false }
+            }
+        } else {
+            withAnimation(Self.fold) { folded = false }
+        }
+    }
+
     /// Folded on `week`, with the month on show the one most of it is in.
     private func show(week: Date) {
         shownWeek = week
@@ -292,8 +332,9 @@ struct CalendarView: View {
         let inMonth = calendar.isDate(date, equalTo: month, toGranularity: .month)
         let exists = existing(date) != nil
         return Button {
+            guard Date().timeIntervalSince(swipedAt) > 0.3, slide == 0 else { return }
             if chosen, collapsed {
-                withAnimation(Self.fold) { folded = false }
+                unfold()
             } else {
                 select(date)
             }
@@ -325,7 +366,11 @@ struct CalendarView: View {
         if let document {
             NoteContent(document: document) { down in
                 guard down != folded else { return }
-                withAnimation(Self.fold) { folded = down }
+                if down {
+                    fold()
+                } else {
+                    unfold()
+                }
             }
             .id(document.path)
         } else {
