@@ -715,7 +715,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// A completion offered in the strip: what it shows, and what
         /// accepting it writes for the link or tag being typed.
         private struct Suggestion: Equatable {
-            enum Kind { case link, tag, callout, color }
+            enum Kind { case link, linkPart, tag, callout, color }
             var title: String
             var detail: String
             var destination: String
@@ -757,6 +757,8 @@ struct LiveNoteEditor: UIViewRepresentable {
                                               destination: destination + pipe + alias, kind: .link)
                         }
                 }
+            } else if let part = LinkPartContext.detect(in: text, selection: selection) {
+                found = linkPartSuggestions(part, in: text, index: index)
             } else if let callout = CalloutCompletionContext.detect(in: text, selection: selection) {
                 let use = Self.calloutUse
                 let ranked = callout.suggestions().enumerated().sorted {
@@ -788,6 +790,38 @@ struct LiveNoteEditor: UIViewRepresentable {
             guard found != suggestions else { return }
             suggestions = found
             showSuggestions()
+        }
+
+        /// After `|`, the note's aliases; after `#`, its headings, read from
+        /// the note itself, or from this one in `[[#`. An embed's `|` takes a
+        /// size, which nothing here suggests.
+        private func linkPartSuggestions(_ part: LinkPartContext, in text: String, index: VaultIndex) -> [Suggestion] {
+            let ref = part.target.isEmpty ? nil : index.resolve(WikiLink(target: part.target), from: nil)
+            switch part.part {
+            case .text:
+                guard let ref, !part.isEmbed else { return [] }
+                return part.matching(index.aliases(of: ref)).map {
+                    Suggestion(title: $0, detail: "Alias", destination: $0, kind: .linkPart,
+                               symbol: "arrow.turn.down.right")
+                }
+            case .heading:
+                let source: String
+                if let ref {
+                    guard ref.isMarkdown, let read = try? MobileVault.read(ref.url) else { return [] }
+                    source = read
+                } else if part.target.isEmpty {
+                    source = text
+                } else {
+                    return []
+                }
+                let headings = NoteText.headings(in: source)
+                return part.matching(headings.map(\.text)).prefix(20).map { name in
+                    let level = headings.first { $0.text == name }?.level ?? 1
+                    return Suggestion(title: name, detail: "H\(level)",
+                                      destination: LinkPartContext.linkable(heading: name),
+                                      kind: .linkPart, symbol: "number")
+                }
+            }
         }
 
         private func showSuggestions() {
@@ -844,6 +878,9 @@ struct LiveNoteEditor: UIViewRepresentable {
                 apply(context.accepting(suggestion.destination, in: text))
             case .link:
                 guard let context = WikiCompletionContext.detect(in: text, selection: selection) else { return }
+                apply(context.accepting(suggestion.destination))
+            case .linkPart:
+                guard let context = LinkPartContext.detect(in: text, selection: selection) else { return }
                 apply(context.accepting(suggestion.destination))
             case .callout:
                 guard let context = CalloutCompletionContext.detect(in: text, selection: selection) else { return }
