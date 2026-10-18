@@ -227,8 +227,12 @@ final class MobileVault {
         }
     }
 
+    /// Not while a scan is running: at launch the app becomes active just
+    /// after `init` has started one, and a second full scan of a cold vault
+    /// doubled the wait for the first list.
     func returnedToForeground() {
         downloadRetries = 3
+        guard !isScanning else { return }
         refresh()
     }
 
