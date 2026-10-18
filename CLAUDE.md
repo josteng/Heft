@@ -18,8 +18,7 @@ swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the
 swift run Heft help [--json]                    # every verb and flag, from CommandLineSpec
 swift run Heft version                          # also --version and -v
 xcodebuild -scheme HeftiOS -destination 'generic/platform=iOS Simulator' build   # the iOS app
-    # in DEBUG, SIMCTL_CHILD_HEFT_IOS_VAULT=<path> opens a vault without the picker;
-    # HEFT_IOS_NOTE, HEFT_IOS_TAB, HEFT_IOS_QUERY and HEFT_IOS_CAPTURE set up a screenshot
+    # DEBUG launch variables set up a screenshot; Docs/iOS.md lists them
 swift run Heft proposals <vault>                # agent edits waiting for review
 swift run Heft backlinks|links|outline <vault> <note>   # the resolved link index
 swift run Heft tags|config <vault>              # tags with counts; settings as JSON
@@ -143,6 +142,7 @@ not work:
 | [`Docs/Gotchas.md`](Docs/Gotchas.md) | AppKit, TextKit, printing, preferences, the icon — and when something behaves impossibly |
 | [`Docs/VimMode.md`](Docs/VimMode.md) | `HeftVimCore` |
 | [`Docs/AgentIntegration.md`](Docs/AgentIntegration.md) | the agent-facing surface, as a user sees it |
+| [`Docs/iOS.md`](Docs/iOS.md) | `HeftiOS`, `HeftShare`, `HeftControls`, the vault bookmark, saving on iOS |
 
 `Docs/Gotchas.md` also carries the **known gaps**: what is deliberately not
 finished, so a rough edge is not mistaken for a regression.
