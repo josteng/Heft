@@ -56,9 +56,6 @@ struct CalendarView: View {
                     .font(.headline)
                     .contentTransition(.numericText(value: selected.timeIntervalSinceReferenceDate))
             }
-            if let document {
-                NoteEditingToolbar(document: document)
-            }
             if !calendar.isDateInToday(selected) {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Today") { select(Date()) }

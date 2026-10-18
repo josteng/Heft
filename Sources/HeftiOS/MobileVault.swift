@@ -205,6 +205,24 @@ final class MobileVault {
         return item(top, path: "", name: root.lastPathComponent)
     }
 
+    func isPinned(_ path: String) -> Bool {
+        pins.contains(Pins.Pin(.note, path))
+    }
+
+    /// Pins live in the vault, beside the Mac's, so the file is read again
+    /// just before the change: a pin made on the Mac meanwhile is kept.
+    func togglePin(_ path: String) {
+        guard let root else { return }
+        var current = Pins.load(from: root)
+        current.toggle(Pins.Pin(.note, path))
+        do {
+            try current.save(to: root)
+            pins = current
+        } catch {
+            problem = "Heft could not save the pin: \(error.localizedDescription)"
+        }
+    }
+
     var pinnedNotes: [SharedVault.ListedNote] {
         let byPath = Dictionary(recent.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         return pins.values(of: .note).compactMap { byPath[$0] }

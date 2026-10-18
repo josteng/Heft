@@ -37,6 +37,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.smartDashesType = .no
         view.smartInsertDeleteType = .no
         view.inputAccessoryView = coordinator.keyboardBar()
+        view.isFindInteractionEnabled = true
         let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.tapped(_:)))
         tap.delegate = coordinator
         view.addGestureRecognizer(tap)
@@ -79,6 +80,7 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         func update(from editor: LiveNoteEditor) {
             document = editor.document
+            editor.document.textView = textView
             scrolledDown = editor.scrolledDown
             follow = editor.follow
             let contextChanged = renderContext.map { !Self.sameSurface($0, editor.context) } ?? true
@@ -141,6 +143,8 @@ struct LiveNoteEditor: UIViewRepresentable {
                     case "numbered": self.numbered()
                     case "hl": self.restyle(textView); self.highlight()
                     case "accept": self.updateSuggestions(); self.accept(0)
+                    case "find": self.document?.find()
+                    case "undo": self.document?.undo()
                     case let name where name.hasPrefix("color:"):
                         self.restyle(textView)
                         self.choose(HighlightColor.allCases.first { $0.rawValue.isEmpty == false && $0.title.lowercased() == name.dropFirst(6) })
@@ -210,6 +214,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                     }
                 )
             }
+            spellExclusions = SpellCheckScope.exclusions(for: decorations, in: source)
             let snapshot = RestyleScope.Snapshot(source: source, decorations: decorations, reveal: reveal)
             let comparable = styleKey == key ? styled : nil
             let scope = comparable.map { RestyleScope.scope(from: $0, to: snapshot) }
@@ -357,6 +362,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             guard let view = textView as? MobileTextView else { return }
             restyle(view)
             document?.edited(view.text)
+            document?.updateUndo()
         }
 
         /// Selection moves and focus restyle on the next pass, not inside
@@ -373,6 +379,27 @@ struct LiveNoteEditor: UIViewRepresentable {
         }
 
         private var restyleQueued = false
+        /// Code, URLs, tags, link targets and maths: where the keyboard must
+        /// neither correct nor mark words, as on the Mac.
+        private var spellExclusions: [NSRange] = []
+        private var checkingOff = false
+
+        /// UIKit takes no per-range veto, so the keyboard's checking follows
+        /// the caret instead: off inside an excluded span, which is what
+        /// stops it "correcting" a URL or a tag being typed, on again
+        /// outside. Changed only on the way in or out, since applying it
+        /// reloads the keyboard.
+        private func updateTextChecking() {
+            guard let textView, textView.isFirstResponder else { return }
+            let caret = textView.selectedRange.location
+            let probe = NSRange(location: max(0, caret - 1), length: caret > 0 ? 1 : 0)
+            let inside = probe.length > 0 && SpellCheckScope.excludes(probe, in: spellExclusions)
+            guard inside != checkingOff else { return }
+            checkingOff = inside
+            textView.autocorrectionType = inside ? .no : .default
+            textView.spellCheckingType = inside ? .no : .default
+            textView.reloadInputViews()
+        }
 
         private func restyleSoon() {
             guard !restyleQueued else { return }
@@ -384,6 +411,8 @@ struct LiveNoteEditor: UIViewRepresentable {
                 refreshFormatState()
                 updateBarForSelection()
                 updateSuggestions()
+                updateTextChecking()
+                document?.updateUndo()
             }
         }
 

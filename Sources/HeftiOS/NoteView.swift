@@ -1,5 +1,6 @@
 import HeftCore
 import SwiftUI
+import UIKit
 
 /// One note's text and its saving, kept apart from any one screen so the
 /// note view and the calendar load, edit and save it the same way.
@@ -32,6 +33,10 @@ final class NoteDocument {
     @ObservationIgnored private var pending: String?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private weak var vault: MobileVault?
+    /// The editor showing this note, for the bar's undo, redo and find.
+    @ObservationIgnored weak var textView: UITextView?
+    private(set) var canUndo = false
+    private(set) var canRedo = false
 
     init(path: String) {
         self.path = path
@@ -60,6 +65,29 @@ final class NoteDocument {
     }
 
     func focus() { focusRequest += 1 }
+
+    /// Read back from the editor's undo manager after every change.
+    func updateUndo() {
+        let undo = textView?.undoManager?.canUndo ?? false
+        let redo = textView?.undoManager?.canRedo ?? false
+        if undo != canUndo { canUndo = undo }
+        if redo != canRedo { canRedo = redo }
+    }
+
+    func undo() {
+        textView?.undoManager?.undo()
+        updateUndo()
+    }
+
+    func redo() {
+        textView?.undoManager?.redo()
+        updateUndo()
+    }
+
+    /// The system's find bar, over this note.
+    func find() {
+        textView?.findInteraction?.presentFindNavigator(showingReplace: false)
+    }
 
     func edited(_ text: String) {
         pending = text
@@ -125,7 +153,6 @@ struct NoteView: View {
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
     @State private var document: NoteDocument
-    @State private var showsBacklinks = false
 
     init(path: String) {
         self.path = path
@@ -134,55 +161,69 @@ struct NoteView: View {
 
     var body: some View {
         let note = vault.note(at: path)
-        let backlinks = vault.index.backlinks(to: path)
         NoteContent(document: document)
             .navigationTitle(note?.name ?? (path as NSString).lastPathComponent)
             // Inline, because most notes open with their own title as a heading
             // and a large bar title above it says the same thing twice.
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if !backlinks.isEmpty, !document.editing {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("Linked From", systemImage: "arrow.uturn.left") { showsBacklinks = true }
-                    }
-                }
-                NoteEditingToolbar(document: document)
-            }
-            .sheet(isPresented: $showsBacklinks) {
-                NavigationStack {
-                    ScrollView {
-                        BacklinksView(backlinks: backlinks) { source in
-                            showsBacklinks = false
-                            push(.note(source))
-                        }
-                        .padding()
-                    }
-                    .navigationTitle("Linked From")
-                    .navigationBarTitleDisplayMode(.inline)
-                }
-                .presentationDetents([.medium, .large])
-            }
             .onAppear {
                 if let note { vault.recordOpen(note) }
             }
     }
 }
 
-/// The pencil, which puts the keyboard in the note, and while typing Done,
-/// which puts it away. Always present, so the bar does not reflow as
-/// notes load.
+/// While reading, Find and a "…" menu of what can be done to the note; while
+/// typing, undo and redo, then Done. There is no Edit: a tap in the text
+/// edits, as in Notes. Always present, so the bar does not reflow as notes
+/// load.
 struct NoteEditingToolbar: ToolbarContent {
     let document: NoteDocument
+    var backlinkCount = 0
+    var showBacklinks: () -> Void = {}
+    @Environment(MobileVault.self) private var vault
+    @Environment(\.mobilePush) private var push
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            if document.editing {
+        if document.editing {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button("Undo", systemImage: "arrow.uturn.backward") { document.undo() }
+                    .disabled(!document.canUndo)
+                Button("Redo", systemImage: "arrow.uturn.forward") { document.redo() }
+                    .disabled(!document.canRedo)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 // The system's own Done: a filled checkmark, as Notes shows it
                 // while typing, rather than a keyboard glyph to decode.
                 Button("Done", systemImage: "checkmark", role: .confirm) { document.editing = false }
-            } else {
-                Button("Edit", systemImage: "pencil") { document.focus() }
-                    .disabled(document.source == nil)
+            }
+        } else {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button("Find in Note", systemImage: "magnifyingglass") { document.find() }
+                Menu("More", systemImage: "ellipsis") { menu }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        let path = document.path
+        let pinned = vault.isPinned(path)
+        Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+            vault.togglePin(path)
+        }
+        // Kept at (0) rather than hidden, so the item is where it always is.
+        Button("Linked From (\(backlinkCount))", systemImage: "arrow.uturn.left", action: showBacklinks)
+            .disabled(backlinkCount == 0)
+        Divider()
+        if let note = vault.note(at: path) {
+            Button("Copy Link", systemImage: "link") {
+                UIPasteboard.general.string = "[[\(vault.index.linkDestination(for: note))]]"
+            }
+            ShareLink(item: note.url) {
+                Label("Share…", systemImage: "square.and.arrow.up")
+            }
+            Button("Show in Folder", systemImage: "folder") {
+                push(.folder(note.folder))
             }
         }
     }
@@ -203,8 +244,10 @@ struct NoteContent: View {
     /// Set only once loading has taken a moment, so a note that opens
     /// quickly never flashes a spinner first.
     @State private var slow = false
+    @State private var showsBacklinks = false
 
     var body: some View {
+        let backlinks = vault.index.backlinks(to: document.path)
         Group {
             if document.source != nil, let root = vault.root {
                 let note = vault.note(at: document.path)
@@ -232,6 +275,25 @@ struct NoteContent: View {
                         slow = true
                     }
             }
+        }
+        .toolbar {
+            NoteEditingToolbar(document: document, backlinkCount: backlinks.count) {
+                showsBacklinks = true
+            }
+        }
+        .sheet(isPresented: $showsBacklinks) {
+            NavigationStack {
+                ScrollView {
+                    BacklinksView(backlinks: backlinks) { source in
+                        showsBacklinks = false
+                        push(.note(source))
+                    }
+                    .padding()
+                }
+                .navigationTitle("Linked From")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+            .presentationDetents([.medium, .large])
         }
         .task(id: "\(document.path)#\(vault.generation)") {
             await document.load(in: vault)
