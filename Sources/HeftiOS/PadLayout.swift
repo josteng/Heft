@@ -39,6 +39,7 @@ struct PadRootView: View {
     @Environment(\.mobileCapture) private var capture
     @State private var settings: SettingsRequest?
     @State private var showsSearch = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var searchModel = SearchModel()
     @State private var expandedFolders: Set<String> = []
     @State private var expandedTags: Set<String> = []
@@ -82,8 +83,13 @@ struct PadRootView: View {
             if showsSearch {
                 SearchPanel(isPresented: $showsSearch, open: { open($0) }, model: searchModel)
                     .environment(\.mobileLibrary, library)
+                    // One quick fade, barely growing from the top, as the
+                    // Mac's bar comes and goes; a plain fade under Reduce Motion.
+                    .transition(reduceMotion ? .opacity
+                                : .opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
             }
         }
+        .animation(.easeOut(duration: 0.15), value: showsSearch)
         .focusedSceneValue(\.heftLibrary, library)
         .environment(\.mobileLibrary, library)
     }
