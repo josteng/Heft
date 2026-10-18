@@ -123,13 +123,18 @@ struct PadRootView: View {
         .searchFocused($searching)
         .navigationTitle(vault.name)
         .navigationBarTitleDisplayMode(.inline)
+        // The keyboard belongs to the note beside it: without this the
+        // month rose with the editor's strip.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .toolbar {
+            // More on the leading side, as Notes keeps Edit there, so it does
+            // not sit between New Note and Search.
+            ToolbarItem(placement: .topBarLeading) {
+                VaultMenu(calendarShown: $showsCalendar, capture: capture)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
                     .keyboardShortcut("n")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                VaultMenu(calendarShown: $showsCalendar, capture: capture)
             }
         }
         // Shortcuts with nowhere to show: ⌘K to search, ⌘⇧T for today.
@@ -338,6 +343,12 @@ private struct PadMonth: View {
                 .accessibilityHint(expanded ? "Folds the month to one week" : "Shows the whole month")
                 Spacer()
                 Group {
+                    if !showsToday {
+                        Button("Today", systemImage: Self.todaySymbol) {
+                            withAnimation(.snappy) { anchor = Date() }
+                            pick(Date())
+                        }
+                    }
                     Button(expanded ? "Previous Month" : "Previous Week", systemImage: "chevron.left") { page(-1) }
                     Button(expanded ? "Next Month" : "Next Week", systemImage: "chevron.right") { page(1) }
                 }
@@ -405,6 +416,20 @@ private struct PadMonth: View {
         withAnimation(.snappy) {
             anchor = calendar.date(byAdding: expanded ? .month : .weekOfYear, value: direction, to: anchor) ?? anchor
         }
+    }
+
+    /// A calendar with one day marked where the system has it, as on the
+    /// phone's Today button.
+    private static let todaySymbol = UIImage(systemName: "calendar.day") == nil ? "calendar" : "calendar.day"
+
+    /// Today chosen and in view, when Today has nothing to do.
+    private var showsToday: Bool {
+        let today = Date()
+        let chosenToday = chosen.map { calendar.isDateInToday($0) } ?? false
+        let inView = expanded
+            ? calendar.isDate(anchor, equalTo: today, toGranularity: .month)
+            : calendar.isDate(anchor, equalTo: today, toGranularity: .weekOfYear)
+        return chosenToday && inView
     }
 
     /// The week's day letters in the order this locale starts its week.

@@ -35,6 +35,10 @@ final class NoteDocument {
     @ObservationIgnored private weak var vault: MobileVault?
     /// The editor showing this note, for the bar's undo, redo and find.
     @ObservationIgnored weak var textView: UITextView?
+    /// What applies at the caret, for the iPad's format popover.
+    var formatState = FormatState()
+    /// The colour the highlighter uses, shown on the popover's dot.
+    var highlightColor: HighlightColor?
     private(set) var canUndo = false
     private(set) var canRedo = false
 
@@ -85,6 +89,17 @@ final class NoteDocument {
     }
 
     /// The system's find bar, over this note.
+    /// A tool from the iPad's bar, which works on the note whether or not
+    /// it already has the keyboard.
+    func format(_ tool: FormatTool) {
+        if textView?.isFirstResponder == false { textView?.becomeFirstResponder() }
+        (textView as? MobileTextView)?.onFormat?(tool)
+    }
+
+    func attach(_ source: AttachSource) {
+        (textView as? MobileTextView)?.onAttach?(source)
+    }
+
     func find() {
         textView?.findInteraction?.presentFindNavigator(showingReplace: false)
     }
@@ -217,8 +232,13 @@ struct NoteEditingToolbar: ToolbarContent {
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
     @Environment(\.noteItemAction) private var itemAction
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some ToolbarContent {
+        // On a wide iPad the keyboard strip's tools live here instead.
+        if UIDevice.current.userInterfaceIdiom == .pad, sizeClass == .regular {
+            PadNoteTools(document: document)
+        }
         if document.editing {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Undo", systemImage: "arrow.uturn.backward") { document.undo() }

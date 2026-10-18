@@ -43,13 +43,16 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.smartQuotesType = .no
         view.smartDashesType = .no
         view.smartInsertDeleteType = .no
-        view.inputAccessoryView = coordinator.keyboardBar()
+        coordinator.accessory = coordinator.keyboardBar()
+        view.inputAccessoryView = coordinator.accessory
         view.isFindInteractionEnabled = true
         let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.tapped(_:)))
         tap.delegate = coordinator
         view.addGestureRecognizer(tap)
         view.ownTap = tap
         view.onFormat = { [weak coordinator] tool in coordinator?.applyTool(tool) }
+        view.onAttach = { [weak coordinator] source in coordinator?.startAttach(source) }
+        view.onWidthClass = { [weak coordinator] in coordinator?.updateAccessory() }
         view.isOnPicture = { [weak coordinator, weak view] point in
             guard let coordinator, let view else { return false }
             return coordinator.pictureRange(at: point, in: view) != nil
@@ -770,6 +773,22 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         private weak var formatButton: UIButton?
         private var formatPanel: FormatPanel?
+        /// The strip above the keyboard: tools and suggestions on a phone,
+        /// only suggestions on a wide iPad, whose tools are in the bar.
+        var accessory: UIView?
+
+        /// On a wide iPad the tools are in the note's toolbar, and a strip
+        /// across the whole window, shown even with a hardware keyboard, is
+        /// only worth it while it has suggestions to offer.
+        func updateAccessory() {
+            guard let textView else { return }
+            let toolsInBar = textView.traitCollection.userInterfaceIdiom == .pad
+                && textView.traitCollection.horizontalSizeClass == .regular
+            let wanted = toolsInBar && suggestions.isEmpty ? nil : accessory
+            guard textView.inputAccessoryView !== wanted else { return }
+            textView.inputAccessoryView = wanted
+            if textView.isFirstResponder { textView.reloadInputViews() }
+        }
         private weak var barScroll: UIScrollView?
         private weak var suggestionScroll: UIScrollView?
         private weak var suggestionRow: UIStackView?
@@ -982,6 +1001,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             let few = suggestions.count <= 3
             suggestionRow.distribution = few ? .fillEqually : .fill
             evenSuggestions?.isActive = few
+            updateAccessory()
             let showing = !suggestions.isEmpty
             suggestionScroll.isHidden = !showing
             barScroll.isHidden = showing
@@ -1129,7 +1149,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// quote from its prefix, the inline styles from the decorations the
         /// last restyle produced around the caret.
         func refreshFormatState() {
-            guard let formatPanel, let textView else { return }
+            guard let textView else { return }
             let text = textView.text as NSString
             let caret = textView.selectedRange.location
             let line = text.substring(with: text.lineRange(for: NSRange(location: caret, length: 0)))
@@ -1158,7 +1178,9 @@ struct LiveNoteEditor: UIViewRepresentable {
                 default: break
                 }
             }
-            formatPanel.show(state)
+            formatPanel?.show(state)
+            if document?.formatState != state { document?.formatState = state }
+            if document?.highlightColor != highlightColor { document?.highlightColor = highlightColor }
         }
 
         static let highlightColorKey = "dev.stenglein.Heft.iOS.highlightColor"
@@ -1303,31 +1325,34 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// The photo library, the camera, or any file; each is copied into
         /// the vault where the Mac would put it, and embedded at the caret.
         private func attachMenu() -> UIMenu {
-            var actions = [
-                UIAction(title: "Photo Library", image: UIImage(systemName: "photo.on.rectangle")) { [weak self] _ in
-                    var configuration = PHPickerConfiguration()
-                    configuration.filter = .images
-                    configuration.selectionLimit = 0
-                    let picker = PHPickerViewController(configuration: configuration)
-                    picker.delegate = self
-                    self?.presentPicker(picker)
-                },
-            ]
-            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                actions.append(UIAction(title: "Take Photo", image: UIImage(systemName: "camera")) { [weak self] _ in
-                    let picker = UIImagePickerController()
-                    picker.sourceType = .camera
-                    picker.delegate = self
-                    self?.presentPicker(picker)
-                })
-            }
-            actions.append(UIAction(title: "Choose File", image: UIImage(systemName: "doc")) { [weak self] _ in
+            UIMenu(children: AttachSource.available.map { source in
+                UIAction(title: source.title, image: UIImage(systemName: source.symbol)) { [weak self] _ in
+                    self?.startAttach(source)
+                }
+            })
+        }
+
+        /// The picker for `source`, from the strip's menu or the iPad's bar.
+        func startAttach(_ source: AttachSource) {
+            switch source {
+            case .library:
+                var configuration = PHPickerConfiguration()
+                configuration.filter = .images
+                configuration.selectionLimit = 0
+                let picker = PHPickerViewController(configuration: configuration)
+                picker.delegate = self
+                presentPicker(picker)
+            case .camera:
+                let picker = UIImagePickerController()
+                picker.sourceType = .camera
+                picker.delegate = self
+                presentPicker(picker)
+            case .file:
                 let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
                 picker.allowsMultipleSelection = true
                 picker.delegate = self
-                self?.presentPicker(picker)
-            })
-            return UIMenu(children: actions)
+                presentPicker(picker)
+            }
         }
 
         private func presentPicker(_ picker: UIViewController) {
@@ -1514,6 +1539,20 @@ final class MobileTextView: UITextView {
     /// ⌘B and ⌘I from a hardware keyboard, written as Markdown rather than
     /// as the attributes UIKit would set on rich text.
     var onFormat: ((FormatTool) -> Void)?
+    var onAttach: ((AttachSource) -> Void)?
+    /// Called when the window's width class changes, as entering Split View.
+    var onWidthClass: (() -> Void)?
+    private var watchingWidth = false
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, !watchingWidth else { return }
+        watchingWidth = true
+        registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (view: MobileTextView, _: UITraitCollection) in
+            view.onWidthClass?()
+        }
+        onWidthClass?()
+    }
 
     override var keyCommands: [UIKeyCommand]? {
         [
@@ -1600,5 +1639,31 @@ extension LiveNoteEditor.Coordinator: PHPickerViewControllerDelegate, UIImagePic
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         for url in urls { insertAttachment(.file(url)) }
+    }
+}
+
+/// Where a picture or file to attach comes from.
+enum AttachSource: CaseIterable {
+    case library, camera, file
+
+    /// The camera only where there is one.
+    static var available: [AttachSource] {
+        allCases.filter { $0 != .camera || UIImagePickerController.isSourceTypeAvailable(.camera) }
+    }
+
+    var title: String {
+        switch self {
+        case .library: "Photo Library"
+        case .camera: "Take Photo"
+        case .file: "Choose File"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .library: "photo.on.rectangle"
+        case .camera: "camera"
+        case .file: "doc"
+        }
     }
 }
