@@ -168,8 +168,8 @@ struct NoteView: View {
     }
 }
 
-/// The pencil, which puts the keyboard in the note, and while typing the
-/// button that puts it away. Always present, so the bar does not reflow as
+/// The pencil, which puts the keyboard in the note, and while typing Done,
+/// which puts it away. Always present, so the bar does not reflow as
 /// notes load.
 struct NoteEditingToolbar: ToolbarContent {
     let document: NoteDocument
@@ -177,7 +177,9 @@ struct NoteEditingToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             if document.editing {
-                Button("Done", systemImage: "keyboard.chevron.compact.down") { document.editing = false }
+                // The system's own Done: a filled checkmark, as Notes shows it
+                // while typing, rather than a keyboard glyph to decode.
+                Button("Done", systemImage: "checkmark", role: .confirm) { document.editing = false }
             } else {
                 Button("Edit", systemImage: "pencil") { document.focus() }
                     .disabled(document.source == nil)
