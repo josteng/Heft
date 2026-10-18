@@ -429,7 +429,7 @@ struct UniversalSearchList: View {
         if showsChips, model.scope == nil {
             Section {
                 ScopeChips(model: model, numbered: asButtons)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: asButtons ? 10 : 4, leading: 0, bottom: asButtons ? 6 : 4, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -438,39 +438,60 @@ struct UniversalSearchList: View {
             Section {
                 ForEach(section.rows) { row in
                     rowView(row)
+                        .listRowInsets(asButtons ? Self.panelRowInsets : nil)
                         .listRowBackground(highlighted == row.id ? Rectangle().fill(.tint.opacity(0.22)) : nil)
                         // The panel has none, as the Mac's bar has none: a
                         // plain list drew them under some rows and not others.
                         .listRowSeparator(asButtons ? .hidden : .automatic)
                 }
             } header: {
-                if let title = section.title { Text(title) }
+                if let title = section.title {
+                    if asButtons {
+                        // Small, as the Mac's bar labels its sections.
+                        Text(title)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .listRowInsets(EdgeInsets(top: 10, leading: 18, bottom: 2, trailing: 18))
+                    } else {
+                        Text(title)
+                    }
+                }
             }
         }
     }
+
+    /// The panel's rows, as close together as the Mac's bar sets them.
+    private static let panelRowInsets = EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18)
 
     @ViewBuilder
     private func rowView(_ row: SearchRow) -> some View {
         switch row {
         case .note(let note) where asButtons:
-            Button { act(row) } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(note.name)
-                    if !note.folder.isEmpty {
-                        Text(note.folder).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(.rect)
-            }
-            .tint(.primary)
+            // One line, the folder trailing, as the Mac's bar lists a note.
+            Button { act(row) } label: { panelLine(note.name, "doc.text", detail: note.folder) }
+                .tint(.primary)
         case .note(let note):
             NoteRow(note: note)
         case .hit(let hit) where asButtons:
-            Button { act(row) } label: { hitLabel(hit) }
+            Button { act(row) } label: { panelHit(hit) }
                 .tint(.primary)
         case .hit(let hit):
             NavigationLink(value: MobileRoute.note(hit.note.relativePath)) { hitLabel(hit) }
+        case .command(let command) where asButtons:
+            Button { act(row) } label: { panelLine(command.title, command.symbol) }
+                .tint(.primary)
+        case .tag(let tag, let count) where asButtons:
+            Button { act(row) } label: { panelLine("#\(tag)", "number", detail: "\(count)") }
+                .tint(.primary)
+        case .folder(let path, let count) where asButtons:
+            Button { act(row) } label: { panelLine(path, "folder", detail: "\(count)") }
+                .tint(.primary)
+        case .scope(let scope) where asButtons:
+            Button { act(row) } label: { panelLine(scope.title, scope.symbol) }
+                .tint(.primary)
+        case .allText(let count) where asButtons:
+            Button { act(row) } label: { panelLine("All \(count) matches in text", "text.magnifyingglass") }
+                .tint(.primary)
         case .command(let command):
             Button { act(row) } label: { Label(command.title, systemImage: command.symbol) }
                 .tint(.primary)
@@ -491,6 +512,44 @@ struct UniversalSearchList: View {
 
     private func act(_ row: SearchRow) {
         model.act(on: row, push: { push($0) }, setQuery: setQuery)
+    }
+
+    /// A row of the panel, as the Mac's bar sets one: a quiet icon in a
+    /// column of its own, the name, and what qualifies it at the far end.
+    private func panelLine(_ title: String, _ symbol: String, detail: String = "") -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 20)
+            Text(title).lineLimit(1)
+            Spacer(minLength: 8)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+        }
+        .contentShape(.rect)
+    }
+
+    /// A text match in the panel: the note on the first line, as its row
+    /// above would show it, and the matched line under it.
+    private func panelHit(_ hit: ContentMatch) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "doc.text").foregroundStyle(.secondary).frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(hit.note.name).fontWeight(.medium).lineLimit(1)
+                    Spacer(minLength: 8)
+                    if hit.occurrences > 1 {
+                        Text("\(hit.occurrences) matches").font(.footnote).foregroundStyle(.tertiary)
+                    }
+                }
+                Text(hit.preview).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .contentShape(.rect)
     }
 
     private func hitLabel(_ hit: ContentMatch) -> some View {
@@ -701,6 +760,10 @@ struct SearchPanel: View {
                     )
                 }
                 .listStyle(.plain)
+                .environment(\.defaultMinListRowHeight, 34)
+                .environment(\.defaultMinListHeaderHeight, 0)
+                .listSectionSpacing(0)
+                .contentMargins(.top, 0, for: .scrollContent)
                 .scrollContentBackground(.hidden)
                 .searchingText(query, model: model)
                 .environment(\.mobilePush) { route in
