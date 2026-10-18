@@ -339,27 +339,27 @@ private struct PadMonth: View {
                 Button {
                     withAnimation(.smooth(duration: 0.3)) { expanded.toggle() }
                 } label: {
-                    HStack(spacing: 4) {
-                        Text(anchor.formatted(.dateTime.month(.wide).year()))
-                            .font(.headline)
-                            .contentTransition(.numericText(value: anchor.timeIntervalSinceReferenceDate))
-                        Image(systemName: "chevron.down")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(expanded ? 180 : 0))
-                    }
+                    // The title folds and opens, as on the phone, with no
+                    // arrow of its own beside the paging ones.
+                    Text(anchor.formatted(.dateTime.month(.wide).year()))
+                        .font(.headline)
+                        .contentTransition(.numericText(value: anchor.timeIntervalSinceReferenceDate))
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint(expanded ? "Folds the month to one week" : "Shows the whole month")
                 Spacer()
                 Group {
-                    if !showsToday {
-                        Button("Today", systemImage: Self.todaySymbol) {
-                            withAnimation(.snappy) { anchor = Date() }
-                            pick(Date())
-                        }
-                    }
                     Button(expanded ? "Previous Month" : "Previous Week", systemImage: "chevron.left") { page(-1) }
+                    // Today between the arrows, always there so nothing
+                    // moves: in the accent when it would go somewhere,
+                    // dimmed when today is chosen and in view.
+                    Button("Today", systemImage: "circle.fill") {
+                        withAnimation(.snappy) { anchor = Date() }
+                        pick(Date())
+                    }
+                    .font(.system(size: 9))
+                    .foregroundStyle(showsToday ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.tint))
+                    .disabled(showsToday)
                     Button(expanded ? "Next Month" : "Next Week", systemImage: "chevron.right") { page(1) }
                 }
                 .labelStyle(.iconOnly)
@@ -427,10 +427,6 @@ private struct PadMonth: View {
             anchor = calendar.date(byAdding: expanded ? .month : .weekOfYear, value: direction, to: anchor) ?? anchor
         }
     }
-
-    /// A calendar with one day marked where the system has it, as on the
-    /// phone's Today button.
-    private static let todaySymbol = UIImage(systemName: "calendar.day") == nil ? "calendar" : "calendar.day"
 
     /// Today chosen and in view, when Today has nothing to do.
     private var showsToday: Bool {
