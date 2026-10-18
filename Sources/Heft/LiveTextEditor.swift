@@ -1421,6 +1421,9 @@ final class HeftTextKit2View: NSTextView {
     ) {
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
         updateAutocorrect()
+        if let linked = justLinkedAt, selectedRange() != NSRange(location: linked, length: 0) {
+            justLinkedAt = nil
+        }
     }
 
     private var grammarSweepTask: Task<Void, Never>?
@@ -1606,6 +1609,11 @@ final class HeftTextKit2View: NSTextView {
     private var completionItems: [WikiCompletionItem] = []
     private var completionSelection = 0
     private var completionIsActive = false
+    /// Where the caret was left by a note just taken from the link menu,
+    /// after its `]]`. A `#` or `|` typed there goes inside the link and
+    /// opens the next menu, as it would have with the menu still open; a
+    /// `|` anywhere else, a table's cell separator, is left alone.
+    private var justLinkedAt: Int?
     private var completionQuery = ""
     private var vimEngine = VimEngine()
     private var vimPreferredX: CGFloat?
@@ -3321,6 +3329,19 @@ final class HeftTextKit2View: NSTextView {
         if let inserted, inserted == "|" || inserted == "#", continueLinkCompletion(with: inserted) {
             return
         }
+        if let inserted, inserted == "|" || inserted == "#", let linked = justLinkedAt,
+           selection == NSRange(location: linked, length: 0), linked >= 2 {
+            justLinkedAt = nil
+            let inside = NSRange(location: linked - 2, length: 0)
+            if shouldChangeText(in: inside, replacementString: inserted) {
+                textStorage?.replaceCharacters(in: inside, with: inserted)
+                didChangeText()
+                setSelectedRange(NSRange(location: linked - 1, length: 0))
+                updateLinkCompletion(allowStart: true)
+            }
+            return
+        }
+        justLinkedAt = nil
 
         // Closing a bracket or an emphasis marker as the opening one is typed.
         // `[[` needs no case of its own any more: the second `[` sees the `]`
@@ -3927,6 +3948,7 @@ final class HeftTextKit2View: NSTextView {
     private func acceptLinkCompletion(at index: Int) -> Bool {
         guard completionIsActive, completionItems.indices.contains(index) else { return false }
         let destination = completionItems[index].destination
+        let kind = completionKind
         let edit: MarkdownEditing.Edit
         switch completionKind {
         case .wiki:
@@ -3965,6 +3987,11 @@ final class HeftTextKit2View: NSTextView {
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
         setSelectedRange(edit.selection)
+        let text = string as NSString
+        if kind == .wiki, !destination.contains("|"), edit.selection.length == 0, edit.selection.location >= 2,
+           text.substring(with: NSRange(location: edit.selection.location - 2, length: 2)) == "]]" {
+            justLinkedAt = edit.selection.location
+        }
         return true
     }
 
