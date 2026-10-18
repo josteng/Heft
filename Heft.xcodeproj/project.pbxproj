@@ -29,6 +29,7 @@
 		010000000000000000000020 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
 		010000000000000000000021 /* LinkTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000019 /* LinkTitles.swift */; };
 		010000000000000000000023 /* LinkTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000019 /* LinkTitles.swift */; };
+		010000000000000000000024 /* NameSuggester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000098 /* NameSuggester.swift */; };
 		010000000000000000000022 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* SwiftMath */; };
 /* End PBXBuildFile section */
 
@@ -123,6 +124,7 @@
 		020000000000000000000017 /* HeftiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HeftiOS.entitlements; sourceTree = "<group>"; };
 		020000000000000000000018 /* HeftShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HeftShare.entitlements; sourceTree = "<group>"; };
 		020000000000000000000019 /* LinkTitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinkTitles.swift; path = Sources/Heft/LinkTitles.swift; sourceTree = SOURCE_ROOT; };
+		020000000000000000000098 /* NameSuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NameSuggester.swift; path = Sources/Heft/NameSuggester.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -220,6 +222,7 @@
 			isa = PBXGroup;
 			children = (
 				020000000000000000000019 /* LinkTitles.swift */,
+				020000000000000000000098 /* NameSuggester.swift */,
 			);
 			name = "Shared with the share extension";
 			sourceTree = "<group>";
@@ -624,7 +627,7 @@
 		0F0000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000006 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		0F0000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000023 /* LinkTitles.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		0F0000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000023 /* LinkTitles.swift in Sources */, 010000000000000000000024 /* NameSuggester.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000009 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000021 /* LinkTitles.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */

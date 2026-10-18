@@ -72,6 +72,7 @@ private struct ItemRowActions: ViewModifier {
                     Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
                         vault.togglePin(item.path)
                     }
+                    .tint(.primary)
                     Divider()
                 }
                 ItemActionButtons(item: item, perform: perform)
@@ -91,8 +92,12 @@ struct ItemActionButtons: View {
     let perform: (ItemAction) -> Void
 
     var body: some View {
+        // Neutral, as the note's own "…" menu is: the accent is for what is
+        // chosen, not for every icon in a menu.
         Button("Rename…", systemImage: "pencil") { perform(.rename(item)) }
+            .tint(.primary)
         Button("Move…", systemImage: "folder") { perform(.move(item)) }
+            .tint(.primary)
         Button("Delete", systemImage: "trash", role: .destructive) { perform(.delete(item)) }
     }
 }
@@ -111,10 +116,12 @@ private struct ItemActionHost: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .alert(renameTitle, isPresented: presented(\.isRename)) {
-                TextField("Name", text: $newName)
-                Button("Cancel", role: .cancel) {}
-                Button("Rename") { if let current { run(current) } }
+            .sheet(isPresented: presented(\.isRename)) {
+                if case .rename(let item) = current {
+                    RenameSheet(item: item, title: renameTitle, name: $newName) {
+                        run(.rename(item))
+                    }
+                }
             }
             .sheet(isPresented: presented(\.isMove)) {
                 if case .move(let item) = action {
@@ -123,20 +130,27 @@ private struct ItemActionHost: ViewModifier {
                     }
                 }
             }
-            .confirmationDialog(deleteTitle, isPresented: presented(\.isDelete), titleVisibility: .visible) {
-                Button("Delete", role: .destructive) { if let current { run(current) } }
-            } message: {
-                Text(deleteMessage)
-            }
-            .alert("Couldn't Do That", isPresented: .constant(problem != nil)) {
-                Button("OK") { problem = nil }
-            } message: {
-                Text(problem ?? "")
-            }
-            .alert("Links Updated", isPresented: .constant(notice != nil)) {
-                Button("OK") { notice = nil }
-            } message: {
-                Text(notice ?? "")
+            // On a neutral carrier, so the dialogs' buttons are not in the
+            // accent the list around them is tinted with.
+            .background {
+                Color.clear
+                    .confirmationDialog(deleteTitle, isPresented: presented(\.isDelete),
+                                        titleVisibility: .visible) {
+                        Button("Delete", role: .destructive) { if let current { run(current) } }
+                    } message: {
+                        Text(deleteMessage)
+                    }
+                    .alert("Couldn't Do That", isPresented: .constant(problem != nil)) {
+                        Button("OK") { problem = nil }
+                    } message: {
+                        Text(problem ?? "")
+                    }
+                    .alert("Links Updated", isPresented: .constant(notice != nil)) {
+                        Button("OK") { notice = nil }
+                    } message: {
+                        Text(notice ?? "")
+                    }
+                    .tint(.primary)
             }
             .onChange(of: action?.id, initial: true) {
                 guard let action else { return }
@@ -230,9 +244,77 @@ private struct MoveSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", systemImage: "xmark", role: .cancel) { dismiss() }
+                        .tint(.primary)
                 }
             }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// The new name, and names suggested from the note under it, as the Mac's
+/// rename prompt has them: the on-device model reads the note, and nothing
+/// is offered without Apple Intelligence or for a folder.
+private struct RenameSheet: View {
+    let item: ItemRef
+    let title: String
+    @Binding var name: String
+    let rename: () -> Void
+    @Environment(MobileVault.self) private var vault
+    @Environment(\.dismiss) private var dismiss
+    @State private var suggestions: [String]?
+    @FocusState private var naming: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Name", text: $name)
+                        .focused($naming)
+                        .submitLabel(.done)
+                        .onSubmit(confirm)
+                }
+                if !item.isFolder, suggestions != [] {
+                    Section("Suggested") {
+                        if let suggestions {
+                            ForEach(suggestions, id: \.self) { suggestion in
+                                Button(suggestion) { name = suggestion }
+                                    .tint(.primary)
+                            }
+                        } else {
+                            Text("Suggesting names…").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", systemImage: "xmark", role: .cancel) { dismiss() }
+                        .tint(.primary)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Rename", systemImage: "checkmark", role: .confirm, action: confirm)
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear { naming = true }
+            .task {
+                guard !item.isFolder, let url = vault.note(at: item.path)?.url else {
+                    suggestions = []
+                    return
+                }
+                let text = await Task.detached { (try? MobileVault.read(url)) ?? "" }.value
+                suggestions = await NameSuggester.suggestions(for: text, current: item.name)
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func confirm() {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        dismiss()
+        rename()
     }
 }

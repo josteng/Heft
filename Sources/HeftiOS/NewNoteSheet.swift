@@ -101,6 +101,7 @@ private struct NewNoteSheet: View {
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", systemImage: "xmark", role: .cancel) { dismiss() }
+                        .tint(.primary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create", systemImage: "checkmark", role: .confirm, action: create)
