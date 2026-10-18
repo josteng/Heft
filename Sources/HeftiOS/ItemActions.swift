@@ -99,6 +99,7 @@ struct ItemActionButtons: View {
         Button("Move…", systemImage: "folder") { perform(.move(item)) }
             .tint(.primary)
         Button("Delete", systemImage: "trash", role: .destructive) { perform(.delete(item)) }
+            .tint(.red)
     }
 }
 

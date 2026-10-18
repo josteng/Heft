@@ -48,6 +48,11 @@ struct LiveNoteEditor: UIViewRepresentable {
         let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.tapped(_:)))
         tap.delegate = coordinator
         view.addGestureRecognizer(tap)
+        view.ownTap = tap
+        view.isOnPicture = { [weak coordinator, weak view] point in
+            guard let coordinator, let view else { return false }
+            return coordinator.pictureRange(at: point, in: view) != nil
+        }
         coordinator.update(from: self)
         return view
     }
@@ -553,6 +558,18 @@ struct LiveNoteEditor: UIViewRepresentable {
             case picture(NSRange)
         }
 
+        /// The embed under a drawn picture at `point`, if there is one.
+        func pictureRange(at point: CGPoint, in textView: MobileTextView) -> NSRange? {
+            guard let manager = textView.textLayoutManager, let content = manager.textContentManager else { return nil }
+            let inContainer = CGPoint(x: point.x - textView.textContainerInset.left,
+                                      y: point.y - textView.textContainerInset.top)
+            guard let fragment = manager.textLayoutFragment(for: inContainer) else { return nil }
+            let start = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+            let text = textView.text as NSString
+            guard start >= 0, start <= text.length else { return nil }
+            return layout.images[text.lineRange(for: NSRange(location: start, length: 0)).location]?.range
+        }
+
         private func target(at point: CGPoint, in textView: MobileTextView) -> Target? {
             guard let manager = textView.textLayoutManager,
                   let content = manager.textContentManager
@@ -577,9 +594,6 @@ struct LiveNoteEditor: UIViewRepresentable {
                     return .checkbox(line: line)
                 }
             }
-            // A picture covers its own source, so a tap on it has no text to
-            // land in; it puts the caret after the embed instead, which shows
-            // the source to edit, as a line being written does.
             if let picture = layout.images[line.location] {
                 return .picture(picture.range)
             }
@@ -618,11 +632,12 @@ struct LiveNoteEditor: UIViewRepresentable {
             case .link(let url):
                 follow?(url)
             case .picture(let range):
+                // The whole embed, selected, as the Mac selects a picture: a
+                // selection keeps the line as it is drawn, where a caret in
+                // the source revealed it and moved everything under the
+                // finger. Typing or Delete then acts on the picture.
                 if !textView.isFirstResponder { textView.becomeFirstResponder() }
-                // After UIKit has placed the tap's own caret.
-                DispatchQueue.main.async {
-                    textView.selectedRange = NSRange(location: NSMaxRange(range), length: 0)
-                }
+                textView.selectedRange = range
                 return
             }
             // The text view takes the same tap as a request for the keyboard;
@@ -739,6 +754,9 @@ struct LiveNoteEditor: UIViewRepresentable {
             glass.contentView.addSubview(suggestions)
             suggestionScroll = suggestions
             suggestionRow = row
+            evenSuggestions = row.widthAnchor.constraint(
+                equalTo: suggestions.frameLayoutGuide.widthAnchor, constant: -20
+            )
             NSLayoutConstraint.activate([
                 stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
                 stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
@@ -754,6 +772,8 @@ struct LiveNoteEditor: UIViewRepresentable {
         private weak var barScroll: UIScrollView?
         private weak var suggestionScroll: UIScrollView?
         private weak var suggestionRow: UIStackView?
+        /// A few suggestions share the strip's width; more scroll.
+        private var evenSuggestions: NSLayoutConstraint?
 
         /// A completion offered in the strip: what it shows, and what
         /// accepting it writes for the link or tag being typed.
@@ -857,9 +877,17 @@ struct LiveNoteEditor: UIViewRepresentable {
             switch part.part {
             case .text:
                 guard let ref, !part.isEmbed else { return [] }
-                return part.matching(index.aliases(of: ref)).map {
+                let aliases = index.aliases(of: ref)
+                requestLinkTexts(for: part, note: ref, in: text)
+                let key = Self.linkTextKey(part)
+                let suggested = (linkTexts?.key == key ? linkTexts?.texts ?? [] : [])
+                    .filter { text in !aliases.contains { $0.lowercased() == text.lowercased() } }
+                return part.matching(aliases).map {
                     Suggestion(title: $0, detail: "Alias", destination: $0, kind: .linkPart,
                                symbol: "arrow.turn.down.right")
+                } + part.matching(suggested).map {
+                    Suggestion(title: $0, detail: "Suggested", destination: $0, kind: .linkPart,
+                               symbol: "sparkles")
                 }
             case .heading:
                 let source: String
@@ -878,6 +906,33 @@ struct LiveNoteEditor: UIViewRepresentable {
                                       destination: LinkPartContext.linkable(heading: name),
                                       kind: .linkPart, symbol: "number")
                 }
+            }
+        }
+
+        /// Text after `|` that fits the sentence, asked of the on-device
+        /// model once per link, as the Mac asks it.
+        private var linkTexts: (key: String, texts: [String])?
+        private var linkTextPending: String?
+
+        private static func linkTextKey(_ part: LinkPartContext) -> String {
+            "\(part.linkStart)|\(part.target.lowercased())"
+        }
+
+        private func requestLinkTexts(for part: LinkPartContext, note: NoteRef, in text: String) {
+            let key = Self.linkTextKey(part)
+            guard note.isMarkdown, linkTextPending != key, linkTexts?.key != key else { return }
+            linkTextPending = key
+            let sentence = part.sentence(in: text)
+            let url = note.url, name = note.name
+            Task { [weak self] in
+                let opening = await Task.detached {
+                    (try? MobileVault.read(url)).map { NoteText.splitFrontmatter($0).body } ?? ""
+                }.value
+                let texts = await LinkTitles.linkTexts(sentence: sentence, note: name, opening: opening)
+                guard let self, self.linkTextPending == key else { return }
+                self.linkTextPending = nil
+                self.linkTexts = (key, texts)
+                self.updateSuggestions()
             }
         }
 
@@ -918,6 +973,9 @@ struct LiveNoteEditor: UIViewRepresentable {
                 button.widthAnchor.constraint(lessThanOrEqualToConstant: 220).isActive = true
                 suggestionRow.addArrangedSubview(button)
             }
+            let few = suggestions.count <= 3
+            suggestionRow.distribution = few ? .fillEqually : .fill
+            evenSuggestions?.isActive = few
             let showing = !suggestions.isEmpty
             suggestionScroll.isHidden = !showing
             barScroll.isHidden = showing
@@ -1442,6 +1500,20 @@ struct LiveNoteEditor: UIViewRepresentable {
 /// the side margins grow rather than the lines.
 final class MobileTextView: UITextView {
     var topInset: CGFloat = 12
+    /// The editor's own tap, which handles a picture itself.
+    weak var ownTap: UIGestureRecognizer?
+    var isOnPicture: (CGPoint) -> Bool = { _ in false }
+
+    /// UIKit's own taps and presses would put a caret into the source a
+    /// picture hides, revealing it and moving the picture away from the
+    /// finger; on a picture only the editor's tap, and scrolling, begin.
+    override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        if recognizer !== ownTap, !(recognizer is UIPanGestureRecognizer),
+           isOnPicture(recognizer.location(in: self)) {
+            return false
+        }
+        return super.gestureRecognizerShouldBegin(recognizer)
+    }
 
     override func layoutSubviews() {
         let side = max(16, (bounds.width - 720) / 2)
