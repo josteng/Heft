@@ -11,7 +11,7 @@ enum FormatTool: Hashable {
     case highlight, color(HighlightColor?)
     case task, bullets, numbers
     case outdent, indent
-    case quote, callout(CalloutKind)
+    case quote, callout
 }
 
 /// What applies where the caret is, which the panel shows filled in.
@@ -189,8 +189,8 @@ final class FormatPanel: UIInputView {
         })
     }
 
-    /// Beside Quote: the callout kinds Obsidian draws, written as
-    /// `> [!kind]` on the line.
+    /// Beside Quote: starts `> [!]`, and the keyboard strip offers the
+    /// kinds, used ones first, as it does for a callout typed by hand.
     private func calloutButton() -> UIButton {
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(systemName: "exclamationmark.bubble")
@@ -199,14 +199,10 @@ final class FormatPanel: UIInputView {
         configuration.baseForegroundColor = .label
         configuration.background.backgroundColor = .tertiarySystemFill
         configuration.background.cornerRadius = 0
-        let button = UIButton(configuration: configuration)
-        button.accessibilityLabel = "Callout"
-        button.showsMenuAsPrimaryAction = true
-        button.menu = UIMenu(title: "Callout", children: CalloutKind.allCases.map { kind in
-            UIAction(title: kind.rawValue.capitalized, image: UIImage(systemName: kind.symbol)) {
-                [weak self] _ in self?.onTool(.callout(kind))
-            }
+        let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+            self?.onTool(.callout)
         })
+        button.accessibilityLabel = "Callout"
         button.heightAnchor.constraint(equalToConstant: 48).isActive = true
         return button
     }

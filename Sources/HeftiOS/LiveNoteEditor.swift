@@ -140,11 +140,12 @@ struct LiveNoteEditor: UIViewRepresentable {
                     case "quote": self.quote()
                     case "numbered": self.numbered()
                     case "hl": self.restyle(textView); self.highlight()
+                    case "accept": self.updateSuggestions(); self.accept(0)
                     case let name where name.hasPrefix("color:"):
                         self.restyle(textView)
                         self.choose(HighlightColor.allCases.first { $0.rawValue.isEmpty == false && $0.title.lowercased() == name.dropFirst(6) })
-                    case let name where name.hasPrefix("callout:"):
-                        if let kind = CalloutKind(rawValue: String(name.dropFirst(8))) { self.callout(kind) }
+                    case "callout": self.startCallout()
+                    case "tag": self.startTag()
                     default: break
                     }
                 }
@@ -382,6 +383,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                 if let textView { restyle(textView) }
                 refreshFormatState()
                 updateBarForSelection()
+                updateSuggestions()
             }
         }
 
@@ -553,8 +555,9 @@ struct LiveNoteEditor: UIViewRepresentable {
                 ("checklist", "Task", #selector(checklist)),
                 ("list.bullet", "Bulleted List", #selector(bullets)),
                 ("link", "Link to Note", #selector(wikiLink)),
-                ("increase.indent", "Indent", #selector(indent)),
-                ("decrease.indent", "Outdent", #selector(outdent)),
+                // A tag rather than indent: `#` is two keyboards deep on a
+                // phone, and indent is in Aa beside outdent.
+                ("number", "Tag", #selector(startTag)),
                 ("text.quote", "Quote", #selector(quote)),
                 ("bold", "Bold", #selector(bold)),
                 ("italic", "Italic", #selector(italic)),
@@ -573,11 +576,35 @@ struct LiveNoteEditor: UIViewRepresentable {
                 // Five and a bit across a phone, so the sixth shows there is more.
                 button.widthAnchor.constraint(equalToConstant: 74).isActive = true
                 if index == 0 { formatButton = button }
-                if index == 7 { textTools = button }
+                if tool.0 == "bold" { textTools = button }
                 stack.addArrangedSubview(button)
             }
             scroll.addSubview(stack)
             barScroll = scroll
+
+            // Suggestions for `[[` and `#` take the tools' place in the same
+            // glass while there are any.
+            let suggestions = UIScrollView(frame: glass.bounds)
+            suggestions.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            suggestions.showsHorizontalScrollIndicator = false
+            suggestions.alwaysBounceHorizontal = true
+            suggestions.contentInset = UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+            suggestions.isHidden = true
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.spacing = 4
+            row.translatesAutoresizingMaskIntoConstraints = false
+            suggestions.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: suggestions.contentLayoutGuide.leadingAnchor),
+                row.trailingAnchor.constraint(equalTo: suggestions.contentLayoutGuide.trailingAnchor),
+                row.topAnchor.constraint(equalTo: suggestions.contentLayoutGuide.topAnchor),
+                row.bottomAnchor.constraint(equalTo: suggestions.contentLayoutGuide.bottomAnchor),
+                row.heightAnchor.constraint(equalTo: suggestions.frameLayoutGuide.heightAnchor),
+            ])
+            glass.contentView.addSubview(suggestions)
+            suggestionScroll = suggestions
+            suggestionRow = row
             NSLayoutConstraint.activate([
                 stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
                 stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
@@ -591,6 +618,154 @@ struct LiveNoteEditor: UIViewRepresentable {
         private weak var formatButton: UIButton?
         private var formatPanel: FormatPanel?
         private weak var barScroll: UIScrollView?
+        private weak var suggestionScroll: UIScrollView?
+        private weak var suggestionRow: UIStackView?
+
+        /// A completion offered in the strip: what it shows, and what
+        /// accepting it writes for the link or tag being typed.
+        private struct Suggestion: Equatable {
+            enum Kind { case link, tag, callout, color }
+            var title: String
+            var detail: String
+            var destination: String
+            var kind: Kind
+            var symbol: String?
+            var tint: UIColor?
+        }
+
+        /// Which callout kinds were used, so the strip offers the usual ones
+        /// first.
+        private static let calloutUse = FrecencyStore(key: "dev.stenglein.Heft.iOS.calloutUse")
+
+        private var suggestions: [Suggestion] = []
+
+        /// `[[` offers notes, as the Mac's menu does: by name and by alias,
+        /// best first, and the most recently edited before anything is
+        /// typed. `#` offers the vault's tags, most used first.
+        private func updateSuggestions() {
+            guard let textView, let index = renderContext?.index else { return }
+            let text = textView.text ?? ""
+            let selection = textView.selectedRange
+            var found: [Suggestion] = []
+            if let wiki = WikiCompletionContext.detect(in: text, selection: selection) {
+                let pipe = WikiCompletionContext.pipe(at: wiki.queryRange.location, in: text)
+                if wiki.query.isEmpty {
+                    found = index.notesByLastEdit.prefix(12).map {
+                        Suggestion(title: $0.name, detail: $0.folder,
+                                   destination: index.linkDestination(for: $0), kind: .link)
+                    }
+                } else {
+                    found = index.linkMatches(matching: wiki.query, forEmbed: wiki.isEmbed)
+                        .prefix(20).map { match in
+                            let destination = index.linkDestination(for: match.ref)
+                            guard let alias = match.alias else {
+                                return Suggestion(title: match.ref.name, detail: match.ref.folder,
+                                                  destination: destination, kind: .link)
+                            }
+                            return Suggestion(title: alias, detail: "\u{2192} \(match.ref.name)",
+                                              destination: destination + pipe + alias, kind: .link)
+                        }
+                }
+            } else if let callout = CalloutCompletionContext.detect(in: text, selection: selection) {
+                let use = Self.calloutUse
+                let ranked = callout.suggestions().enumerated().sorted {
+                    let left = use.score($0.element.kind.rawValue), right = use.score($1.element.kind.rawValue)
+                    return left != right ? left > right : $0.offset < $1.offset
+                }.map(\.element)
+                found = ranked.map {
+                    Suggestion(title: $0.kind.rawValue.capitalized, detail: $0.matchedAlias ?? "",
+                               destination: $0.insertion, kind: .callout, symbol: $0.kind.symbol)
+                }
+            } else if HighlightCompletionContext.detect(in: text, selection: selection) != nil {
+                // The colour the pencil uses first, then the rest in order.
+                let current = highlightColor
+                let choices: [HighlightColor?] = [current] + ([nil] + HighlightColor.allCases.map(Optional.some))
+                    .filter { $0 != current }
+                found = choices.map {
+                    Suggestion(title: $0?.title ?? "Default", detail: "", destination: $0?.rawValue ?? "",
+                               kind: .color, symbol: "circle.fill",
+                               tint: Theme.highlightSwatch($0 ?? .yellow))
+                }
+            } else if let tag = TagCompletionContext.detect(in: text, selection: selection) {
+                // The index lists tags most used first.
+                found = tag.suggestions(from: index.allTags).prefix(20).map {
+                    let count = index.noteCount(forTag: $0)
+                    return Suggestion(title: "#\($0)", detail: count == 1 ? "1 note" : "\(count) notes",
+                                      destination: $0, kind: .tag)
+                }
+            }
+            guard found != suggestions else { return }
+            suggestions = found
+            showSuggestions()
+        }
+
+        private func showSuggestions() {
+            guard let suggestionRow, let suggestionScroll, let barScroll else { return }
+            suggestionRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            for (position, suggestion) in suggestions.enumerated() {
+                var configuration = UIButton.Configuration.plain()
+                configuration.title = suggestion.title
+                configuration.subtitle = suggestion.detail.isEmpty ? nil : suggestion.detail
+                configuration.titleLineBreakMode = .byTruncatingTail
+                configuration.baseForegroundColor = .label
+                configuration.titleAlignment = .center
+                configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12)
+                if let symbol = suggestion.symbol {
+                    configuration.image = UIImage(systemName: symbol)
+                    configuration.imagePadding = 6
+                    configuration.preferredSymbolConfigurationForImage =
+                        UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+                    if let tint = suggestion.tint {
+                        configuration.image = configuration.image?.withTintColor(tint, renderingMode: .alwaysOriginal)
+                    }
+                }
+                configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
+                    var attributes = $0
+                    attributes.font = .preferredFont(forTextStyle: .subheadline)
+                    return attributes
+                }
+                configuration.subtitleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
+                    var attributes = $0
+                    attributes.font = .preferredFont(forTextStyle: .caption2)
+                    attributes.foregroundColor = .secondaryLabel
+                    return attributes
+                }
+                let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+                    self?.accept(position)
+                })
+                button.widthAnchor.constraint(lessThanOrEqualToConstant: 220).isActive = true
+                suggestionRow.addArrangedSubview(button)
+            }
+            let showing = !suggestions.isEmpty
+            suggestionScroll.isHidden = !showing
+            barScroll.isHidden = showing
+            suggestionScroll.setContentOffset(CGPoint(x: -suggestionScroll.contentInset.left, y: 0), animated: false)
+        }
+
+        private func accept(_ position: Int) {
+            guard let textView, suggestions.indices.contains(position) else { return }
+            let suggestion = suggestions[position]
+            let text = textView.text ?? ""
+            let selection = textView.selectedRange
+            switch suggestion.kind {
+            case .tag:
+                guard let context = TagCompletionContext.detect(in: text, selection: selection) else { return }
+                apply(context.accepting(suggestion.destination, in: text))
+            case .link:
+                guard let context = WikiCompletionContext.detect(in: text, selection: selection) else { return }
+                apply(context.accepting(suggestion.destination))
+            case .callout:
+                guard let context = CalloutCompletionContext.detect(in: text, selection: selection) else { return }
+                Self.calloutUse.record(suggestion.destination)
+                apply(context.accepting(suggestion.destination))
+                // Started from Aa: the title is typed next, on the keyboard.
+                if textView.inputView != nil { toggleFormatPanel() }
+            case .color:
+                guard let context = HighlightCompletionContext.detect(in: text, selection: selection) else { return }
+                apply(context.accepting(HighlightColor(rawValue: suggestion.destination)))
+            }
+            updateSuggestions()
+        }
         /// The first of the text tools, which a selection scrolls to.
         private weak var textTools: UIButton?
         private var barShowsTextTools = false
@@ -666,7 +841,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             case .code: format(.code)
             case .highlight: highlight()
             case .color(let color): choose(color)
-            case .callout(let kind): callout(kind)
+            case .callout: startCallout()
             case .task: checklist()
             case .bullets: bullets()
             case .numbers: numbered()
@@ -781,23 +956,46 @@ struct LiveNoteEditor: UIViewRepresentable {
             ))
         }
 
-        /// The line as a callout of `kind`: `> [!kind] ` in front of it, or
-        /// the kind swapped on a line that already is one.
-        private func callout(_ kind: CalloutKind) {
+        /// Aa's callout: `> [!]` in front of the line with the caret between
+        /// the brackets, so the strip offers the kinds as it does for a
+        /// callout typed by hand; on a callout already, its kind is selected
+        /// for the same choice.
+        private func startCallout() {
             guard let textView else { return }
             let text = textView.text as NSString
             let selection = textView.selectedRange
             let line = text.lineRange(for: NSRange(location: selection.location, length: 0))
             let content = text.substring(with: line).trimmingCharacters(in: .newlines) as NSString
-            let prefix = content.range(of: #"^>[ \t]?(\[![^\]]*\][+-]?[ \t]?)?"#, options: .regularExpression)
-            let existing = prefix.location == NSNotFound ? 0 : prefix.length
-            let marker = "> [!\(kind.rawValue)] "
-            let caret = max(line.location + (marker as NSString).length,
-                            selection.location - existing + (marker as NSString).length)
+            let kind = content.range(of: #"(?<=^>[ \t]?\[!)[^\]]*(?=\])"#, options: .regularExpression)
+            if kind.location != NSNotFound {
+                textView.selectedRange = NSRange(location: line.location + NSMaxRange(kind), length: 0)
+                restyle(textView)
+                updateSuggestions()
+                return
+            }
+            let quote = content.range(of: #"^>[ \t]?"#, options: .regularExpression)
+            let existing = quote.location == NSNotFound ? 0 : quote.length
             apply(MarkdownEditing.Edit(
-                range: NSRange(location: line.location, length: existing), replacement: marker,
-                selection: NSRange(location: caret, length: 0)
+                range: NSRange(location: line.location, length: existing), replacement: "> [!] ",
+                selection: NSRange(location: line.location + 4, length: 0)
             ))
+            updateSuggestions()
+        }
+
+        /// `#` at the caret, after a space when it would otherwise join the
+        /// word before, so the strip offers the vault's tags.
+        @objc private func startTag() {
+            guard let textView else { return }
+            let text = textView.text as NSString
+            let caret = textView.selectedRange.location
+            let joins = caret > 0 && !CharacterSet.whitespacesAndNewlines.contains(
+                UnicodeScalar(text.character(at: caret - 1)) ?? " ")
+            let marker = joins ? " #" : "#"
+            apply(MarkdownEditing.Edit(
+                range: textView.selectedRange, replacement: marker,
+                selection: NSRange(location: caret + (marker as NSString).length, length: 0)
+            ))
+            updateSuggestions()
         }
 
         @objc private func code() { format(.code) }
