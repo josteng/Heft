@@ -372,6 +372,7 @@ private struct PadMonth: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .tint(.primary)
+                .hoverEffect(.highlight)
             }
             let symbols = weekdaySymbols
             HStack(spacing: 0) {
@@ -426,6 +427,9 @@ private struct PadMonth: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+        // A trackpad's pointer lights the day under it, as the system's
+        // own buttons do.
+        .hoverEffect(.highlight)
         .accessibilityLabel(date.formatted(date: .complete, time: .omitted))
     }
 
