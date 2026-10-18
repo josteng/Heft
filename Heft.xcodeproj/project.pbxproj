@@ -20,6 +20,9 @@
 		010000000000000000000011 /* libHeftCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* libHeftCore.a */; };
 		010000000000000000000012 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
 		010000000000000000000013 /* HeftCapture.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = 020000000000000000000008 /* HeftCapture.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		010000000000000000000014 /* libHeftCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* libHeftCore.a */; };
+		010000000000000000000015 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
+		010000000000000000000016 /* Heft.icon in Resources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000003 /* Heft.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -79,6 +82,7 @@
 		020000000000000000000009 /* HeftCapture-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "HeftCapture-Info.plist"; sourceTree = "<group>"; };
 		020000000000000000000010 /* HeftCapture.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HeftCapture.entitlements; sourceTree = "<group>"; };
 		020000000000000000000011 /* HeftIntentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HeftIntentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		020000000000000000000012 /* HeftiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HeftiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,6 +92,7 @@
 		040000000000000000000004 /* HeftVimCore */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftVimCore; sourceTree = "<group>"; };
 		040000000000000000000005 /* HeftCapture */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftCapture; sourceTree = "<group>"; };
 		040000000000000000000006 /* HeftIntentTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Tests/HeftIntentTests; sourceTree = "<group>"; };
+		040000000000000000000007 /* HeftiOS */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftiOS; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -137,6 +142,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		050000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				010000000000000000000014 /* libHeftCore.a in Frameworks */,
+				010000000000000000000015 /* Markdown in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -149,6 +163,7 @@
 				040000000000000000000004 /* HeftVimCore */,
 				040000000000000000000006 /* HeftIntentTests */,
 				040000000000000000000005 /* HeftCapture */,
+				040000000000000000000007 /* HeftiOS */,
 				060000000000000000000003 /* Resources */,
 				060000000000000000000004 /* Config */,
 				060000000000000000000002 /* Products */,
@@ -164,6 +179,7 @@
 				020000000000000000000006 /* libHeftVimCore.a */,
 				020000000000000000000011 /* HeftIntentTests.xctest */,
 				020000000000000000000008 /* HeftCapture.appex */,
+				020000000000000000000012 /* HeftiOS.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -333,6 +349,30 @@
 			productReference = 020000000000000000000011 /* HeftIntentTests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		090000000000000000000007 /* HeftiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A0000000000000000000008 /* Build configuration list for PBXNativeTarget "HeftiOS" */;
+			buildPhases = (
+				0F0000000000000000000007 /* Sources */,
+				050000000000000000000006 /* Frameworks */,
+				0E0000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0B0000000000000000000009 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				040000000000000000000007 /* HeftiOS */,
+			);
+			name = HeftiOS;
+			packageProductDependencies = (
+				0D0000000000000000000001 /* Markdown */,
+			);
+			productName = HeftiOS;
+			productReference = 020000000000000000000012 /* HeftiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -347,6 +387,7 @@
 					090000000000000000000002 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000004 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000005 = { CreatedOnToolsVersion = 26.0; };
+					090000000000000000000007 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000003 = {
 						CreatedOnToolsVersion = 26.0;
 						TestTargetID = 090000000000000000000001;
@@ -382,6 +423,7 @@
 				090000000000000000000004 /* HeftVimCore */,
 				090000000000000000000006 /* HeftIntentTests */,
 				090000000000000000000005 /* HeftCapture */,
+				090000000000000000000007 /* HeftiOS */,
 			);
 		};
 /* End PBXProject section */
@@ -409,6 +451,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0E0000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				010000000000000000000016 /* Heft.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -418,6 +468,7 @@
 		0F0000000000000000000004 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000006 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		0F0000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -429,6 +480,7 @@
 		0B0000000000000000000006 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000005 /* HeftCapture */; targetProxy = 030000000000000000000004 /* PBXContainerItemProxy */; };
 		0B0000000000000000000007 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000002 /* HeftCore */; targetProxy = 030000000000000000000001 /* PBXContainerItemProxy */; };
 		0B0000000000000000000008 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000001 /* Heft */; targetProxy = 030000000000000000000002 /* PBXContainerItemProxy */; };
+		0B0000000000000000000009 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000002 /* HeftCore */; targetProxy = 030000000000000000000001 /* PBXContainerItemProxy */; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -624,6 +676,54 @@
 			};
 			name = Release;
 		};
+		100000000000000000000015 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = Heft;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Heft;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile;
+				PRODUCT_NAME = HeftiOS;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		100000000000000000000016 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = Heft;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Heft;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile;
+				PRODUCT_NAME = HeftiOS;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -634,6 +734,7 @@
 		0A0000000000000000000005 /* Build configuration list for PBXNativeTarget "HeftVimCore" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000009 /* Debug */, 100000000000000000000010 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0A0000000000000000000006 /* Build configuration list for PBXNativeTarget "HeftCapture" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000011 /* Debug */, 100000000000000000000012 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0A0000000000000000000007 /* Build configuration list for PBXNativeTarget "HeftIntentTests" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000013 /* Debug */, 100000000000000000000014 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0A0000000000000000000008 /* Build configuration list for PBXNativeTarget "HeftiOS" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000015 /* Debug */, 100000000000000000000016 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */

@@ -17,6 +17,9 @@ swift run Heft render <vault> <note> [caret]    # what the live surface would dr
 swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the GUI
 swift run Heft help [--json]                    # every verb and flag, from CommandLineSpec
 swift run Heft version                          # also --version and -v
+xcodebuild -scheme HeftiOS -destination 'generic/platform=iOS Simulator' build   # the iOS app
+    # in DEBUG, SIMCTL_CHILD_HEFT_IOS_VAULT=<path> opens a vault without the picker;
+    # HEFT_IOS_NOTE, HEFT_IOS_TAB, HEFT_IOS_QUERY and HEFT_IOS_CAPTURE set up a screenshot
 swift run Heft proposals <vault>                # agent edits waiting for review
 swift run Heft backlinks|links|outline <vault> <note>   # the resolved link index
 swift run Heft tags|config <vault>              # tags with counts; settings as JSON
@@ -39,7 +42,7 @@ Scripts/publish.sh [--version X]                # the GitHub workflow end to end
 
 ## Architecture
 
-Four targets:
+Five targets:
 
 - `HeftCore`: pure logic. Never imports AppKit or SwiftUI. Parsing, the link index,
   the vault scanner, moment.js date formatting, live-mode decorations, the file
@@ -55,6 +58,11 @@ Four targets:
 - `HeftCapture`: the App Intents extension. The two Spotlight captures run
   here, in a sandboxed process of their own, so that filing a line never
   launches or activates the app. Foundation and `HeftCore` only.
+- `HeftiOS`: the iPhone and iPad companion. Browse, read, search, the daily
+  calendar, and capture, over `HeftCore`. Notes are rendered from
+  `MarkdownModel` and edited as plain text with an explicit save that refuses
+  a file changed elsewhere; the live surface stays on the Mac. The vault is a
+  bookmark from the Files picker, and there is no watcher: it rescans.
 
 The dependencies are Apple's swift-markdown (cmark-gfm), SwiftMath (LaTeX), and
 swift-markdown-engine for its syntax-highlighting grammars.
