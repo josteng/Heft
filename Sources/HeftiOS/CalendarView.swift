@@ -412,7 +412,7 @@ struct CalendarView: View {
                 } else {
                     unfold()
                 }
-            }, findInMenu: true, topInset: 20)
+            }, findInMenu: true, topInset: 20, underTopBar: false)
             .id(document.path)
         } else {
             ContentUnavailableView {

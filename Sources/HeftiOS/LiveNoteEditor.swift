@@ -37,9 +37,9 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.backgroundColor = .clear
         view.font = Theme.liveFont
         view.alwaysBounceVertical = true
-        // The note ends at the bar's edge as the search list does, rather
-        // than showing through the title and buttons.
-        view.topEdgeEffect.style = .hard
+        // Under the phone's bar the note ends at a firmer edge, as its lists
+        // do beneath theirs; the iPad's wider bar keeps the soft blur.
+        view.topEdgeEffect.style = UIDevice.current.userInterfaceIdiom == .phone ? .hard : .soft
         view.keyboardDismissMode = .interactive
         // Markdown is typed literally: curled quotes and joined dashes would
         // change what the file says.

@@ -338,6 +338,9 @@ struct NoteContent: View {
     /// Capture.
     var findInMenu = false
     var topInset: CGFloat = 12
+    /// Whether the note runs on under the top bar's glass. Not under the
+    /// calendar's month, which the text view cannot inset itself from.
+    var underTopBar = true
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
     @Environment(\.openURL) private var openURL
@@ -383,6 +386,10 @@ struct NoteContent: View {
                 // Under the keyboard rather than above it; the editor pads
                 // itself by what covers it.
                 .ignoresSafeArea(.keyboard, edges: .bottom)
+                // Under the top bar too, which the text view insets itself
+                // from, so the note scrolls on behind the bar's glass rather
+                // than ending at its lower edge.
+                .ignoresSafeArea(.container, edges: underTopBar ? .top : [])
                 .overlay(alignment: .top) {
                     if document.conflict { conflictBanner }
                 }
@@ -527,3 +534,4 @@ private struct BacklinksView: View {
         }
     }
 }
+
