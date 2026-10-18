@@ -1,0 +1,103 @@
+import Foundation
+
+/// The colours the live surface draws with, kept in the vault so the Mac and
+/// the phone draw a vault's notes alike.
+///
+/// In `.heft/appearance.json` beside the pins, and synced the same way, by
+/// whatever syncs the vault. The Mac keeps its own copy as archived
+/// `NSColor`s and writes this when it changes; the phone has only this. Each
+/// colour is an sRGB hex string, and nil means the built-in default. Link
+/// and tag fall back to the accent rather than to a fixed colour, as they do
+/// on the Mac.
+public struct AppearancePreferences: Codable, Equatable, Sendable {
+    public var accent: String?
+    public var link: String?
+    public var tag: String?
+    public var code: String?
+    public var bold: String?
+    public var italic: String?
+    /// h1 through h6.
+    public var headings: [String?] = Array(repeating: nil, count: 6)
+    /// On by default, as on the Mac.
+    public var colorfulFormatting = true
+
+    public init() {}
+
+    public static func url(in vaultRoot: URL) -> URL {
+        vaultRoot.appendingPathComponent(".heft", isDirectory: true)
+            .appendingPathComponent("appearance.json")
+    }
+
+    /// Nil when the vault has no file, which is different from a file of
+    /// defaults: with none, the Mac's own choice stands.
+    public static func load(fromVault vaultRoot: URL) -> AppearancePreferences? {
+        guard let data = try? Data(contentsOf: url(in: vaultRoot)) else { return nil }
+        return try? JSONDecoder().decode(AppearancePreferences.self, from: data)
+    }
+
+    /// Whole and atomic, as the pins are.
+    public func save(toVault vaultRoot: URL) throws {
+        let file = Self.url(in: vaultRoot)
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(self).write(to: file, options: .atomic)
+    }
+
+    /// Every key optional when reading, so a file written by an older or
+    /// newer build still opens with what it does say.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accent = try container.decodeIfPresent(String.self, forKey: .accent)
+        link = try container.decodeIfPresent(String.self, forKey: .link)
+        tag = try container.decodeIfPresent(String.self, forKey: .tag)
+        code = try container.decodeIfPresent(String.self, forKey: .code)
+        bold = try container.decodeIfPresent(String.self, forKey: .bold)
+        italic = try container.decodeIfPresent(String.self, forKey: .italic)
+        let stored = try container.decodeIfPresent([String?].self, forKey: .headings) ?? []
+        headings = (0..<6).map { $0 < stored.count ? stored[$0] : nil }
+        colorfulFormatting = try container.decodeIfPresent(Bool.self, forKey: .colorfulFormatting) ?? true
+    }
+}
+
+extension AppearancePreferences {
+    public enum SyncStep: Equatable, Sendable {
+        case nothing
+        /// Write this device's colours to the vault.
+        case write
+        /// Take the vault's colours.
+        case adopt(AppearancePreferences)
+    }
+
+    /// What a device does on reading a vault's file, given its own colours.
+    ///
+    /// The file wins whenever there is one, since it is the last choice made
+    /// on any device. With none, a device that has customised its colours
+    /// writes them; one still on the defaults writes nothing, so a folder
+    /// opened with the defaults is not given a `.heft` it never asked for.
+    public static func step(stored: AppearancePreferences?, current: AppearancePreferences) -> SyncStep {
+        guard let stored else { return current == AppearancePreferences() ? .nothing : .write }
+        return stored == current ? .nothing : .adopt(stored)
+    }
+}
+
+/// `#RRGGBB`, or `#RRGGBBAA` when not opaque, in sRGB.
+public enum HexColor {
+    public static func format(red: Double, green: Double, blue: Double, alpha: Double = 1) -> String {
+        func byte(_ value: Double) -> String {
+            String(format: "%02X", Int((min(max(value, 0), 1) * 255).rounded()))
+        }
+        return "#" + byte(red) + byte(green) + byte(blue) + (alpha < 1 ? byte(alpha) : "")
+    }
+
+    public static func components(_ hex: String) -> (red: Double, green: Double, blue: Double, alpha: Double)? {
+        var digits = hex.trimmingCharacters(in: .whitespaces)
+        if digits.hasPrefix("#") { digits.removeFirst() }
+        guard digits.count == 6 || digits.count == 8, let value = UInt32(digits, radix: 16) else { return nil }
+        let full = digits.count == 6 ? value << 8 | 0xFF : value
+        func channel(_ shift: UInt32) -> Double { Double((full >> shift) & 0xFF) / 255 }
+        return (channel(24), channel(16), channel(8), channel(0))
+    }
+}
