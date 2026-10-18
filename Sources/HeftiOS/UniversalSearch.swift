@@ -89,9 +89,15 @@ final class SearchModel {
 
     /// ⌘1…⌘5: the chip with that number, or no scope when it is the one
     /// already chosen.
+    /// Out of the scope, to its parent where it has one.
+    func leave() {
+        scope = scope?.parent
+    }
+
     func choose(chip number: Int) {
         guard let chip = BarScope.chip(number: number), chip != .ask else { return }
-        scope = scope == chip ? nil : chip
+        // As on the Mac: from any scope, and its own number keeps it.
+        scope = chip
     }
 
     /// A prefix typed alone into an unscoped field enters its scope, as on
@@ -411,8 +417,8 @@ struct UniversalSearchList: View {
     var asButtons = false
     /// The row the keyboard has chosen, lit.
     var highlighted: String?
-    /// The scope chips at the head of the list; the phone has them above
-    /// its keyboard instead.
+    /// The scope chips at the head of the list, while no scope is chosen;
+    /// the phone has them under its field instead.
     var showsChips = true
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobileLibrary) private var library
@@ -420,7 +426,7 @@ struct UniversalSearchList: View {
 
     var body: some View {
         let commands = library.map(MobileCommand.all) ?? []
-        if showsChips {
+        if showsChips, model.scope == nil {
             Section {
                 ScopeChips(model: model, numbered: asButtons)
                     .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
@@ -528,46 +534,99 @@ private struct SearchTextTask: ViewModifier {
 
 /// The scopes as chips; the chosen one carries an ✕ to leave it, as
 /// Backspace in an empty field does on the Mac.
+/// The scopes to search in. In the iPad's panel they show only while none
+/// is chosen, as on the Mac, where a chosen one moves into the field as a
+/// `ScopeToken`. On the phone, whose keyboard cannot report Delete in an
+/// empty field, they stay: the chosen one is coloured and a second tap
+/// leaves it.
 struct ScopeChips: View {
     let model: SearchModel
-    /// Full size above the phone's keyboard, smaller under a panel's field.
+    /// Full size under the phone's field, with the chosen one kept and
+    /// coloured; smaller under a panel's.
     var large = false
     /// ⌘1… beside each, where a hardware keyboard chooses them.
     var numbered = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                if let scope = model.scope, !SearchModel.chips.contains(scope) {
-                    chip(scope, chosen: true)
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    // A tag or folder entered from its list leads, chosen.
+                    if let scope = model.scope, !SearchModel.chips.contains(scope) {
+                        chip(scope)
+                    }
+                    ForEach(SearchModel.chips, id: \.self) { chip($0) }
                 }
-                ForEach(SearchModel.chips, id: \.self) { scope in
-                    chip(scope, chosen: model.scope == scope)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, large ? 4 : 0)
             }
-            .padding(.horizontal, 16)
         }
     }
 
-    private func chip(_ scope: BarScope, chosen: Bool) -> some View {
-        Button {
-            model.scope = chosen ? nil : scope
+    private func chip(_ scope: BarScope) -> some View {
+        let chosen = model.scope == scope
+        return Button {
+            if chosen { model.leave() } else { model.scope = scope }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: scope.symbol)
                 Text(scope.title)
-                if numbered, !chosen, let number = scope.chipNumber {
+                if numbered, let number = scope.chipNumber {
                     Text("⌘\(number)").font(.caption2).foregroundStyle(.secondary)
                 }
-                if chosen { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
             }
             .font(large ? .body : .subheadline)
             .padding(.horizontal, large ? 14 : 12)
             .padding(.vertical, large ? 9 : 6)
             .foregroundStyle(chosen ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-            .background(chosen ? AnyShapeStyle(.tint) : AnyShapeStyle(.fill.tertiary), in: .capsule)
+            .modifier(ChipBackground(chosen: chosen, glass: large))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Glass under the phone's field, where the chips float over the list; a
+/// plain fill inside the iPad's panel, which is glass already.
+private struct ChipBackground: ViewModifier {
+    let chosen: Bool
+    let glass: Bool
+
+    func body(content: Content) -> some View {
+        if glass {
+            content.glassEffect(chosen ? .regular.tint(.accentColor).interactive() : .regular.interactive(),
+                                in: .capsule)
+        } else {
+            content.background(.fill.tertiary, in: .capsule)
+        }
+    }
+}
+
+/// The chosen scope in the field, where the magnifier was, as the Mac's bar
+/// shows it. Tapping it leaves the scope: a tag for the list of tags,
+/// anything else for no scope.
+struct ScopeToken: View {
+    let model: SearchModel
+    let scope: BarScope
+
+    var body: some View {
+        Button {
+            model.leave()
+        } label: {
+            // The text keeps the text colour: a light accent is unreadable
+            // as text on a tint of itself.
+            HStack(spacing: 4) {
+                Image(systemName: scope.symbol).foregroundStyle(.tint)
+                Text(scope.title).lineLimit(1)
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(.tint.opacity(0.22), in: .capsule)
+            .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Searching \(scope.title)")
+        .accessibilityHint("Leaves the scope")
     }
 }
 
@@ -595,8 +654,13 @@ struct SearchPanel: View {
                 .onTapGesture { close() }
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Image(systemName: model.scope?.symbol ?? "magnifyingglass")
-                        .foregroundStyle(.secondary)
+                    if let scope = model.scope {
+                        ScopeToken(model: model, scope: scope)
+                            .transition(.scale(scale: 0.7).combined(with: .opacity))
+                    } else {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            .transition(.opacity)
+                    }
                     TextField(model.scope?.placeholder ?? BarScope.unscopedPlaceholder, text: $query)
                         .textFieldStyle(.plain)
                         .font(.title3)
@@ -606,6 +670,12 @@ struct SearchPanel: View {
                         .onKeyPress(.downArrow) { move(1, in: rows); return .handled }
                         .onKeyPress(.upArrow) { move(-1, in: rows); return .handled }
                         .onKeyPress(.escape) { close(); return .handled }
+                        // Delete in an empty field leaves the scope, as on the Mac.
+                        .onKeyPress(.delete) {
+                            guard query.isEmpty, model.scope != nil else { return .ignored }
+                            model.leave()
+                            return .handled
+                        }
                         // ⌘1–⌘3 come through the menu bar; these two have no
                         // menu item of their own.
                         .onKeyPress(keys: ["4", "5"]) { press in
@@ -639,6 +709,7 @@ struct SearchPanel: View {
                 }
             }
             .frame(width: 620)
+            .animation(.easeOut(duration: 0.22), value: model.scope)
             .frame(maxHeight: 560)
             .glassEffect(in: .rect(cornerRadius: 26))
             .padding(.top, 60)

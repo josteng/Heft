@@ -5,37 +5,30 @@ import UIKit
 /// The Search tab: the Mac's ⌘T search, `UniversalSearchList`, under a field
 /// of its own at the top, as the iPad's panel has, rather than the tab's
 /// system field, which sat at the top on some phones and floated at the
-/// bottom on others. The scope chips ride above the keyboard while typing,
-/// where the editor keeps its suggestions.
+/// bottom on others. The scope chips sit under it, the chosen one coloured;
+/// above the keyboard they were missing on a first launch.
 struct SearchView: View {
     @State private var query = ""
     @State private var model = SearchModel()
     @FocusState private var fieldFocused: Bool
-    /// Whether the keyboard is up, when the chips ride on it; the field's
-    /// focus state did not update from inside the bar it sits in.
-    @State private var typing = false
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobileLibrary) private var library
     @Environment(\.mobilePush) private var push
 
     var body: some View {
         List {
-            UniversalSearchList(query: query, model: model, setQuery: { query = $0 }, showsChips: !typing)
+            UniversalSearchList(query: query, model: model, setQuery: { query = $0 }, showsChips: false)
         }
         .searchingText(query, model: model)
-        .safeAreaBar(edge: .top) { field }
-        .toolbar {
-            ToolbarItem(placement: .keyboard) {
+        .safeAreaBar(edge: .top) {
+            VStack(spacing: 8) {
+                field
                 ScopeChips(model: model, large: true)
             }
+            .padding(.bottom, 6)
+            .animation(.easeOut(duration: 0.2), value: model.scope)
         }
         .toolbar(.hidden, for: .navigationBar)
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            typing = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            typing = false
-        }
         .onChange(of: query) { _, typed in
             if model.enterScope(byTyping: typed) { query = "" }
         }
@@ -75,6 +68,5 @@ struct SearchView: View {
         .padding(.vertical, 11)
         .glassEffect(in: .capsule)
         .padding(.horizontal, 16)
-        .padding(.bottom, 6)
     }
 }
