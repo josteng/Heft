@@ -1,4 +1,5 @@
 import Foundation
+import HeftCore
 
 /// Bridges foreground App Intents to SwiftUI's live window registry. Intent
 /// execution can begin before the first WindowGroup has appeared, so requests
@@ -13,6 +14,8 @@ final class IntentNavigation {
     /// have no vault yet: working out which vault a path belongs to is the
     /// registry's job, and it cannot be asked before one exists.
     private var pendingPaths: [String] = []
+    /// A note handed off before any window existed: Handoff launches Heft.
+    private var pendingHandoff: HandoffNote?
 
     private init() {}
 
@@ -28,6 +31,18 @@ final class IntentNavigation {
         for path in paths {
             registry.openPath(path)
         }
+        if let note = pendingHandoff {
+            pendingHandoff = nil
+            _ = registry.continueHandoff(note)
+        }
+    }
+
+    func continueHandoff(_ note: HandoffNote) {
+        guard let registry else {
+            pendingHandoff = note
+            return
+        }
+        _ = registry.continueHandoff(note)
     }
 
     /// Opens a path from outside the app, once there is a window to open it in.

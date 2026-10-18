@@ -542,6 +542,22 @@ final class VaultRegistry: ObservableObject {
         let model = workspaceModels[owner]?.value
         window.isDocumentEdited = model?.saveIsBlocked ?? false
         window.showDocumentIcon(for: model?.current?.url)
+        MacHandoff.offer(model?.current, in: model?.vaultRoot, on: window)
+    }
+
+    /// A note open on another device: the same path in an open vault,
+    /// preferring the one whose folder has the same name.
+    func continueHandoff(_ note: HandoffNote) -> Bool {
+        let roots = workspaceModels.values.compactMap { $0.value?.vaultRoot?.standardizedFileURL }
+        let ordered = roots.filter { $0.lastPathComponent == note.vault }
+            + roots.filter { $0.lastPathComponent != note.vault }
+        for root in ordered {
+            let url = root.appendingPathComponent(note.path)
+            if FileManager.default.fileExists(atPath: url.path), openFromIntent(url, in: root) {
+                return true
+            }
+        }
+        return false
     }
 
     func window(for owner: UUID) -> NSWindow? {

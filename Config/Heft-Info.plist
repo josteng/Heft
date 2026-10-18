@@ -39,6 +39,7 @@
     <key>NSUserActivityTypes</key>
     <array>
         <string>dev.stenglein.Heft.openNote</string>
+        <string>dev.stenglein.Heft.handoffNote</string>
     </array>
     <key>CFBundleURLTypes</key>
     <array>

@@ -26,6 +26,22 @@ final class HeftAppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { IntentNavigation.shared.openPath(path) }
         }
     }
+
+    func application(_ application: NSApplication, willContinueUserActivityWithType type: String) -> Bool {
+        type == HandoffNote.activityType
+    }
+
+    /// A note open on the phone, picked from the Dock.
+    func application(
+        _ application: NSApplication, continue userActivity: NSUserActivity,
+        restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void
+    ) -> Bool {
+        guard userActivity.activityType == HandoffNote.activityType,
+              let note = HandoffNote(userInfo: userActivity.userInfo)
+        else { return false }
+        MainActor.assumeIsolated { IntentNavigation.shared.continueHandoff(note) }
+        return true
+    }
 }
 
 struct HeftApp: App {

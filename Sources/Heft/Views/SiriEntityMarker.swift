@@ -119,7 +119,10 @@ final class SiriPointer {
         pointed = identifier
         pointedWindow = identifier == nil ? nil : window
         for view in markers.compactMap(\.view) { refresh(view) }
-        guard let identifier else { return }
+        guard let identifier else {
+            MacHandoff.resume(on: window)
+            return
+        }
         let activity = NSUserActivity(activityType: "dev.stenglein.Heft.openNote")
         activity.appEntityIdentifier = identifier
         activity.becomeCurrent()

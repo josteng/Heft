@@ -369,7 +369,9 @@ final class AppModel: ObservableObject {
     /// walks up the folders it sits in. Heft draws no handle of its own for
     /// this, because AppKit's is already where a Mac user reaches for it.
     private func updateProxyIcon() {
-        registry.window(for: workspaceID)?.showDocumentIcon(for: current?.url)
+        guard let window = registry.window(for: workspaceID) else { return }
+        window.showDocumentIcon(for: current?.url)
+        MacHandoff.offer(current, in: vaultRoot, on: window)
     }
     /// Bumped whenever `text` is replaced from outside the editor, so the
     /// NSTextView knows to reset rather than treat it as user typing.
