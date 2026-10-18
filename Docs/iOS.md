@@ -43,6 +43,14 @@ written only over the text it was based on; a file that changed meanwhile
 stops saving and offers Use Theirs or Keep Mine, because the Mac autosaves
 and iCloud delivers that late.
 
+## Handoff
+
+The open note is offered as `HandoffNote`: its vault-relative path and the
+vault folder's name, since the two apps reach the same vault by different
+paths. It needs both apps signed by the same team; a Mac build signed
+ad hoc never sees the phone. The Mac makes the activity current itself
+instead of setting `window.userActivity`, which Siri's pointer uses.
+
 ## Gotchas
 
 - Restyle after a caret move or focus on the next run-loop pass, never

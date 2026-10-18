@@ -115,6 +115,8 @@ struct MobileRootView: View {
     @State private var tab: MobileTab = .recent
     @State private var capture: CaptureSheetRequest?
     @State private var quickCapture: CaptureSheetRequest?
+    /// A note open on the Mac, chosen from the app switcher.
+    @State private var handedOff: MobileRoute?
     @Environment(\.scenePhase) private var scenePhase
     private var request = CaptureRequest.shared
 
@@ -124,7 +126,7 @@ struct MobileRootView: View {
         } else {
             TabView(selection: $tab) {
                 Tab("Recent", systemImage: "clock", value: .recent) {
-                    MobileStack { RecentView() }
+                    MobileStack(incoming: $handedOff) { RecentView() }
                 }
                 Tab("Files", systemImage: "folder", value: .files) {
                     MobileStack { FolderView(path: "") }
@@ -165,6 +167,13 @@ struct MobileRootView: View {
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { quickCapture = nil }
             }
+            .onContinueUserActivity(HandoffNote.activityType) { activity in
+                guard let note = HandoffNote(userInfo: activity.userInfo) else { return }
+                capture = nil
+                quickCapture = nil
+                tab = .recent
+                handedOff = .note(note.path)
+            }
             .onAppear(perform: applyLaunchRequest)
         }
     }
@@ -194,6 +203,8 @@ struct MobileRootView: View {
 /// in any tab lands in that tab.
 struct MobileStack<Root: View>: View {
     var showsCapture = true
+    /// A screen to open from outside, replacing whatever was pushed.
+    var incoming: Binding<MobileRoute?> = .constant(nil)
     @ViewBuilder var root: Root
     @State private var path: [MobileRoute] = []
     /// A note on the root screen has the keyboard: capture is for getting a
@@ -220,6 +231,11 @@ struct MobileStack<Root: View>: View {
                 }
         }
         .environment(\.mobilePush) { path.append($0) }
+        .onChange(of: incoming.wrappedValue, initial: true) { _, route in
+            guard let route else { return }
+            incoming.wrappedValue = nil
+            path = [route]
+        }
     }
 }
 

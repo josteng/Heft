@@ -261,6 +261,9 @@ struct NoteContent: View {
     /// quickly never flashes a spinner first.
     @State private var slow = false
     @State private var showsBacklinks = false
+    /// Only a note on screen is offered to the Mac: a tab left on another
+    /// note would otherwise compete with it.
+    @State private var onScreen = false
 
     var body: some View {
         let backlinks = vault.index.backlinks(to: document.path)
@@ -300,6 +303,14 @@ struct NoteContent: View {
             }
         }
         .preference(key: TypingInNoteKey.self, value: document.editing)
+        .onAppear { onScreen = true }
+        .onDisappear { onScreen = false }
+        // The Mac shows this note in its Dock while it is open here.
+        .userActivity(HandoffNote.activityType, isActive: onScreen && vault.root != nil) { activity in
+            activity.title = vault.note(at: document.path)?.name
+            activity.isEligibleForHandoff = true
+            activity.addUserInfoEntries(from: HandoffNote(path: document.path, vault: vault.name).userInfo)
+        }
         .sheet(isPresented: $showsBacklinks) {
             NavigationStack {
                 ScrollView {
