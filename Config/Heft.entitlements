@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Which team made the app, for the iPhone: it hands a note off only
+         to an app of the same team, and reads the team from these, not
+         from the certificate. They need a provisioning profile. -->
+    <key>com.apple.application-identifier</key>
+    <string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>$(DEVELOPMENT_TEAM)</string>
+</dict>
+</plist>

@@ -31,6 +31,23 @@ SIGNING_IDENTITY="$(
     security find-identity -v -p codesigning 2>/dev/null \
         | awk '/"Apple Development:/{print $2; exit}'
 )"
+# With a team as well, the build is signed with a development profile and
+# carries the team entitlements in Config/Heft.entitlements: the iPhone takes
+# a Handoff only from an app that names its team that way. Xcode registers
+# this Mac and fetches the profile on the first build. Releases never set
+# HEFT_APP_ENTITLEMENTS; release.sh signs with Developer ID and no profile.
+TEAM="$(sed -n 's/^DEVELOPMENT_TEAM *= *\([A-Z0-9]*\).*/\1/p' "$ROOT/Config/Local.xcconfig" 2>/dev/null | head -1)"
+PROFILE_ARGS=()
+if [[ -n "$SIGNING_IDENTITY" && -n "$TEAM" ]]; then
+    PROFILE_ARGS=(
+        -allowProvisioningUpdates
+        -allowProvisioningDeviceRegistration
+        CODE_SIGN_STYLE=Automatic
+        "DEVELOPMENT_TEAM=$TEAM"
+        "CODE_SIGN_IDENTITY=Apple Development"
+        HEFT_APP_ENTITLEMENTS=Config/Heft.entitlements
+    )
+fi
 if [[ -n "$SIGNING_IDENTITY" ]]; then
     SIGNING_ARGS=(
         CODE_SIGN_STYLE=Manual
@@ -49,17 +66,28 @@ fi
 # outside a checkout, since that is not an error worth stopping a build over.
 BUILD_NUMBER="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 
-xcodebuild \
-    -quiet \
-    -project "$ROOT/Heft.xcodeproj" \
-    -scheme Heft \
-    -configuration "$XCODE_CONFIGURATION" \
-    -destination "platform=macOS,arch=$(uname -m)" \
-    -derivedDataPath "$DERIVED_DATA" \
-    -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
-    "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" \
-    "${SIGNING_ARGS[@]}" \
-    build
+build() {
+    xcodebuild \
+        -quiet \
+        -project "$ROOT/Heft.xcodeproj" \
+        -scheme Heft \
+        -configuration "$XCODE_CONFIGURATION" \
+        -destination "platform=macOS,arch=$(uname -m)" \
+        -derivedDataPath "$DERIVED_DATA" \
+        -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+        "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" \
+        "$@" \
+        build
+}
+
+# Offline, or signed out of Xcode, the profile cannot be had; the build
+# still works, only without Handoff to the iPhone.
+if [[ ${#PROFILE_ARGS[@]} -gt 0 ]] && build "${PROFILE_ARGS[@]}"; then
+    :
+else
+    [[ ${#PROFILE_ARGS[@]} -gt 0 ]] && echo "Note: no development profile; built without Handoff to the iPhone." >&2
+    build "${SIGNING_ARGS[@]}"
+fi
 
 echo "Built $APP"
 

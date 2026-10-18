@@ -47,8 +47,11 @@ and iCloud delivers that late.
 
 The open note is offered as `HandoffNote`: its vault-relative path and the
 vault folder's name, since the two apps reach the same vault by different
-paths. It needs both apps signed by the same team; a Mac build signed
-ad hoc never sees the phone. The Mac makes the activity current itself
+paths. It needs both apps signed by the same team, and the iPhone reads
+the Mac app's team from its entitlements, which on macOS need a profile:
+`bundle.sh` signs with a development profile and `Config/Heft.entitlements`
+when a team is set. Releases carry neither, so a released Mac app hands off
+to the phone but not back. The Mac makes the activity current itself
 instead of setting `window.userActivity`, which Siri's pointer uses.
 
 ## Gotchas
