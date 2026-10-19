@@ -729,6 +729,12 @@ struct SearchPanel: View {
                         .onKeyPress(.downArrow) { move(1, in: rows); return .handled }
                         .onKeyPress(.upArrow) { move(-1, in: rows); return .handled }
                         .onKeyPress(.escape) { close(); return .handled }
+                        // ⌘. is iPadOS's Escape, for keyboards without the key.
+                        .onKeyPress(keys: ["."]) { press in
+                            guard press.modifiers.contains(.command) else { return .ignored }
+                            close()
+                            return .handled
+                        }
                         // Delete in an empty field leaves the scope, as on the Mac.
                         .onKeyPress(.delete) {
                             guard query.isEmpty, model.scope != nil else { return .ignored }

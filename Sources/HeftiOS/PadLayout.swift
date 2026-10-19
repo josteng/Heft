@@ -56,10 +56,11 @@ struct PadRootView: View {
     @State private var panelNote: PanelNote?
     /// The notes and days this window has shown, for Back and Forward.
     @State private var history = NavigationHistory<PadPlace>()
+    @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var preferences = BrowsingPreferences.shared
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             sidebar
         } detail: {
             NavigationStack(path: $detailPath) {
@@ -366,6 +367,8 @@ struct PadRootView: View {
                     case "back": library.back?()
                     case "forward": library.forward?()
                     case "wait": break
+                    case "collapse": withAnimation { columns = .detailOnly }
+                    case "expand": withAnimation { columns = .all }
                     case _ where step.hasPrefix("tag:"): open(.tag(String(step.dropFirst(4))))
                     case _ where step.hasPrefix("searchtag:"): library.search(.tag(String(step.dropFirst(10))))
                     case _ where step.hasPrefix("taptag:"):
