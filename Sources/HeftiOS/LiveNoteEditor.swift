@@ -625,7 +625,18 @@ struct LiveNoteEditor: UIViewRepresentable {
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             guard let textView else { return false }
             hadFocusAtTap = textView.isFirstResponder
-            return target(at: touch.location(in: textView), in: textView) != nil
+            guard let found = target(at: touch.location(in: textView), in: textView) else { return false }
+            if !hadFocusAtTap {
+                if case .picture = found {} else {
+                    textView.refusesFocus = true
+                    // Back once the tap is over, or a moment later if it
+                    // became a scroll instead.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak textView] in
+                        textView?.refusesFocus = false
+                    }
+                }
+            }
+            return true
         }
 
         func gestureRecognizer(
@@ -651,11 +662,9 @@ struct LiveNoteEditor: UIViewRepresentable {
                 textView.selectedRange = range
                 return
             }
-            // The text view takes the same tap as a request for the keyboard;
-            // a box ticked or a link followed while reading is not one.
-            if !hadFocusAtTap {
-                DispatchQueue.main.async { textView.resignFirstResponder() }
-            }
+            // The text view refused the keyboard for this tap; a box ticked
+            // or a link followed while reading is not a request for it.
+            DispatchQueue.main.async { textView.refusesFocus = false }
         }
 
         private func toggleCheckbox(on line: NSRange, in textView: MobileTextView) {
@@ -1571,6 +1580,15 @@ final class MobileTextView: UITextView {
     var topInset: CGFloat = 12
     /// The editor's own tap, which handles a picture itself.
     weak var ownTap: UIGestureRecognizer?
+    /// Set for a tap that ticks a box or follows a link while reading. The
+    /// text view took such a tap as a request for the keyboard too, and in
+    /// taking it scrolled to its old caret, often the top of the note,
+    /// before the keyboard was handed back.
+    var refusesFocus = false
+
+    override var canBecomeFirstResponder: Bool {
+        !refusesFocus && super.canBecomeFirstResponder
+    }
     /// ⌘B and ⌘I from a hardware keyboard, written as Markdown rather than
     /// as the attributes UIKit would set on rich text.
     var onFormat: ((FormatTool) -> Void)?
