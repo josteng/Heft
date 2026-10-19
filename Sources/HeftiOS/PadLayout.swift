@@ -69,12 +69,14 @@ struct PadRootView: View {
                     }
             }
             .onPreferenceChange(PanelNoteKey.self) { panelNote = $0 }
-            // Outline and Linked From, as the Mac's right sidebar. On the
-            // pane, outside its stack: on the note inside it, the note
-            // stopped scrolling and the panel took no taps.
-            .inspector(isPresented: $preferences.showsNotePanel) {
-                notePanel.inspectorColumnWidth(min: 220, ideal: 280, max: 380)
-            }
+        }
+        // Outline and Linked From, as the Mac's right sidebar: a full-height
+        // column beside the split view, which is where an inspector goes.
+        // On the note inside the pane's stack the note stopped scrolling
+        // and the panel took no taps; on the pane's stack, in landscape,
+        // hiding the sidebar left the note its old width.
+        .inspector(isPresented: $preferences.showsNotePanel) {
+            notePanel.inspectorColumnWidth(min: 220, ideal: 280, max: 380)
         }
         .environment(\.mobilePush) { open($0) }
         .environment(\.mobileReplace) { open($0) }

@@ -116,11 +116,11 @@ instead of setting `window.userActivity`, which Siri's pointer uses.
 
 ## Gotchas
 
-- `.inspector` goes outside a navigation stack: on a note pushed onto the
-  phone's stack it stopped the stack pushing anything, and on the iPad's
-  note inside its pane's stack the note stopped scrolling and the panel
-  took no taps. The iPad's panel hangs on the pane and learns the note
-  from `PanelNoteKey`.
+- `.inspector` goes on the split view, outside every navigation stack. On
+  a note pushed onto the phone's stack it stopped the stack pushing; on
+  the iPad's note it froze the note and the panel; on the note pane's
+  stack, in landscape, hiding the sidebar left the note its old width.
+  The panel learns the open note from `PanelNoteKey`.
 - Restyle after a caret move or focus on the next run-loop pass, never
   inside the delegate callback: rewriting attributes while UIKit places a
   tap's caret makes it drop the tap, and the caret lands at the end.
