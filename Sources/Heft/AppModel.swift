@@ -73,6 +73,50 @@ final class EditorSelection: ObservableObject {
     }
 }
 
+/// The open note's headings and the one the caret is under, for the right
+/// sidebar's Outline.
+///
+/// Its own object, as `NoteStats` is, so typing publishes to the outline
+/// alone, and only when a heading or the caret's section changes. The text
+/// is only scanned while an Outline is showing.
+@MainActor
+final class OutlineTracker: ObservableObject {
+    @Published private(set) var outline = NoteOutline.empty
+    @Published private(set) var current: Int?
+    private var text = ""
+    private var caret = 0
+    /// How many Outline views are showing, across this window's sidebar.
+    private var watchers = 0
+
+    func update(from text: String) {
+        self.text = text
+        if watchers > 0 { rescan() }
+    }
+
+    func caretMoved(to location: Int) {
+        caret = location
+        if watchers > 0 { refreshCurrent() }
+    }
+
+    func watch() {
+        watchers += 1
+        if watchers == 1 { rescan() }
+    }
+
+    func unwatch() { watchers = max(0, watchers - 1) }
+
+    private func rescan() {
+        let scanned = NoteOutline(source: text)
+        if scanned != outline { outline = scanned }
+        refreshCurrent()
+    }
+
+    private func refreshCurrent() {
+        let index = outline.index(containing: caret)
+        if index != current { current = index }
+    }
+}
+
 final class NoteStats: ObservableObject {
     private(set) var wordCount = 0
     private(set) var characterCount = 0
@@ -332,6 +376,7 @@ final class AppModel: ObservableObject {
     var text: String = "" { didSet { textDidChange(from: oldValue) } }
     /// What the status bar shows about the open note.
     let stats = NoteStats()
+    let outline = OutlineTracker()
     /// Whether text is selected in the editor, for Ask's suggestions. Its
     /// own object, as `stats` is, so a selection redraws Ask alone.
     let editorSelection = EditorSelection()
@@ -1048,6 +1093,16 @@ final class AppModel: ObservableObject {
         pendingLineReveal = line
     }
 
+    /// Takes the caret to a line of the open note, 1-based, as a link's
+    /// destination lands, but scrolling there: just below the top, with the
+    /// keyboard back in the note. What a click in the Outline does.
+    func jump(toLine line: Int) {
+        guard current != nil else { return }
+        pendingLineRevealKind = .heading
+        pendingLineReveal = line
+        focusEditor()
+    }
+
     private func recordRecent(_ relativePath: String) {
         session?.recordRecent(relativePath)
     }
@@ -1195,6 +1250,7 @@ final class AppModel: ObservableObject {
         isApplyingExternalText = false
         // A note just opened shows its count at once, not after the interval.
         stats.update(from: new)
+        outline.update(from: new)
         documentGenerationKeepsPosition = keepingPosition
         documentGeneration += 1
     }
@@ -2822,6 +2878,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.statsTask = nil
             self.stats.update(from: self.text)
+            self.outline.update(from: self.text)
         }
     }
 

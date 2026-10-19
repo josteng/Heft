@@ -4,7 +4,7 @@ import SwiftUI
 /// The right side's views: about the open note, where the left side is
 /// about where things are.
 enum InspectorMode: String, PanelMode {
-    case backlinks, chats
+    case backlinks, outline, chats
 
     static let storageName = "inspector"
 
@@ -13,6 +13,7 @@ enum InspectorMode: String, PanelMode {
     var title: String {
         switch self {
         case .backlinks: "Backlinks"
+        case .outline: "Outline"
         // Ask, as in the bar and in Settings: one name for the feature, and
         // "chat" only for one conversation in it. Stored as `chats`.
         case .chats: "Ask"
@@ -22,6 +23,7 @@ enum InspectorMode: String, PanelMode {
     var symbol: String {
         switch self {
         case .backlinks: "link"
+        case .outline: "list.bullet.indent"
         case .chats: BarScope.ask.symbol
         }
     }
@@ -48,8 +50,8 @@ extension PanelLayout where Mode == InspectorMode {
     @MainActor var usable: Self { offering { $0.isAvailable } }
 }
 
-/// The right sidebar: Backlinks, and Ask with its chats beside the note
-/// they are about.
+/// The right sidebar: Backlinks, the note's Outline, and Ask with its chats
+/// beside the note they are about.
 struct InspectorView: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject private var general = GeneralSettings.shared
@@ -71,13 +73,14 @@ struct InspectorView: View {
             }
             switch layout.shown(mode) {
             case .backlinks: BacklinksPanel()
+            case .outline: OutlinePanel(tracker: model.outline)
             case .chats: ChatsPanel(runner: model.agent, selection: model.editorSelection)
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(.ultraThinMaterial)
         .onChange(of: mode) { _, mode in InspectorLayout.recordLastUsed(mode) }
-        // ⌥⌘1 and ⌥⌘2, or the bar handing its chat over. Read on appearing
+        // ⌥⌘1 to ⌥⌘3, or the bar handing its chat over. Read on appearing
         // too: a hidden right side has no view to hear the request until
         // showing it builds one.
         .onAppear(perform: takeRequest)

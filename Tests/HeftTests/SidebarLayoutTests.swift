@@ -91,7 +91,8 @@ struct InspectorLayoutTests {
         left.save(in: defaults)
         #expect(InspectorLayout.current(in: defaults) == .standard)
 
-        let right = InspectorLayout(entries: [.init(mode: .chats, isShown: true), .init(mode: .backlinks, isShown: true)],
+        let right = InspectorLayout(entries: [.init(mode: .chats, isShown: true), .init(mode: .backlinks, isShown: true),
+                                              .init(mode: .outline, isShown: false)],
                                     start: .view(.chats))
         right.save(in: defaults)
         #expect(InspectorLayout.current(in: defaults) == right)
@@ -120,12 +121,47 @@ struct InspectorLayoutTests {
         #expect(neither.visible == [.backlinks])
     }
 
+    /// Outline came after Backlinks and Ask; a reader who had already
+    /// arranged those finds it at the end, shown, and on ⌥⌘3.
+    @Test("A view added later joins a stored order at the end")
+    func addedLater() throws {
+        let defaults = try #require(UserDefaults(suiteName: "dev.stenglein.Heft.inspector-\(UUID().uuidString)"))
+        defaults.set(["chats", "backlinks"], forKey: "dev.stenglein.Heft.inspector.order")
+        let stored = InspectorLayout.current(in: defaults)
+        #expect(stored.entries.map(\.mode) == [.chats, .backlinks, .outline])
+        #expect(stored.entries.last?.isShown == true)
+        #expect(stored.mode(forShortcut: 3) == .outline)
+    }
+
+    /// With Ask off, Settings lists the right side's views without it, and
+    /// an edit there must not lose where Ask stood or whether it showed.
+    @Test("Leaving a view out of the list and putting it back")
+    func withoutAndRestoring() {
+        let original = InspectorLayout(entries: [.init(mode: .backlinks, isShown: true), .init(mode: .chats, isShown: false),
+                                                 .init(mode: .outline, isShown: true)],
+                                       start: .view(.chats))
+        var edited = original.without(.chats)
+        #expect(edited.entries.map(\.mode) == [.backlinks, .outline])
+        #expect(edited.start == .first, "a start the list cannot show falls back")
+        edited.entries.swapAt(0, 1)
+        let restored = edited.restoring(.chats, from: original)
+        #expect(restored.entries.map(\.mode) == [.outline, .chats, .backlinks])
+        #expect(restored.entries[1].isShown == false)
+        #expect(restored.start == .view(.chats))
+        var started = edited
+        started.start = .lastUsed
+        #expect(started.restoring(.chats, from: original).start == .lastUsed, "a start picked in the list stays")
+        #expect(original.without(.chats).restoring(.chats, from: original) == original)
+    }
+
     @Test("The last view ticked keeps its box")
     func lastTicked() {
         let both = InspectorLayout.standard
         #expect(!PanelLayoutRows.isLastShown(.backlinks, in: both))
         var onlyAsk = both
         onlyAsk.entries[0].isShown = false
+        #expect(!PanelLayoutRows.isLastShown(.chats, in: onlyAsk), "Outline is still shown")
+        onlyAsk.entries[1].isShown = false
         #expect(PanelLayoutRows.isLastShown(.chats, in: onlyAsk))
         #expect(!PanelLayoutRows.isLastShown(.backlinks, in: onlyAsk), "already off")
     }

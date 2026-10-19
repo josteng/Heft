@@ -15,6 +15,10 @@ import SwiftUI
 enum LineReveal: Equatable {
     case match
     case destination
+    /// A heading picked in the Outline, in the note already on screen: the
+    /// same landing, scrolled to rather than cut to, so the reader sees
+    /// which way it went.
+    case heading
 }
 
 struct FindSelection: Equatable {
@@ -97,6 +101,8 @@ struct LiveTextEditor: NSViewRepresentable {
     var onAskAbout: (() -> Void)? = nil
     /// Whether text is selected, each time the selection changes.
     var onSelectionPresence: ((Bool) -> Void)? = nil
+    /// Where the caret is, each time the selection changes, for the outline.
+    var onCaretMove: ((Int) -> Void)? = nil
     let onFollowLink: (URL) -> Void
     let onVimSearch: (VimHostAction) -> Void
 
@@ -148,6 +154,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onEditorClaimed = onEditorClaimed
         textView.onAskAbout = onAskAbout
         textView.onSelectionPresence = onSelectionPresence
+        textView.onCaretMove = onCaretMove
         textView.onVimSearch = onVimSearch
         textView.completionIndex = context.index
         // Also set here, not only in `updateNSView`: a note typed into before
@@ -205,6 +212,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onEditorClaimed = onEditorClaimed
         textView.onAskAbout = onAskAbout
         textView.onSelectionPresence = onSelectionPresence
+        textView.onCaretMove = onCaretMove
         textView.onVimSearch = onVimSearch
         textView.checksSpelling(typing.checksSpelling, grammar: typing.checksGrammar)
         textView.correctsSpelling = typing.correctsSpelling
@@ -280,6 +288,8 @@ struct LiveTextEditor: NSViewRepresentable {
                 nsContext.coordinator.selectFindResult(findSelection.range, in: textView)
             case .destination:
                 nsContext.coordinator.landOn(findSelection.range, in: textView)
+            case .heading:
+                nsContext.coordinator.landOn(findSelection.range, in: textView, animated: true)
             }
         } else if findSelection == nil {
             nsContext.coordinator.hideSelectionWhenUnfocused(in: textView)
@@ -782,17 +792,26 @@ struct LiveTextEditor: NSViewRepresentable {
         /// link is navigation, so the line it lands on is where typing should
         /// carry on from, not a block of highlighted text to replace. No find
         /// indicator either, which is what the yellow flash was.
-        func landOn(_ line: NSRange, in textView: NSTextView) {
+        func landOn(_ line: NSRange, in textView: NSTextView, animated: Bool = false) {
             guard line.location != NSNotFound else { return }
             revealsSelection = true
+            let clip = textView.enclosingScrollView?.contentView
+            let before = clip?.bounds.origin
             let caret = NSRange(location: line.location, length: 0)
             textView.setSelectedRange(caret)
             restyle(textView)
             // The restyle can move things above the caret, so it is set again
             // afterwards, exactly as a find result is.
             textView.setSelectedRange(caret)
+            // Placing the caret scrolls it into view at once; an animated
+            // landing starts from where the reader was instead, or it leapt
+            // most of the way and eased only the rest.
+            if animated, let clip, let before {
+                clip.scroll(to: before)
+                textView.enclosingScrollView?.reflectScrolledClipView(clip)
+            }
             if let view = textView as? HeftTextKit2View {
-                view.scrollToTop(of: line)
+                view.scrollToTop(of: line, animated: animated)
             } else {
                 textView.scrollRangeToVisible(line)
             }
@@ -1342,7 +1361,7 @@ final class HeftTextKit2View: NSTextView {
     /// The content inset is part of the sum, not something to leave to the
     /// clamp: subtracting only the text margin would put the heading under the
     /// toolbar everywhere except at the very top of the document.
-    func scrollToTop(of range: NSRange) {
+    func scrollToTop(of range: NSRange, animated: Bool = false) {
         guard let scrollView = enclosingScrollView,
               let rect = rect(forSelection: range)
         else {
@@ -1352,10 +1371,19 @@ final class HeftTextKit2View: NSTextView {
         let clip = scrollView.contentView
         var origin = clip.bounds.origin
         origin.y = rect.minY - scrollView.contentInsets.top - Self.destinationMargin
-        clip.scroll(to: clip.constrainBoundsRect(
-            NSRect(origin: origin, size: clip.bounds.size)
-        ).origin)
-        scrollView.reflectScrolledClipView(clip)
+        let target = clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            clip.scroll(to: target)
+            scrollView.reflectScrolledClipView(clip)
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            clip.animator().setBoundsOrigin(target)
+        } completionHandler: {
+            scrollView.reflectScrolledClipView(clip)
+        }
     }
 
     func scrollToDocumentTop() {
@@ -1380,6 +1408,7 @@ final class HeftTextKit2View: NSTextView {
     var onEditorClaimed: (() -> Void)?
     var onAskAbout: (() -> Void)?
     var onSelectionPresence: ((Bool) -> Void)?
+    var onCaretMove: ((Int) -> Void)?
     var onVimSearch: ((VimHostAction) -> Void)?
     var onFirstResponderChange: ((Bool) -> Void)?
     var completionIndex = VaultIndex.empty
@@ -3549,6 +3578,7 @@ final class HeftTextKit2View: NSTextView {
         // Before the bar's own conditions: a selection is still one while
         // the keyboard is in the right sidebar, asking about it.
         onSelectionPresence?(selection.length > 0)
+        onCaretMove?(selection.location)
         // A block is a range per line and the bar formats one, so it stays
         // hidden there; Visual and Visual Line follow the setting.
         let vimHidesBar = vimEnabled && (

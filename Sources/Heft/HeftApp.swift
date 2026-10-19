@@ -371,6 +371,11 @@ struct HeftCommands: Commands {
                     .keyboardShortcut(.inspectorView2)
                     .disabled(model == nil || behindBar)
             }
+            if let view = general.inspectorLayout.usable.mode(forShortcut: 3) {
+                Button(view.title) { model?.showInspector(view) }
+                    .keyboardShortcut(.inspectorView3)
+                    .disabled(model == nil || behindBar)
+            }
         }
     }
 

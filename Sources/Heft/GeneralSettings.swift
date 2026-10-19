@@ -328,17 +328,15 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                // With Ask off there is one view and nothing to arrange; a
-                // list with Ask ticked but off, and Backlinks unticked but
-                // showing, said the opposite of what the sidebar did.
-                if settings.asksAgent {
-                    PanelLayoutRows(
-                        layout: $settings.inspectorLayout, shortcutPrefix: "⌥⌘", shortcutCount: 2,
-                        opensOnDetail: "The view a new window's right sidebar starts in. ⌥⌘0 shows and hides it."
-                    )
-                } else {
-                    Text("Ask is off, so the right sidebar shows Backlinks. Turn Ask on in Settings ▸ Ask "
-                        + "to have both, and choose their order here.")
+                // With Ask off its row is left out, rather than ticked and
+                // doing nothing; Ask keeps its place for when it comes back.
+                PanelLayoutRows(
+                    layout: settings.asksAgent ? $settings.inspectorLayout : inspectorLayoutWithoutAsk,
+                    shortcutPrefix: "⌥⌘", shortcutCount: 3,
+                    opensOnDetail: "The view a new window's right sidebar starts in. ⌥⌘0 shows and hides it."
+                )
+                if !settings.asksAgent {
+                    Text("Ask is off. Turn it on in Settings ▸ Ask to add it here.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -346,11 +344,18 @@ struct GeneralSettingsView: View {
             } header: {
                 SectionHeading(
                     "Right Sidebar",
-                    detail: "About the note that is open. ⌥⌘1 and ⌥⌘2 follow its views."
+                    detail: "About the note that is open. ⌥⌘1 to ⌥⌘3 follow its views."
                 )
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var inspectorLayoutWithoutAsk: Binding<InspectorLayout> {
+        Binding(
+            get: { settings.inspectorLayout.without(.chats) },
+            set: { settings.inspectorLayout = $0.restoring(.chats, from: settings.inspectorLayout) }
+        )
     }
 }
 

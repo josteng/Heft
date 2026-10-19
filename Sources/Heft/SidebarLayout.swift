@@ -21,7 +21,7 @@ typealias InspectorLayout = PanelLayout<InspectorMode>
 /// A list like the attachment rules: each view switched on or off and
 /// dragged into place, so a reader who never uses Tags can put it away and
 /// one who lives in Recent can put it first. ⌘1 to ⌘3 follow the left
-/// side's views shown, in this order, ⌥⌘1 and ⌥⌘2 the right side's, and the
+/// side's views shown, in this order, ⌥⌘1 to ⌥⌘3 the right side's, and the
 /// switch above either hides when one view is all there is.
 struct PanelLayout<Mode: PanelMode>: Equatable {
     struct Entry: Equatable, Identifiable {
@@ -114,6 +114,24 @@ struct PanelLayout<Mode: PanelMode>: Equatable {
     /// switched off while showing gives way.
     func shown(_ mode: Mode) -> Mode {
         visible.contains(mode) ? mode : visible[0]
+    }
+
+    /// The layout with `mode` left out, for a list that should not offer it.
+    func without(_ mode: Mode) -> Self {
+        var copy = self
+        copy.entries.removeAll { $0.mode == mode }
+        if case .view(mode) = copy.start { copy.start = .first }
+        return copy
+    }
+
+    /// This layout, made by `without(mode)` and then edited, with `mode`
+    /// back where it stood in `original`, shown or not as it was.
+    func restoring(_ mode: Mode, from original: Self) -> Self {
+        var copy = self
+        guard let index = original.entries.firstIndex(where: { $0.mode == mode }) else { return copy }
+        copy.entries.insert(original.entries[index], at: min(index, copy.entries.count))
+        if case .view(mode) = original.start, start == .first { copy.start = original.start }
+        return copy
     }
 
     // MARK: - Storage

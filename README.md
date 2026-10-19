@@ -188,8 +188,9 @@ four-space indented code, raw HTML and entity references;
 - **The sidebar's views**, Files, Recent and Tags, can be hidden and put in
   any order in Settings ▸ General; ⌘1 to ⌘3 follow them, and a window can open
   on the first, the last used, or one in particular. The right sidebar (⌥⌘0)
-  is about the open note, Backlinks and Ask, set up the same way, with ⌥⌘1
-  and ⌥⌘2.
+  is about the open note, Backlinks, Outline and Ask, set up the same way,
+  with ⌥⌘1 to ⌥⌘3. Outline lists the note's headings, lights the one the
+  caret is in, and takes you to one with a click.
 - **Recent** reads like your notes rather than a folder listing: each row
   has its date, first line and folder, grouped under Today, Yesterday,
   Previous 7 Days and by month. Order it by last edit, which follows notes
@@ -342,6 +343,7 @@ every shortcut, grouped, and is how an agent answers "how do I do X".
 | ⌥⌘0 | Toggle right sidebar |
 | ⌥⌘1 | First right sidebar view |
 | ⌥⌘2 | Second right sidebar view |
+| ⌥⌘3 | Third right sidebar view |
 
 ## Not built yet
 

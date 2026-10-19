@@ -33,6 +33,7 @@ struct AppCommandShortcut {
     static let toggleBacklinks = Self("toggleBacklinks")
     static let inspectorView1 = Self("inspectorView1")
     static let inspectorView2 = Self("inspectorView2")
+    static let inspectorView3 = Self("inspectorView3")
     static let exportPDF = Self("exportPDF")
     static let newNote = Self("newNote")
     static let newWindow = Self("newWindow")
