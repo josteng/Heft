@@ -420,7 +420,9 @@ struct NoteEditingToolbar: ToolbarContent {
         }
         if let togglePanel {
             // Last, at the edge the panel opens from, as the Mac's button
-            // sits; there whether or not the note is being typed in.
+            // sits; there whether or not the note is being typed in. A pill
+            // of its own, apart from what acts on the note.
+            ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItem(placement: .primaryAction) {
                 Button(panelShown ? "Hide Outline and Links" : "Show Outline and Links",
                        systemImage: "sidebar.right", action: togglePanel)
