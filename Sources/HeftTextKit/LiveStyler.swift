@@ -716,12 +716,10 @@ enum LiveStyler {
             heading.paragraphSpacingBefore = level <= 2 ? 20 : 14
             heading.paragraphSpacing = level <= 2 ? 12 : 6
             storage.addAttributes([
-                .font: NSFont.systemFont(
-                    ofSize: headingSize(level), weight: level <= 2 ? .bold : .semibold
-                ),
+                .font: Theme.headingFont(level, size: headingSize(level), face: context.headingFont),
                 .paragraphStyle: heading,
             ], range: text.lineRange(for: range))
-            if drawsWidgets, context.colorfulFormatting {
+            if drawsWidgets, context.headingBars {
                 layout.blocks[text.lineRange(for: range).location] =
                     .headingAccent(level: level, color: context.headingColor(level))
             }
@@ -805,9 +803,7 @@ enum LiveStyler {
             if case .heading(let level) = quote.nested {
                 storage.addAttribute(
                     .font,
-                    value: NSFont.systemFont(
-                        ofSize: headingSize(level), weight: level <= 2 ? .bold : .semibold
-                    ),
+                    value: Theme.headingFont(level, size: headingSize(level), face: context.headingFont),
                     range: range
                 )
                 // Enough room for the larger glyphs, which the quote's own

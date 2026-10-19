@@ -52,9 +52,46 @@ struct AppearancePreferencesTests {
         var theirs = AppearancePreferences()
         theirs.colorfulFormatting = false
         #expect(AppearancePreferences.step(stored: nil, current: defaults) == .nothing)
+        var keptTheBar = AppearancePreferences()
+        keptTheBar.headingColor = .levelColors
+        #expect(AppearancePreferences.step(stored: nil, current: keptTheBar) == .nothing,
+                "a Mac that kept the bar it always drew writes no file")
+        var serif = AppearancePreferences()
+        serif.headingFont = .newYork
+        #expect(AppearancePreferences.step(stored: nil, current: serif) == .write)
         #expect(AppearancePreferences.step(stored: nil, current: mine) == .write)
         #expect(AppearancePreferences.step(stored: mine, current: mine) == .nothing)
         #expect(AppearancePreferences.step(stored: theirs, current: mine) == .adopt(theirs))
         #expect(AppearancePreferences.step(stored: defaults, current: mine) == .adopt(defaults))
     }
+
+    /// Headings left colourful formatting for a setting of their own; a
+    /// file written before that keeps the bar it had, and a new vault starts
+    /// plain.
+    @Test("Heading font and colour, and files from before them")
+    func headings() throws {
+        #expect(AppearancePreferences().headingColor == .none)
+        #expect(AppearancePreferences().headingFont == .system)
+        let colorful = try JSONDecoder().decode(AppearancePreferences.self, from: Data("{}".utf8))
+        #expect(colorful.headingColor == .levelColors, "an old file drew the bar")
+        let plain = try JSONDecoder().decode(
+            AppearancePreferences.self, from: Data(#"{"colorfulFormatting": false}"#.utf8)
+        )
+        #expect(plain.headingColor == .none)
+        let chosen = try JSONDecoder().decode(
+            AppearancePreferences.self,
+            from: Data(#"{"colorfulFormatting": true, "headingColor": "none", "headingFont": "newYork"}"#.utf8)
+        )
+        #expect(chosen.headingColor == .none, "a choice made stays, whatever colourful formatting says")
+        #expect(chosen.headingFont == .newYork)
+
+        var preferences = AppearancePreferences()
+        preferences.headingFont = .newYork
+        preferences.headingColor = .levelColors
+        let again = try JSONDecoder().decode(
+            AppearancePreferences.self, from: JSONEncoder().encode(preferences)
+        )
+        #expect(again == preferences)
+    }
 }
+

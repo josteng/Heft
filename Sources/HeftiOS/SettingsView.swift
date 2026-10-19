@@ -146,19 +146,33 @@ private struct AppearanceSettingsView: View {
                 Group {
                     colorRow("Bold", \.bold, current: appearance.boldColor)
                     colorRow("Italic", \.italic, current: appearance.italicColor)
+                }
+                .disabled(!appearance.colorfulFormatting)
+            } footer: {
+                Text("Gives bold and italic each their own color.")
+            }
+            Section {
+                Picker("Font", selection: setting(\.headingFont)) {
+                    ForEach(AppearancePreferences.HeadingFont.allCases) { Text($0.title).tag($0) }
+                }
+                Picker("Color", selection: setting(\.headingColor)) {
+                    ForEach(AppearancePreferences.HeadingColor.allCases) { Text($0.title).tag($0) }
+                }
+                if appearance.headingColor == .levelColors {
                     NavigationLink {
                         HeadingColorsView()
                     } label: {
                         HStack {
-                            Text("Headings")
+                            Text("Level Colors")
                             Spacer()
                             HeadingSwatches(appearance: appearance)
                         }
                     }
                 }
-                .disabled(!appearance.colorfulFormatting)
+            } header: {
+                Text("Headings")
             } footer: {
-                Text("Gives bold, italic and headings each their own color.")
+                Text("New York is Apple's serif. Level Colors draws a bar in each level's color beside the heading.")
             }
         }
         .syncBadge(synced: true)
@@ -167,6 +181,10 @@ private struct AppearanceSettingsView: View {
     }
 
     private func binding(_ key: WritableKeyPath<AppearancePreferences, Bool>) -> Binding<Bool> {
+        setting(key)
+    }
+
+    private func setting<Value>(_ key: WritableKeyPath<AppearancePreferences, Value>) -> Binding<Value> {
         Binding(
             get: { vault.appearance[keyPath: key] },
             set: { value in
@@ -272,9 +290,18 @@ private struct SettingsPreview: View {
     var body: some View {
         let colorful = appearance.colorfulFormatting
         VStack(alignment: .leading, spacing: 6) {
-            Text("Weekend plans")
-                .font(.title3.bold())
-                .foregroundStyle(colorful ? Color(uiColor: appearance.headingColor(1)) : .primary)
+            // As the editor draws a heading: its face, and the bar beside it
+            // when headings have level colours.
+            HStack(spacing: 9) {
+                if appearance.headingColor == .levelColors {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color(uiColor: appearance.headingColor(1)))
+                        .frame(width: 3, height: 18)
+                }
+                Text("Weekend plans")
+                    .font(appearance.headingFont == .newYork
+                          ? .system(.title3, design: .serif) : .title3.bold())
+            }
             Text(line([
                 ("Buy ", nil, nil),
                 ("fresh bread", colorful ? appearance.boldColor : nil, .body.bold()),

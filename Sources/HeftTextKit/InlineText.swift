@@ -15,7 +15,12 @@ struct RenderContext {
     let vaultRoot: URL?
     /// Mirrors the vault's Obsidian setting; see `ObsidianSettings`.
     var strictLineBreaks: Bool = false
+    /// Bold and italic in their own colours.
     var colorfulFormatting: Bool = false
+    /// The face headings are set in.
+    var headingFont: AppearancePreferences.HeadingFont = .system
+    /// A bar in the level's colour beside each heading.
+    var headingBars: Bool = false
     /// User-customisable via the Appearance settings pane; default to the
     /// same values `AppearanceSettings` falls back to when nothing is set.
     var accentColor: NSColor = StyleDefaults.accentColor

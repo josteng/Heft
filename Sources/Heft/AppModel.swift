@@ -2557,6 +2557,8 @@ final class AppModel: ObservableObject {
             index: index, current: current, vaultRoot: vaultRoot,
             strictLineBreaks: settings.strictLineBreaks,
             colorfulFormatting: appearance.colorfulFormattingEnabled,
+            headingFont: appearance.headingFont,
+            headingBars: appearance.headingColor == .levelColors,
             accentColor: ink(appearance.accentColor),
             linkColor: ink(appearance.linkColor),
             tagColor: ink(appearance.tagColor),

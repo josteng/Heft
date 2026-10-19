@@ -343,7 +343,7 @@ final class VaultRegistry: ObservableObject {
         LaunchVaultPreference.url
     }
 
-    static let recentVaultsKey = "dev.stenglein.Heft.recentVaults"
+    nonisolated static let recentVaultsKey = "dev.stenglein.Heft.recentVaults"
 
     /// Every vault opened, most recent first. Stored as written; what is
     /// still *there* is decided at read time by `recentVaults`.

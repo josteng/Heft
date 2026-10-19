@@ -18,8 +18,31 @@ public struct AppearancePreferences: Codable, Equatable, Sendable {
     public var italic: String?
     /// h1 through h6.
     public var headings: [String?] = Array(repeating: nil, count: 6)
-    /// On by default, as on the Mac.
+    /// On by default, as on the Mac. Bold and italic; headings have their
+    /// own `headingColor` since there was a choice of how they look.
     public var colorfulFormatting = true
+    public var headingFont: HeadingFont = .system
+    /// None for a vault set up now; an older file is read as it looked,
+    /// see `init(from:)`.
+    public var headingColor: HeadingColor = .none
+
+    /// The face headings are set in. Body text stays the system font.
+    public enum HeadingFont: String, Codable, CaseIterable, Sendable, Identifiable {
+        case system
+        /// Apple's serif, shipped with every Mac, iPhone and iPad.
+        case newYork
+        public var id: Self { self }
+        public var title: String { self == .system ? "System" : "New York" }
+    }
+
+    /// What marks a heading besides its size and weight.
+    public enum HeadingColor: String, Codable, CaseIterable, Sendable, Identifiable {
+        case none
+        /// A bar in the level's colour beside the heading, as Obsidian draws.
+        case levelColors
+        public var id: Self { self }
+        public var title: String { self == .none ? "None" : "Level Colors" }
+    }
 
     public init() {}
 
@@ -59,6 +82,11 @@ public struct AppearancePreferences: Codable, Equatable, Sendable {
         let stored = try container.decodeIfPresent([String?].self, forKey: .headings) ?? []
         headings = (0..<6).map { $0 < stored.count ? stored[$0] : nil }
         colorfulFormatting = try container.decodeIfPresent(Bool.self, forKey: .colorfulFormatting) ?? true
+        headingFont = try container.decodeIfPresent(HeadingFont.self, forKey: .headingFont) ?? .system
+        // A file from before headings had their own setting drew the bar
+        // with colourful formatting, so it keeps looking that way.
+        headingColor = try container.decodeIfPresent(HeadingColor.self, forKey: .headingColor)
+            ?? (colorfulFormatting ? .levelColors : .none)
     }
 }
 
@@ -78,8 +106,17 @@ extension AppearancePreferences {
     /// writes them; one still on the defaults writes nothing, so a folder
     /// opened with the defaults is not given a `.heft` it never asked for.
     public static func step(stored: AppearancePreferences?, current: AppearancePreferences) -> SyncStep {
-        guard let stored else { return current == AppearancePreferences() ? .nothing : .write }
+        guard let stored else { return untouched.contains(current) ? .nothing : .write }
         return stored == current ? .nothing : .adopt(stored)
+    }
+
+    /// The defaults, and the defaults as they were before headings had their
+    /// own setting: a Mac that kept the bar it always drew has chosen
+    /// nothing either.
+    static var untouched: [AppearancePreferences] {
+        var before = AppearancePreferences()
+        before.headingColor = .levelColors
+        return [AppearancePreferences(), before]
     }
 }
 

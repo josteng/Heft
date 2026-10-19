@@ -86,6 +86,23 @@ final class AppearanceSettings: ObservableObject {
         }
     }
 
+    /// The face headings are set in, synced with the vault like the colours.
+    @Published var headingFont: AppearancePreferences.HeadingFont {
+        didSet {
+            HeftDefaults.shared.set(headingFont.rawValue, forKey: Self.headingFontKey)
+            AppearanceSync.changed()
+        }
+    }
+
+    /// Whether a heading has the bar in its level's colour. Was part of
+    /// Colorful Formatting until headings had a setting of their own.
+    @Published var headingColor: AppearancePreferences.HeadingColor {
+        didSet {
+            HeftDefaults.shared.set(headingColor.rawValue, forKey: Self.headingColorKey)
+            AppearanceSync.changed()
+        }
+    }
+
     /// How consecutive source lines are read, overriding what the vault says.
     ///
     /// Here rather than in General because it is about how a note reads on the
@@ -145,6 +162,8 @@ final class AppearanceSettings: ObservableObject {
     private static let boldKey = "dev.stenglein.Heft.appearance.boldColor"
     private static let italicKey = "dev.stenglein.Heft.appearance.italicColor"
     private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
+    private static let headingFontKey = "dev.stenglein.Heft.appearance.headingFont"
+    private static let headingColorKey = "dev.stenglein.Heft.appearance.headingColor"
     private static func headingKey(_ index: Int) -> String {
         "dev.stenglein.Heft.appearance.headingColor\(index + 1)"
     }
@@ -157,12 +176,28 @@ final class AppearanceSettings: ObservableObject {
         customBoldColor = Self.load(Self.boldKey)
         customItalicColor = Self.load(Self.italicKey)
         customHeadingColors = (0..<6).map { Self.load(Self.headingKey($0)) }
-        colorfulFormattingEnabled = HeftDefaults.shared.object(forKey: Self.colorfulFormattingKey) == nil
+        let colorful = HeftDefaults.shared.object(forKey: Self.colorfulFormattingKey) == nil
             ? true
             : HeftDefaults.shared.bool(forKey: Self.colorfulFormattingKey)
+        colorfulFormattingEnabled = colorful
+        headingFont = HeftDefaults.shared.string(forKey: Self.headingFontKey)
+            .flatMap(AppearancePreferences.HeadingFont.init(rawValue:)) ?? .system
+        headingColor = HeftDefaults.shared.string(forKey: Self.headingColorKey)
+            .flatMap(AppearancePreferences.HeadingColor.init(rawValue:))
+            ?? Self.headingColorBeforeTheSetting(colorful: colorful)
         showsFolderArrows = HeftDefaults.shared.bool(forKey: Self.folderArrowsKey)
         recentOrder = RecentOrder(rawValue: HeftDefaults.shared.string(forKey: Self.recentOrderKey) ?? "") ?? .edited
         recentLayout = RecentLayout(rawValue: HeftDefaults.shared.string(forKey: Self.recentLayoutKey) ?? "") ?? .preview
+    }
+
+    /// What a Mac without the setting sees: the bar it drew before, when
+    /// Heft has opened a vault here and colourful formatting is on; plain on
+    /// a first launch.
+    static func headingColorBeforeTheSetting(
+        colorful: Bool, in defaults: UserDefaults = HeftDefaults.shared
+    ) -> AppearancePreferences.HeadingColor {
+        let launchedBefore = !(defaults.stringArray(forKey: VaultRegistry.recentVaultsKey) ?? []).isEmpty
+        return launchedBefore && colorful ? .levelColors : .none
     }
 
     private static func load(_ key: String) -> NSColor? {
@@ -324,7 +359,7 @@ struct AppearanceSettingsView: View {
                 Toggle(isOn: $appearance.colorfulFormattingEnabled) {
                     SettingLabel(
                         "Colorful Formatting",
-                        detail: "Gives bold, italic, and headings each their own color."
+                        detail: "Gives bold and italic each their own color. Headings have their own section."
                     )
                 }
                 Group {
@@ -348,9 +383,34 @@ struct AppearanceSettingsView: View {
                         reset: { appearance.customItalicColor = nil },
                         resetHelp: "Reset to orange"
                     )
-                    headingColorsRow()
                 }
                 .disabled(!appearance.colorfulFormattingEnabled)
+            }
+
+            Section {
+                Picker(selection: $appearance.headingFont) {
+                    ForEach(AppearancePreferences.HeadingFont.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "Font",
+                        detail: "New York is Apple's serif, for headings that read like a book's."
+                    )
+                }
+                .defaultMenuTint()
+                Picker(selection: $appearance.headingColor) {
+                    ForEach(AppearancePreferences.HeadingColor.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "Color",
+                        detail: "Level Colors draws a bar in each level's color beside the heading."
+                    )
+                }
+                .defaultMenuTint()
+                if appearance.headingColor == .levelColors {
+                    headingColorsRow()
+                }
+            } header: {
+                SectionHeading("Headings", detail: "Besides their size and weight, how headings stand out from the text.")
             }
 
             Section {

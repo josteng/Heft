@@ -508,6 +508,8 @@ struct NoteContent: View {
                         index: vault.index, current: note, vaultRoot: root,
                         strictLineBreaks: vault.settings.strictLineBreaks,
                         colorfulFormatting: vault.appearance.colorfulFormatting,
+                        headingFont: vault.appearance.headingFont,
+                        headingBars: vault.appearance.headingColor == .levelColors,
                         accentColor: vault.appearance.accentColor,
                         linkColor: vault.appearance.linkColor,
                         tagColor: vault.appearance.tagColor,

@@ -36,29 +36,52 @@ enum Theme {
         }
     }
 
-    static func heading(_ level: Int, scale: CGFloat = 1) -> Font {
-        .system(
-            size: headingPointSize(level) * scale,
-            weight: level == 1 ? .bold : .semibold,
-            design: .default
-        )
+    static func heading(
+        _ level: Int, scale: CGFloat = 1, face: AppearancePreferences.HeadingFont = .system
+    ) -> Font {
+        Font(headingFont(level, size: headingPointSize(level) * scale, face: face))
     }
 
-    static func headingCapHeight(_ level: Int, scale: CGFloat = 1) -> CGFloat {
-        NSFont.systemFont(
-            ofSize: headingPointSize(level) * scale,
-            weight: level == 1 ? .bold : .semibold
-        ).capHeight
+    static func headingCapHeight(
+        _ level: Int, scale: CGFloat = 1, face: AppearancePreferences.HeadingFont = .system
+    ) -> CGFloat {
+        headingFont(level, size: headingPointSize(level) * scale, face: face).capHeight
+    }
+
+    /// A heading's font, from the size the system face has at its level.
+    ///
+    /// New York sits a step larger, since its x-height is lower than San
+    /// Francisco's, and lighter at the top, where a bold serif shouts; from
+    /// H4 down it is semibold, or a small serif disappears beside sans body
+    /// text. The system face keeps the weights it always had.
+    static func headingFont(
+        _ level: Int, size: CGFloat, face: AppearancePreferences.HeadingFont
+    ) -> NSFont {
+        let index = min(max(level, 1), 6) - 1
+        switch face {
+        case .system:
+            return NSFont.systemFont(ofSize: size, weight: level <= 2 ? .bold : .semibold)
+        case .newYork:
+            let scales: [CGFloat] = [30 / 28, 24 / 22, 19 / 18, 17 / 16, 1, 15 / 14]
+            let weights: [NSFont.Weight] = [.regular, .regular, .medium, .semibold, .semibold, .medium]
+            let system = NSFont.systemFont(ofSize: size * scales[index], weight: weights[index])
+            guard let serif = system.fontDescriptor.withDesign(.serif) else { return system }
+            #if os(macOS)
+            return NSFont(descriptor: serif, size: size * scales[index]) ?? system
+            #else
+            return NSFont(descriptor: serif, size: size * scales[index])
+            #endif
+        }
     }
 
     /// The coloured bar beside a heading. All of it scales, not only its
     /// height: at a presentation's 2x a 3pt bar 12pt away read as a hairline
     /// pressed against a heading twice the size.
     static func headingBar(
-        _ level: Int, scale: CGFloat = 1
+        _ level: Int, scale: CGFloat = 1, face: AppearancePreferences.HeadingFont = .system
     ) -> (size: CGSize, gap: CGFloat, cornerRadius: CGFloat) {
         (
-            CGSize(width: 3 * scale, height: headingCapHeight(level, scale: scale)),
+            CGSize(width: 3 * scale, height: headingCapHeight(level, scale: scale, face: face)),
             12 * scale,
             2 * scale
         )

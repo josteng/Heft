@@ -13,6 +13,8 @@ extension AppearanceSettings {
         preferences.italic = customItalicColor.map(Self.hex)
         preferences.headings = customHeadingColors.map { $0.map(Self.hex) }
         preferences.colorfulFormatting = colorfulFormattingEnabled
+        preferences.headingFont = headingFont
+        preferences.headingColor = headingColor
         return preferences
     }
 
@@ -25,6 +27,8 @@ extension AppearanceSettings {
         customItalicColor = Self.color(preferences.italic)
         customHeadingColors = preferences.headings.map(Self.color)
         colorfulFormattingEnabled = preferences.colorfulFormatting
+        headingFont = preferences.headingFont
+        headingColor = preferences.headingColor
     }
 
     private static func hex(_ color: NSColor) -> String {

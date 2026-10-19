@@ -85,12 +85,12 @@ private struct BlockView: View {
             ParagraphView(
                 inlines: inlines,
                 context: context,
-                font: Theme.heading(level, scale: fontScale),
+                font: Theme.heading(level, scale: fontScale, face: context.headingFont),
                 embedDepth: embedDepth
             )
             .overlay(alignment: Alignment(horizontal: .leading, vertical: .headingBaseline)) {
-                if context.colorfulFormatting {
-                    let bar = Theme.headingBar(level, scale: fontScale)
+                if context.headingBars {
+                    let bar = Theme.headingBar(level, scale: fontScale, face: context.headingFont)
                     RoundedRectangle(cornerRadius: bar.cornerRadius)
                         .fill(Color(nsColor: context.headingColor(level)))
                         .frame(width: bar.size.width, height: bar.size.height)
@@ -326,6 +326,8 @@ private struct TransclusionView: View {
                         current: ref,
                         vaultRoot: context.vaultRoot,
                         colorfulFormatting: context.colorfulFormatting,
+                        headingFont: context.headingFont,
+                        headingBars: context.headingBars,
                         accentColor: context.accentColor,
                         linkColor: context.linkColor,
                 tagColor: context.tagColor,

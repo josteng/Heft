@@ -65,6 +65,7 @@ enum AppIntegrationCheck {
 
         let customContext = RenderContext(
             index: .empty, current: nil, vaultRoot: nil, colorfulFormatting: true,
+            headingBars: true,
             accentColor: .systemBlue, linkColor: .systemIndigo, tagColor: .systemTeal,
             codeColor: .systemBrown,
             boldColor: .systemGreen, italicColor: .systemPurple,
