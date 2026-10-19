@@ -165,7 +165,7 @@ struct PadRootView: View {
                 case .files:
                     PadTreeRows(items: vault.tree?.children ?? [], expanded: $expandedFolders) { action = $0 }
                 case .tags:
-                    PadTagRows(expanded: $expandedTags)
+                    PadTagRows(expanded: $expandedTags) { action = $0 }
                 }
             }
             .overlay {
@@ -365,6 +365,7 @@ struct PadRootView: View {
                     case "forward": library.forward?()
                     case "wait": break
                     case _ where step.hasPrefix("tag:"): open(.tag(String(step.dropFirst(4))))
+                    case _ where step.hasPrefix("searchtag:"): library.search(.tag(String(step.dropFirst(10))))
                     case _ where step.hasPrefix("taptag:"):
                         // As a tap on a tag while reading: the text view
                         // takes the keyboard, the tag is followed, and the
@@ -438,7 +439,9 @@ private struct PadTreeRows: View {
 /// Every tag, most used first, each opening onto its notes, newest first.
 private struct PadTagRows: View {
     @Binding var expanded: Set<String>
+    let perform: (ItemAction) -> Void
     @Environment(MobileVault.self) private var vault
+    @Environment(\.mobileLibrary) private var library
 
     var body: some View {
         ForEach(vault.index.allTags, id: \.self) { tag in
@@ -450,8 +453,11 @@ private struct PadTagRows: View {
             )) {
                 if expanded.contains(tag) {
                     let tagged = Set(vault.index.notes(taggedWith: tag).map(\.relativePath))
-                    ForEach(vault.index.notesByLastEdit.filter { tagged.contains($0.relativePath) }) {
-                        NoteRow(note: $0)
+                    // The notes take the same menu and drag as in Files.
+                    ForEach(vault.index.notesByLastEdit.filter { tagged.contains($0.relativePath) }) { note in
+                        NoteRow(note: note)
+                            .itemActions(ItemRef(path: note.relativePath, isFolder: false), perform)
+                            .draggableNote(note.relativePath, vault: vault)
                     }
                 }
             } label: {
@@ -461,6 +467,16 @@ private struct PadTagRows: View {
                     Text("\(vault.index.noteCount(forTag: tag))")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                }
+                .contextMenu {
+                    // Into the search narrowed to the tag: its notes in the
+                    // scope's order, with a field to filter them.
+                    Button("Search in #\(tag)", systemImage: "magnifyingglass") {
+                        library?.search(.tag(tag))
+                    }
+                    Button("Copy Tag", systemImage: "number") {
+                        UIPasteboard.general.string = "#\(tag)"
+                    }
                 }
             }
         }
