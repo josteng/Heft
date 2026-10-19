@@ -753,9 +753,26 @@ private struct HidesTabBarWhenPushed: UIViewControllerRepresentable {
 
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
-            guard let coming = navigationController?.topViewController,
-                  !Self.holdsMarker(coming) else { return }
-            tabBarController?.setTabBarHidden(false, animated: animated)
+            // Kept hidden only for another note coming on in this stack. A
+            // note still on top is its own tab being left, for Search or a
+            // handoff, and the next tab needs its bar.
+            guard let navigation = navigationController,
+                  let coming = navigation.topViewController,
+                  Self.holdsMarker(coming), !isOrContains(coming)
+            else {
+                tabBarController?.setTabBarHidden(false, animated: animated)
+                return
+            }
+        }
+
+        /// Whether `controller` is the screen this marker sits in.
+        private func isOrContains(_ controller: UIViewController) -> Bool {
+            var current: UIViewController? = self
+            while let next = current {
+                if next === controller { return true }
+                current = next.parent
+            }
+            return false
         }
 
         private static func holdsMarker(_ controller: UIViewController) -> Bool {
