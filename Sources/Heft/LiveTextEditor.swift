@@ -103,6 +103,8 @@ struct LiveTextEditor: NSViewRepresentable {
     var onSelectionPresence: ((Bool) -> Void)? = nil
     /// Where the caret is, each time the selection changes, for the outline.
     var onCaretMove: ((Int) -> Void)? = nil
+    /// A tag clicked in the text, without its `#`.
+    var onFollowTag: ((String) -> Void)? = nil
     let onFollowLink: (URL) -> Void
     let onVimSearch: (VimHostAction) -> Void
 
@@ -155,6 +157,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onAskAbout = onAskAbout
         textView.onSelectionPresence = onSelectionPresence
         textView.onCaretMove = onCaretMove
+        textView.onFollowTag = onFollowTag
         textView.onVimSearch = onVimSearch
         textView.completionIndex = context.index
         // Also set here, not only in `updateNSView`: a note typed into before
@@ -213,6 +216,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.onAskAbout = onAskAbout
         textView.onSelectionPresence = onSelectionPresence
         textView.onCaretMove = onCaretMove
+        textView.onFollowTag = onFollowTag
         textView.onVimSearch = onVimSearch
         textView.checksSpelling(typing.checksSpelling, grammar: typing.checksGrammar)
         textView.correctsSpelling = typing.correctsSpelling
@@ -1409,6 +1413,7 @@ final class HeftTextKit2View: NSTextView {
     var onAskAbout: (() -> Void)?
     var onSelectionPresence: ((Bool) -> Void)?
     var onCaretMove: ((Int) -> Void)?
+    var onFollowTag: ((String) -> Void)?
     var onVimSearch: ((VimHostAction) -> Void)?
     var onFirstResponderChange: ((Bool) -> Void)?
     var completionIndex = VaultIndex.empty
@@ -2819,6 +2824,8 @@ final class HeftTextKit2View: NSTextView {
         }
         // A highlight's colour dot opens a menu, as a checkbox ticks: the hand.
         if highlightDot(at: point) != nil { return .pointingHand }
+        // A tag opens on a click, as a link does: the same hand.
+        if tag(at: point) != nil { return .pointingHand }
         return pointerTarget(at: point, among: rects) != nil ? .pointingHand : nil
     }
 
@@ -2928,6 +2935,14 @@ final class HeftTextKit2View: NSTextView {
             return
         }
         if takePictureClick(event) { return }
+        // A tag answers a plain click as a link does, opening the search
+        // narrowed to it. A modifier keeps the click for the text.
+        if event.clickCount == 1,
+           event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+           let tag = tag(at: convert(event.locationInWindow, from: nil)) {
+            onFollowTag?(tag)
+            return
+        }
         if event.clickCount == 1, let dot = highlightDot(at: convert(event.locationInWindow, from: nil)) {
             highlightColorMenu(for: dot.span).popUp(
                 positioning: nil, at: NSPoint(x: dot.rect.minX, y: dot.rect.maxY + 4), in: self
@@ -2977,6 +2992,28 @@ final class HeftTextKit2View: NSTextView {
             updateVimCursor()
         }
         onTrackingEnded?()
+    }
+
+    /// The tag whose pill is under `point`, as the styler drew it: the
+    /// paragraph under the point, then its pills by where they are drawn.
+    /// Not through `characterIndexForInsertion`, which put points early in
+    /// a note's first line at its end, and past the end of a line ending in
+    /// a tag gives the tag's last character, which is a click on the line.
+    func tag(at point: NSPoint) -> String? {
+        guard let manager = textLayoutManager, let content = manager.textContentManager else { return nil }
+        let inContainer = CGPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        guard let fragment = manager.textLayoutFragment(for: inContainer) else { return nil }
+        let text = string as NSString
+        let start = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+        guard start >= 0, start <= text.length else { return nil }
+        let line = text.lineRange(for: NSRange(location: min(start, max(0, text.length - 1)), length: 0))
+        for pill in liveLayout.inlineTags[line.location] ?? [] {
+            guard let rect = rect(forSelection: pill.range), rect.insetBy(dx: -4, dy: -2).contains(point)
+            else { continue }
+            let name = text.substring(with: pill.range).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            return name.isEmpty ? nil : name
+        }
+        return nil
     }
 
     /// The markup before the words of the line under `point`, while it is

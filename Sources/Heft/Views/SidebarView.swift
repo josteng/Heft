@@ -493,7 +493,7 @@ struct SidebarView: View {
     /// Tags, most used first, each expanding to the notes carrying it.
     private var tagList: some View {
         let rows = tagRows
-        return ScrollView {
+        return ScrollViewReader { proxy in ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
                 if rows.isEmpty {
                     empty(Self.noTagsMessage(
@@ -517,6 +517,17 @@ struct SidebarView: View {
                                 expandedTags.insert(name)
                                 // Counted as entering it in the search bar is.
                                 model.recordScopeUse(.tag(name))
+                            }
+                        }
+                        .contextMenu {
+                            // The bar narrowed to the tag: its notes in the
+                            // scope's order, with a field to filter them.
+                            MenuButton("Search in #\(name)", symbol: "magnifyingglass") {
+                                model.openBar(.tag(name))
+                            }
+                            MenuButton("Copy Tag", symbol: "number") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString("#\(name)", forType: .string)
                             }
                         }
                     case .note(let note, _):
@@ -554,6 +565,20 @@ struct SidebarView: View {
             .padding(.horizontal, 6)
             .padding(.top, 8)
             .padding(.bottom, 8)
+        }
+        // A tag clicked in a note: opened, with a filter that hides it
+        // cleared, and brought into view. Read on appearing too, since the
+        // request is what switched the sidebar to this view.
+        .onChange(of: model.tagRevealRequest, initial: true) { _, tag in
+            guard let tag else { return }
+            model.tagRevealRequest = nil
+            if !model.scopedTags(matching: filter).contains(tag) { filter = "" }
+            expandedTags.insert(tag)
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(60))
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("tag:\(tag)", anchor: .top) }
+            }
+        }
         }
     }
 

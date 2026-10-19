@@ -595,6 +595,7 @@ struct EditorPane: View {
                 onAskAbout: { model.askAboutSelection() },
                 onSelectionPresence: { model.editorSelection.update($0) },
                 onCaretMove: { model.outline.caretMoved(to: $0) },
+                onFollowTag: { model.showTag($0) },
                 onFollowLink: { url in
                     if !model.handle(url: url) { NSWorkspace.shared.open(url) }
                 },

@@ -479,6 +479,8 @@ final class AppModel: ObservableObject {
     /// A sidebar view asked for from the menu (⌘1 to ⌘3); the sidebar owns
     /// which one it shows and takes the request, as it takes a new note's.
     @Published var sidebarModeRequest: SidebarMode?
+    /// A tag to open and show in the sidebar's Tags, taken by that view.
+    @Published var tagRevealRequest: String?
     /// The same for the right side's views, answered by `InspectorView`.
     @Published var inspectorModeRequest: InspectorMode?
     /// Text Ask About adds to the right sidebar's field, taken by `ChatsPanel`.
@@ -3411,6 +3413,18 @@ final class AppModel: ObservableObject {
             withAnimation(.snappy(duration: 0.2)) { columnVisibility = .all }
         }
         sidebarModeRequest = mode
+    }
+
+    /// A tag clicked in a note: in the sidebar's Tags, opened and scrolled
+    /// to, as the iPad shows it, so the note stays where it is; in the bar
+    /// narrowed to it when Tags is not one of the sidebar's views.
+    func showTag(_ tag: String) {
+        guard GeneralSettings.shared.sidebarLayout.visible.contains(.tags) else {
+            openBar(.tag(tag))
+            return
+        }
+        showSidebar(.tags)
+        tagRevealRequest = tag
     }
 
     /// The right side, on `mode`, shown if it was hidden.
