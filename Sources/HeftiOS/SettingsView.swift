@@ -130,22 +130,33 @@ private struct AppearanceSettingsView: View {
                 SettingsPreview(appearance: appearance)
             }
             Section {
-                colorRow("Accent", \.accent, current: appearance.accentColor)
+                Picker("Colors", selection: setting(\.palette)) {
+                    ForEach(AppearancePreferences.ColorPalette.allCases) { Text($0.title).tag($0) }
+                }
+                if appearance.hasCustomFormattingColor {
+                    Button("Use Built-in Colors") { vault.setAppearance(vault.appearance.usingBuiltInColors()) }
+                }
             } footer: {
-                Text("Checkboxes, the caret and what iOS draws in blue. Follows the system when not set.")
+                Text("Muted softens the built-in colors. Colors you pick with Custom are shown exactly as chosen.")
             }
             Section {
-                colorRow("Links", \.link, current: appearance.linkColor)
-                colorRow("Tags", \.tag, current: appearance.tagColor)
-                colorRow("Code", \.code, current: appearance.codeColor)
+                swatchRow("Accent", \.accent, current: appearance.accentColor,
+                          defaultChip: ("System", StyleDefaults.accentColor))
+            } footer: {
+                Text("Checkboxes, the caret and the app's controls. System follows the system accent.")
+            }
+            Section {
+                swatchRow("Links", \.link, current: appearance.linkColor, defaultChip: ("Accent", appearance.accentForText))
+                swatchRow("Tags", \.tag, current: appearance.tagColor, defaultChip: ("Accent", appearance.accentForText))
+                swatchRow("Code", \.code, current: appearance.codeColor, defaultSwatch: .graphite)
             } footer: {
                 Text("Links and tags follow the accent when not set.")
             }
             Section {
                 Toggle("Colorful Formatting", isOn: binding(\.colorfulFormatting))
                 Group {
-                    colorRow("Bold", \.bold, current: appearance.boldColor)
-                    colorRow("Italic", \.italic, current: appearance.italicColor)
+                    swatchRow("Bold", \.bold, current: appearance.boldColor, defaultSwatch: .red)
+                    swatchRow("Italic", \.italic, current: appearance.italicColor, defaultSwatch: .orange)
                 }
                 .disabled(!appearance.colorfulFormatting)
             } footer: {
@@ -195,15 +206,21 @@ private struct AppearanceSettingsView: View {
         )
     }
 
-    private func colorRow(
-        _ title: String, _ key: WritableKeyPath<AppearancePreferences, String?>, current: UIColor
+    private func swatchRow(
+        _ title: String, _ key: WritableKeyPath<AppearancePreferences, String?>, current: UIColor,
+        defaultChip: (label: String, color: UIColor)? = nil,
+        defaultSwatch: AppearancePreferences.Swatch? = nil
     ) -> some View {
-        ColorSettingRow(title: title, isCustom: vault.appearance[keyPath: key] != nil, current: current) { hex in
+        SwatchSettingRow(
+            title: title, stored: vault.appearance[keyPath: key], current: current,
+            palette: vault.appearance.palette, defaultChip: defaultChip, defaultSwatch: defaultSwatch
+        ) { stored in
             var changed = vault.appearance
-            changed[keyPath: key] = hex
+            changed[keyPath: key] = stored
             vault.setAppearance(changed)
         }
     }
+
 }
 
 /// One colour: a picker, and Reset once it is set.
@@ -232,6 +249,78 @@ private struct ColorSettingRow: View {
                     .font(.subheadline)
             }
         }
+    }
+}
+
+/// A colour as the palette's swatches, Accent where it follows the accent,
+/// and the system picker for an exact colour, as System Settings offers an
+/// accent. A swatch is stored by name and drawn by the palette.
+private struct SwatchSettingRow: View {
+    let title: String
+    let stored: String?
+    let current: UIColor
+    let palette: AppearancePreferences.ColorPalette
+    /// The chip for the colour's own default, System or Accent, or none
+    /// where the default is a swatch's colour.
+    let defaultChip: (label: String, color: UIColor)?
+    /// The swatch the built-in colour is, ringed while nothing is chosen.
+    var defaultSwatch: AppearancePreferences.Swatch?
+    let set: (String?) -> Void
+
+    var body: some View {
+        let choice = AppearancePreferences.ColorChoice(stored: stored)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title)
+                if case .custom = choice {
+                    Text("Custom").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if stored != nil {
+                    Button("Reset") { set(nil) }
+                        .buttonStyle(.borderless)
+                        .font(.subheadline)
+                }
+                ColorPicker(title, selection: Binding(
+                    get: { Color(uiColor: current) },
+                    set: { picked in
+                        let hex = AppearancePreferences.hex(UIColor(picked))
+                        if hex != AppearancePreferences.hex(current) { set(hex) }
+                    }
+                ), supportsOpacity: false)
+                .labelsHidden()
+            }
+            HStack(spacing: 8) {
+                if let defaultChip {
+                    chip(defaultChip.color, chosen: stored == nil, label: defaultChip.label) { set(nil) }
+                    // Apart from the swatches: this one follows something
+                    // else, the swatches are fixed hues.
+                    Rectangle().fill(.secondary.opacity(0.5)).frame(width: 1, height: 18)
+                }
+                ForEach(AppearancePreferences.Swatch.allCases) { swatch in
+                    chip(Palette.color(swatch, palette),
+                         chosen: choice == .swatch(swatch) || (stored == nil && defaultSwatch == swatch),
+                         label: swatch.title) {
+                        set(swatch.rawValue)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func chip(_ color: UIColor, chosen: Bool, label: String, choose: @escaping () -> Void) -> some View {
+        Button(action: choose) {
+            Circle()
+                .fill(Color(uiColor: color))
+                .frame(width: 22, height: 22)
+                .padding(3)
+                .overlay(Circle().strokeBorder(chosen ? Color.primary.opacity(0.7) : .clear, lineWidth: 2))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
     }
 }
 

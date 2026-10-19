@@ -21,6 +21,9 @@ struct RenderContext {
     var headingFont: AppearancePreferences.HeadingFont = .system
     /// A bar in the level's colour beside each heading.
     var headingBars: Bool = false
+    /// Decides code's fill, highlights and callouts; the colours below are
+    /// already resolved through it.
+    var palette: AppearancePreferences.ColorPalette = .vivid
     /// User-customisable via the Appearance settings pane; default to the
     /// same values `AppearanceSettings` falls back to when nothing is set.
     var accentColor: NSColor = StyleDefaults.accentColor
@@ -200,7 +203,7 @@ enum InlineText {
                 case .code(let s):
                     var run = AttributedString(s)
                     run.font = Theme.mono(scale: fontScale)
-                    run.backgroundColor = Theme.codeBackground
+                    run.backgroundColor = Color(nsColor: Palette.codeFill(context.palette))
                     run.foregroundColor = Color(nsColor: context.codeColor)
                     if let link = style.link { run.link = link }
                     buffer += run
@@ -363,7 +366,7 @@ enum InlineText {
         run.font = font
         if style.strike { run.strikethroughStyle = .single }
         if style.highlight {
-            run.backgroundColor = Color(nsColor: Theme.highlightBackground(style.highlightColor))
+            run.backgroundColor = Color(nsColor: Palette.highlightFill(style.highlightColor, context.palette))
         }
         if let color = style.color {
             run.foregroundColor = color

@@ -4,11 +4,11 @@ import Foundation
 /// the phone draw a vault's notes alike.
 ///
 /// In `.heft/appearance.json` beside the pins, and synced the same way, by
-/// whatever syncs the vault. The Mac keeps its own copy as archived
-/// `NSColor`s and writes this when it changes; the phone has only this. Each
-/// colour is an sRGB hex string, and nil means the built-in default. Link
-/// and tag fall back to the accent rather than to a fixed colour, as they do
-/// on the Mac.
+/// whatever syncs the vault. The Mac keeps its own copy and writes this when
+/// it changes; the phone has only this. Each colour is a `ColorChoice`: nil
+/// for the built-in default, a swatch's name, which the palette resolves, or
+/// an sRGB hex string, shown exactly. Link and tag fall back to the accent
+/// rather than to a fixed colour, as they do on the Mac.
 public struct AppearancePreferences: Codable, Equatable, Sendable {
     public var accent: String?
     public var link: String?
@@ -18,9 +18,13 @@ public struct AppearancePreferences: Codable, Equatable, Sendable {
     public var italic: String?
     /// h1 through h6.
     public var headings: [String?] = Array(repeating: nil, count: 6)
-    /// On by default, as on the Mac. Bold and italic; headings have their
-    /// own `headingColor` since there was a choice of how they look.
-    public var colorfulFormatting = true
+    /// Bold and italic in their own colours. Off for a vault set up now; on
+    /// in a file from before, which never said. Headings have their own
+    /// `headingColor`.
+    public var colorfulFormatting = false
+    /// How the built-in colours and the swatches are drawn. Muted for a
+    /// vault set up now; vivid, as they always were, in a file from before.
+    public var palette: ColorPalette = .muted
     public var headingFont: HeadingFont = .system
     /// None for a vault set up now; an older file is read as it looked,
     /// see `init(from:)`.
@@ -33,6 +37,46 @@ public struct AppearancePreferences: Codable, Equatable, Sendable {
         case newYork
         public var id: Self { self }
         public var title: String { self == .system ? "System" : "New York" }
+    }
+
+    /// Today's colours, or the same hues softened.
+    public enum ColorPalette: String, Codable, CaseIterable, Sendable, Identifiable {
+        case vivid, muted
+        public var id: Self { self }
+        public var title: String { self == .vivid ? "Vivid" : "Muted" }
+    }
+
+    /// A colour picked from the row rather than with Custom: stored by name,
+    /// so the palette decides how it looks, in light and dark alike.
+    public enum Swatch: String, Codable, CaseIterable, Sendable, Identifiable {
+        case red, orange, yellow, green, teal, blue, purple, graphite
+        public var id: Self { self }
+        public var title: String { rawValue.capitalized }
+    }
+
+    /// What a stored colour string means.
+    public enum ColorChoice: Equatable, Sendable {
+        case swatch(Swatch)
+        /// Exactly this sRGB colour, which no palette changes.
+        case custom(String)
+
+        public init?(stored: String?) {
+            guard let stored else { return nil }
+            if let swatch = Swatch(rawValue: stored) {
+                self = .swatch(swatch)
+            } else if HexColor.components(stored) != nil {
+                self = .custom(stored)
+            } else {
+                return nil
+            }
+        }
+
+        public var stored: String {
+            switch self {
+            case .swatch(let swatch): swatch.rawValue
+            case .custom(let hex): hex
+            }
+        }
     }
 
     /// What marks a heading besides its size and weight.
@@ -82,6 +126,7 @@ public struct AppearancePreferences: Codable, Equatable, Sendable {
         let stored = try container.decodeIfPresent([String?].self, forKey: .headings) ?? []
         headings = (0..<6).map { $0 < stored.count ? stored[$0] : nil }
         colorfulFormatting = try container.decodeIfPresent(Bool.self, forKey: .colorfulFormatting) ?? true
+        palette = try container.decodeIfPresent(ColorPalette.self, forKey: .palette) ?? .vivid
         headingFont = try container.decodeIfPresent(HeadingFont.self, forKey: .headingFont) ?? .system
         // A file from before headings had their own setting drew the bar
         // with colourful formatting, so it keeps looking that way.
@@ -110,13 +155,21 @@ extension AppearancePreferences {
         return stored == current ? .nothing : .adopt(stored)
     }
 
-    /// The defaults, and the defaults as they were before headings had their
-    /// own setting: a Mac that kept the bar it always drew has chosen
-    /// nothing either.
+    /// The defaults, and the defaults as they were before headings and the
+    /// palette had settings: a Mac that kept the look it always had has
+    /// chosen nothing either.
     static var untouched: [AppearancePreferences] {
+        [AppearancePreferences(), legacy]
+    }
+
+    /// What a file from before these settings means: colourful formatting
+    /// on, the heading bar, vivid colours.
+    public static var legacy: AppearancePreferences {
         var before = AppearancePreferences()
+        before.colorfulFormatting = true
         before.headingColor = .levelColors
-        return [AppearancePreferences(), before]
+        before.palette = .vivid
+        return before
     }
 }
 

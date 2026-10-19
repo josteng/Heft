@@ -2559,6 +2559,7 @@ final class AppModel: ObservableObject {
             colorfulFormatting: appearance.colorfulFormattingEnabled,
             headingFont: appearance.headingFont,
             headingBars: appearance.headingColor == .levelColors,
+            palette: appearance.palette,
             accentColor: ink(appearance.accentColor),
             linkColor: ink(appearance.linkColor),
             tagColor: ink(appearance.tagColor),

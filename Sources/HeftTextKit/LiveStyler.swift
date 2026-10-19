@@ -140,6 +140,7 @@ enum LiveStyler {
         var layout = incremental.map {
             carryOver($0.previous, edit: $0.edit, dirty: scope)
         } ?? LiveLayout()
+        layout.palette = context.palette
 
         // The caret has to be able to re-enter a span it just left, so the
         // ranges that reveal on the caret alone are reported back to the
@@ -934,13 +935,13 @@ enum LiveStyler {
         case .strikethrough:
             storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
         case .highlight(let color):
-            storage.addAttribute(.backgroundColor, value: Theme.highlightBackground(color), range: range)
+            storage.addAttribute(.backgroundColor, value: Palette.highlightFill(color, context.palette), range: range)
 
         case .inlineCode:
             // Size comes from whatever font is already there, so inline code
             // inside a heading stays heading-sized.
             monospace(storage, range: range, delta: -1, base: base, color: context.codeColor)
-            storage.addAttribute(.backgroundColor, value: NSColor.quaternarySystemFill, range: range)
+            storage.addAttribute(.backgroundColor, value: Palette.codeFill(context.palette), range: range)
 
         case .wikiLink(let link):
             let resolved = context.index.resolve(link, from: context.current) != nil

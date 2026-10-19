@@ -2,31 +2,46 @@ import AppKit
 import HeftCore
 
 extension AppearanceSettings {
-    /// The colours as the vault file holds them.
+    /// The colours as the vault file holds them: a custom colour as its hex,
+    /// a swatch by name, a default as nothing.
     var portable: AppearancePreferences {
+        func stored(_ custom: NSColor?, _ slot: String) -> String? {
+            custom.map(Self.hex) ?? swatches[slot]?.rawValue
+        }
         var preferences = AppearancePreferences()
-        preferences.accent = customAccentColor.map(Self.hex)
-        preferences.link = customLinkColor.map(Self.hex)
-        preferences.tag = customTagColor.map(Self.hex)
-        preferences.code = customCodeColor.map(Self.hex)
-        preferences.bold = customBoldColor.map(Self.hex)
-        preferences.italic = customItalicColor.map(Self.hex)
-        preferences.headings = customHeadingColors.map { $0.map(Self.hex) }
+        preferences.accent = stored(customAccentColor, "accent")
+        preferences.link = stored(customLinkColor, "link")
+        preferences.tag = stored(customTagColor, "tag")
+        preferences.code = stored(customCodeColor, "code")
+        preferences.bold = stored(customBoldColor, "bold")
+        preferences.italic = stored(customItalicColor, "italic")
+        preferences.headings = (0..<6).map { stored(customHeadingColors[$0], Self.headingSlot($0)) }
         preferences.colorfulFormatting = colorfulFormattingEnabled
+        preferences.palette = palette
         preferences.headingFont = headingFont
         preferences.headingColor = headingColor
         return preferences
     }
 
     func adopt(_ preferences: AppearancePreferences) {
-        customAccentColor = Self.color(preferences.accent)
-        customLinkColor = Self.color(preferences.link)
-        customTagColor = Self.color(preferences.tag)
-        customCodeColor = Self.color(preferences.code)
-        customBoldColor = Self.color(preferences.bold)
-        customItalicColor = Self.color(preferences.italic)
-        customHeadingColors = preferences.headings.map(Self.color)
+        var swatches: [String: AppearancePreferences.Swatch] = [:]
+        func custom(_ stored: String?, _ slot: String) -> NSColor? {
+            switch AppearancePreferences.ColorChoice(stored: stored) {
+            case .custom(let hex): return Self.color(hex)
+            case .swatch(let swatch): swatches[slot] = swatch; return nil
+            case nil: return nil
+            }
+        }
+        customAccentColor = custom(preferences.accent, "accent")
+        customLinkColor = custom(preferences.link, "link")
+        customTagColor = custom(preferences.tag, "tag")
+        customCodeColor = custom(preferences.code, "code")
+        customBoldColor = custom(preferences.bold, "bold")
+        customItalicColor = custom(preferences.italic, "italic")
+        customHeadingColors = (0..<6).map { custom(preferences.headings[$0], Self.headingSlot($0)) }
+        self.swatches = swatches
         colorfulFormattingEnabled = preferences.colorfulFormatting
+        palette = preferences.palette
         headingFont = preferences.headingFont
         headingColor = preferences.headingColor
     }

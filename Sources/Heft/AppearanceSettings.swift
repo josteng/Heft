@@ -17,7 +17,6 @@ final class AppearanceSettings: ObservableObject {
     static let defaultAccentColor = StyleDefaults.accentColor
     static let defaultBoldColor = StyleDefaults.boldColor
     static let defaultItalicColor = StyleDefaults.italicColor
-    static let defaultCodeColor = StyleDefaults.codeColor
     /// h1 through h6, in order.
     static let defaultHeadingColors = StyleDefaults.headingColors
 
@@ -86,6 +85,25 @@ final class AppearanceSettings: ObservableObject {
         }
     }
 
+    /// How the built-in colours and swatches are drawn. A colour picked with
+    /// Custom is shown exactly, whichever this is.
+    @Published var palette: AppearancePreferences.ColorPalette {
+        didSet {
+            HeftDefaults.shared.set(palette.rawValue, forKey: Self.paletteKey)
+            AppearanceSync.changed()
+        }
+    }
+
+    /// The swatch picked for a colour, by slot (`link`, `tag`, `code`,
+    /// `bold`, `italic`, `heading1`…`heading6`). A slot has a swatch or a
+    /// custom colour, never both; choosing one clears the other.
+    @Published var swatches: [String: AppearancePreferences.Swatch] = [:] {
+        didSet {
+            HeftDefaults.shared.set(swatches.mapValues(\.rawValue), forKey: Self.swatchesKey)
+            AppearanceSync.changed()
+        }
+    }
+
     /// The face headings are set in, synced with the vault like the colours.
     @Published var headingFont: AppearancePreferences.HeadingFont {
         didSet {
@@ -136,21 +154,67 @@ final class AppearanceSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(recentLayout.rawValue, forKey: Self.recentLayoutKey) }
     }
 
-    var accentColor: NSColor { customAccentColor ?? Self.defaultAccentColor }
-    var linkColor: NSColor { customLinkColor ?? accentColor }
-    var tagColor: NSColor { customTagColor ?? accentColor }
-    var codeColor: NSColor { customCodeColor ?? Self.defaultCodeColor }
-    var boldColor: NSColor { customBoldColor ?? Self.defaultBoldColor }
-    var italicColor: NSColor { customItalicColor ?? Self.defaultItalicColor }
+    /// The app's accent everywhere, the interface included: the system's,
+    /// a swatch the palette draws, or a custom colour.
+    var accentColor: NSColor { customAccentColor ?? swatchColor("accent") ?? Self.defaultAccentColor }
+
+    /// Links and tags that follow the accent. The system's accent is
+    /// softened for text under Muted; one picked here is used as it is,
+    /// a swatch having been drawn by the palette already.
+    private var accentForText: NSColor {
+        customAccentColor == nil && swatches["accent"] == nil
+            ? Palette.followingAccent(accentColor, palette) : accentColor
+    }
+    var linkColor: NSColor { customLinkColor ?? swatchColor("link") ?? accentForText }
+    var tagColor: NSColor { customTagColor ?? swatchColor("tag") ?? accentForText }
+    var codeColor: NSColor { Palette.code(palette, chosen: customCodeColor ?? swatchColor("code")) }
+    var boldColor: NSColor { customBoldColor ?? swatchColor("bold") ?? Palette.bold(palette) }
+    var italicColor: NSColor { customItalicColor ?? swatchColor("italic") ?? Palette.italic(palette) }
 
     /// - Parameter level: 1-based heading level, as written in Markdown (h1…h6+).
     func headingColor(_ level: Int) -> NSColor {
-        let index = min(max(level, 1), Self.defaultHeadingColors.count) - 1
-        return customHeadingColors[index] ?? Self.defaultHeadingColors[index]
+        let index = min(max(level, 1), 6) - 1
+        return customHeadingColors[index] ?? swatchColor(Self.headingSlot(index)) ?? Palette.heading(level, palette)
     }
 
-    var hasCustomHeadingColor: Bool { customHeadingColors.contains { $0 != nil } }
-    func resetHeadingColors() { customHeadingColors = Array(repeating: nil, count: 6) }
+    /// The Accent chip of the link and tag rows: what those draw in when
+    /// they follow the accent.
+    var accentForChip: NSColor { accentForText }
+
+    private func swatchColor(_ slot: String) -> NSColor? {
+        swatches[slot].map { Palette.color($0, palette) }
+    }
+
+    static func headingSlot(_ index: Int) -> String { "heading\(index + 1)" }
+
+    var hasCustomHeadingColor: Bool {
+        customHeadingColors.contains { $0 != nil } || (0..<6).contains { swatches[Self.headingSlot($0)] != nil }
+    }
+
+    func resetHeadingColors() {
+        customHeadingColors = Array(repeating: nil, count: 6)
+        for index in 0..<6 { swatches[Self.headingSlot(index)] = nil }
+    }
+
+    /// Whether any formatting colour was picked with Custom, which Muted
+    /// leaves as it is.
+    var hasCustomFormattingColor: Bool {
+        [customLinkColor, customTagColor, customCodeColor, customBoldColor, customItalicColor]
+            .contains { $0 != nil } || customHeadingColors.contains { $0 != nil }
+    }
+
+    /// Every formatting colour back to the built-in one, which the palette
+    /// draws: what makes Muted reach colours chosen before it existed. The
+    /// accent stays, as it is the caret's and the checkboxes'.
+    func useBuiltInColors() {
+        customLinkColor = nil
+        customTagColor = nil
+        customCodeColor = nil
+        customBoldColor = nil
+        customItalicColor = nil
+        customHeadingColors = Array(repeating: nil, count: 6)
+        swatches = [:]
+    }
 
     private static let folderArrowsKey = "dev.stenglein.Heft.appearance.folderArrows"
     private static let recentOrderKey = "dev.stenglein.Heft.sidebar.recentOrder"
@@ -163,6 +227,8 @@ final class AppearanceSettings: ObservableObject {
     private static let italicKey = "dev.stenglein.Heft.appearance.italicColor"
     private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
     private static let headingFontKey = "dev.stenglein.Heft.appearance.headingFont"
+    private static let paletteKey = "dev.stenglein.Heft.appearance.palette"
+    private static let swatchesKey = "dev.stenglein.Heft.appearance.swatches"
     private static let headingColorKey = "dev.stenglein.Heft.appearance.headingColor"
     private static func headingKey(_ index: Int) -> String {
         "dev.stenglein.Heft.appearance.headingColor\(index + 1)"
@@ -176,10 +242,18 @@ final class AppearanceSettings: ObservableObject {
         customBoldColor = Self.load(Self.boldKey)
         customItalicColor = Self.load(Self.italicKey)
         customHeadingColors = (0..<6).map { Self.load(Self.headingKey($0)) }
+        // A Mac that opened a vault before these settings keeps the look it
+        // had: colourful formatting on unless switched off, vivid colours.
+        // A first launch starts calm.
+        let launchedBefore = Self.launchedBefore()
         let colorful = HeftDefaults.shared.object(forKey: Self.colorfulFormattingKey) == nil
-            ? true
+            ? launchedBefore
             : HeftDefaults.shared.bool(forKey: Self.colorfulFormattingKey)
         colorfulFormattingEnabled = colorful
+        palette = HeftDefaults.shared.string(forKey: Self.paletteKey)
+            .flatMap(AppearancePreferences.ColorPalette.init(rawValue:)) ?? (launchedBefore ? .vivid : .muted)
+        swatches = (HeftDefaults.shared.dictionary(forKey: Self.swatchesKey) as? [String: String] ?? [:])
+            .compactMapValues(AppearancePreferences.Swatch.init(rawValue:))
         headingFont = HeftDefaults.shared.string(forKey: Self.headingFontKey)
             .flatMap(AppearancePreferences.HeadingFont.init(rawValue:)) ?? .system
         headingColor = HeftDefaults.shared.string(forKey: Self.headingColorKey)
@@ -196,8 +270,12 @@ final class AppearanceSettings: ObservableObject {
     static func headingColorBeforeTheSetting(
         colorful: Bool, in defaults: UserDefaults = HeftDefaults.shared
     ) -> AppearancePreferences.HeadingColor {
-        let launchedBefore = !(defaults.stringArray(forKey: VaultRegistry.recentVaultsKey) ?? []).isEmpty
-        return launchedBefore && colorful ? .levelColors : .none
+        launchedBefore(in: defaults) && colorful ? .levelColors : .none
+    }
+
+    /// Whether Heft has opened a vault on this Mac before.
+    static func launchedBefore(in defaults: UserDefaults = HeftDefaults.shared) -> Bool {
+        !(defaults.stringArray(forKey: VaultRegistry.recentVaultsKey) ?? []).isEmpty
     }
 
     private static func load(_ key: String) -> NSColor? {
@@ -329,44 +407,56 @@ struct AppearanceSettingsView: View {
     private var settings: some View {
         Form {
             Section {
-                colorRow(
+                Picker(selection: $appearance.palette) {
+                    ForEach(AppearancePreferences.ColorPalette.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel(
+                        "Colors",
+                        detail: "Muted softens the built-in colors. Colors you pick with Custom "
+                            + "are shown exactly as chosen."
+                    )
+                }
+                .defaultMenuTint()
+                if appearance.hasCustomFormattingColor {
+                    LabeledContent {
+                        Button("Use Built-in Colors") { appearance.useBuiltInColors() }
+                    } label: {
+                        SettingLabel(
+                            "Custom Colors",
+                            detail: "Some colors were picked with Custom and keep their exact shade. "
+                                + "This returns them to the built-in ones, which follow Colors above."
+                        )
+                    }
+                }
+            }
+
+            Section {
+                swatchRow(
                     "Accent Color",
-                    detail: "The caret and checkboxes. Follows your macOS accent color, "
-                        + "not a fixed color, unless set here.",
-                    color: settableBinding(current: appearance.accentColor) { appearance.customAccentColor = $0 },
-                    isCustom: appearance.customAccentColor != nil,
-                    reset: { appearance.customAccentColor = nil },
-                    resetHelp: "Follow your macOS accent color again"
+                    detail: "The caret, checkboxes and Heft's own controls. System follows your "
+                        + "macOS accent color.",
+                    slot: "accent", custom: \.customAccentColor, current: appearance.accentColor,
+                    defaultChip: ("System", Self.defaultAccentColorForChip)
                 )
             }
 
-            // Its own card above the rest: Link and Tag default to it, so it
-            // is one level up from them, not one of them.
+            // Link and Tag default to the accent, so it is one level up
+            // from them, not one of them.
             Section {
-                colorRow(
-                    "Link Color",
-                    detail: "Defaults to Accent Color above; set here to use a different "
-                        + "color just for links.",
-                    color: settableBinding(current: appearance.linkColor) { appearance.customLinkColor = $0 },
-                    isCustom: appearance.customLinkColor != nil,
-                    reset: { appearance.customLinkColor = nil },
-                    resetHelp: "Follow Accent Color again"
+                swatchRow(
+                    "Link Color", detail: "Accent follows the accent color above.",
+                    slot: "link", custom: \.customLinkColor, current: appearance.linkColor,
+                    defaultChip: ("Accent", appearance.accentForChip)
                 )
-                colorRow(
-                    "Tag Color",
-                    detail: "For #tags and the pill behind them. Defaults to Accent Color above.",
-                    color: settableBinding(current: appearance.tagColor) { appearance.customTagColor = $0 },
-                    isCustom: appearance.customTagColor != nil,
-                    reset: { appearance.customTagColor = nil },
-                    resetHelp: "Follow Accent Color again"
+                swatchRow(
+                    "Tag Color", detail: "For #tags and the pill behind them.",
+                    slot: "tag", custom: \.customTagColor, current: appearance.tagColor,
+                    defaultChip: ("Accent", appearance.accentForChip)
                 )
-                colorRow(
-                    "Code Color",
-                    detail: "For inline `code` spans.",
-                    color: settableBinding(current: appearance.codeColor) { appearance.customCodeColor = $0 },
-                    isCustom: appearance.customCodeColor != nil,
-                    reset: { appearance.customCodeColor = nil },
-                    resetHelp: "Reset to pink"
+                swatchRow(
+                    "Code Color", detail: "For inline `code` spans.",
+                    slot: "code", custom: \.customCodeColor, current: appearance.codeColor,
+                    defaultSwatch: .graphite
                 )
             }
 
@@ -378,25 +468,15 @@ struct AppearanceSettingsView: View {
                     )
                 }
                 Group {
-                    colorRow(
-                        "Bold Color",
-                        detail: "For **bold** text.",
-                        color: settableBinding(current: appearance.boldColor) {
-                            appearance.customBoldColor = $0
-                        },
-                        isCustom: appearance.customBoldColor != nil,
-                        reset: { appearance.customBoldColor = nil },
-                        resetHelp: "Reset to red"
+                    swatchRow(
+                        "Bold Color", detail: "For **bold** text.",
+                        slot: "bold", custom: \.customBoldColor, current: appearance.boldColor,
+                        defaultSwatch: .red
                     )
-                    colorRow(
-                        "Italic Color",
-                        detail: "For *italic* text.",
-                        color: settableBinding(current: appearance.italicColor) {
-                            appearance.customItalicColor = $0
-                        },
-                        isCustom: appearance.customItalicColor != nil,
-                        reset: { appearance.customItalicColor = nil },
-                        resetHelp: "Reset to orange"
+                    swatchRow(
+                        "Italic Color", detail: "For *italic* text.",
+                        slot: "italic", custom: \.customItalicColor, current: appearance.italicColor,
+                        defaultSwatch: .orange
                     )
                 }
                 .disabled(!appearance.colorfulFormattingEnabled)
@@ -481,32 +561,78 @@ struct AppearanceSettingsView: View {
         )
     }
 
-    /// A row of the form: the control column is right-aligned by the form,
-    /// so every swatch sits at the same distance from its Reset button and
-    /// the label takes whatever is left. Reset keeps one width so the
-    /// swatches line up whether or not a row's button is enabled.
+    private static let resetWidth: CGFloat = 60
+    private static let defaultAccentColorForChip = AppearanceSettings.defaultAccentColor
+
+    /// A colour as a row of swatches, like the accent colour in System
+    /// Settings: the palette's eight, Accent where the colour follows it,
+    /// then the colour well for an exact colour, then Reset. A swatch is
+    /// stored by name and drawn by the palette; the well's colour is shown
+    /// exactly.
     @ViewBuilder
-    private func colorRow(
-        _ title: String, detail: String, color: Binding<Color>, isCustom: Bool,
-        reset: @escaping () -> Void, resetHelp: String
+    private func swatchRow(
+        _ title: String, detail: String, slot: String,
+        custom: ReferenceWritableKeyPath<AppearanceSettings, NSColor?>, current: NSColor,
+        defaultChip: (label: String, color: NSColor)? = nil,
+        defaultSwatch: AppearancePreferences.Swatch? = nil
     ) -> some View {
+        let chosen = appearance.swatches[slot]
+        let isCustom = appearance[keyPath: custom] != nil
         LabeledContent {
-            HStack(spacing: 12) {
-                ColorPicker("", selection: color, supportsOpacity: false)
-                    .labelsHidden()
-                    .frame(width: 44, height: 22)
-                    .alignedWithTitle()
-                Button("Reset", action: reset)
-                    .disabled(!isCustom)
-                    .help(resetHelp)
-                    .frame(width: Self.resetWidth)
+            HStack(spacing: 6) {
+                if let defaultChip {
+                    SwatchChip(
+                        color: defaultChip.color,
+                        isChosen: chosen == nil && !isCustom, help: defaultChip.label
+                    ) {
+                        appearance[keyPath: custom] = nil
+                        appearance.swatches[slot] = nil
+                    }
+                    // Apart from the swatches: this one follows something
+                    // else, the swatches are fixed hues.
+                    Rectangle().fill(.secondary.opacity(0.5)).frame(width: 1, height: 14).padding(.horizontal, 2)
+                }
+                ForEach(AppearancePreferences.Swatch.allCases) { swatch in
+                    SwatchChip(
+                        color: Palette.color(swatch, appearance.palette),
+                        // The built-in colour is a swatch's own for bold
+                        // and italic, and is ringed as that swatch.
+                        isChosen: !isCustom && (chosen == swatch || (chosen == nil && defaultSwatch == swatch)),
+                        help: swatch.title
+                    ) {
+                        appearance[keyPath: custom] = nil
+                        appearance.swatches[slot] = swatch
+                    }
+                }
+                ColorPicker(
+                    "",
+                    selection: settableBinding(current: current) { picked in
+                        appearance.swatches[slot] = nil
+                        appearance[keyPath: custom] = picked
+                    },
+                    supportsOpacity: false
+                )
+                .labelsHidden()
+                .frame(width: 36, height: 22)
+                .overlay(alignment: .bottom) {
+                    if isCustom {
+                        Text("Custom").font(.system(size: 8)).foregroundStyle(.secondary).offset(y: 10)
+                    }
+                }
+                .help("Custom: exactly this color, whatever Colors says")
+                .padding(.leading, 4)
+                Button("Reset") {
+                    appearance[keyPath: custom] = nil
+                    appearance.swatches[slot] = nil
+                }
+                .disabled(!isCustom && chosen == nil)
+                .help(defaultChip.map { "Back to \($0.label)" } ?? "Back to the built-in color")
+                .frame(width: Self.resetWidth)
             }
         } label: {
             SettingLabel(title, detail: detail)
         }
     }
-
-    private static let resetWidth: CGFloat = 60
 
     /// A heading segment, plus the border around the whole pill, comes to
     /// the same 18pt of colour inside a 3pt band that a single swatch above
@@ -641,5 +767,29 @@ struct AppearanceSettingsView: View {
         } label: {
             SettingLabel("Heading Colors", detail: "The stripe beside h1–h6 headings.")
         }
+    }
+}
+
+/// One swatch in a colour row: a filled circle, ringed when chosen.
+private struct SwatchChip: View {
+    let color: NSColor
+    let isChosen: Bool
+    let help: String
+    let choose: () -> Void
+
+    var body: some View {
+        Button(action: choose) {
+            Circle()
+                .fill(Color(nsColor: color))
+                .frame(width: 14, height: 14)
+                .overlay(Circle().strokeBorder(.primary.opacity(0.15), lineWidth: 0.5))
+                .padding(2.5)
+                .overlay(Circle().strokeBorder(isChosen ? Color.primary.opacity(0.7) : .clear, lineWidth: 1.5))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(isChosen ? .isSelected : [])
     }
 }

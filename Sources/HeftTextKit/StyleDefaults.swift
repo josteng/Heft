@@ -11,7 +11,8 @@ enum StyleDefaults {
     static let accentColor = NSColor.controlAccentColor
     static let boldColor = NSColor.systemRed
     static let italicColor = NSColor.systemOrange
-    static let codeColor = NSColor.systemPink
+    /// Graphite, the vivid palette's; `Palette.code` is what draws it.
+    static let codeColor = NSColor.systemGray
     /// h1 through h6, in order.
     static let headingColors: [NSColor] = [
         .systemRed, .systemOrange, .systemYellow, .systemGreen, .systemBlue, .systemPurple,

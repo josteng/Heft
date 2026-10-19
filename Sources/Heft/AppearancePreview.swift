@@ -39,6 +39,7 @@ struct AppearancePreview: NSViewRepresentable {
             colorfulFormatting: appearance.colorfulFormattingEnabled,
             headingFont: appearance.headingFont,
             headingBars: appearance.headingColor == .levelColors,
+            palette: appearance.palette,
             accentColor: appearance.accentColor,
             linkColor: appearance.linkColor,
             tagColor: appearance.tagColor,

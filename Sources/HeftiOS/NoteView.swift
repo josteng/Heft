@@ -510,6 +510,7 @@ struct NoteContent: View {
                         colorfulFormatting: vault.appearance.colorfulFormatting,
                         headingFont: vault.appearance.headingFont,
                         headingBars: vault.appearance.headingColor == .levelColors,
+                        palette: vault.appearance.palette,
                         accentColor: vault.appearance.accentColor,
                         linkColor: vault.appearance.linkColor,
                         tagColor: vault.appearance.tagColor,

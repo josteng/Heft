@@ -328,6 +328,7 @@ private struct TransclusionView: View {
                         colorfulFormatting: context.colorfulFormatting,
                         headingFont: context.headingFont,
                         headingBars: context.headingBars,
+                        palette: context.palette,
                         accentColor: context.accentColor,
                         linkColor: context.linkColor,
                 tagColor: context.tagColor,
@@ -428,7 +429,7 @@ private struct CalloutView: View {
     @Environment(\.markdownFontScale) private var fontScale
 
     var body: some View {
-        let tint = Theme.calloutTint(kind)
+        let tint = Color(nsColor: Palette.calloutTint(kind, context.palette))
         VStack(alignment: .leading, spacing: 8) {
             Label(title, systemImage: kind.symbol)
                 .font(.system(size: Theme.bodySize * fontScale, weight: .semibold))
@@ -439,7 +440,7 @@ private struct CalloutView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.10), in: .rect(cornerRadius: 8))
+        .background(Color(nsColor: Palette.calloutFill(kind, context.palette)), in: .rect(cornerRadius: 8))
         .overlay(alignment: .leading) {
             Rectangle().fill(tint).frame(width: 3)
                 .clipShape(.rect(topLeadingRadius: 8, bottomLeadingRadius: 8))

@@ -35,6 +35,9 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.delegate = coordinator
         view.textLayoutManager?.delegate = coordinator
         view.backgroundColor = .clear
+        // A link takes the colour the styler gives it, as on the Mac; the
+        // text view's own link style drew every link in the tint.
+        view.linkTextAttributes = [:]
         view.font = Theme.liveFont
         view.alwaysBounceVertical = true
         // Under the phone's bar the note ends at a firmer edge, as its lists
@@ -207,6 +210,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                 && a.strictLineBreaks == b.strictLineBreaks
                 && a.colorfulFormatting == b.colorfulFormatting
                 && a.headingFont == b.headingFont && a.headingBars == b.headingBars
+                && a.palette == b.palette
                 && [a.accentColor, a.linkColor, a.tagColor, a.codeColor, a.boldColor, a.italicColor]
                     == [b.accentColor, b.linkColor, b.tagColor, b.codeColor, b.boldColor, b.italicColor]
                 && a.headingColors == b.headingColors
@@ -262,7 +266,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             // look until it was opened again.
             let key = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
                 + "\(context.strictLineBreaks)/\(width)/\(textView.traitCollection.userInterfaceStyle.rawValue)/"
-                + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/"
+                + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.palette)/"
                 + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/\(context.codeColor)/"
                 + "\(context.boldColor)/\(context.italicColor)/\(context.headingColors)"
 
@@ -363,6 +367,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                 fragment.widget = layout.blocks[key]
                 fragment.inlineMath = layout.inlineMath[key] ?? []
                 fragment.inlineTags = layout.inlineTags[key] ?? []
+                fragment.palette = layout.palette
                 return fragment
             }
         }

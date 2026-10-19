@@ -304,7 +304,7 @@ struct LiveTextEditor: NSViewRepresentable {
         // disk. Without this an embed styled before the index arrived stays an
         // unresolved orange filename instead of becoming a picture.
         let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
+            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.palette)/\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
             + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/\(context.headingColors)/"
             + "\(context.imageGeneration)"
         if nsContext.coordinator.indexFingerprint != fingerprint {
@@ -1080,7 +1080,7 @@ struct LiveTextEditor: NSViewRepresentable {
         /// When any of it moves, no part of the previous pass can be kept.
         private static func styleKey(context: RenderContext, width: CGFloat) -> String {
             "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-                + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/"
+                + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.palette)/"
                 + "\(context.strictLineBreaks)/\(width)/"
                 + "\(context.appearance?.name.rawValue ?? "")/"
                 + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
@@ -1275,6 +1275,7 @@ extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
         fragment.widget = layout.blocks[key]
         fragment.inlineMath = layout.inlineMath[key] ?? []
         fragment.inlineTags = layout.inlineTags[key] ?? []
+        fragment.palette = layout.palette
         return fragment
     }
 }

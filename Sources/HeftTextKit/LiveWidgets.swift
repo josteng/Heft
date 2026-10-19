@@ -166,6 +166,9 @@ struct LiveLayout {
     /// picture selects its source rather than revealing it, and Space or a
     /// double-click opens its file.
     var images: [Int: DrawnPicture] = [:]
+    /// What callout cards are drawn in, handed to every line's fragment as
+    /// its tag pills are.
+    var palette: AppearancePreferences.ColorPalette = .vivid
 
     /// Every drawn table in the note, in document order. The editor needs these
     /// outside a draw pass — to put the caret in a cell, to work out what a
@@ -192,7 +195,7 @@ struct LiveLayout {
         let blockKeys = blocks.keys.sorted().map(String.init).joined(separator: ",")
         let mathKeys = inlineMath.map { "\($0.key):\($0.value.count)" }.sorted().joined(separator: ",")
         let tagKeys = inlineTags.map { "\($0.key):\($0.value.count)" }.sorted().joined(separator: ",")
-        return blockKeys + "|" + mathKeys + "|" + tagKeys
+        return blockKeys + "|" + mathKeys + "|" + tagKeys + "|" + palette.rawValue
     }
 }
 
@@ -878,6 +881,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     var widget: BlockWidget?
     var inlineMath: [(location: Int, image: NSImage)] = []
     var inlineTags: [(range: NSRange, color: NSColor, font: NSFont, ink: CGRect)] = []
+    var palette: AppearancePreferences.ColorPalette = .vivid
     var elementStart = 0
 
     /// Vertical breathing room around a drawn block. `LiveStyler` adds twice
@@ -1140,7 +1144,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     ) {
         guard let line = textLineFragments.first else { return }
         let left = point.x - indent
-        let tint = Theme.calloutNSTint(quote.callout)
+        let tint = Palette.calloutTint(quote.callout, palette)
 
         // Both `paragraphSpacingBefore` and `paragraphSpacing` land *inside*
         // the layout fragment, so the padding at each end of the block is
@@ -1158,7 +1162,7 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         // into a near-white slab.
         context.setFillColor(
             quote.isCallout
-                ? tint.withAlphaComponent(0.11).cgColor
+                ? Palette.calloutFill(quote.callout, palette).cgColor
                 : NSColor.quaternarySystemFill.cgColor
         )
         fill(rect, edge: quote.edge, radius: 8, in: context)

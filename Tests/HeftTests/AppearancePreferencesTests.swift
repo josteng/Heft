@@ -32,7 +32,7 @@ struct AppearancePreferencesTests {
         #expect(AppearancePreferences.load(fromVault: vault) == preferences)
     }
 
-    @Test("Missing keys read as defaults, and colourful formatting starts on")
+    @Test("Missing keys read as defaults; an old file's colourful formatting is on, a new vault's off")
     func partial() throws {
         let decoded = try JSONDecoder().decode(
             AppearancePreferences.self, from: Data(##"{"bold": "#FF0000", "headings": ["#00FF00"]}"##.utf8)
@@ -41,7 +41,7 @@ struct AppearancePreferencesTests {
         #expect(decoded.colorfulFormatting)
         #expect(decoded.headings.count == 6)
         #expect(decoded.headings[0] == "#00FF00" && decoded.headings[1] == nil)
-        #expect(AppearancePreferences().colorfulFormatting)
+        #expect(!AppearancePreferences().colorfulFormatting, "a vault set up now starts calm")
     }
 
     @Test("The vault's file wins; without one, only customised colours are written")
@@ -52,10 +52,8 @@ struct AppearancePreferencesTests {
         var theirs = AppearancePreferences()
         theirs.colorfulFormatting = false
         #expect(AppearancePreferences.step(stored: nil, current: defaults) == .nothing)
-        var keptTheBar = AppearancePreferences()
-        keptTheBar.headingColor = .levelColors
-        #expect(AppearancePreferences.step(stored: nil, current: keptTheBar) == .nothing,
-                "a Mac that kept the bar it always drew writes no file")
+        #expect(AppearancePreferences.step(stored: nil, current: .legacy) == .nothing,
+                "a Mac that kept the look it always had writes no file")
         var serif = AppearancePreferences()
         serif.headingFont = .newYork
         #expect(AppearancePreferences.step(stored: nil, current: serif) == .write)
