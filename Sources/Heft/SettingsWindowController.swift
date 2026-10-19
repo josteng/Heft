@@ -90,6 +90,26 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 160)
     }
 
+    /// How tall a long pane (Typing, Appearance) is allowed to get before it
+    /// scrolls as a whole.
+    ///
+    /// From the screen on a small display, so the tab still fits with the
+    /// title bar, the tab strip and a margin off the Dock; a ceiling on a
+    /// large one. The ceiling was the screen's, and on a big display the
+    /// tab took the window to its edge: a settings window nine hundred
+    /// points tall for one tab, while every other tab sits under six
+    /// hundred. What the ceiling costs is the end of the rule table, which
+    /// scrolls into view.
+    static var tallPaneMaxHeight: CGFloat {
+        let available = (NSScreen.main?.visibleFrame.height ?? 900) - 140
+        return min(max(available, 460), 760)
+    }
+
+    /// And how tall it is even when it does not need to be, so a long pane
+    /// opens showing most of itself: Typing's rule table, Appearance's
+    /// heading settings.
+    static var tallPaneMinHeight: CGFloat { min(720, tallPaneMaxHeight) }
+
     var title: String {
         switch self {
         case .general: "General"

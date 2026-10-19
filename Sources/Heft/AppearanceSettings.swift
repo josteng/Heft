@@ -309,10 +309,25 @@ struct AppearanceSettingsView: View {
     @ObservedObject private var appearance = AppearanceSettings.shared
 
     var body: some View {
+        // The preview stays put above the settings, which scroll beneath it:
+        // a change is seen where the eye already is, however far down it was
+        // made.
+        VStack(spacing: 0) {
+            AppearancePreview(appearance: appearance)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.background.secondary, in: .rect(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.5)))
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 4)
+            settings
+        }
+        .frame(minHeight: SettingsPane.tallPaneMinHeight, maxHeight: SettingsPane.tallPaneMaxHeight)
+    }
+
+    private var settings: some View {
         Form {
-            Section {
-                AppearancePreview(appearance: appearance)
-            }
             Section {
                 colorRow(
                     "Accent Color",

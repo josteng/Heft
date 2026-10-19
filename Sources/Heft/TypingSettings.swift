@@ -242,29 +242,6 @@ struct TypingSettingsView: View {
     @FocusState private var focusedTrigger: UUID?
     @State private var isPlaceholderHelpPresented = false
 
-    /// How tall the pane is allowed to get before it scrolls as a whole.
-    ///
-    /// From the screen on a small display, so the tab still fits with the
-    /// title bar, the tab strip and a margin off the Dock; a ceiling on a
-    /// large one. The ceiling was the screen's, and on a big display the
-    /// tab took the window to its edge: a settings window nine hundred
-    /// points tall for one tab, while every other tab sits under six
-    /// hundred. What the ceiling costs is the end of the rule table, which
-    /// scrolls into view.
-    private static var maxPaneHeight: CGFloat {
-        let available = (NSScreen.main?.visibleFrame.height ?? 900) - 140
-        return min(max(available, 460), 760)
-    }
-
-    /// And how tall it is even when it does not need to be.
-    ///
-    /// The eight group toggles and their examples cost most of the pane, so
-    /// sizing the window to the content alone opens it with the rule table
-    /// just below the bottom edge — the tab looks like it is only about the
-    /// built-in substitutions. A floor keeps the table on screen from the
-    /// start, at the price of some empty space before any rules exist.
-    private static var minPaneHeight: CGFloat { min(720, maxPaneHeight) }
-
     /// The pane scrolls in one piece rather than scrolling the rule table
     /// inside it.
     ///
@@ -421,7 +398,7 @@ struct TypingSettingsView: View {
             .disabled(!settings.substitutionsEnabled)
         }
         .formStyle(.grouped)
-        .frame(minHeight: Self.minPaneHeight, maxHeight: Self.maxPaneHeight)
+        .frame(minHeight: SettingsPane.tallPaneMinHeight, maxHeight: SettingsPane.tallPaneMaxHeight)
     }
 
     @ViewBuilder
