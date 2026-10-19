@@ -256,8 +256,15 @@ struct LiveNoteEditor: UIViewRepresentable {
             var context = renderContext
             context.appearance = textView.traitCollection
             let width = textView.textContainer.size.width
+            // Everything a pass draws with, the appearance included: with only
+            // the note and the width in it, a colour or heading setting
+            // changed in Settings matched the key, and the note kept its old
+            // look until it was opened again.
             let key = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-                + "\(context.strictLineBreaks)/\(width)/\(textView.traitCollection.userInterfaceStyle.rawValue)"
+                + "\(context.strictLineBreaks)/\(width)/\(textView.traitCollection.userInterfaceStyle.rawValue)/"
+                + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/"
+                + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/\(context.codeColor)/"
+                + "\(context.boldColor)/\(context.italicColor)/\(context.headingColors)"
 
             if let styled, styleKey == key, styled.reveal == reveal,
                styled.source.isEqual(to: source as String) {
