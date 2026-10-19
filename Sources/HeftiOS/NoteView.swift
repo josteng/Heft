@@ -296,6 +296,7 @@ struct NoteView: View {
     @State private var document: NoteDocument
     @State private var action: ItemAction?
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.mobileLibrary) private var library
 
     init(path: String, startsTyping: Bool = false) {
         self.path = path
@@ -330,6 +331,19 @@ struct NoteView: View {
             // The bar's own title stays for VoiceOver and the back menu.
             .toolbar(removing: .title)
             .toolbar {
+                // Back and Forward before the name, as the Mac's pair sits
+                // ahead of its title; the phone's stack has its own back.
+                if let library, library.back != nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ControlGroup {
+                            Button("Back", systemImage: "chevron.left") { library.back?() }
+                                .disabled(!library.canGoBack)
+                            Button("Forward", systemImage: "chevron.right") { library.forward?() }
+                                .disabled(!library.canGoForward)
+                        }
+                        .tint(.primary)
+                    }
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     // As wide as the name up to what the buttons leave; a
                     // toolbar item is otherwise squeezed to a letter or two.

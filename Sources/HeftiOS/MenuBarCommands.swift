@@ -27,6 +27,12 @@ struct LibraryActions {
     var calendarShown: Bool
     var settings: () -> Void
     var refresh: () -> Void
+    /// The iPad's Back and Forward through the notes and days a window has
+    /// shown; nil on the phone, whose stack has its own back button.
+    var back: (() -> Void)?
+    var forward: (() -> Void)?
+    var canGoBack = false
+    var canGoForward = false
     /// ⌘1…⌘3: the sidebar's views, or the search's scopes while it is open,
     /// as the same keys choose the bar's chips on the Mac.
     var numbered: (Int) -> Void = { _ in }
@@ -81,6 +87,18 @@ struct HeftMenuCommands: Commands {
                 Button("Outdent") { note?.format(.outdent) }
             }
             .disabled(note == nil)
+        }
+        CommandGroup(before: .sidebar) {
+            // ⌘[ and ⌘], as the Mac's Back and Forward.
+            if let library, library.back != nil {
+                Button("Back") { library.back?() }
+                    .keyboardShortcut("[")
+                    .disabled(!library.canGoBack)
+                Button("Forward") { library.forward?() }
+                    .keyboardShortcut("]")
+                    .disabled(!library.canGoForward)
+                Divider()
+            }
         }
         CommandGroup(after: .sidebar) {
             Button("Files") { library?.numbered(1) }.keyboardShortcut("1")

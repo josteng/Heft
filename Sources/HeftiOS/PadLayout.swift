@@ -25,6 +25,12 @@ enum PadSidebarMode: String, CaseIterable, Identifiable {
 /// The phone's screens are reused for what goes in them. Only what a sidebar
 /// does differently is here: rows select rather than push, folders and tags
 /// open in place, and the calendar is a month rather than a tab.
+/// A note or a day the iPad's note pane showed.
+enum PadPlace: Equatable, Sendable {
+    case note(String)
+    case day(Date)
+}
+
 struct PadRootView: View {
     @Binding var selection: MobileRoute?
     @Binding var day: Date?
@@ -48,6 +54,8 @@ struct PadRootView: View {
     @State private var detailPath: [MobileRoute] = []
     /// The note in the pane, which the panel beside it is about.
     @State private var panelNote: PanelNote?
+    /// The notes and days this window has shown, for Back and Forward.
+    @State private var history = NavigationHistory<PadPlace>()
     @State private var preferences = BrowsingPreferences.shared
 
     var body: some View {
@@ -88,6 +96,9 @@ struct PadRootView: View {
                 open(route)
             }
         }
+        .onChange(of: place, initial: true) { _, place in
+            if let place { history.visit(place) }
+        }
         .onAppear(perform: applyLaunchRequest)
         .overlay {
             if showsSearch {
@@ -120,6 +131,10 @@ struct PadRootView: View {
             calendarShown: showsCalendar,
             settings: { settings = SettingsRequest() },
             refresh: { vault.refresh() },
+            back: { go(history.back(skipping: unusable)) },
+            forward: { go(history.forward(skipping: unusable)) },
+            canGoBack: history.canGoBack,
+            canGoForward: history.canGoForward,
             numbered: { number in
                 if showsSearch {
                     searchModel.choose(chip: number)
@@ -250,6 +265,32 @@ struct PadRootView: View {
 
     // MARK: Routing
 
+    /// What the note pane shows, as Back and Forward remember it.
+    private var place: PadPlace? {
+        if let day { return .day(day) }
+        switch selection {
+        case .note(let path), .newNote(let path): return .note(path)
+        default: return nil
+        }
+    }
+
+    /// Shows a place from the history. The history has already moved, so
+    /// the visit this change reports is the place it is on, and records
+    /// nothing.
+    private func go(_ place: PadPlace?) {
+        switch place {
+        case .note(let path): open(.note(path))
+        case .day(let date): pick(date)
+        case nil: break
+        }
+    }
+
+    /// A note deleted or moved since it was shown.
+    private func unusable(_ place: PadPlace) -> Bool {
+        if case .note(let path) = place { return vault.note(at: path) == nil }
+        return false
+    }
+
     /// Where a link, a new note or an action leads, on a screen with a
     /// sidebar: notes into the note pane, folders and tags into the sidebar.
     private func open(_ route: MobileRoute) {
@@ -314,6 +355,19 @@ struct PadRootView: View {
         }
         if environment["HEFT_IOS_QUERY"] != nil { showsSearch = true }
         if environment["HEFT_IOS_PAD_MONTH"] != nil { calendarExpanded = true }
+        // `HEFT_IOS_PAD_STEPS=A.md,B.md,back` opens notes and goes back or
+        // forward, a step a second, as a reader clicking through would.
+        if let steps = environment["HEFT_IOS_PAD_STEPS"]?.split(separator: ",") {
+            for (offset, step) in steps.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 + Double(offset)) {
+                    switch step {
+                    case "back": library.back?()
+                    case "forward": library.forward?()
+                    default: open(.note(String(step)))
+                    }
+                }
+            }
+        }
         #endif
     }
 }
