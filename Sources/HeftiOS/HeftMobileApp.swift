@@ -255,7 +255,10 @@ struct MobileRootView: View {
             newFolder: { creating = NewNoteRequest(folder: vault.newNoteFolder, makesFolder: true) },
             capture: { capture = CaptureSheetRequest() },
             today: { showDay(Date()) },
-            search: { _ in tab = .search },
+            search: { scope in
+                if let scope { SearchRequest.shared.open(scope) }
+                tab = .search
+            },
             show: { mode in tab = mode == .files ? .files : .recent },
             toggleCalendar: { tab = .calendar },
             calendarShown: true,
@@ -277,7 +280,7 @@ struct MobileRootView: View {
                 MobileStack(showsCapture: false) { CalendarView() }
             }
             Tab(value: .search, role: .search) {
-                MobileStack { SearchView() }
+                MobileStack(poppedBy: SearchRequest.shared.generation) { SearchView() }
             }
         }
     }
@@ -299,6 +302,11 @@ struct MobileRootView: View {
         case "search": tab = .search
         default: break
         }
+        // `HEFT_IOS_SEARCH_TAG` asks for Search narrowed to a tag, as a tag
+        // tapped in a note does, once a note has had time to open.
+        if let tag = environment["HEFT_IOS_SEARCH_TAG"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { phoneLibrary.search(.tag(tag)) }
+        }
         // The path an Open Note intent takes, without Shortcuts.
         if let path = environment["HEFT_IOS_OPEN"] { NoteOpenRequest.shared.path = path }
         if environment["HEFT_IOS_CAPTURE"] != nil {
@@ -318,6 +326,8 @@ struct MobileStack<Root: View>: View {
     var showsCapture = true
     /// A screen to open from outside, replacing whatever was pushed.
     var incoming: Binding<MobileRoute?> = .constant(nil)
+    /// Moving it takes the stack back to its root.
+    var poppedBy = 0
     @ViewBuilder var root: Root
     @State private var path: [MobileRoute] = []
     /// A note on the root screen has the keyboard: capture is for getting a
@@ -347,6 +357,7 @@ struct MobileStack<Root: View>: View {
         .environment(\.mobileReplace) { route in
             if path.isEmpty { path = [route] } else { path[path.count - 1] = route }
         }
+        .onChange(of: poppedBy) { path = [] }
         .onChange(of: incoming.wrappedValue, initial: true) { _, route in
             guard let route else { return }
             incoming.wrappedValue = nil

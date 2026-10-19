@@ -619,7 +619,32 @@ struct LiveNoteEditor: UIViewRepresentable {
                     return .link(url)
                 }
             }
+            // A tag carries no link; its pill is where the styler drew one,
+            // and it opens the notes carrying it, as the note's `follow`
+            // answers a tag.
+            for probe in [offset, offset - 1] {
+                guard let pill = layout.inlineTags[line.location]?
+                        .first(where: { NSLocationInRange(probe, $0.range) }),
+                      Self.contains(point, pill.range, in: textView) else { continue }
+                let name = text.substring(with: pill.range).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+                var components = URLComponents()
+                components.scheme = HeftURL.scheme
+                components.host = HeftURL.Host.follow.rawValue
+                components.queryItems = [URLQueryItem(name: "tag", value: name)]
+                if !name.isEmpty, let url = components.url { return .link(url) }
+            }
             return nil
+        }
+
+        /// Whether `point` is on the drawn text of `range`: past the end of
+        /// a line ending in a tag, the nearest character is still the tag's.
+        private static func contains(_ point: CGPoint, _ range: NSRange, in textView: UITextView) -> Bool {
+            guard let start = textView.position(from: textView.beginningOfDocument, offset: range.location),
+                  let end = textView.position(from: start, offset: range.length),
+                  let textRange = textView.textRange(from: start, to: end) else { return false }
+            return textView.selectionRects(for: textRange).contains {
+                $0.rect.insetBy(dx: -6, dy: -4).contains(point)
+            }
         }
 
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {

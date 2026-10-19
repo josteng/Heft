@@ -24,7 +24,8 @@ also creates it), `HEFT_IOS_SETTINGS` opens Settings on a page (`root`,
 `appearance`, `vault`), `HEFT_IOS_ITEM_ACTION=rename|move|delete:<path>`
 asks for one in Files, and `HEFT_IOS_RUN` carries one out after the first
 scan (`rename:<path>:<name>`, `move:<path>:<folder>`, `delete:<path>`, `duplicate:<path>`). `HEFT_IOS_OPEN=<path>` opens a note the
-way the Open Note intent does. `HEFT_IOS_OUTLINE` opens the note's Outline, and `jump:<n>`
+way the Open Note intent does. `HEFT_IOS_SEARCH_TAG=<tag>` opens Search in a tag's scope, and
+`HEFT_IOS_TAG=<tag>` pushes a tag's list over the note, as a tapped tag does. `HEFT_IOS_OUTLINE` opens the note's Outline, and `jump:<n>`
 goes to its nth heading. Point them at
 a copy of a vault: the editor saves.
 

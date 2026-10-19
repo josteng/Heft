@@ -363,6 +363,20 @@ struct PadRootView: View {
                     switch step {
                     case "back": library.back?()
                     case "forward": library.forward?()
+                    case "wait": break
+                    case _ where step.hasPrefix("tag:"): open(.tag(String(step.dropFirst(4))))
+                    case _ where step.hasPrefix("taptag:"):
+                        // As a tap on a tag while reading: the text view
+                        // takes the keyboard, the tag is followed, and the
+                        // keyboard is handed back.
+                        let textView = panelNote?.document.textView
+                        if environment["HEFT_IOS_CARET_TOP"] != nil {
+                            textView?.selectedRange = NSRange(location: 0, length: 0)
+                        }
+                        (textView as? MobileTextView)?.refusesFocus = true
+                        textView?.becomeFirstResponder()
+                        open(.tag(String(step.dropFirst(7))))
+                        DispatchQueue.main.async { (textView as? MobileTextView)?.refusesFocus = false }
                     default: open(.note(String(step)))
                     }
                 }

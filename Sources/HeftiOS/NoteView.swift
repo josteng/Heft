@@ -687,6 +687,8 @@ struct NoteContent: View {
         }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         if let tag = items.first(where: { $0.name == "tag" })?.value {
+            // Over the note, so Back returns to it: on the phone the tag's
+            // own list, on the iPad the sidebar's Tags.
             push(.tag(tag))
             return
         }

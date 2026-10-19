@@ -122,22 +122,44 @@ struct FolderView: View {
         if let note = ProcessInfo.processInfo.environment["HEFT_IOS_NOTE"] {
             push(.note(note))
         }
+        // `HEFT_IOS_TAG` then opens a tag's list over it, as a tap on the tag.
+        if let tag = ProcessInfo.processInfo.environment["HEFT_IOS_TAG"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { push(.tag(tag)) }
+        }
         #endif
     }
 }
 
-/// Every note carrying a tag, newest edit first.
+/// A tag's notes, as the search narrowed to the tag lists them: in the
+/// order Settings ▸ Search sets inside a scope, with a field to filter them
+/// and the lines that match. Pushed where the tag was tapped, so Back
+/// returns to the note.
 struct TagView: View {
     let tag: String
-    @Environment(MobileVault.self) private var vault
+    @State private var query = ""
+    @State private var model: SearchModel
+
+    init(tag: String) {
+        self.tag = tag
+        let model = SearchModel()
+        model.scope = .tag(tag)
+        _model = State(initialValue: model)
+    }
 
     var body: some View {
-        let edited = vault.index.notesByLastEdit
-        let tagged = Set(vault.index.notes(taggedWith: tag).map(\.relativePath))
-        List(edited.filter { tagged.contains($0.relativePath) }) { note in
-            NoteRow(note: note)
+        List {
+            UniversalSearchList(query: query, model: model, setQuery: { query = $0 }, showsChips: false)
         }
+        .searchingText(query, model: model)
+        // Always showing, under the title: the list is for narrowing down.
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Filter #\(tag)")
+        .autocorrectionDisabled()
+        .textInputAutocapitalization(.never)
         .navigationTitle("#\(tag)")
+        // Large, as the other lists: pushed from a note, it took the
+        // note's inline title.
+        .navigationBarTitleDisplayMode(.large)
         .toolbarRole(.browser)
     }
 }
