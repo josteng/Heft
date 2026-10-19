@@ -24,7 +24,8 @@ also creates it), `HEFT_IOS_SETTINGS` opens Settings on a page (`root`,
 `appearance`, `vault`), `HEFT_IOS_ITEM_ACTION=rename|move|delete:<path>`
 asks for one in Files, and `HEFT_IOS_RUN` carries one out after the first
 scan (`rename:<path>:<name>`, `move:<path>:<folder>`, `delete:<path>`, `duplicate:<path>`). `HEFT_IOS_OPEN=<path>` opens a note the
-way the Open Note intent does. Point them at
+way the Open Note intent does. `HEFT_IOS_OUTLINE` opens the note's Outline, and `jump:<n>`
+goes to its nth heading. Point them at
 a copy of a vault: the editor saves.
 
 ## iPad
@@ -113,6 +114,11 @@ instead of setting `window.userActivity`, which Siri's pointer uses.
 
 ## Gotchas
 
+- `.inspector` goes outside a navigation stack: on a note pushed onto the
+  phone's stack it stopped the stack pushing anything, and on the iPad's
+  note inside its pane's stack the note stopped scrolling and the panel
+  took no taps. The iPad's panel hangs on the pane and learns the note
+  from `PanelNoteKey`.
 - Restyle after a caret move or focus on the next run-loop pass, never
   inside the delegate callback: rewriting attributes while UIKit places a
   tap's caret makes it drop the tap, and the caret lands at the end.

@@ -511,6 +511,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                 updateSuggestions()
                 updateTextChecking()
                 document?.updateUndo()
+                document?.readerMoved()
             }
         }
 
@@ -533,6 +534,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// pull past the top. A note long enough to scroll opens on reaching
         /// the top, by finger or by a flick coasting there.
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            document?.readerMoved()
             guard scrolledDown != nil, scrollView.isDragging || scrollView.isDecelerating,
                   Date() >= settlingUntil
             else { return }

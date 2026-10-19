@@ -48,6 +48,14 @@ final class NoteDocument {
     }
     private(set) var canUndo = false
     private(set) var canRedo = false
+    /// The note's headings, read with the text and again a moment after
+    /// typing stops.
+    private(set) var outline = NoteOutline.empty
+    /// The heading the reader is in, kept only while an Outline shows: the
+    /// caret's while typing, otherwise the one at the top of the screen.
+    private(set) var outlineCurrent: Int?
+    @ObservationIgnored private var outlineTask: Task<Void, Never>?
+    @ObservationIgnored private var outlineWatchers = 0
 
     init(path: String) {
         self.path = path
@@ -69,6 +77,7 @@ final class NoteDocument {
             if text != source {
                 source = text
                 revision += 1
+                setOutline(NoteOutline(source: text))
             }
         } catch {
             failure = error.localizedDescription
@@ -114,6 +123,101 @@ final class NoteDocument {
     func edited(_ text: String) {
         pending = text
         saveSoon()
+        outlineTask?.cancel()
+        outlineTask = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            setOutline(NoteOutline(source: text))
+        }
+    }
+
+    // MARK: Outline
+
+    func watchOutline() {
+        outlineWatchers += 1
+        readerMoved()
+    }
+
+    func unwatchOutline() { outlineWatchers = max(0, outlineWatchers - 1) }
+
+    /// The caret moved or the note scrolled: which heading the reader is in.
+    func readerMoved() {
+        guard outlineWatchers > 0, let textView else { return }
+        let position = editing ? textView.selectedRange.location : Self.topOffset(in: textView)
+        let index = outline.index(containing: position)
+        if index != outlineCurrent { outlineCurrent = index }
+    }
+
+    private func setOutline(_ new: NoteOutline) {
+        if new != outline { outline = new }
+        readerMoved()
+    }
+
+    /// Where the text at the top of the screen starts, under the bar: read
+    /// a little lower than the edge, past the gap a jump leaves above its
+    /// heading, or the line before it counted.
+    private static func topOffset(in textView: UITextView) -> Int {
+        guard let manager = textView.textLayoutManager,
+              let content = manager.textContentManager else { return 0 }
+        let y = textView.contentOffset.y + textView.adjustedContentInset.top - textView.textContainerInset.top
+        guard let fragment = manager.textLayoutFragment(for: CGPoint(x: 1, y: max(0, y) + 24)) else { return 0 }
+        return content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+    }
+
+    /// Takes the reader to a heading: the caret on it, and the heading just
+    /// under the bar with its section below, as the Mac lands a link.
+    ///
+    /// TextKit only estimates the height of text not yet laid out, so the
+    /// note is laid out down to a screen past the heading first, or the
+    /// estimate left the note too short to scroll that far and the jump
+    /// stopped above its heading. The landing is measured again once the
+    /// scroll ends, and put right if laying out on the way moved it.
+    func reveal(_ entry: NoteOutline.Entry) {
+        guard let textView else { return }
+        let length = (textView.text as NSString).length
+        let location = min(entry.offset, length)
+        textView.selectedRange = NSRange(location: location, length: 0)
+        guard let target = Self.offset(showing: location, in: textView, layingOutFrom: textView.contentOffset) else { return }
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        UIView.animate(withDuration: reduceMotion ? 0 : 0.3, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+            textView.contentOffset = target
+        } completion: { [weak textView] _ in
+            guard let textView,
+                  let settled = Self.offset(showing: location, in: textView, layingOutFrom: textView.contentOffset),
+                  abs(settled.y - textView.contentOffset.y) > 1
+            else { return }
+            textView.setContentOffset(settled, animated: !reduceMotion)
+        }
+    }
+
+    /// Where to scroll for the text at `location` to sit just under the bar.
+    private static func offset(showing location: Int, in textView: UITextView,
+                               layingOutFrom current: CGPoint) -> CGPoint? {
+        guard let manager = textView.textLayoutManager,
+              let content = manager.textContentManager else { return nil }
+        let documentStart = content.documentRange.location
+        let length = (textView.text as NSString).length
+        // A screenful of text past the heading, generously, so the bottom
+        // the scroll is clamped to is real.
+        let through = min(length, location + 6000)
+        guard let start = content.location(documentStart, offsetBy: location),
+              let end = content.location(documentStart, offsetBy: through),
+              let range = NSTextRange(location: documentStart, end: end) else { return nil }
+        manager.ensureLayout(for: range)
+        textView.layoutIfNeeded()
+        var top: CGFloat?
+        manager.enumerateTextLayoutFragments(from: start, options: [.ensuresLayout]) { fragment in
+            top = fragment.layoutFragmentFrame.minY
+            return false
+        }
+        guard let top else { return nil }
+        let inset = textView.adjustedContentInset
+        let height = max(textView.contentSize.height,
+                         manager.usageBoundsForTextContainer.maxY + textView.textContainerInset.top
+                            + textView.textContainerInset.bottom)
+        let lowest = max(-inset.top, height + inset.bottom - textView.bounds.height)
+        let y = top + textView.textContainerInset.top - inset.top - 12
+        return CGPoint(x: current.x, y: min(max(y, -inset.top), lowest))
     }
 
     func saveSoon(immediately: Bool = false) {
@@ -258,6 +362,12 @@ struct NoteEditingToolbar: ToolbarContent {
     /// button of its own to make room for.
     var findInMenu = false
     var showBacklinks: () -> Void = {}
+    var hasOutline = false
+    var showOutline: () -> Void = {}
+    /// Shows and hides the iPad's panel beside the note; nil where there is
+    /// no room for one.
+    var togglePanel: (() -> Void)?
+    var panelShown = false
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobilePush) private var push
     @Environment(\.noteItemAction) private var itemAction
@@ -294,6 +404,16 @@ struct NoteEditingToolbar: ToolbarContent {
                     .tint(.primary)
             }
         }
+        if let togglePanel {
+            // Last, at the edge the panel opens from, as the Mac's button
+            // sits; there whether or not the note is being typed in.
+            ToolbarItem(placement: .primaryAction) {
+                Button(panelShown ? "Hide Outline and Links" : "Show Outline and Links",
+                       systemImage: "sidebar.right", action: togglePanel)
+                    .tint(.primary)
+                    .keyboardShortcut("0", modifiers: [.command, .option])
+            }
+        }
     }
 
     @ViewBuilder
@@ -306,7 +426,9 @@ struct NoteEditingToolbar: ToolbarContent {
         Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
             vault.togglePin(path)
         }
-        // Kept at (0) rather than hidden, so the item is where it always is.
+        // Kept, greyed, rather than hidden, so each item is where it always is.
+        Button("Outline", systemImage: "list.bullet.indent", action: showOutline)
+            .disabled(!hasOutline)
         Button("Linked From (\(backlinkCount))", systemImage: "arrow.uturn.left", action: showBacklinks)
             .disabled(backlinkCount == 0)
         Divider()
@@ -351,6 +473,10 @@ struct NoteContent: View {
     /// quickly never flashes a spinner first.
     @State private var slow = false
     @State private var showsBacklinks = false
+    /// The phone's Outline sheet; the iPad's panel is remembered instead.
+    @State private var showsOutline = false
+    @State private var preferences = BrowsingPreferences.shared
+    @Environment(\.horizontalSizeClass) private var sizeClass
     /// Only a note on screen is offered to the Mac: a tab left on another
     /// note would otherwise compete with it.
     @State private var onScreen = false
@@ -407,11 +533,29 @@ struct NoteContent: View {
                     }
             }
         }
+        // The iPad's panel beside it is the note pane's, outside its
+        // navigation stack, and is told which note is open.
+        .preference(key: PanelNoteKey.self, value: hasPanel ? PanelNote(document: document) : nil)
         .toolbar {
-            NoteEditingToolbar(document: document, backlinkCount: backlinks.count,
-                               findInMenu: findInMenu) {
-                showsBacklinks = true
+            NoteEditingToolbar(
+                document: document, backlinkCount: backlinks.count, findInMenu: findInMenu,
+                showBacklinks: { showPanel(.backlinks) },
+                hasOutline: !document.outline.entries.isEmpty,
+                showOutline: { showPanel(.outline) },
+                togglePanel: hasPanel ? { withAnimation { preferences.showsNotePanel.toggle() } } : nil,
+                panelShown: preferences.showsNotePanel
+            )
+        }
+        .sheet(isPresented: $showsOutline) {
+            NavigationStack {
+                OutlineList(document: document) { entry in
+                    showsOutline = false
+                    document.reveal(entry)
+                }
+                .navigationTitle("Outline")
+                .navigationBarTitleDisplayMode(.inline)
             }
+            .presentationDetents([.medium, .large])
         }
         .safeAreaInset(edge: .bottom) {
             if !document.suggestionChips.isEmpty { SuggestionBar(document: document) }
@@ -443,6 +587,27 @@ struct NoteContent: View {
         .task(id: "\(document.path)#\(vault.generation)") {
             await document.load(in: vault)
         }
+        #if DEBUG
+        // `HEFT_IOS_OUTLINE` opens the Outline, `jump:<n>` goes to the nth
+        // heading with the iPad's panel open, as a tap there would, and
+        // `closed` puts the iPad's panel away.
+        .task {
+            guard let request = ProcessInfo.processInfo.environment["HEFT_IOS_OUTLINE"] else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if request == "closed" {
+                preferences.showsNotePanel = false
+            } else if request.hasPrefix("jump:"), let n = Int(request.dropFirst(5)),
+                      document.outline.entries.indices.contains(n) {
+                if hasPanel {
+                    showPanel(.outline)
+                    try? await Task.sleep(for: .seconds(1))
+                }
+                document.reveal(document.outline.entries[n])
+            } else {
+                showPanel(.outline)
+            }
+        }
+        #endif
         .onDisappear { document.saveSoon(immediately: true) }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { document.saveSoon(immediately: true) }
@@ -456,6 +621,23 @@ struct NoteContent: View {
             Button("OK") { unresolved = nil }
         } message: {
             Text("Nothing in this vault is called “\(unresolved ?? "")”.")
+        }
+    }
+
+    /// The iPad beside a wide note; a narrow window, like the phone, has no
+    /// room for a panel and shows sheets instead.
+    private var hasPanel: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && sizeClass == .regular
+    }
+
+    private func showPanel(_ panel: BrowsingPreferences.NotePanel) {
+        if hasPanel {
+            preferences.notePanel = panel
+            withAnimation { preferences.showsNotePanel = true }
+        } else if panel == .outline {
+            showsOutline = true
+        } else {
+            showsBacklinks = true
         }
     }
 
@@ -511,7 +693,7 @@ struct NoteContent: View {
     }
 }
 
-private struct BacklinksView: View {
+struct BacklinksView: View {
     let backlinks: [Backlink]
     let open: (String) -> Void
 

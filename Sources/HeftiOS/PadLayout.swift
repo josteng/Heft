@@ -46,6 +46,9 @@ struct PadRootView: View {
     @State private var creating: NewNoteRequest?
     @State private var action: ItemAction?
     @State private var detailPath: [MobileRoute] = []
+    /// The note in the pane, which the panel beside it is about.
+    @State private var panelNote: PanelNote?
+    @State private var preferences = BrowsingPreferences.shared
 
     var body: some View {
         NavigationSplitView {
@@ -56,6 +59,13 @@ struct PadRootView: View {
                     .navigationDestination(for: MobileRoute.self) { route in
                         if case .image(let path) = route { ImageFileView(path: path) }
                     }
+            }
+            .onPreferenceChange(PanelNoteKey.self) { panelNote = $0 }
+            // Outline and Linked From, as the Mac's right sidebar. On the
+            // pane, outside its stack: on the note inside it, the note
+            // stopped scrolling and the panel took no taps.
+            .inspector(isPresented: $preferences.showsNotePanel) {
+                notePanel.inspectorColumnWidth(min: 220, ideal: 280, max: 380)
             }
         }
         .environment(\.mobilePush) { open($0) }
@@ -188,6 +198,18 @@ struct PadRootView: View {
     }
 
     // MARK: Note pane
+
+    @ViewBuilder
+    private var notePanel: some View {
+        if let document = panelNote?.document {
+            NotePanelView(document: document, backlinks: vault.index.backlinks(to: document.path)) {
+                open(.note($0))
+            }
+        } else {
+            ContentUnavailableView("No Note Open", systemImage: "doc.text",
+                                   description: Text("A note's outline and the notes linking to it show here."))
+        }
+    }
 
     @ViewBuilder
     private var detail: some View {
