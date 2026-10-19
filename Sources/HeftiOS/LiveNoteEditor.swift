@@ -1707,9 +1707,11 @@ final class MobileTextView: UITextView {
     }
 
     override func layoutSubviews() {
-        // 20 at the least, the system's margin: at 16 a heading's accent,
-        // drawn 12 to the left of the text, sat against the screen's edge.
-        let side = max(20, (bounds.width - 720) / 2)
+        // 24 at the least on a phone, 20 elsewhere: a heading's bar is drawn
+        // to the left of the text, and on a phone's narrow margin it sat
+        // against the screen's edge.
+        let least: CGFloat = UIDevice.current.userInterfaceIdiom == .phone ? 24 : 20
+        let side = max(least, (bounds.width - 720) / 2)
         let insets = UIEdgeInsets(top: topInset, left: side, bottom: 160, right: side)
         if textContainerInset != insets { textContainerInset = insets }
         super.layoutSubviews()

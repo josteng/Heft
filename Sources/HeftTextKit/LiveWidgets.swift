@@ -1772,12 +1772,23 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         }
     }
 
+    /// How far left of a heading's text its bar is drawn. Closer on a phone,
+    /// whose narrower margin otherwise put the bar 8pt from the screen's
+    /// edge; with the phone's 24pt margin it lines up under the back button.
+    static var headingBarGap: CGFloat {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone ? 9 : 12
+        #else
+        12
+        #endif
+    }
+
     private func drawHeadingAccent(color: NSColor, at point: CGPoint, in context: CGContext) {
         guard let line = textLineFragments.first else { return }
         let lineBounds = line.typographicBounds
         let height = max(8, lineBounds.height - 8)
         let rect = CGRect(
-            x: point.x - 12,
+            x: point.x - Self.headingBarGap,
             y: point.y + lineBounds.midY - height / 2,
             width: 3,
             height: height
