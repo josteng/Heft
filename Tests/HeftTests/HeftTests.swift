@@ -1564,6 +1564,29 @@ struct DailyCaptureTests {
         #expect(item.lowerBound > firstMarker.upperBound, "the item went to the later marker")
     }
 
+    /// Captures for a day with no note yet, as a queue delivered at once
+    /// would make. Each saw the note missing, and a template written after
+    /// another capture had already added to it replaced that line.
+    @Test("Simultaneous captures into a note not yet made lose nothing")
+    func simultaneousFirstCaptures() throws {
+        for round in 0 ..< 20 {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("HeftDailyRace-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let capture = DailyNoteCapture(
+                vaultRoot: root, settings: ObsidianSettings.load(vaultRoot: root))
+            let day = stamp(9, round)
+            DispatchQueue.concurrentPerform(iterations: 16) { index in
+                _ = try? capture.capture("line \(index)", at: day)
+            }
+            let note = try String(
+                contentsOf: capture.dailyNotes.url(for: day), encoding: .utf8)
+            let items = note.split(separator: "\n").filter { $0.hasPrefix("- ") }
+            #expect(items.count == 16, "round \(round) kept \(items.count)")
+        }
+    }
+
     @Test("Nothing is captured from nothing")
     func rejectsEmptyCaptures() {
         #expect(throws: DailyNoteCaptureError.self) {

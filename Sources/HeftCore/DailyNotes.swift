@@ -140,7 +140,22 @@ public struct DailyNotes: Sendable {
             )
         } ?? "# \(title)\n\n"
 
-        try body.write(to: target, atomically: true, encoding: .utf8)
+        // Checked again under coordination, the way a capture writes. Two
+        // captures for a day with no note both saw it missing, and the
+        // second template replaced the note the first had already added to.
+        let coordinator = NSFileCoordinator()
+        var coordinationError: NSError?
+        var writeError: Error?
+        coordinator.coordinate(writingItemAt: target, options: [], error: &coordinationError) { url in
+            guard !FileManager.default.fileExists(atPath: url.path) else { return }
+            do {
+                try body.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                writeError = error
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        if let writeError { throw writeError }
         return target
     }
 }
