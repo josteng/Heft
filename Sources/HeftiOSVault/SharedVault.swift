@@ -166,8 +166,17 @@ enum SharedVault {
 
     /// Files everything queued, oldest first, and removes each once written.
     /// One that fails stays queued for the next try. Returns how many landed.
+    ///
+    /// One drain at a time: every rescan drains, rescans overlap, and two
+    /// drains listing the same queue would file each share twice.
     @discardableResult
     static func drainQueue(into root: URL) -> Int {
+        drainLock.withLock { drainLocked(into: root) }
+    }
+
+    private static let drainLock = NSLock()
+
+    private static func drainLocked(into root: URL) -> Int {
         guard let folder = queueFolder,
               let files = try? FileManager.default.contentsOfDirectory(
                   at: folder, includingPropertiesForKeys: nil)
