@@ -398,25 +398,25 @@ public final class VaultIndex: @unchecked Sendable {
         if byPath[lower + ".md"] != nil { return byPath[lower + ".md"] }
 
         // Basename lookup, which is how most Obsidian links are written.
+        // `[[Note.md]]` is the name `note` with its extension, which the
+        // names are keyed without.
         let base = (lower as NSString).lastPathComponent
-        if let candidates = byName[base], let first = candidates.first {
-            // If the link carried a folder, prefer a candidate under it.
-            if target.contains("/") {
-                if let scoped = candidates.first(where: { $0.relativePath.lowercased().hasSuffix(lower) }) {
-                    return scoped
-                }
-                if let scoped = candidates.first(where: { $0.relativePath.lowercased().hasSuffix(lower + ".md") }) {
-                    return scoped
-                }
-            }
-            return first
-        }
-        // Attachments are linked with their extension, already covered by byName,
-        // but a link may differ in extension case only.
         let withoutExt = (base as NSString).deletingPathExtension
-        if let candidates = byName[withoutExt], let first = candidates.first { return first }
-
-        return nil
+        guard let candidates = byName[base] ?? byName[withoutExt], let first = candidates.first
+        else { return nil }
+        // If the link carried a folder, prefer a candidate under it. The
+        // match is on whole path components: `[[b/Note]]` names a folder
+        // `b`, and a plain suffix let `xab/Note.md` win it.
+        if target.contains("/") {
+            let under = lower.hasPrefix("/") ? lower : "/" + lower
+            if let scoped = candidates.first(where: { $0.relativePath.lowercased().hasSuffix(under) }) {
+                return scoped
+            }
+            if let scoped = candidates.first(where: { $0.relativePath.lowercased().hasSuffix(under + ".md") }) {
+                return scoped
+            }
+        }
+        return first
     }
 
     /// When the note's file was last written, as the scan saw it. Nil for a
