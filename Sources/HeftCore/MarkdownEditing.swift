@@ -727,6 +727,33 @@ public enum MarkdownEditing {
         return line.location + (parsed.indent as NSString).length + (markup as NSString).length
     }
 
+    /// `block`, an attachment's embed, on a line of its own, with the caret
+    /// after it. A caret inside a line puts it after that line rather than
+    /// at the caret: splitting the line could cut a link or a span in two.
+    public static func onOwnLine(_ block: String, at selection: NSRange, in source: String) -> Edit {
+        let text = source as NSString
+        var at = selection
+        at.location = min(at.location, text.length)
+        at.length = min(at.length, text.length - at.location)
+        let line = text.lineRange(for: NSRange(location: at.location, length: 0))
+        // A Windows line ends in `\r\n`, and stopping at its `\n` put the
+        // embed between the two.
+        func isBreak(_ unit: unichar) -> Bool { unit == 10 || unit == 13 }
+        var lineEnd = NSMaxRange(line)
+        while lineEnd > line.location, isBreak(text.character(at: lineEnd - 1)) { lineEnd -= 1 }
+        if at.location != line.location {
+            at = NSRange(location: lineEnd, length: 0)
+        }
+        let before = at.location > 0 && !isBreak(text.character(at: at.location - 1)) ? "\n" : ""
+        let end = NSMaxRange(at)
+        let after = end < text.length && isBreak(text.character(at: end)) ? "" : "\n"
+        let replacement = before + block + after
+        return Edit(
+            range: at, replacement: replacement,
+            selection: NSRange(location: at.location + (replacement as NSString).length, length: 0)
+        ).adapted(to: LineEnding(of: source))
+    }
+
     /// Wraps the selection in a link, putting the caret where the destination
     /// goes so it can be typed or pasted straight away.
     public static func makeLink(in source: String, range: NSRange) -> Edit {

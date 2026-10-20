@@ -1465,29 +1465,18 @@ struct LiveNoteEditor: UIViewRepresentable {
         }
 
         /// The embed on a line of its own, and the keyboard back after it.
-        /// A caret inside a line puts it after that line rather than at the
-        /// caret: splitting the line could cut a link or a span in two.
+        /// Where that line goes is `MarkdownEditing.onOwnLine`'s.
         private func insertAttachment(_ attachment: EditorAttachment) {
             guard let textView, let attach else { return }
             do {
                 let link = try attach(attachment)
-                let text = textView.text as NSString
-                var at = attachAt ?? textView.selectedRange
-                at.location = min(at.location, text.length)
-                let line = text.lineRange(for: NSRange(location: at.location, length: 0))
-                var lineEnd = NSMaxRange(line)
-                if lineEnd > line.location, text.character(at: lineEnd - 1) == 10 { lineEnd -= 1 }
-                if at.location != line.location {
-                    at = NSRange(location: lineEnd, length: 0)
-                }
-                let before = at.location > 0 && text.character(at: at.location - 1) != 10 ? "\n" : ""
-                let end = NSMaxRange(at)
-                let after = end < text.length && text.character(at: end) == 10 ? "" : "\n"
+                let edit = MarkdownEditing.onOwnLine(
+                    link, at: attachAt ?? textView.selectedRange, in: textView.text
+                )
                 if !textView.isFirstResponder { textView.becomeFirstResponder() }
-                replace(at, with: before + link + after, in: textView)
-                let caret = at.location + (before + link + after as NSString).length
-                textView.selectedRange = NSRange(location: caret, length: 0)
-                attachAt = NSRange(location: caret, length: 0)
+                replace(edit.range, with: edit.replacement, in: textView)
+                textView.selectedRange = edit.selection
+                attachAt = edit.selection
                 restyle(textView)
             } catch {
                 document?.saveError = error.localizedDescription
