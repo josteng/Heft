@@ -159,6 +159,22 @@ struct ImageSelectionTests {
         }
     }
 
+    /// Daily notes made from one template start with the same picture at
+    /// the same offset, and the selection is a range: kept across a swap,
+    /// it rang the other note's picture and the next `-` shrank it.
+    @Test("Opening another note drops the selection")
+    func noteSwapDeselects() throws {
+        try withEditor("intro\n\n![[shot.png]]\n\nafter") { view in
+            view.selectImage(NSRange(location: 7, length: 13))
+            let coordinator = try #require(view.delegate as? LiveTextEditor.Coordinator)
+            coordinator.load("intro\n\n![[shot.png]]\n\nanother day", into: view)
+            view.restyleNow()
+            #expect(view.selectedImage == nil)
+            #expect(!press(view, "-"))
+            #expect(view.string == "intro\n\n![[shot.png]]\n\nanother day")
+        }
+    }
+
     /// A restyle after typing redoes only the lines that changed and
     /// carries the rest over, so the pictures it did not redraw must come
     /// along, moved by the edit, or a click on one reveals its source.

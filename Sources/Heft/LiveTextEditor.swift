@@ -466,6 +466,9 @@ struct LiveTextEditor: NSViewRepresentable {
             layout = LiveLayout()
             styled = nil
             textView.liveLayout = layout
+            // A selected picture is a range into the text that is going, and
+            // assigning `string` is not an edit, so nothing else drops it.
+            textView.selectImage(nil)
             textView.string = text
             // The assignment records itself as an edit that deleted the whole
             // old note, and carried into the next pass that shift would remap
