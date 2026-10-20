@@ -153,6 +153,10 @@ public enum CommandLineSpec {
              "Append one timestamped line, the way Spotlight capture does.", flags: [
             Flag("--daily", "Today's daily note, at its log marker, rather than the inbox."),
             Flag("--to", value: "<note>", "That note instead of the inbox one."),
+            Flag("--done", "As a ticked task, `- [x]`: a record of something finished."),
+            Flag("--at", value: "<time>",
+                 "That moment instead of now, in ISO 8601: the time on the line, "
+                 + "and with --daily which day's note."),
         ], isReadOnly: false),
         Verb("daily", "<vault> [YYYY-MM-DD]", "Create a daily note from the template.",
              isReadOnly: false),

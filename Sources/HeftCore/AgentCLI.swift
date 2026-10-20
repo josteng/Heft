@@ -783,13 +783,29 @@ public enum AgentCLI {
 
     private static func capture(root: URL, arguments: [String]) {
         let options = Options(arguments[...])
-        let words = CommandLineSpec.split(arguments, forVerb: "capture").positional
-        let text = words.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = CommandLineSpec.split(arguments, forVerb: "capture")
+        let text = parsed.positional.joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
-            fail("usage: heft capture <vault> <text> [--daily] [--to <note>]")
+            fail("usage: heft capture <vault> <text> [--daily] [--to <note>] [--done] [--at <time>]")
         }
-        guard !(options.flag("daily") && options["to"] != nil) else {
+        // Read through the spec, which knows these take no value. `Options`
+        // alone took `--done "text"` for an option valued "text", and the
+        // line went in unticked.
+        let daily = parsed.flags.contains("--daily")
+        let done = parsed.flags.contains("--done")
+        guard !(daily && options["to"] != nil) else {
             fail("--daily and --to name two different notes; pick one")
+        }
+        var moment = Date()
+        if parsed.flags.contains("--at") {
+            guard let asked = options["at"], let named = captureMoment(asked) else {
+                fail("""
+                    --at takes an ISO 8601 date and time: \(options["at"] ?? "nothing")
+                    For example 2026-03-04T09:15:00+01:00, or 2026-03-04T09:15 for local time.
+                    """)
+            }
+            moment = named
         }
 
         // Through the same normaliser the stored inbox note goes through,
@@ -819,16 +835,19 @@ public enum AgentCLI {
         }
 
         if AgentCaptureReviewPreference.isOn || isAsked {
-            captureAsProposal(text, root: root, daily: options.flag("daily"), to: target)
+            captureAsProposal(
+                text, root: root, daily: daily, to: target, at: moment, done: done)
         }
 
         do {
             let written: URL
-            if options.flag("daily") {
+            if daily {
                 let settings = ObsidianSettings.load(vaultRoot: root)
-                written = try DailyNoteCapture(vaultRoot: root, settings: settings).capture(text)
+                written = try DailyNoteCapture(vaultRoot: root, settings: settings)
+                    .capture(text, at: moment, done: done)
             } else {
-                written = try InboxCapture(vaultRoot: root, relativePath: target).capture(text)
+                written = try InboxCapture(vaultRoot: root, relativePath: target)
+                    .capture(text, at: moment, done: done)
             }
             // Both sides standardised, or /tmp against /private/tmp made the
             // daily note print an absolute path where the inbox printed a
@@ -854,9 +873,8 @@ public enum AgentCLI {
     /// would drift and the preference would change more than when the write
     /// happens.
     private static func captureAsProposal(
-        _ text: String, root: URL, daily: Bool, to target: String?
+        _ text: String, root: URL, daily: Bool, to target: String?, at now: Date, done: Bool
     ) -> Never {
-        let now = Date()
         let relative: String
         let starting: String?
         let proposed: String
@@ -876,7 +894,7 @@ public enum AgentCLI {
                 } ?? "# \(title)\n\n"
                 proposed = try DailyNoteCapture.contents(
                     byCapturing: text, in: base, at: now, title: title,
-                    timestamped: CaptureTimestampPreference.isOn
+                    timestamped: CaptureTimestampPreference.isOn, done: done
                 )
             } else {
                 let inbox = InboxCapture(vaultRoot: root, relativePath: target)
@@ -886,7 +904,7 @@ public enum AgentCLI {
                     .deletingPathExtension
                 proposed = try InboxCapture.contents(
                     byCapturing: text, in: starting ?? "", at: now, title: title,
-                    timestamped: CaptureTimestampPreference.isOn
+                    timestamped: CaptureTimestampPreference.isOn, done: done
                 )
             }
         } catch {
@@ -916,6 +934,41 @@ public enum AgentCLI {
         print("note:    \(relative)")
         print("Waiting for review in Heft. Settings ▸ Capture decides this.")
         exit(0)
+    }
+
+    /// The moment `--at` names. ISO 8601 with an offset or `Z`, seconds and
+    /// fractions optional; without an offset it is local time, the way a
+    /// person typing a time means it.
+    ///
+    /// The shape and the calendar day are checked first, because both
+    /// formatters are lenient: `02-30` rolled into March, `Z` followed by
+    /// anything was read as `Z`, and a five-digit year lost a digit.
+    static func captureMoment(_ raw: String) -> Date? {
+        let text = raw.trimmingCharacters(in: .whitespaces)
+        let shape = #/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}(?::?\d{2})?)?/#
+        guard let typed = text.wholeMatch(of: shape) else { return nil }
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = TimeZone(identifier: "UTC")!
+        let day = DateComponents(
+            year: Int(typed.1), month: Int(typed.2), day: Int(typed.3),
+            hour: Int(typed.4), minute: Int(typed.5))
+        guard day.isValidDate(in: gregorian) else { return nil }
+        let zoned = ISO8601DateFormatter()
+        for options: ISO8601DateFormatter.Options in [
+            [.withInternetDateTime],
+            [.withInternetDateTime, .withFractionalSeconds],
+        ] {
+            zoned.formatOptions = options
+            if let date = zoned.date(from: text) { return date }
+        }
+        let local = DateFormatter()
+        local.locale = Locale(identifier: "en_US_POSIX")
+        local.timeZone = .current
+        for pattern in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"] {
+            local.dateFormat = pattern
+            if let date = local.date(from: text) { return date }
+        }
+        return nil
     }
 
     // MARK: - Helpers

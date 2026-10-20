@@ -293,7 +293,8 @@ public struct InboxCapture: Sendable {
     public func capture(
         _ rawText: String,
         at date: Date = Date(),
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        done: Bool = false
     ) throws -> URL {
         var vaultIsDirectory: ObjCBool = false
         guard FileManager.default.fileExists(
@@ -329,7 +330,8 @@ public struct InboxCapture: Sendable {
                     at: date,
                     calendar: calendar,
                     title: title,
-                    timestamped: CaptureTimestampPreference.isOn
+                    timestamped: CaptureTimestampPreference.isOn,
+                    done: done
                 )
                 try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -344,13 +346,17 @@ public struct InboxCapture: Sendable {
     }
 
     /// Pure formatter used by the disk writer and deterministic tests.
+    ///
+    /// - Parameter done: write the item as a ticked task, `- [x] …`, for a
+    ///   record of something finished rather than a thought to act on.
     public static func contents(
         byCapturing rawText: String,
         in existing: String,
         at date: Date,
         calendar: Calendar = .current,
         title: String = "Inbox",
-        timestamped: Bool = true
+        timestamped: Bool = true,
+        done: Bool = false
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw InboxCaptureError.emptyCapture }
@@ -358,7 +364,7 @@ public struct InboxCapture: Sendable {
         let newline = existing.contains("\r\n") ? "\r\n" : "\n"
         let day = formatted(date, pattern: "yyyy-MM-dd", calendar: calendar)
         let time = timestamped ? formatted(date, pattern: "HH:mm", calendar: calendar) : ""
-        let entry = markdownEntry(text, time: time, newline: newline)
+        let entry = markdownEntry(text, time: time, done: done, newline: newline)
         let dayHeading = "## \(day)"
 
         guard !existing.isEmpty else {
@@ -397,8 +403,9 @@ public struct InboxCapture: Sendable {
     /// `time` is empty when timestamps are off, and the space that would
     /// have followed it goes with it: `- thought`, not `-  thought`, which
     /// is a different thing to a Markdown parser reading indentation.
+    /// `done` puts a ticked checkbox ahead of the time, where a task's box goes.
     static func markdownEntry(
-        _ text: String, time: String, newline: String
+        _ text: String, time: String, done: Bool = false, newline: String
     ) -> String {
         let normalised = text
             .replacingOccurrences(of: "\r\n", with: "\n")
@@ -406,7 +413,8 @@ public struct InboxCapture: Sendable {
         let lines = normalised.split(separator: "\n", omittingEmptySubsequences: false)
         let first = lines.first.map(String.init) ?? ""
         let continuation = lines.dropFirst().map { "  \($0)" }.joined(separator: newline)
-        let opening = time.isEmpty ? "- \(first)" : "- \(time) \(first)"
+        let marker = done ? "- [x] " : "- "
+        let opening = time.isEmpty ? "\(marker)\(first)" : "\(marker)\(time) \(first)"
         return continuation.isEmpty ? opening : "\(opening)\(newline)\(continuation)"
     }
 

@@ -28,7 +28,7 @@ swift run Heft files <vault> --sort recent      # also used, edited, name
 swift run Heft chats <vault> [query]            # past Ask chats; --read <id>
 swift run Heft spell <vault> [note]             # misspellings and grammar; --no-grammar, --json
 swift run Heft read <vault> <note>              # --lines N-M reads a part, and records no read
-swift run Heft capture <vault> "text"           # one line to the inbox; --daily, --to <note>
+swift run Heft capture <vault> "text"           # one line to the inbox; --daily, --to <note>, --done, --at <ISO time>
 swift run Heft export <vault> <note> <out.pdf>  # rendered note as a PDF, headless
     # --force is needed when the output file already exists
     # --text-size N --paper a4|letter|legal|tabloid --landscape --margin narrow|normal|wide --title

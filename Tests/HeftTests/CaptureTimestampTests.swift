@@ -100,4 +100,41 @@ struct CaptureTimestampTests {
             #expect(written.contains("  second"), Comment(rawValue: "stamped: \(stamped)"))
         }
     }
+
+    // MARK: - Done
+
+    @Test("A done capture is a ticked task, the box ahead of the time")
+    func doneIsATickedTask() throws {
+        let inbox = try InboxCapture.contents(
+            byCapturing: "shipped it", in: "", at: noon, calendar: utc, done: true
+        )
+        #expect(inbox.contains("\n- [x] 12:00 shipped it\n"))
+        let daily = try DailyNoteCapture.contents(
+            byCapturing: "shipped it", in: "# Tuesday\n", at: noon, calendar: utc, done: true
+        )
+        #expect(daily.contains("\n- [x] 12:00 shipped it\n"))
+    }
+
+    @Test("A done capture without the time is a plain ticked task")
+    func doneWithoutATime() throws {
+        for written in [
+            try InboxCapture.contents(
+                byCapturing: "shipped it", in: "", at: noon, calendar: utc,
+                timestamped: false, done: true),
+            try DailyNoteCapture.contents(
+                byCapturing: "shipped it", in: "# Tuesday\n", at: noon, calendar: utc,
+                timestamped: false, done: true),
+        ] {
+            #expect(written.contains("\n- [x] shipped it\n"))
+            #expect(!written.contains("[x]  "))
+        }
+    }
+
+    @Test("Not done is the line it always was")
+    func notDoneHasNoBox() throws {
+        let daily = try DailyNoteCapture.contents(
+            byCapturing: "a thought", in: "# Tuesday\n", at: noon, calendar: utc
+        )
+        #expect(!daily.contains("["))
+    }
 }

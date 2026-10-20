@@ -44,6 +44,9 @@ heft chats <vault> [query]             # past Ask chats, latest first
 heft capture <vault> "text"            # add one timestamped line to the inbox
     --daily                            # ...to today's log marker instead
     --to <note>                        # ...to that note, inside the vault
+    --done                             # ...as a ticked task, `- [x] 14:32 text`
+    --at 2026-03-04T09:15:00+01:00     # ...stamped then, and with --daily into
+                                       #    that day's note
 
 heft propose <vault> <note.md> \       # the new body arrives on stdin
     --summary "what this is for" \

@@ -931,6 +931,111 @@ struct AgentCLITests {
         #expect(inbox.components(separatedBy: "\n- ").count == 2)
     }
 
+    /// What another program logs when something is finished: a ticked
+    /// task, at the moment it happened, in that day's note.
+    @Test("--done --at writes a ticked line into that day's note at that time")
+    func captureDoneAtAMoment() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // No offset, so local time: the line's time is the one typed, in
+        // whatever zone the suite runs in.
+        let output = try run([
+            "capture", root.path, "finished the draft", "--daily", "--done",
+            "--at", "2025-03-04T09:15",
+        ])
+        #expect(output.status == 0, "\(output.error)")
+        let moment = try #require(AgentCLI.captureMoment("2025-03-04T09:15"))
+        let path = DailyNotes(vaultRoot: root, settings: ObsidianSettings.load(vaultRoot: root))
+            .relativePath(for: moment)
+        #expect(path.contains("2025-03-04"))
+        let note = try String(
+            contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        #expect(note.contains("- [x] 09:15 finished the draft"))
+        // Not today's note.
+        let today = DailyNotes(vaultRoot: root, settings: ObsidianSettings.load(vaultRoot: root))
+            .relativePath(for: Date())
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(today).path))
+    }
+
+    @Test("--at with an offset is that instant, and dates the inbox's heading")
+    func captureAtAnInstantIntoTheInbox() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stamp = "2025-03-04T12:00:00Z"
+        #expect(try run(["capture", root.path, "late note", "--at", stamp]).status == 0)
+        let moment = try #require(AgentCLI.captureMoment(stamp))
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd"
+        let day = format.string(from: moment)
+        format.dateFormat = "HH:mm"
+        let time = format.string(from: moment)
+        let inbox = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        #expect(inbox.contains("## \(day)\n- \(time) late note"))
+    }
+
+    @Test("--done before the text still ticks it")
+    func captureDoneBeforeTheText() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["capture", root.path, "--done", "ticked first"]).status == 0)
+        let inbox = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        #expect(inbox.contains("- [x] "))
+        #expect(inbox.contains("ticked first"))
+    }
+
+    @Test("An --at that is not a time is refused, and nothing is written")
+    func captureRefusesABadMoment() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for bad in ["yesterday", "2025-13-40T99:00", "09:15"] {
+            let refused = try run(["capture", root.path, "text", "--at", bad])
+            #expect(refused.status != 0, "`--at \(bad)` was accepted")
+            #expect(refused.error.contains("ISO 8601"))
+        }
+        let missing = try run(["capture", root.path, "text", "--at"])
+        #expect(missing.status != 0)
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8) == "# Inbox\n")
+    }
+
+    @Test("Parsing --at: offsets, fractions and local time")
+    func captureMomentForms() throws {
+        let instant = try #require(AgentCLI.captureMoment("2025-03-04T12:00:00Z"))
+        #expect(instant.timeIntervalSince1970 == 1_741_089_600)
+        #expect(AgentCLI.captureMoment("2025-03-04T13:00:00+01:00") == instant)
+        #expect(AgentCLI.captureMoment("2025-03-04T12:00:00.000Z") == instant)
+        #expect(AgentCLI.captureMoment("2025-03-04T12:00:30") != nil)
+        #expect(AgentCLI.captureMoment("2025-03-04") == nil)
+    }
+
+    /// The parsers behind `--at` are lenient: a day past the month's end
+    /// rolled into the next month, and anything after a `Z` was ignored.
+    @Test("An --at that names no real moment is refused, not rolled over")
+    func captureMomentIsStrict() throws {
+        for bad in [
+            "2025-02-30T10:00:00Z", "2025-04-31T10:00:00+02:00", "2025-03-04T12:00:00Zjunk",
+            "12025-03-04T09:15", "2025-3-4T09:15", "2025-03-04T9:15",
+        ] {
+            #expect(AgentCLI.captureMoment(bad) == nil, "`\(bad)` was accepted")
+        }
+        #expect(AgentCLI.captureMoment("2025-02-28T10:00:00Z") != nil)
+        #expect(AgentCLI.captureMoment("2025-03-04T09:15:00+0100") != nil)
+
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let refused = try run(["capture", root.path, "text", "--at", "2025-02-30T10:00:00Z"])
+        #expect(refused.status != 0)
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8) == "# Inbox\n")
+    }
+
     // MARK: - Machine-readable answers
 
     /// The tab-separated columns are fine to read and wrong to parse: a path

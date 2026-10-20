@@ -33,7 +33,8 @@ public struct DailyNoteCapture: Sendable {
     public func capture(
         _ rawText: String,
         at date: Date = Date(),
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        done: Bool = false
     ) throws -> URL {
         var vaultIsDirectory: ObjCBool = false
         guard FileManager.default.fileExists(
@@ -61,7 +62,8 @@ public struct DailyNoteCapture: Sendable {
                     at: date,
                     calendar: calendar,
                     title: dailyNotes.stem(for: date),
-                    timestamped: CaptureTimestampPreference.isOn
+                    timestamped: CaptureTimestampPreference.isOn,
+                    done: done
                 )
                 try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -77,13 +79,15 @@ public struct DailyNoteCapture: Sendable {
 
     /// - Parameter title: the note's own name, used to give an empty note a
     ///   heading before its first captured item.
+    /// - Parameter done: write the item as a ticked task, `- [x] …`.
     public static func contents(
         byCapturing rawText: String,
         in existing: String,
         at date: Date,
         calendar: Calendar = .current,
         title: String? = nil,
-        timestamped: Bool = true
+        timestamped: Bool = true,
+        done: Bool = false
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw DailyNoteCaptureError.emptyCapture }
@@ -96,16 +100,8 @@ public struct DailyNoteCapture: Sendable {
         formatter.dateFormat = "HH:mm"
         let time = timestamped ? formatter.string(from: date) : ""
 
-        let normalised = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        let lines = normalised.split(separator: "\n", omittingEmptySubsequences: false)
-        let first = lines.first.map(String.init) ?? ""
-        let continuation = lines.dropFirst().map { "  \($0)" }.joined(separator: newline)
-        // The space after the time goes with the time when it is off, or the
-        // line starts `-  ` and the extra column reads as indentation.
-        let opening = time.isEmpty ? "- \(first)" : "- \(time) \(first)"
-        let entry = continuation.isEmpty ? opening : "\(opening)\(newline)\(continuation)"
+        // The same line the inbox writes, so the two cannot drift apart.
+        let entry = InboxCapture.markdownEntry(text, time: time, done: done, newline: newline)
 
         if let marker = markerLine(in: existing, newline: newline) {
             var result = existing
