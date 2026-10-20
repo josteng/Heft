@@ -2931,10 +2931,24 @@ final class AppModel: ObservableObject {
 
     func save() {
         guard isDirty, let current else { return }
+        // The comparison and the write are one coordinated write. A capture
+        // (`heft capture`, Spotlight, Siri, the share sheet) appends under
+        // coordination, and one landing between an uncoordinated read and
+        // write here was written over, after it had reported success. Now it
+        // waits for this to finish and appends to what was saved.
+        do {
+            try Self.coordinatingWrite(to: current.url) { target in
+                saveCoordinated(current, at: target)
+            }
+        } catch {
+            noteWriteFailed(error)
+        }
+    }
 
-        let diskExists = FileManager.default.fileExists(atPath: current.url.path)
+    private func saveCoordinated(_ current: NoteRef, at target: URL) {
+        let diskExists = FileManager.default.fileExists(atPath: target.path)
         let diskText = diskExists
-            ? (try? String(contentsOf: current.url, encoding: .utf8))
+            ? (try? String(contentsOf: target, encoding: .utf8))
             : nil
 
         // Never recreate a file that disappeared, or overwrite an externally
@@ -2966,7 +2980,31 @@ final class AppModel: ObservableObject {
             return
         }
 
-        writeCurrentBuffer()
+        beforeSaveWrites?()
+        writeCurrentBuffer(at: target)
+    }
+
+    /// Runs between a save reading the file and writing it, so a test can put
+    /// another writer exactly there.
+    var beforeSaveWrites: (() -> Void)?
+
+    /// One coordinated write of `url`, the way every capture writes, so the
+    /// two take turns instead of interleaving.
+    ///
+    /// `body` gets the URL to use. Never coordinate again inside it: a second
+    /// coordinator on the same file from inside the first waits for it.
+    private static func coordinatingWrite(
+        to url: URL, _ body: (URL) throws -> Void
+    ) throws {
+        var coordinationError: NSError?
+        var bodyError: Error?
+        NSFileCoordinator().coordinate(
+            writingItemAt: url, options: .forMerging, error: &coordinationError
+        ) { target in
+            do { try body(target) } catch { bodyError = error }
+        }
+        if let coordinationError { throw coordinationError }
+        if let bodyError { throw bodyError }
     }
 
     /// Moves a conflict from the all-or-nothing alert into hunk-by-hunk review.
@@ -3035,10 +3073,18 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func writeCurrentBuffer() {
+    /// Writes the buffer to the open note, coordinated, or at `target` when
+    /// the caller already holds the coordinated write.
+    private func writeCurrentBuffer(at target: URL? = nil) {
         guard let current else { return }
         do {
-            try text.write(to: current.url, atomically: true, encoding: .utf8)
+            if let target {
+                try text.write(to: target, atomically: true, encoding: .utf8)
+            } else {
+                try Self.coordinatingWrite(to: current.url) { target in
+                    try text.write(to: target, atomically: true, encoding: .utf8)
+                }
+            }
             discardDraft()
             isDirty = false
             writeFailed = false
@@ -3047,14 +3093,18 @@ final class AppModel: ObservableObject {
             saveConflict = nil
             reindexIfMetadataChanged(for: current)
         } catch {
-            // The buffer stays dirty so the next keystroke retries, but until
-            // then the only copy of the work is in memory. A draft puts it on
-            // disk, so a full volume or a permissions change cannot cost the
-            // note.
-            writeFailed = true
-            recordDraft()
-            status = "Save failed, kept a draft: \(error.localizedDescription)"
+            noteWriteFailed(error)
         }
+    }
+
+    private func noteWriteFailed(_ error: Error) {
+        // The buffer stays dirty so the next keystroke retries, but until
+        // then the only copy of the work is in memory. A draft puts it on
+        // disk, so a full volume or a permissions change cannot cost the
+        // note.
+        writeFailed = true
+        recordDraft()
+        status = "Save failed, kept a draft: \(error.localizedDescription)"
     }
 
     /// Mirrors the buffer to a draft file, for the states where autosave
