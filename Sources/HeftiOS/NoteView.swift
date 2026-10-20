@@ -32,6 +32,8 @@ final class NoteDocument {
     /// that any view draws.
     @ObservationIgnored private var pending: String?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// The last save started, which the next one waits for.
+    @ObservationIgnored private var writing: Task<Void, Never>?
     @ObservationIgnored private weak var vault: MobileVault?
     /// The editor showing this note, for the bar's undo, redo and find.
     @ObservationIgnored weak var textView: UITextView?
@@ -244,7 +246,18 @@ final class NoteDocument {
         pending = nil
     }
 
+    /// One write at a time. A second started while the first is on disk
+    /// still holds the first's base, finds the first's text in the file and
+    /// calls that a change from elsewhere: leaving the app asks for a save
+    /// on inactive and again on background, two saves that can overlap.
     private func save() async {
+        let previous = writing
+        let current = Task { await previous?.value; await write() }
+        writing = current
+        await current.value
+    }
+
+    private func write() async {
         guard let vault, let text = pending, let base = onDisk, !conflict,
               let url = vault.note(at: path)?.url
         else { return }
