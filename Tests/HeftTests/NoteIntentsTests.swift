@@ -266,6 +266,18 @@ struct NoteIntentsTests {
         #expect(try String(contentsOf: root.appendingPathComponent("Roof.md"), encoding: .utf8) == "body\n")
     }
 
+    /// A Windows note keeps one kind of line ending; its `\r\n` is a single
+    /// Swift character, so a check for a trailing `\n` never matched it.
+    @Test("Appending to a CRLF note writes CRLF")
+    func appendCRLF() throws {
+        let root = try vault(["Roof.md": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("Roof.md")
+        try Data("the roof\r\n".utf8).write(to: url)
+        try NoteAppend.append("gutters\nand the chimney", to: "Roof.md", in: root)
+        #expect(try Data(contentsOf: url) == Data("the roof\r\n\r\ngutters\r\nand the chimney\r\n".utf8))
+    }
+
     /// A share or a Siri request runs unattended, so a note it cannot read
     /// must stay as it is rather than be replaced by the line.
     @Test("Appending to a note that cannot be read leaves it alone")

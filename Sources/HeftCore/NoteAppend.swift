@@ -43,13 +43,17 @@ public enum NoteAppend {
                 // and writing over it would replace it with the line.
                 let existing = try String(contentsOf: target, encoding: .utf8)
                 // A blank line before, so a sentence added to a paragraph does
-                // not join it, and exactly one newline after.
+                // not join it, and exactly one newline after, in the note's
+                // own line ending: `\r\n` is one Character, never `\n`.
+                let newline = existing.contains("\r\n") ? "\r\n" : "\n"
                 var separator = ""
                 if !existing.isEmpty {
-                    separator = existing.hasSuffix("\n\n") ? ""
-                        : existing.hasSuffix("\n") ? "\n" : "\n\n"
+                    separator = existing.hasSuffix(newline + newline) ? ""
+                        : existing.hasSuffix(newline) ? newline : newline + newline
                 }
-                try (existing + separator + text + "\n").write(
+                let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+                    .replacingOccurrences(of: "\n", with: newline)
+                try (existing + separator + lines + newline).write(
                     to: target, atomically: true, encoding: .utf8
                 )
             } catch {
