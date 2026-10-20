@@ -694,9 +694,10 @@ public enum LiveDecorator {
     // MARK: - Tables
 
     /// A pipe row, a delimiter row carrying at least one dash, then any number
-    /// of further pipe rows.
+    /// of further pipe rows. A row in a Windows note ends in `\r\n`, and the
+    /// `\r` is the break's: matched as the row's, it stopped the next row.
     private static let tablePattern = #"""
-    (?m)^[ \t]*\|[^\n]*\n[ \t]*\|(?=[^\n]*-)[ \t:\-|]+\|?[ \t]*(?:\n[ \t]*\|[^\n]*)*
+    (?m)^[ \t]*\|[^\n]*\n[ \t]*\|(?=[^\n]*-)[ \t:\-|]+\|?[ \t]*(?:\r?\n[ \t]*\|[^\r\n]*)*
     """#
 
     /// Splits a matched table into cells. Returns nil when the delimiter row
@@ -1940,7 +1941,8 @@ public enum LiveDecorator {
         let header = text.substring(with: NSRange(
             location: range.location, length: firstLineEnd.location - range.location
         ))
-        let language = header.trimmingCharacters(in: CharacterSet(charactersIn: " \t`~"))
+        // `\r` too: a Windows note's break is `\r\n`, and `swift\r` is no language.
+        let language = header.trimmingCharacters(in: CharacterSet(charactersIn: " \t`~\r"))
         return language.isEmpty ? nil : language
     }
 
