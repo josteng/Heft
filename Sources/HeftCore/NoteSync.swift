@@ -4,6 +4,8 @@ import Observation
 /// The vault a `NoteSync` saves into, as the iOS app's vault provides it.
 @MainActor
 public protocol NoteSyncVault: AnyObject {
+    /// The vault's folder, which drafts are kept against.
+    var root: URL? { get }
     /// Where the note at a vault-relative path is now.
     func noteURL(at path: String) -> URL?
     /// Called after each write, for the vault to see the change.
@@ -19,6 +21,11 @@ public protocol NoteSyncVault: AnyObject {
 /// iCloud brings that late, and quietly replacing what the Mac wrote is the
 /// one outcome worse than not saving. A refused save becomes a `conflict`
 /// for the reader to settle.
+///
+/// Typing that cannot reach its note, refused or failed, is mirrored to a
+/// `DraftStore` draft as the Mac does: otherwise leaving the note, or iOS
+/// ending the app in the background, lost it. A draft left over when the
+/// note is next opened becomes a recovery note beside it.
 @MainActor @Observable
 public final class NoteSync {
     /// How the note's file is read and written; tests hold a read or a
@@ -77,6 +84,8 @@ public final class NoteSync {
     @ObservationIgnored private weak var vault: (any NoteSyncVault)?
     @ObservationIgnored private let storage: Storage
     @ObservationIgnored private let saveDelay: Duration
+    /// Whether a draft from an earlier document has been looked for.
+    @ObservationIgnored private var draftChecked = false
 
     public init(path: String, storage: Storage = .coordinated, saveDelay: Duration = .seconds(1)) {
         self.path = path
@@ -95,6 +104,10 @@ public final class NoteSync {
         guard let url = vault.noteURL(at: path) else {
             failure = "The note is no longer in the vault."
             return
+        }
+        if !draftChecked {
+            draftChecked = true
+            await recoverDraft(beside: url)
         }
         loadsStarted += 1
         let load = loadsStarted
@@ -145,6 +158,7 @@ public final class NoteSync {
     public func abandon() {
         saveTask?.cancel()
         pending = nil
+        discardDraft()
     }
 
     /// One write at a time. A second started while the first is on disk
@@ -159,9 +173,11 @@ public final class NoteSync {
     }
 
     private func write() async {
-        guard let vault, let text = pending, let base = onDisk, !conflict,
+        guard let vault, let text = pending, let base = onDisk,
               let url = vault.noteURL(at: path)
         else { return }
+        // Saving waits for the reader; the draft keeps up with the typing.
+        guard !conflict else { return recordDraft() }
         do {
             try await storage.write(text, url, base)
             // A read begun before this write holds what it replaced.
@@ -169,11 +185,14 @@ public final class NoteSync {
             onDisk = text
             source = text
             if pending == text { pending = nil } else { saveSoon() }
+            discardDraft()
             vault.noteWritten()
         } catch NoteWriteError.changedElsewhere {
             conflict = true
+            recordDraft()
         } catch {
             saveError = error.localizedDescription
+            recordDraft()
         }
     }
 
@@ -196,9 +215,11 @@ public final class NoteSync {
             source = text
             conflict = false
             if pending == text { pending = nil } else { saveSoon() }
+            discardDraft()
             vault.noteWritten()
         } catch {
             saveError = error.localizedDescription
+            recordDraft()
         }
     }
 
@@ -207,7 +228,43 @@ public final class NoteSync {
         guard let vault else { return }
         pending = nil
         conflict = false
+        discardDraft()
         await load(in: vault)
+    }
+
+    // MARK: Drafts
+
+    private func recordDraft() {
+        guard let root = vault?.root, let pending else { return }
+        DraftStore.write(pending, vault: root, relativePath: path)
+    }
+
+    private func discardDraft() {
+        guard let root = vault?.root else { return }
+        DraftStore.discard(vault: root, relativePath: path)
+    }
+
+    /// A draft that outlived the document that wrote it, written into the
+    /// vault beside the note unless it says what the note says. Kept when
+    /// that write fails, for the next time the note opens.
+    private func recoverDraft(beside url: URL) async {
+        guard let vault, let root = vault.root,
+              let draft = DraftStore.draft(vault: root, relativePath: path)
+        else { return }
+        // nil when the write failed, false when there was nothing to write.
+        let wrote = await Task.detached { () -> Bool? in
+            if let current = try? NoteFile.read(url), current == draft { return false }
+            guard !draft.isEmpty else { return false }
+            let name = DraftStore.recoveryName(for: url.deletingPathExtension().lastPathComponent)
+            let folder = url.deletingLastPathComponent()
+            let file = VaultOperations.uniqueName(base: name, extension: "md") {
+                FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
+            }
+            return (try? NoteFile.create(draft, at: folder.appendingPathComponent(file))) != nil ? true : nil
+        }.value
+        guard let wrote else { return }
+        DraftStore.discard(vault: root, relativePath: path)
+        if wrote { vault.noteWritten() }
     }
 }
 
@@ -259,6 +316,20 @@ public enum NoteFile {
                 guard current == original else { throw NoteWriteError.changedElsewhere }
                 try text.write(to: coordinated, atomically: true, encoding: .utf8)
             }
+        }
+        if let coordinationError { throw coordinationError }
+        try result.get()
+    }
+
+    /// Writes a new file, refusing one that is already there.
+    public static func create(_ text: String, at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var coordinationError: NSError?
+        var result: Result<Void, Error> = .success(())
+        NSFileCoordinator().coordinate(writingItemAt: url, options: [], error: &coordinationError) {
+            coordinated in
+            result = Result { try Data(text.utf8).write(to: coordinated, options: .withoutOverwriting) }
         }
         if let coordinationError { throw coordinationError }
         try result.get()

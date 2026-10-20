@@ -43,6 +43,11 @@ struct NoteSyncTests {
         private let lock = NSLock()
         private var calls: [String: Int] = [:]
         private var gates: [String: Gate] = [:]
+        private var failing = false
+
+        /// Makes writes fail, as a full disk would, or work again.
+        func failWrites(_ fail: Bool = true) { lock.withLock { failing = fail } }
+        private var fails: Bool { lock.withLock { failing } }
 
         func hold(_ kind: String, call: Int) -> Gate {
             let gate = Gate()
@@ -67,10 +72,12 @@ struct NoteSyncTests {
                 },
                 write: { text, url, original in
                     await self.next("write")?.pass()
+                    if self.fails { throw CocoaError(.fileWriteOutOfSpace) }
                     try NoteFile.write(text, to: url, replacing: original)
                 },
                 overwrite: { text, url in
                     await self.next("overwrite")?.pass()
+                    if self.fails { throw CocoaError(.fileWriteOutOfSpace) }
                     try NoteFile.overwrite(text, at: url)
                 }
             )
@@ -79,10 +86,12 @@ struct NoteSyncTests {
 
     @MainActor
     final class Vault: NoteSyncVault {
-        let root: URL
-        init(_ root: URL) { self.root = root }
-        func noteURL(at path: String) -> URL? { root.appendingPathComponent(path) }
-        func noteWritten() {}
+        init(_ folder: URL) { self.folder = folder }
+        var root: URL? { folder }
+        let folder: URL
+        func noteURL(at path: String) -> URL? { folder.appendingPathComponent(path) }
+        private(set) var writes = 0
+        func noteWritten() { writes += 1 }
     }
 
     private func vault(_ text: String) throws -> (Vault, URL) {
@@ -103,7 +112,7 @@ struct NoteSyncTests {
     @Test("A save started during another waits for it")
     func overlappingSaves() async throws {
         let (vault, url) = try vault("old\n")
-        defer { try? FileManager.default.removeItem(at: vault.root) }
+        defer { try? FileManager.default.removeItem(at: vault.folder) }
         let probe = Probe()
         let sync = NoteSync(path: "Note.md", storage: probe.storage)
         await sync.load(in: vault)
@@ -128,7 +137,7 @@ struct NoteSyncTests {
     @Test("A read that typing overtook is not taken as the base")
     func readOvertakenByTyping() async throws {
         let (vault, url) = try vault("old\n")
-        defer { try? FileManager.default.removeItem(at: vault.root) }
+        defer { try? FileManager.default.removeItem(at: vault.folder) }
         let probe = Probe()
         let sync = NoteSync(path: "Note.md", storage: probe.storage)
         await sync.load(in: vault)
@@ -152,7 +161,7 @@ struct NoteSyncTests {
     @Test("An older read finishing last is dropped")
     func readsOutOfOrder() async throws {
         let (vault, url) = try vault("first\n")
-        defer { try? FileManager.default.removeItem(at: vault.root) }
+        defer { try? FileManager.default.removeItem(at: vault.folder) }
         let probe = Probe()
         let sync = NoteSync(path: "Note.md", storage: probe.storage)
         let slow = probe.hold("read", call: 1)
@@ -171,7 +180,7 @@ struct NoteSyncTests {
     @Test("A read begun before a save does not undo it")
     func readBeforeSave() async throws {
         let (vault, url) = try vault("old\n")
-        defer { try? FileManager.default.removeItem(at: vault.root) }
+        defer { try? FileManager.default.removeItem(at: vault.folder) }
         let probe = Probe()
         let sync = NoteSync(path: "Note.md", storage: probe.storage)
         await sync.load(in: vault)
@@ -197,7 +206,7 @@ struct NoteSyncTests {
     @Test("Typing during Keep Mine is saved after it")
     func typingDuringKeepMine() async throws {
         let (vault, url) = try vault("old\n")
-        defer { try? FileManager.default.removeItem(at: vault.root) }
+        defer { try? FileManager.default.removeItem(at: vault.folder) }
         let probe = Probe()
         let sync = NoteSync(path: "Note.md", storage: probe.storage)
         await sync.load(in: vault)
@@ -224,7 +233,7 @@ struct NoteSyncTests {
     @Test("A note gone from disk is a conflict, not a failed save")
     func noteGoneFromDisk() async throws {
         let (vault, url) = try vault("old\n")
-        defer { try? FileManager.default.removeItem(at: vault.root) }
+        defer { try? FileManager.default.removeItem(at: vault.folder) }
         let sync = NoteSync(path: "Note.md", storage: Probe().storage)
         await sync.load(in: vault)
         try FileManager.default.removeItem(at: url)
@@ -237,5 +246,137 @@ struct NoteSyncTests {
         #expect(!FileManager.default.fileExists(atPath: url.path))
         await sync.keepMine()
         #expect(try contents(url) == "old mine\n")
+    }
+
+    // MARK: Drafts
+
+    private func draft(_ vault: Vault) -> String? {
+        DraftStore.draft(vault: vault.folder, relativePath: "Note.md")
+    }
+
+    /// Saving stops in a conflict, and leaving the note or the app being
+    /// ended in the background then lost the typing: it was only in memory.
+    @Test("Typing in a conflict is kept as a draft until it is settled")
+    func conflictKeepsDraft() async throws {
+        let (vault, url) = try vault("old\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        try "theirs\n".write(to: url, atomically: true, encoding: .utf8)
+
+        sync.edited("mine\n")
+        await sync.saveNow()
+        #expect(sync.conflict)
+        #expect(draft(vault) == "mine\n")
+        sync.edited("mine more\n")
+        await sync.saveNow()
+        #expect(draft(vault) == "mine more\n", "typing after the conflict was not kept")
+
+        await sync.keepMine()
+        #expect(draft(vault) == nil, "the draft outlived Keep Mine")
+    }
+
+    @Test("Use Theirs drops the draft with the typing")
+    func useTheirsDropsDraft() async throws {
+        let (vault, url) = try vault("old\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        try "theirs\n".write(to: url, atomically: true, encoding: .utf8)
+        sync.edited("mine\n")
+        await sync.saveNow()
+        #expect(draft(vault) != nil)
+
+        await sync.useTheirs()
+        #expect(draft(vault) == nil)
+        #expect(sync.source == "theirs\n")
+    }
+
+    @Test("A failed save keeps a draft, and the next good one drops it")
+    func failedSaveKeepsDraft() async throws {
+        let (vault, url) = try vault("old\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let probe = Probe()
+        let sync = NoteSync(path: "Note.md", storage: probe.storage)
+        await sync.load(in: vault)
+        probe.failWrites()
+
+        sync.edited("mine\n")
+        await sync.saveNow()
+        #expect(sync.saveError != nil)
+        #expect(draft(vault) == "mine\n", "a failed save left the typing only in memory")
+
+        probe.failWrites(false)
+        await sync.saveNow()
+        #expect(try contents(url) == "mine\n")
+        #expect(draft(vault) == nil, "the draft outlived the save")
+    }
+
+    /// The next time the note opens, the draft is put where notes are, as
+    /// the Mac recovers one, and the note itself is left alone.
+    @Test("A leftover draft becomes a recovery note beside the note")
+    func draftRecovered() async throws {
+        let (vault, url) = try vault("theirs\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        DraftStore.write("mine\n", vault: vault.folder, relativePath: "Note.md")
+
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+
+        let recovery = vault.folder.appendingPathComponent("Note (Heft Recovery).md")
+        #expect(try contents(recovery) == "mine\n")
+        #expect(try contents(url) == "theirs\n")
+        #expect(sync.source == "theirs\n")
+        #expect(draft(vault) == nil)
+        #expect(vault.writes == 1, "the vault was not told of the recovery note")
+    }
+
+    @Test("A leftover draft that matches the note is only dropped")
+    func matchingDraftDropped() async throws {
+        let (vault, _) = try vault("same\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        DraftStore.write("same\n", vault: vault.folder, relativePath: "Note.md")
+
+        await NoteSync(path: "Note.md", storage: Probe().storage).load(in: vault)
+
+        #expect(vault.writes == 0, "a rescan was asked for with nothing written")
+        let names = try FileManager.default.contentsOfDirectory(atPath: vault.folder.path)
+        #expect(names == ["Note.md"])
+        #expect(draft(vault) == nil)
+    }
+
+    /// A note being deleted keeps nothing, or its draft would come back as
+    /// a recovery note when another note takes the name.
+    @Test("Abandoned typing leaves no draft")
+    func abandonDropsDraft() async throws {
+        let (vault, url) = try vault("old\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        try "theirs\n".write(to: url, atomically: true, encoding: .utf8)
+        sync.edited("mine\n")
+        await sync.saveNow()
+        #expect(draft(vault) != nil)
+
+        sync.abandon()
+        #expect(draft(vault) == nil)
     }
 }
