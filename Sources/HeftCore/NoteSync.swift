@@ -178,13 +178,37 @@ public final class NoteSync {
         else { return }
         // Saving waits for the reader; the draft keeps up with the typing.
         guard !conflict else { return recordDraft() }
+        var written = text
+        var original = base
         do {
-            try await storage.write(text, url, base)
+            var attempts = 0
+            while true {
+                do {
+                    try await storage.write(written, url, original)
+                    break
+                } catch NoteWriteError.changedElsewhere {
+                    // Changed since it was read, which is usually a capture
+                    // filed into the note being typed in. Changes on other
+                    // lines are merged and written, compared against what
+                    // the merge read, so one landing meanwhile merges again;
+                    // only the same lines changed on both sides ask.
+                    attempts += 1
+                    guard attempts < 4, let theirs = try? await storage.read(url),
+                          let merged = NoteMerge.merge(base: base, mine: text, theirs: theirs)
+                    else { throw NoteWriteError.changedElsewhere }
+                    written = merged
+                    original = theirs
+                }
+            }
             // A read begun before this write holds what it replaced.
             loadLanded = loadsStarted
-            onDisk = text
-            source = text
-            if pending == text { pending = nil } else { saveSoon() }
+            onDisk = written
+            if written == text {
+                source = text
+                if pending == text { pending = nil } else { saveSoon() }
+            } else {
+                takeMerge(written, mergedFrom: text)
+            }
             discardDraft()
             vault.noteWritten()
         } catch NoteWriteError.changedElsewhere {
@@ -194,6 +218,28 @@ public final class NoteSync {
             saveError = error.localizedDescription
             recordDraft()
         }
+    }
+
+    /// Hands a merged save to the editor, which takes it as it takes a
+    /// reload. Typing during the write is on top of `buffer`, the text that
+    /// was merged, so the merge is carried into it in turn and saved next.
+    private func takeMerge(_ merged: String, mergedFrom buffer: String) {
+        guard let typed = pending, typed != buffer else {
+            pending = nil
+            source = merged
+            revision += 1
+            return
+        }
+        guard let carried = NoteMerge.merge(base: buffer, mine: typed, theirs: merged) else {
+            // The typing reached the lines the capture changed meanwhile.
+            conflict = true
+            recordDraft()
+            return
+        }
+        pending = carried
+        source = carried
+        revision += 1
+        saveSoon()
     }
 
     /// Writes what was typed over the version that arrived meanwhile.

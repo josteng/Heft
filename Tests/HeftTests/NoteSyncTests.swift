@@ -248,6 +248,105 @@ struct NoteSyncTests {
         #expect(try contents(url) == "old mine\n")
     }
 
+    // MARK: Captures
+
+    /// A line filed into the note from elsewhere, a capture from the Mac,
+    /// a share, Siri, while it is being typed in: different lines, so the
+    /// save merges them rather than stopping for the reader.
+    @Test("A capture landing before a save is merged into it")
+    func captureMergedIntoSave() async throws {
+        let (vault, url) = try vault("a\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        let before = sync.revision
+        try "a\ncaptured\n".write(to: url, atomically: true, encoding: .utf8)
+
+        sync.edited("a typed\n")
+        await sync.saveNow()
+
+        #expect(!sync.conflict, "a capture on another line stopped saving")
+        #expect(try contents(url) == "a typed\ncaptured\n")
+        #expect(sync.source == "a typed\ncaptured\n")
+        #expect(sync.revision == before + 1, "the editor was not given the merged text")
+        #expect(!sync.hasUnsavedText)
+        #expect(draft(vault) == nil)
+    }
+
+    /// The file can change again between the merge's read and its write;
+    /// that write is compared too, and merges again rather than replacing it.
+    @Test("A capture landing during a merge is merged as well")
+    func captureDuringMerge() async throws {
+        let (vault, url) = try vault("a\n")
+        defer { try? FileManager.default.removeItem(at: vault.folder) }
+        let probe = Probe()
+        let sync = NoteSync(path: "Note.md", storage: probe.storage)
+        await sync.load(in: vault)
+        try "a\none\n".write(to: url, atomically: true, encoding: .utf8)
+        let mergeRead = probe.hold("read", call: 2)
+
+        sync.edited("a typed\n")
+        let save = Task { await sync.saveNow() }
+        await mergeRead.arrival()
+        try "a\none\ntwo\n".write(to: url, atomically: true, encoding: .utf8)
+        await mergeRead.open()
+        await save.value
+
+        #expect(!sync.conflict)
+        #expect(try contents(url) == "a typed\none\ntwo\n", "the second capture was written over")
+    }
+
+    /// Typing goes on while the merge is written; it is on top of the
+    /// buffer that was merged, so the capture is carried into it.
+    @Test("Typing during a merged save keeps the capture")
+    func typingDuringMergedSave() async throws {
+        let (vault, url) = try vault("a\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let probe = Probe()
+        let sync = NoteSync(path: "Note.md", storage: probe.storage)
+        await sync.load(in: vault)
+        try "a\ncaptured\n".write(to: url, atomically: true, encoding: .utf8)
+        let mergedWrite = probe.hold("write", call: 2)
+
+        sync.edited("a typed\n")
+        let save = Task { await sync.saveNow() }
+        await mergedWrite.arrival()
+        sync.edited("a typed more\n")
+        await mergedWrite.open()
+        await save.value
+
+        #expect(sync.source == "a typed more\ncaptured\n", "the editor lost the capture or the typing")
+        #expect(sync.hasUnsavedText)
+        await sync.saveNow()
+        #expect(!sync.conflict)
+        #expect(try contents(url) == "a typed more\ncaptured\n")
+    }
+
+    /// Changes to the same line are a choice only the reader can make.
+    @Test("A change on the line being typed still asks")
+    func overlappingChangeAsks() async throws {
+        let (vault, url) = try vault("a\nb\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        try "a\nb theirs\n".write(to: url, atomically: true, encoding: .utf8)
+
+        sync.edited("a\nb mine\n")
+        await sync.saveNow()
+
+        #expect(sync.conflict)
+        #expect(try contents(url) == "a\nb theirs\n")
+    }
+
     // MARK: Drafts
 
     private func draft(_ vault: Vault) -> String? {

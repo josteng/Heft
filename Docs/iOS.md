@@ -99,9 +99,11 @@ the foreground and after its own writes, starting from the Mac's
 ## Saving
 
 A note saves a second after typing stops and when it is left. A save is
-written only over the text it was based on; a file that changed meanwhile,
-or was renamed or deleted, stops saving and offers Use Theirs or Keep Mine,
-because the Mac autosaves and iCloud delivers that late. Typing that cannot
+written only over the text it was based on, because the Mac autosaves and
+iCloud delivers that late. A file that changed meanwhile on other lines,
+as a capture does, is merged with `NoteMerge` and the editor takes the
+result as it takes a reload; one changed on the same lines, renamed or
+deleted, stops saving and offers Use Theirs or Keep Mine. Typing that cannot
 be saved is kept as a `DraftStore` draft, as on the Mac, and a draft still
 there when the note next opens becomes a recovery note beside it. The
 loading and saving are `NoteSync` in `HeftCore`, so their ordering is tested
