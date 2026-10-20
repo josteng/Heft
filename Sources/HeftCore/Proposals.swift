@@ -546,7 +546,9 @@ public enum ProposalStore {
             body: stillWanted,
             agent: proposal.agent,
             summary: proposal.summary,
-            createdAt: proposal.createdAt
+            createdAt: proposal.createdAt,
+            // Still part of the change it was proposed as.
+            group: proposal.group
         )
         try write(remaining, in: vaultRoot)
         return (updated, remaining)

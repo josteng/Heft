@@ -115,6 +115,26 @@ struct ProposalTests {
         #expect(ProposalStore.all(in: root).isEmpty)
     }
 
+    /// What is left of a grouped edit is still part of that change, or it
+    /// drops out of the group in the review centre after one hunk.
+    @Test("A half-reviewed proposal stays in its group")
+    func settleKeepsTheGroup() throws {
+        let root = try disposableVault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let before = "a\nb\nc\n"
+        let proposal = Proposal(
+            notePath: "Note.md", base: before, body: "A\nb\nC\n",
+            agent: "test", summary: "Two changes", group: Proposal.Group(summary: "Tidy up")
+        )
+        let diff = proposal.diff(against: before)
+        let outcome = try ProposalStore.settle(
+            proposal, currentText: before,
+            accepted: [diff.hunks[0].id], rejected: [], in: root
+        )
+        #expect(outcome.remaining?.group == proposal.group)
+        #expect(ProposalStore.all(in: root).first?.group == proposal.group)
+    }
+
     @Test("A rejected hunk is never proposed again")
     func rejectionSticks() throws {
         let root = try disposableVault()
