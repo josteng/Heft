@@ -350,6 +350,41 @@ struct AgentCLITests {
         #expect(try String(contentsOf: root.appendingPathComponent("Plan.md"), encoding: .utf8) == "# Plan\n")
     }
 
+    /// `--from` is read by `heft`, not by the agent, so the agent's own
+    /// limits never saw it, and `diff` then printed the file.
+    @Test("A pinned proposal's --from stays inside the folder")
+    func pinnedFrom() throws {
+        let root = try vault(["Work/Plan.md": "# Plan\n", "Home/Secret.md": "# Secret\nThe code.\n"])
+        let outside = try vault(["Far.md": "far away\n"])
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        for source in [
+            root.appendingPathComponent("Home/Secret.md").path,
+            root.path + "/Work/../Home/Secret.md",
+            outside.appendingPathComponent("Far.md").path,
+        ] {
+            let proposed = try run(
+                ["propose", root.path, "Work/New.md", "--from", source, "--summary", "leak"],
+                scope: "Work", pin: root
+            )
+            #expect(proposed.status != 0 && proposed.error.contains("limited to"), "\(source): \(proposed.error)")
+        }
+        let wide = try run(
+            ["propose", root.path, "New.md", "--from", outside.appendingPathComponent("Far.md").path],
+            pin: root
+        )
+        #expect(wide.status != 0, "outside the vault with no folder either; got \(wide.text)")
+        #expect(ProposalStore.all(in: root).isEmpty)
+
+        let inside = try run(
+            ["propose", root.path, "Work/New.md", "--from", root.appendingPathComponent("Work/Plan.md").path],
+            scope: "Work", pin: root
+        )
+        #expect(inside.status == 0, "got \(inside.error)")
+    }
+
     // MARK: - read
 
     /// Said while proposing, so an agent can pick somewhere else rather than

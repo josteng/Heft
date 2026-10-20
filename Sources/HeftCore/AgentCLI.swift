@@ -73,6 +73,13 @@ public enum AgentCLI {
         return URL(fileURLWithPath: path)
     }
 
+    /// The real path a pinned run is kept inside: its folder, or its vault.
+    /// Nil when nothing is pinned.
+    public static var pinnedBoundary: String? {
+        guard let vault = pinnedVault else { return nil }
+        return realPath(agentScope.map { vault.appendingPathComponent($0) } ?? vault)
+    }
+
     /// Where a path really is: symlinks followed, `/var` as `/private/var`,
     /// and the case the disk has. A part that does not exist yet keeps its
     /// spelling after the real path of the part that does.
@@ -88,6 +95,10 @@ public enum AgentCLI {
             missing.append(existing.lastPathComponent)
             existing.deleteLastPathComponent()
         }
+    }
+
+    static func isInside(_ path: String, boundary: String) -> Bool {
+        path == boundary || path.hasPrefix(boundary == "/" ? "/" : boundary + "/")
     }
 
     /// The arguments a run Heft pinned to a vault may go on with, or an
@@ -190,10 +201,16 @@ public enum AgentCLI {
 
         var body: String
         if let from = options["from"] {
-            guard let text = try? String(
-                contentsOf: URL(fileURLWithPath: (from as NSString).expandingTildeInPath),
-                encoding: .utf8
-            ) else { fail("cannot read \(from)") }
+            let source = URL(fileURLWithPath: (from as NSString).expandingTildeInPath)
+            // Read by `heft`, not by the agent, so the agent's own limits
+            // never saw it: `--from ../Home/Secret.md` and then `diff`
+            // printed a file from outside the folder, or the disk.
+            if let boundary = pinnedBoundary, !isInside(realPath(source), boundary: boundary) {
+                fail("\(from) is outside \(agentScope ?? "the vault"), what this question is limited to")
+            }
+            guard let text = try? String(contentsOf: source, encoding: .utf8) else {
+                fail("cannot read \(from)")
+            }
             body = text
         } else {
             var input = ""
