@@ -80,6 +80,26 @@ public enum VaultRename {
         })
         var plans: [Rewrite] = []
 
+        // A bare name finds the shallowest file of that name, then the
+        // shortest path, so a move can leave it answering for another file:
+        // `Plan.md` moved deep under `Archive` loses the name to
+        // `Work/Plan.md`. Asked of the vault as the move will leave it; a
+        // tie is no answer either, and a path is spelled instead.
+        func name(_ path: String) -> String {
+            let file = (path as NSString).lastPathComponent
+            let isMarkdown = VaultScanner.classify(
+                extension: (file as NSString).pathExtension.lowercased()
+            ) == .markdown
+            return (isMarkdown ? (file as NSString).deletingPathExtension : file).lowercased()
+        }
+        func rank(_ path: String) -> (Int, Int) { (path.count(where: { $0 == "/" }), path.count) }
+        let after = Dictionary(grouping: index.allFiles.map {
+            changes[$0.relativePath] ?? $0.relativePath
+        }, by: name)
+        func nameFinds(_ path: String) -> Bool {
+            !(after[name(path)] ?? []).contains { $0 != path && rank($0) <= rank(path) }
+        }
+
         for path in sources.sorted() {
             guard let source = index.note(atRelativePath: path) else { continue }
             let original: String
@@ -100,7 +120,9 @@ public enum VaultRename {
                     guard let old = index.resolve(link, from: source)?.relativePath,
                           let new = changes[old]
                     else { return link.target }
-                    return WikiLinkParser.retargeted(link.target, to: new)
+                    return WikiLinkParser.retargeted(
+                        link.target, to: new, asPath: !nameFinds(new)
+                    )
                 }
             )
             guard result.count > 0, result.text != original else { continue }

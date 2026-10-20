@@ -134,4 +134,51 @@ struct VaultRenameTests {
             #expect(after == "[[Old]] and more", "the newer edit survived")
         }
     }
+
+    /// The shallowest file of a name is the one a bare link finds, so a
+    /// move can leave the name answering for another file.
+    @Test("A bare link becomes a path when its name would find another file")
+    func bareLinkKeepsItsTarget() throws {
+        try withVault([
+            "Plan.md": "root plan", "Work/Plan.md": "work plan",
+            "Notes/Ideas.md": "ideas", "Thoughts.md": "root thoughts",
+            "Index.md": "[[Plan]] [[Ideas]]",
+        ]) { root, index, tree in
+            _ = try VaultRename.perform(
+                item: try item(tree, "Plan.md"), to: "Archive/Old/Plan.md",
+                index: index, vaultRoot: root
+            )
+            var after = VaultIndex.build(root: VaultScanner.scan(root: root))
+            var links = try String(contentsOf: root.appendingPathComponent("Index.md"), encoding: .utf8)
+            #expect(links == "[[Archive/Old/Plan]] [[Ideas]]")
+            #expect(after.backlinks(to: "Archive/Old/Plan.md").count == 1)
+            #expect(after.backlinks(to: "Work/Plan.md").isEmpty)
+
+            // Renamed onto a name the root already answers to.
+            _ = try VaultRename.perform(
+                item: try item(VaultScanner.scan(root: root), "Notes/Ideas.md"),
+                to: "Notes/Thoughts.md", index: after, vaultRoot: root
+            )
+            after = VaultIndex.build(root: VaultScanner.scan(root: root))
+            links = try String(contentsOf: root.appendingPathComponent("Index.md"), encoding: .utf8)
+            #expect(links == "[[Archive/Old/Plan]] [[Notes/Thoughts]]")
+            #expect(after.backlinks(to: "Thoughts.md").isEmpty)
+        }
+    }
+
+    /// Two files of a name at the same depth and length: which one a bare
+    /// name finds is not something to leave a link depending on.
+    @Test("A bare link becomes a path when its name would be a tie")
+    func bareLinkTieIsAPath() throws {
+        try withVault([
+            "Plan.md": "root plan", "Work/Plan.md": "work plan", "Index.md": "[[Plan]]",
+        ]) { root, index, tree in
+            _ = try VaultRename.perform(
+                item: try item(tree, "Plan.md"), to: "Wirk/Plan.md", index: index, vaultRoot: root
+            )
+            #expect(try String(contentsOf: root.appendingPathComponent("Index.md"), encoding: .utf8)
+                == "[[Wirk/Plan]]")
+        }
+    }
 }
+

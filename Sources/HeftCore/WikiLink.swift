@@ -308,8 +308,11 @@ public enum WikiLinkParser {
     /// The original shape is kept: a bare name stays a bare name, a path stays
     /// a path, and an explicit `.md` survives. Rewriting everything to a full
     /// path would also resolve, but it would churn links the rename never
-    /// needed to touch.
-    public static func retargeted(_ old: String, to newRelativePath: String) -> String {
+    /// needed to touch. `asPath` spells a bare name as a path, for a name
+    /// that would find another file once the move is done.
+    public static func retargeted(
+        _ old: String, to newRelativePath: String, asPath: Bool = false
+    ) -> String {
         // `.md` is the only extension a link may omit. An attachment's
         // extension is part of its name, so dropping it would break the link.
         let dropsExtension = (newRelativePath as NSString).pathExtension.lowercased() == "md"
@@ -317,6 +320,6 @@ public enum WikiLinkParser {
         let spelled = dropsExtension
             ? (newRelativePath as NSString).deletingPathExtension
             : newRelativePath
-        return old.contains("/") ? spelled : (spelled as NSString).lastPathComponent
+        return old.contains("/") || asPath ? spelled : (spelled as NSString).lastPathComponent
     }
 }
