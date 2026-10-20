@@ -255,7 +255,7 @@ struct VimCoreTests {
 
     @Test("Dot repeats operators and native Insert transactions")
     @MainActor
-    func textKitDotRepeat() throws {
+    func textKitDotRepeat() async throws {
         let operators = HeftTextKit2View(usingTextLayoutManager: true)
         operators.isEditable = true
         operators.string = "one two three"
@@ -326,26 +326,26 @@ struct VimCoreTests {
         #expect(openLine.string == "one\n- item\n- item\n")
 
         if let nvim = Self.neovimURL {
-            let operatorOracle = try Self.runNeovim(
+            let operatorOracle = try await Self.runNeovim(
                 nvim, source: "one two three", command: "dw."
             )
-            let countedOracle = try Self.runNeovim(
+            let countedOracle = try await Self.runNeovim(
                 nvim, source: "one two three four five", command: "2dw."
             )
-            let replaceOracle = try Self.runNeovim(
+            let replaceOracle = try await Self.runNeovim(
                 nvim, source: "abc", command: "rXl."
             )
-            let insertionOracle = try Self.runNeovim(
+            let insertionOracle = try await Self.runNeovim(
                 nvim,
                 source: "one two",
                 exCommand: #"+execute "normal! inew \<Esc>w.""#
             )
-            let changeOracle = try Self.runNeovim(
+            let changeOracle = try await Self.runNeovim(
                 nvim,
                 source: "one two three",
                 exCommand: #"+execute "normal! cwitem\<Esc>w.""#
             )
-            let openLineOracle = try Self.runNeovim(
+            let openLineOracle = try await Self.runNeovim(
                 nvim,
                 source: "one\n",
                 exCommand: #"+execute "normal! o- item\<Esc>.""#
@@ -1029,7 +1029,7 @@ struct VimCoreTests {
     /// real one rather than copy a plausible-looking rule.
     @Test("External Neovim agrees where undoing an indent leaves the cursor")
     @MainActor
-    func neovimAgreesOnTheUndoCursor() throws {
+    func neovimAgreesOnTheUndoCursor() async throws {
         guard let nvim = Self.neovimURL else { return }
         let source = "\t- x"
         // On the `x`, which is where a reader typing the item would be.
@@ -1038,7 +1038,7 @@ struct VimCoreTests {
         // the way leaving insert mode or a restyle moves it in the editor.
         // Without it the undo has nowhere to put the cursor but where it
         // already is, and the test would pass whatever the editor did.
-        let oracle = try Self.runNeovimCursor(
+        let oracle = try await Self.runNeovimCursor(
             nvim, source: source, cursor: caret, command: ">>0u"
         )
 
@@ -1062,7 +1062,7 @@ struct VimCoreTests {
     }
 
     @Test("External Neovim agrees on representative buffer edits")
-    func neovimDifferential() throws {
+    func neovimDifferential() async throws {
         guard let nvim = Self.neovimURL else { return }
         let fixtures: [(String, String)] = [
             ("dw", "one two three\nsecond line\n"),
@@ -1097,13 +1097,13 @@ struct VimCoreTests {
         for (command, source) in fixtures {
             var heft = VimHarness(source)
             heft.type(command)
-            let oracle = try Self.runNeovim(nvim, source: source, command: command)
+            let oracle = try await Self.runNeovim(nvim, source: source, command: command)
             #expect(heft.text == oracle, "Mismatch for normal! \(command)")
         }
     }
 
     @Test("External Neovim agrees on Visual Block insert and delete")
-    func neovimVisualBlockDifferential() throws {
+    func neovimVisualBlockDifferential() async throws {
         guard let nvim = Self.neovimURL else { return }
         let source = "one\ntwo\nthree\n"
 
@@ -1111,7 +1111,7 @@ struct VimCoreTests {
         insert.send(.control("v"))
         insert.type("jjI# ")
         insert.send(.escape)
-        let inserted = try Self.runNeovim(
+        let inserted = try await Self.runNeovim(
             nvim,
             source: source,
             exCommand: #"+execute "normal! \<C-v>jjI# \<Esc>""#
@@ -1121,7 +1121,7 @@ struct VimCoreTests {
         var delete = VimHarness(source)
         delete.send(.control("v"))
         delete.type("jjld")
-        let deleted = try Self.runNeovim(
+        let deleted = try await Self.runNeovim(
             nvim,
             source: source,
             exCommand: #"+execute "normal! \<C-v>jjld""#
@@ -1130,7 +1130,7 @@ struct VimCoreTests {
     }
 
     @Test("External Neovim agrees on a cursor-motion matrix")
-    func neovimMotionMatrix() throws {
+    func neovimMotionMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         let source = "(alpha beta) x\nshort\nalpha beta gamma\n\nlast line\n"
         let thirdLine = (source as NSString).range(of: "alpha beta gamma").location
@@ -1144,7 +1144,7 @@ struct VimCoreTests {
         for fixture in fixtures {
             var heft = VimHarness(source, cursor: fixture.cursor)
             heft.type(fixture.command)
-            let oracle = try Self.runNeovimCursor(
+            let oracle = try await Self.runNeovimCursor(
                 nvim,
                 source: source,
                 cursor: fixture.cursor,
@@ -1158,7 +1158,7 @@ struct VimCoreTests {
     }
 
     @Test("External Neovim agrees on text objects from every relevant cursor position")
-    func neovimTextObjectMatrix() throws {
+    func neovimTextObjectMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         let fixtures: [(source: String, cursor: Int, commands: [String])] = [
             ("one   two, three\n", 0, ["diw", "daw"]),
@@ -1180,7 +1180,7 @@ struct VimCoreTests {
             for command in fixture.commands {
                 var heft = VimHarness(fixture.source, cursor: fixture.cursor)
                 heft.type(command)
-                let oracle = try Self.runNeovim(
+                let oracle = try await Self.runNeovim(
                     nvim,
                     source: fixture.source,
                     cursor: fixture.cursor,
@@ -1308,7 +1308,7 @@ struct VimCoreTests {
     }
 
     @Test("External Neovim agrees on registers, marks, and macros")
-    func neovimRegisterMarkMacroMatrix() throws {
+    func neovimRegisterMarkMacroMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         let source = "alpha beta gamma\none two three\nlast row here\n"
         let registerAndMark = [
@@ -1319,7 +1319,7 @@ struct VimCoreTests {
         for command in registerAndMark {
             var heft = VimHarness(source, cursor: 0)
             heft.type(command)
-            let oracle = try Self.runNeovimKeystrokes(
+            let oracle = try await Self.runNeovimKeystrokes(
                 nvim, source: source, cursor: 0, keys: command
             )
             #expect(heft.text == oracle, "Register/mark mismatch for \(command)")
@@ -1330,7 +1330,7 @@ struct VimCoreTests {
         for command in ["qaxq@a", "qaxq3@a", "qaddq@a", "qadwjq@a", "qaxq@a@@", "qbdwq2@b"] {
             var heft = VimHarness(source, cursor: 0)
             heft.type(command)
-            let oracle = try Self.runNeovimKeystrokes(nvim, source: source, cursor: 0, keys: command)
+            let oracle = try await Self.runNeovimKeystrokes(nvim, source: source, cursor: 0, keys: command)
             #expect(heft.text == oracle, "Macro mismatch for \(command)")
         }
     }
@@ -1348,7 +1348,7 @@ struct VimCoreTests {
     }
 
     @Test("External Neovim agrees on operator-motion compositions away from column zero")
-    func neovimOperatorMotionMatrix() throws {
+    func neovimOperatorMotionMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         let source = "first alpha beta\nsecond (inside) tail\n\nlast words here\n"
         let fixtures: [(cursor: Int, commands: [String])] = [
@@ -1362,7 +1362,7 @@ struct VimCoreTests {
             for command in fixture.commands {
                 var heft = VimHarness(source, cursor: fixture.cursor)
                 heft.type(command)
-                let oracle = try Self.runNeovim(
+                let oracle = try await Self.runNeovim(
                     nvim,
                     source: source,
                     cursor: fixture.cursor,
@@ -1377,7 +1377,7 @@ struct VimCoreTests {
     }
 
     @Test("Generated operator, motion, and count matrix agrees with Neovim")
-    func neovimGeneratedOperatorMatrix() throws {
+    func neovimGeneratedOperatorMatrix() async throws {
         guard let nvim = Self.neovimURL else { return }
         let source = "top row words here\n  alpha, beta gamma delta\nshort row\n  omega sigma tail\nlast row\n"
         let text = source as NSString
@@ -1423,7 +1423,7 @@ struct VimCoreTests {
                             heft.type(command)
                             oracleCommand = command
                         }
-                        let oracle = try Self.runNeovim(
+                        let oracle = try await Self.runNeovim(
                             nvim,
                             source: source,
                             cursor: cursor,
@@ -1440,7 +1440,7 @@ struct VimCoreTests {
     }
 
     @Test("Mature Vim-emulator coverage categories agree with Neovim")
-    func neovimCoverageMapCorpus() throws {
+    func neovimCoverageMapCorpus() async throws {
         guard let nvim = Self.neovimURL else { return }
 
         // Original Heft fixtures covering the high-yield edge categories in
@@ -1494,7 +1494,7 @@ struct VimCoreTests {
         for fixture in fixtures {
             var heft = VimHarness(fixture.source, cursor: fixture.cursor)
             heft.type(fixture.command)
-            let oracle = try Self.runNeovim(
+            let oracle = try await Self.runNeovim(
                 nvim,
                 source: fixture.source,
                 cursor: fixture.cursor,
@@ -1508,7 +1508,7 @@ struct VimCoreTests {
     }
 
     @Test("Real-world motion boundary corpus agrees with Neovim")
-    func neovimMotionBoundaryCorpus() throws {
+    func neovimMotionBoundaryCorpus() async throws {
         guard let nvim = Self.neovimURL else { return }
         let source = "heading words\n\n  indented alpha,beta\nx\na considerably longer final row\n"
         let text = source as NSString
@@ -1532,7 +1532,7 @@ struct VimCoreTests {
         for fixture in fixtures {
             var heft = VimHarness(source, cursor: fixture.cursor)
             heft.type(fixture.command)
-            let oracle = try Self.runNeovimCursor(
+            let oracle = try await Self.runNeovimCursor(
                 nvim,
                 source: source,
                 cursor: fixture.cursor,
@@ -1554,8 +1554,8 @@ struct VimCoreTests {
             .map { URL(fileURLWithPath: $0) }
     }
 
-    private static func runNeovim(_ executable: URL, source: String, command: String) throws -> String {
-        try runNeovim(executable, source: source, exCommand: "+normal! \(command)")
+    private static func runNeovim(_ executable: URL, source: String, command: String) async throws -> String {
+        try await runNeovim(executable, source: source, exCommand: "+normal! \(command)")
     }
 
     private static func runNeovim(
@@ -1563,7 +1563,7 @@ struct VimCoreTests {
         source: String,
         cursor: Int,
         command: String
-    ) throws -> String {
+    ) async throws -> String {
         precondition(source.unicodeScalars.allSatisfy { $0.isASCII })
         let bytes = Array(source.utf8)
         let safeCursor = min(max(0, cursor), bytes.count)
@@ -1571,7 +1571,7 @@ struct VimCoreTests {
         let line = prefix.reduce(1) { $1 == 10 ? $0 + 1 : $0 }
         let lastNewline = prefix.lastIndex(of: 10)
         let byteColumn = safeCursor - ((lastNewline.map { $0 + 1 }) ?? 0)
-        return try runNeovim(
+        return try await runNeovim(
             executable,
             source: source,
             exCommand: "+call cursor(\(line),\(byteColumn + 1))",
@@ -1617,15 +1617,13 @@ struct VimCoreTests {
         }
         var oracles = [Result<String, Error>?](repeating: nil, count: cases.count)
         let lock = NSLock()
-        // At background priority, workers and processes both: the timing
-        // checks in the same run measure the main thread, and an oracle
-        // holding the performance cores pushed it onto the efficiency ones,
-        // where a keystroke looked six times its cost.
+        // How many run at once is `oracleSlots`, shared by every test; these
+        // workers only queue for it.
         let workers = max(2, ProcessInfo.processInfo.activeProcessorCount / 3)
         var next = 0
         let group = DispatchGroup()
         for _ in 0..<workers {
-            DispatchQueue.global(qos: .background).async(group: group) {
+            DispatchQueue.global(qos: .utility).async(group: group) {
                 while true {
                     lock.lock()
                     let index = next
@@ -1642,7 +1640,7 @@ struct VimCoreTests {
             }
         }
         await withCheckedContinuation { continuation in
-            group.notify(queue: .global(qos: .background)) { continuation.resume() }
+            group.notify(queue: .global(qos: .utility)) { continuation.resume() }
         }
         for (index, item) in cases.enumerated() {
             switch oracles[index] {
@@ -1656,17 +1654,66 @@ struct VimCoreTests {
         }
     }
 
-    /// How long one oracle process gets before it is taken as wedged.
-    /// A batch takes about a second; this is only a bound on a hang.
-    private static let oracleTimeout: TimeInterval = 120
+    /// How long one oracle process may go without a sign of progress before
+    /// it is taken as wedged. A batch writes a file per case and echoes
+    /// what it types, so a slow one keeps proving it is alive; one that has
+    /// stopped typing goes quiet, and a Neovim that reaches the end of its
+    /// script without quitting waits for keys forever. A single command
+    /// shows nothing until it is done, so for those this bounds the whole
+    /// run. A fixed bound on the whole run failed every batch on a loaded
+    /// machine while they were still working through their cases.
+    private static let oracleStall: TimeInterval = 120
+
+    /// Neovims running at once, across every test in the process. Each
+    /// matrix used to start a third of the cores' worth, and with three
+    /// matrices and the single-command tests running in parallel the
+    /// processes outnumbered the cores and starved each other.
+    private static let oracleSlots = DispatchSemaphore(
+        value: max(2, ProcessInfo.processInfo.activeProcessorCount / 3)
+    )
+
+    /// Run first in every oracle: quits Neovim once its parent is gone.
+    /// macOS has no parent-death signal, and a test process that is killed,
+    /// or crashes, never reaches the code that would stop its children, so
+    /// without this each one left its Neovims running under launchd,
+    /// one waiting forever whenever its script did not end in a quit.
+    private static var orphanWatch: String {
+        "lua local uv = vim.uv or vim.loop; local t = uv.new_timer(); "
+            + "t:start(1000, 1000, function() "
+            + "if uv.os_getppid() ~= \(getpid()) then os.exit(1) end end)"
+    }
 
     private final class OracleOutput: @unchecked Sendable {
         private let lock = NSLock()
         private var data = Data()
-        var timedOut = false
+        private var lastProgress = DispatchTime.now()
+        private var stalled = false
+        private var lastCount = 0
+
+        /// Counts as progress whenever `count` has grown since last asked.
+        func observe(count: Int) {
+            lock.lock()
+            if count > lastCount { lastCount = count; lastProgress = .now() }
+            lock.unlock()
+        }
 
         func append(_ chunk: Data) {
-            lock.lock(); data.append(chunk); lock.unlock()
+            lock.lock()
+            data.append(chunk)
+            lastProgress = .now()
+            lock.unlock()
+        }
+
+        /// True, and from then on, once nothing has arrived for `limit`.
+        func hasStalled(for limit: TimeInterval) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if !stalled, DispatchTime.now() > lastProgress + limit { stalled = true }
+            return stalled
+        }
+
+        var timedOut: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return stalled
         }
 
         var text: String {
@@ -1675,17 +1722,42 @@ struct VimCoreTests {
         }
     }
 
+    /// `runOracleBlocking` off Swift concurrency's threads. A test that
+    /// waited on Neovim itself held one of them for its whole run, and with
+    /// a dozen oracle tests doing that, and queueing for `oracleSlots` as
+    /// well, the pool had too few left for the detached work other tests
+    /// wait on, such as a vault's first scan.
+    private static func runOracle(_ process: Process) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(with: Result { try runOracleBlocking(process) })
+            }
+        }
+    }
+
     /// Runs one Neovim to completion and returns what it wrote to stderr.
     ///
     /// Each part of this stops a wedged oracle from hanging the whole suite
     /// rather than failing one test. Stderr is drained while it runs, because
     /// reading it only after exit deadlocks as soon as a batch writes more
-    /// than a pipe holds. Stdin is /dev/null, so a Neovim that reaches the end
-    /// of its script gets EOF instead of waiting for a key it will never be
-    /// sent. And the wait is bounded, so the run ends even when Neovim stops
-    /// somewhere neither of those explains: once seen, a batch was left
-    /// waiting on a half-typed command line with 50 of its 64 cases written.
-    private static func runOracle(_ process: Process) throws -> String {
+    /// than a pipe holds. Stdin is /dev/null, so nothing can wait on a
+    /// terminal. And a Neovim that stops making progress is ended, by
+    /// SIGKILL if SIGTERM does not do it, and always reaped before this
+    /// returns, so a timeout cannot leave a process behind.
+    ///
+    /// At utility priority: below the main thread the timing checks measure,
+    /// so a keystroke there is never queued behind an oracle, but not at
+    /// background, which on a busy machine is confined to the efficiency
+    /// cores and throttled on every file it reads and writes.
+    ///
+    /// `progress`, when given, counts something the run leaves as it goes,
+    /// such as a batch's result files; Neovim buffers what it echoes, so
+    /// stderr alone can sit still for a while in a run that is not stuck.
+    private static func runOracleBlocking(
+        _ process: Process, progress: (() -> Int)? = nil
+    ) throws -> String {
+        process.arguments = ["--cmd", orphanWatch] + (process.arguments ?? [])
+        process.qualityOfService = .utility
         process.standardInput = FileHandle.nullDevice
         let errors = Pipe()
         process.standardError = errors
@@ -1694,15 +1766,25 @@ struct VimCoreTests {
             let chunk = handle.availableData
             if !chunk.isEmpty { output.append(chunk) }
         }
+        oracleSlots.wait()
+        defer { oracleSlots.signal() }
+        // The clock starts with the slot, not with the queue for it.
+        output.append(Data())
         try process.run()
-        let watchdog = DispatchWorkItem {
-            guard process.isRunning else { return }
-            output.timedOut = true
-            process.terminate()
+        let watchdog = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        var termination = 0
+        watchdog.setEventHandler {
+            if let progress { output.observe(count: progress()) }
+            guard process.isRunning, output.hasStalled(for: oracleStall) else { return }
+            termination += 1
+            if termination == 1 {
+                process.terminate()
+            } else if termination > 5 {
+                kill(process.processIdentifier, SIGKILL)
+            }
         }
-        DispatchQueue.global(qos: .background).asyncAfter(
-            deadline: .now() + oracleTimeout, execute: watchdog
-        )
+        watchdog.schedule(deadline: .now() + 1, repeating: 1)
+        watchdog.resume()
         process.waitUntilExit()
         watchdog.cancel()
         errors.fileHandleForReading.readabilityHandler = nil
@@ -1711,7 +1793,7 @@ struct VimCoreTests {
             // The tail only: a wedged batch has echoed every command it got
             // through, and the end is the part that says where it stopped.
             throw VimOracleError.failed(
-                "timed out after \(Int(oracleTimeout))s, last output: \(output.text.suffix(400))"
+                "no progress for \(Int(oracleStall))s, last output: \(output.text.suffix(400))"
             )
         }
         return output.text
@@ -1772,11 +1854,13 @@ struct VimCoreTests {
             let process = Process()
             process.executableURL = executable
             process.arguments = ["--clean", "--headless", "-n", "-s", script.path]
-            process.qualityOfService = .background
             var environment = ProcessInfo.processInfo.environment
             environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
             process.environment = environment
-            let diagnostic = try runOracle(process)
+            let diagnostic = try runOracleBlocking(process) {
+                let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+                return names.count { $0.hasPrefix("out-") }
+            }
             guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
             return cases.indices.map { index in
                 Result {
@@ -1793,7 +1877,7 @@ struct VimCoreTests {
         source: String,
         cursor: Int,
         keys: String
-    ) throws -> String {
+    ) async throws -> String {
         precondition(source.unicodeScalars.allSatisfy { $0.isASCII })
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("heft-vim-keys-\(UUID().uuidString)", isDirectory: true)
@@ -1814,7 +1898,7 @@ struct VimCoreTests {
         var environment = ProcessInfo.processInfo.environment
         environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
         process.environment = environment
-        let diagnostic = try runOracle(process)
+        let diagnostic = try await runOracle(process)
         guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
         return String(decoding: try Data(contentsOf: file), as: UTF8.self)
     }
@@ -1824,7 +1908,7 @@ struct VimCoreTests {
         source: String,
         exCommand: String,
         additionalCommand: String? = nil
-    ) throws -> String {
+    ) async throws -> String {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("heft-vim-oracle-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1840,7 +1924,7 @@ struct VimCoreTests {
         var environment = ProcessInfo.processInfo.environment
         environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
         process.environment = environment
-        let diagnostic = try runOracle(process)
+        let diagnostic = try await runOracle(process)
         guard process.terminationStatus == 0 else {
             throw VimOracleError.failed(diagnostic)
         }
@@ -1852,7 +1936,7 @@ struct VimCoreTests {
         source: String,
         cursor: Int,
         command: String
-    ) throws -> Int {
+    ) async throws -> Int {
         precondition(source.unicodeScalars.allSatisfy { $0.isASCII })
         let bytes = Array(source.utf8)
         let safeCursor = min(max(0, cursor), bytes.count)
@@ -1882,7 +1966,7 @@ struct VimCoreTests {
         var environment = ProcessInfo.processInfo.environment
         environment["NVIM_LOG_FILE"] = directory.appendingPathComponent("nvim.log").path
         process.environment = environment
-        let diagnostic = try runOracle(process)
+        let diagnostic = try await runOracle(process)
         guard process.terminationStatus == 0 else { throw VimOracleError.failed(diagnostic) }
 
         let state = try JSONDecoder().decode(
