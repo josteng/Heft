@@ -58,13 +58,8 @@ enum SaveConflictResolution {
     case cancel
 }
 
-/// What the status bar shows about the open note as it is typed.
-///
-/// Its own object rather than properties on `AppModel`, because every view
-/// in the window observes the model and only the status bar wants this.
-/// Typing publishes here and nowhere else.
-@MainActor
 /// Whether the editor has text selected; published only when that flips.
+@MainActor
 final class EditorSelection: ObservableObject {
     @Published private(set) var isActive = false
 
@@ -117,6 +112,12 @@ final class OutlineTracker: ObservableObject {
     }
 }
 
+/// What the status bar shows about the open note as it is typed.
+///
+/// Its own object rather than properties on `AppModel`, because every view
+/// in the window observes the model and only the status bar wants this.
+/// Typing publishes here and nowhere else.
+@MainActor
 final class NoteStats: ObservableObject {
     private(set) var wordCount = 0
     private(set) var characterCount = 0
