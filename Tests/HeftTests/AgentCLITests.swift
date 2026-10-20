@@ -149,6 +149,13 @@ struct AgentCLITests {
         #expect(proposed.status != 0 && proposed.error.contains("limited to"))
         let moved = try run(["propose", root.path, "Work/Plan.md", "--move", "Home/Plan.md"], scope: "Work")
         #expect(moved.status != 0 && moved.error.contains("limited to"))
+        // `--replace` needs no read first, so a path climbing out of the
+        // folder would have proposed to the note there.
+        let climbed = try run(
+            ["propose", root.path, "Work/../Home/Secret.md", "--replace"],
+            stdin: "--- old\nThe launch code.\n--- new\nNothing.\n", scope: "Work"
+        )
+        #expect(climbed.status != 0 && climbed.error.contains("limited to"), "got \(climbed.error)")
         #expect(ProposalStore.all(in: root).isEmpty, "nothing was proposed")
         let allowed = try run(
             ["propose", root.path, "Work/Plan.md"], stdin: "# Plan\nMonday.\n", readLog: log, scope: "Work"
@@ -157,6 +164,22 @@ struct AgentCLITests {
 
         // Without a scope, the whole vault as before.
         #expect(try run(["read", root.path, "Home/Secret.md"]).status == 0)
+    }
+
+    /// Accepting a proposal writes the vault root joined with its path, so
+    /// a path that climbs out names a file outside the vault, scope or none.
+    @Test("A proposal's path stays inside the vault")
+    func proposalPathStaysInside() throws {
+        let root = try vault(["Plan.md": "# Plan\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let climbed = try run(["propose", root.path, "../Outside.md"], stdin: "# Outside\n")
+        #expect(climbed.status != 0 && climbed.error.contains("inside the vault"), "got \(climbed.error)")
+        let hidden = try run(["propose", root.path, "Notes/../../Outside.md"], stdin: "# Outside\n")
+        #expect(hidden.status != 0, "got \(hidden.error)")
+        #expect(ProposalStore.all(in: root).isEmpty)
+        // A `..` inside a name is a name.
+        let dotted = try run(["propose", root.path, "Plans..md"], stdin: "# Plans\n")
+        #expect(dotted.status == 0, "got \(dotted.error)")
     }
 
     /// What the search bar knows, as an agent can ask it: names ranked as
@@ -212,6 +235,8 @@ struct AgentCLITests {
         #expect(AgentCLI.isInScope("Work", scope: "Work"))
         #expect(!AgentCLI.isInScope("Workshop/Plan.md", scope: "Work"))
         #expect(!AgentCLI.isInScope("Home/Plan.md", scope: "Work"))
+        #expect(!AgentCLI.isInScope("Work/../Home/Plan.md", scope: "Work"))
+        #expect(AgentCLI.isInScope("Work/../Home/Plan.md", scope: nil))
         #expect(AgentCLI.isInScope("Home/Plan.md", scope: nil))
     }
 

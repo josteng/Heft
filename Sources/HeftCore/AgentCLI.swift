@@ -48,9 +48,11 @@ public enum AgentCLI {
     }
 
     /// Whether a vault-relative path is inside `scope`; everything is when
-    /// there is none.
+    /// there is none. A `..` anywhere is outside: `Work/../Home` starts with
+    /// the folder and climbs out of it.
     public static func isInScope(_ relative: String, scope: String?) -> Bool {
         guard let scope else { return true }
+        guard !relative.split(separator: "/").contains("..") else { return false }
         return relative == scope || relative.hasPrefix(scope + "/")
     }
 
@@ -116,6 +118,11 @@ public enum AgentCLI {
         let options = Options(arguments.dropFirst())
         let relative = normalized(notePath)
         requireInScope(relative)
+        // Accepting writes the vault root joined with this path, so a `..`
+        // part would write outside the vault, scope or no scope.
+        guard !relative.split(separator: "/").contains("..") else {
+            fail("\(relative) climbs out of the vault: a note path stays inside the vault")
+        }
         if let destination = options["move"] { requireInScope(NewNoteLocation.normalised(destination)) }
 
         // Deleting and moving are facts about the tree rather than about a
