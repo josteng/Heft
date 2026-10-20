@@ -158,6 +158,10 @@ enum SharedVault {
 
     static func enqueue(_ pending: Pending) throws {
         guard let folder = queueFolder else { throw InboxCaptureError.vaultUnavailable }
+        try enqueue(pending, in: folder)
+    }
+
+    static func enqueue(_ pending: Pending, in folder: URL) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(pending)
         try data.write(to: folder.appendingPathComponent("\(UUID().uuidString).json"),
@@ -171,14 +175,19 @@ enum SharedVault {
     /// drains listing the same queue would file each share twice.
     @discardableResult
     static func drainQueue(into root: URL) -> Int {
-        drainLock.withLock { drainLocked(into: root) }
+        guard let folder = queueFolder else { return 0 }
+        return drainQueue(from: folder, into: root)
+    }
+
+    @discardableResult
+    static func drainQueue(from folder: URL, into root: URL) -> Int {
+        drainLock.withLock { drainLocked(from: folder, into: root) }
     }
 
     private static let drainLock = NSLock()
 
-    private static func drainLocked(into root: URL) -> Int {
-        guard let folder = queueFolder,
-              let files = try? FileManager.default.contentsOfDirectory(
+    private static func drainLocked(from folder: URL, into root: URL) -> Int {
+        guard let files = try? FileManager.default.contentsOfDirectory(
                   at: folder, includingPropertiesForKeys: nil)
         else { return 0 }
         let decoder = JSONDecoder()

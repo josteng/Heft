@@ -41,6 +41,15 @@ let package = Package(
             path: "Sources/HeftCapture",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // The iOS app's App Group side, its share queue and filing, built
+        // here so that tests reach them; the bundles iOS runs are the Xcode
+        // targets, which compile the same folder.
+        .target(
+            name: "HeftiOSVault",
+            dependencies: ["HeftCore"],
+            path: "Sources/HeftiOSVault",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "Heft",
             dependencies: [
@@ -63,7 +72,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HeftTests",
-            dependencies: ["Heft", "HeftCore", "HeftVimCore", "HeftTestDefaults"],
+            dependencies: ["Heft", "HeftCore", "HeftVimCore", "HeftiOSVault", "HeftTestDefaults"],
             path: "Tests/HeftTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
