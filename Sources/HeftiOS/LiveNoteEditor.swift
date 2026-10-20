@@ -216,15 +216,16 @@ struct LiveNoteEditor: UIViewRepresentable {
                 && a.headingColors == b.headingColors
         }
 
-        /// Replaces the text, keeping the caret where it was when it still fits.
+        /// Replaces the text, keeping the caret beside the text it was in:
+        /// a capture merged in above the line being typed moves that line.
         private func load(_ text: String, into textView: MobileTextView) {
             let selection = textView.selectedRange
+            let caret = NoteSync.caret(selection.location, from: textView.text, to: text)
             layout = LiveLayout()
             styled = nil
             pendingShift = nil
             textView.text = text
-            let length = (text as NSString).length
-            textView.selectedRange = NSRange(location: min(selection.location, length), length: 0)
+            textView.selectedRange = NSRange(location: caret, length: 0)
             restyle(textView)
         }
 

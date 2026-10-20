@@ -330,6 +330,23 @@ public final class NoteSync {
         await load(in: vault)
     }
 
+    /// Where a caret at `offset` in `old` belongs in `new`, both in UTF-16
+    /// units: where it was while the text before it is unchanged, else as
+    /// far from the end while the text after it is, which is a capture
+    /// filed above the line being typed. Otherwise clamped.
+    public static func caret(_ offset: Int, from old: String, to new: String) -> Int {
+        let old = old as NSString, new = new as NSString
+        let offset = min(max(0, offset), old.length)
+        if offset <= new.length, old.substring(to: offset) == new.substring(to: offset) {
+            return offset
+        }
+        let tail = old.length - offset
+        if tail <= new.length, old.substring(from: offset) == new.substring(from: new.length - tail) {
+            return new.length - tail
+        }
+        return min(offset, new.length)
+    }
+
     // MARK: Drafts
 
     private func recordDraft() {

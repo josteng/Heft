@@ -491,6 +491,21 @@ struct NoteSyncTests {
         #expect(try contents(url) == "a!\n")
     }
 
+    // MARK: Caret
+
+    /// A capture filed above the caret moves the reader's line down; the
+    /// caret goes with it rather than staying at an offset now on another
+    /// line.
+    @Test("The caret follows its text when lines arrive above it")
+    func caretFollowsText() {
+        let old = "top\ntyping here\n"
+        let caret = ("top\ntyping" as NSString).length
+        #expect(NoteSync.caret(caret, from: old, to: "top\ncaptured\ntyping here\n")
+                == ("top\ncaptured\ntyping" as NSString).length)
+        #expect(NoteSync.caret(caret, from: old, to: old + "captured\n") == caret)
+        #expect(NoteSync.caret(caret, from: old, to: "other\n") == ("other\n" as NSString).length)
+    }
+
     // MARK: Drafts
 
     private func draft(_ vault: Vault) -> String? {
