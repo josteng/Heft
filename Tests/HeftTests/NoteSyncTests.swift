@@ -217,4 +217,25 @@ struct NoteSyncTests {
         #expect(!sync.conflict)
         #expect(try contents(url) == "mine more\n", "the typing made during Keep Mine was dropped")
     }
+
+    /// A note renamed or deleted on another device: saving stops and asks,
+    /// rather than failing on every pause in typing, and the typing stays
+    /// for Keep Mine to write back.
+    @Test("A note gone from disk is a conflict, not a failed save")
+    func noteGoneFromDisk() async throws {
+        let (vault, url) = try vault("old\n")
+        defer { try? FileManager.default.removeItem(at: vault.root) }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        try FileManager.default.removeItem(at: url)
+
+        sync.edited("old mine\n")
+        await sync.saveNow()
+
+        #expect(sync.conflict)
+        #expect(sync.saveError == nil, "every pause in typing reported a failed save")
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        await sync.keepMine()
+        #expect(try contents(url) == "old mine\n")
+    }
 }

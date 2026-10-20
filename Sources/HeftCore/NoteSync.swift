@@ -249,6 +249,12 @@ public enum NoteFile {
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forMerging,
                                        error: &coordinationError) { coordinated in
             result = Result {
+                // Renamed or deleted elsewhere is a change too, which Keep
+                // Mine can write back; as a failed read it was reported on
+                // every pause in typing.
+                guard FileManager.default.fileExists(atPath: coordinated.path) else {
+                    throw NoteWriteError.changedElsewhere
+                }
                 let current = try String(contentsOf: coordinated, encoding: .utf8)
                 guard current == original else { throw NoteWriteError.changedElsewhere }
                 try text.write(to: coordinated, atomically: true, encoding: .utf8)
