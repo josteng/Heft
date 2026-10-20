@@ -56,6 +56,9 @@ final class AgentRunner: ObservableObject {
         /// When it started: its proposals are the ones signed with its chat
         /// and made since, so one re-proposed under the same id counts.
         var started: Date
+        /// The vault it was asked in, which it is saved in whatever the
+        /// window has opened since.
+        var vaultRoot: URL
     }
     @Published private var runs: [String: Run] = [:]
     private static let host = ProcessInfo.processInfo.hostName
@@ -89,7 +92,7 @@ final class AgentRunner: ObservableObject {
             run.process.terminate()
             var chat = run.chat
             chat.turns[chat.turns.count - 1].failure = "Stopped"
-            finish(chat)
+            finish(chat, in: run.vaultRoot)
         }
         runs.removeAll()
         activities.removeAll()
@@ -115,13 +118,13 @@ final class AgentRunner: ObservableObject {
     func isRunning(_ chatID: String) -> Bool { runs[chatID] != nil }
 
     /// Names a chat as the reader wants it; its first question until then.
-    func rename(_ chat: AgentChat, to title: String) {
+    func rename(_ chat: AgentChat, to title: String, in root: URL? = nil) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         var renamed = runs[chat.id]?.chat ?? (self.chat?.id == chat.id ? self.chat ?? chat : chat)
         renamed.title = trimmed
         if runs[chat.id] != nil { runs[chat.id]?.chat = renamed }
-        finish(renamed)
+        finish(renamed, in: root)
     }
 
     func delete(_ chat: AgentChat) {
@@ -295,7 +298,7 @@ final class AgentRunner: ObservableObject {
             finish(chat)
             return
         }
-        runs[chat.id] = Run(process: process, chat: chat, started: started)
+        runs[chat.id] = Run(process: process, chat: chat, started: started, vaultRoot: vaultRoot)
         activities[chat.id] = "Thinking"
         let limit = timeLimit
         Task { [weak self, weak process] in
@@ -391,7 +394,8 @@ final class AgentRunner: ObservableObject {
         activities[chatID] = nil
         // The chat may have been closed while it ran; it is finished on disk
         // all the same.
-        guard let run = runs.removeValue(forKey: chatID), let vaultRoot else { return }
+        guard let run = runs.removeValue(forKey: chatID) else { return }
+        let vaultRoot = run.vaultRoot
         var chat = run.chat
         let last = chat.turns.count - 1
         if let outcome {
@@ -413,21 +417,21 @@ final class AgentRunner: ObservableObject {
         // chat running alongside leaves proposals in the same folder.
         let left = Self.own(ProposalStore.all(in: vaultRoot), chat: chat, since: run.started)
         chat.turns[last].proposals = Self.merged(chat.turns[last].proposals, with: left)
-        finish(chat)
+        finish(chat, in: vaultRoot)
         if !left.isEmpty { onProposals(chat.turns[last].proposals) }
-        if last == 0, chat.turns[0].failure == nil, !chat.turns[0].answer.isEmpty { nameChat(chat) }
+        if last == 0, chat.turns[0].failure == nil, !chat.turns[0].answer.isEmpty { nameChat(chat, in: vaultRoot) }
     }
 
     /// Gives a chat a name after its first answer, unless the reader has
     /// already given it one.
-    private func nameChat(_ chat: AgentChat) {
+    private func nameChat(_ chat: AgentChat, in root: URL) {
         let question = chat.turns[0].question
         let answer = chat.turns[0].answer
         Task { [weak self] in
             guard let self, let title = await self.titler(question, answer) else { return }
             let current = self.chats.first { $0.id == chat.id } ?? chat
             guard current.title == AgentChat.title(for: question) else { return }
-            self.rename(current, to: title)
+            self.rename(current, to: title, in: root)
         }
     }
 
@@ -463,15 +467,15 @@ final class AgentRunner: ObservableObject {
         return result
     }
 
-    /// Saves a turn that has ended, and shows it if its chat is on screen.
-    private func finish(_ finished: AgentChat) {
+    /// Saves a turn that has ended, in `root` or else the vault on screen,
+    /// and shows it if its chat is on screen.
+    private func finish(_ finished: AgentChat, in root: URL? = nil) {
         var chat = finished
         chat.updatedAt = Date()
         if self.chat?.id == chat.id { self.chat = chat }
-        if let vaultRoot {
-            try? AgentChatStore.save(chat, in: vaultRoot)
-            chats = AgentChatStore.all(in: vaultRoot)
-        }
+        guard let root = root ?? vaultRoot else { return }
+        try? AgentChatStore.save(chat, in: root)
+        if root == vaultRoot { chats = AgentChatStore.all(in: root) }
     }
 
     /// A failure in the reader's words. A signed-out agent is the common one,

@@ -321,6 +321,20 @@ struct AgentRunnerTests {
         #expect(fixture.runner.chats.isEmpty)
     }
 
+    /// A window can open another vault while a chat is answered; the chat
+    /// belongs to the vault it was asked in.
+    @Test("A run that ends after the window changed vaults is saved in its own")
+    func vaultChangedWhileRunning() async throws {
+        let fixture = try fixture(stdout: answering, delay: 0.5)
+        let other = fixture.vault.deletingLastPathComponent().appendingPathComponent("Other", isDirectory: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        fixture.runner.ask("What is due?", vaultRoot: fixture.vault, scope: "")
+        fixture.runner.load(vaultRoot: other)
+        try await settle(fixture.runner)
+        #expect(AgentChatStore.all(in: other).isEmpty)
+        #expect(AgentChatStore.all(in: fixture.vault).first?.turns[0].answer == "Due Friday, see [[Plan]].")
+    }
+
     @Test("A run past its time limit is stopped and says why")
     func timeLimit() async throws {
         let fixture = try fixture(stdout: answering, delay: 5)
