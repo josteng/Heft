@@ -921,7 +921,7 @@ public enum AgentCLI {
                 let title = notes.stem(for: now)
                 // Refused here too, or accepting the proposal wrote there.
                 let url = try notes.checkedURL(for: now)
-                starting = try? String(contentsOf: url, encoding: .utf8)
+                starting = try existingText(at: url)
                 // What `ensureNote` would have written, so a proposal for a
                 // day with no note yet still carries the template.
                 let base = starting ?? notes.templateBody().map {
@@ -937,7 +937,7 @@ public enum AgentCLI {
             } else {
                 let inbox = InboxCapture(vaultRoot: root, relativePath: target)
                 relative = inbox.relativePath
-                starting = try? String(contentsOf: inbox.url, encoding: .utf8)
+                starting = try existingText(at: inbox.url)
                 let title = ((relative as NSString).lastPathComponent as NSString)
                     .deletingPathExtension
                 proposed = try InboxCapture.contents(
@@ -972,6 +972,14 @@ public enum AgentCLI {
         print("note:    \(relative)")
         print("Waiting for review in Heft. Settings ▸ Capture decides this.")
         exit(0)
+    }
+
+    /// A note's text, nil when there is no note, and a refusal when there
+    /// is one that cannot be read. Read as nil, a note that was not UTF-8
+    /// became a proposal to create it, and accepting that replaced it.
+    private static func existingText(at url: URL) throws -> String? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try String(contentsOf: url, encoding: .utf8)
     }
 
     /// The moment `--at` names. ISO 8601 with an offset or `Z`, seconds and

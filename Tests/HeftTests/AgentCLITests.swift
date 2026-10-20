@@ -896,6 +896,32 @@ struct AgentCLITests {
         #expect(pending.kind == .create)
     }
 
+    /// A note that is there but not UTF-8 read as no note at all, so the
+    /// proposal was a create carrying the template, and accepting it
+    /// replaced the file. The immediate path already refuses it.
+    @Test("A reviewed capture into a note it cannot read is refused")
+    func reviewedCaptureRefusesAnUnreadableNote() throws {
+        let root = try vault([:])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { Self.discardSuite(suite) }
+        AgentCaptureReviewPreference.set(true, in: try #require(UserDefaults(suiteName: suite)))
+        let unreadable = Data([0xFF, 0xFE, 0x20, 0x62])
+        let daily = try dailyNote(in: root, day: "2025-03-04", body: "")
+        try unreadable.write(to: daily)
+        try unreadable.write(to: root.appendingPathComponent("Inbox.md"))
+
+        for arguments in [
+            ["kept out", "--daily", "--at", "2025-03-04T09:00"],
+            ["kept out"],
+        ] {
+            let refused = try run(["capture", root.path] + arguments, defaultsSuite: suite)
+            #expect(refused.status != 0, "\(arguments) was proposed")
+        }
+        #expect(ProposalStore.all(in: root).isEmpty)
+        #expect(try Data(contentsOf: daily) == unreadable)
+    }
+
     /// The daily note's folder comes from a file in the vault, and one that
     /// climbs out of it is refused whether the line is written or proposed.
     @Test("--daily cannot leave the vault, written or reviewed")
