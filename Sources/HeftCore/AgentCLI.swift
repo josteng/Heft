@@ -799,27 +799,40 @@ public enum AgentCLI {
     }
 
     private static func capture(root: URL, arguments: [String]) {
-        let options = Options(arguments[...])
-        let parsed = CommandLineSpec.split(arguments, forVerb: "capture")
-        let text = parsed.positional.joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            fail("usage: heft capture <vault> <text> [--daily] [--to <note>] [--done] [--at <time>]")
+        let usage = "usage: heft capture <vault> [--daily] [--to <note>] [--done] [--at <time>] [--] <text>"
+        // Strictly, since this writes without review: a caller that gets
+        // the flags wrong has to hear so before a line is written, not find
+        // a wrong one later. A program that logs here keeps its own record
+        // of what landed, and a success that wrote the wrong thing is the
+        // one failure it cannot see.
+        let options: [String: String]
+        let switches: Set<String>
+        let positional: [String]
+        switch CommandLineSpec.parse(arguments, forVerb: "capture") {
+        case let .success(parsed):
+            (positional, switches, options) = (parsed.positional, parsed.switches, parsed.values)
+        case let .failure(.unknown(flag)):
+            fail("capture has no \(flag) flag. Text that starts with -- goes after a lone --.\n\(usage)")
+        case let .failure(.missingValue(flag)):
+            fail("\(flag) needs a value after it.\n\(usage)")
         }
+        let text = positional.joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { fail(usage) }
         // Read through the spec, which knows these take no value. `Options`
         // alone took `--done "text"` for an option valued "text", and the
         // line went in unticked.
-        let daily = parsed.flags.contains("--daily")
-        let done = parsed.flags.contains("--done")
-        guard !(daily && options["to"] != nil) else {
+        let daily = switches.contains("--daily")
+        let done = switches.contains("--done")
+        guard !(daily && options["--to"] != nil) else {
             fail("--daily and --to name two different notes; pick one")
         }
         var moment = Date()
-        let atGiven = parsed.flags.contains("--at")
-        if atGiven {
-            guard let asked = options["at"], let named = captureMoment(asked) else {
+        let atGiven = options["--at"] != nil
+        if let asked = options["--at"] {
+            guard let named = captureMoment(asked) else {
                 fail("""
-                    --at takes an ISO 8601 date and time: \(options["at"] ?? "nothing")
+                    --at takes an ISO 8601 date and time: \(asked)
                     For example 2026-03-04T09:15:00+01:00, or 2026-03-04T09:15 for local time.
                     """)
             }
@@ -834,7 +847,7 @@ public enum AgentCLI {
         // adding to a *note*; prepending Markdown to a shell profile breaks
         // it as thoroughly as overwriting would.
         var target: String?
-        if let asked = options["to"] {
+        if let asked = options["--to"] {
             guard let cleaned = InboxNotePreference.normalised(asked) else {
                 fail("""
                     --to takes a path inside the vault: \(asked)

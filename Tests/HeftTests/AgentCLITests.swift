@@ -988,6 +988,40 @@ struct AgentCLITests {
         #expect(unchanged == "# Inbox\n")
     }
 
+    /// A program logging here keeps its own record of what landed, so a
+    /// success that wrote the wrong line is the failure it cannot see.
+    /// Each of these used to exit 0: `--to --done` went to the inbox, an
+    /// unknown flag was skipped, and a leading `--word` left the line.
+    @Test("A flag capture does not know, or one missing its value, writes nothing")
+    func captureRefusesFlagsItCannotRead() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n", "Log.md": "# Log\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for arguments in [
+            ["x", "--to", "--done"],
+            ["x", "--daily", "--done", "--at"],
+            ["x", "--daily", "--from-a-newer-heft"],
+            ["--fix", "the parser"],
+        ] {
+            let refused = try run(["capture", root.path] + arguments)
+            #expect(refused.status != 0, "\(arguments) was accepted")
+            #expect(refused.error.contains("usage"), "\(refused.error)")
+        }
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8) == "# Inbox\n")
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Log.md"), encoding: .utf8) == "# Log\n")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).sorted()
+            == ["Inbox.md", "Log.md"])
+
+        // After a lone `--` it is text, flags and all.
+        let literal = try run(["capture", root.path, "--done", "--", "--fix", "--to", "it"])
+        #expect(literal.status == 0, "\(literal.error)")
+        #expect(try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+            .contains(" --fix --to it\n"))
+    }
+
     @Test("Several words are one line, not one capture each")
     func captureJoinsItsWords() throws {
         let root = try vault(["Inbox.md": "# Inbox\n"])

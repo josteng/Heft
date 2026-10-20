@@ -158,6 +158,8 @@ public enum CommandLineSpec {
                  "That moment instead of now, in ISO 8601: the time on the line, "
                  + "and with --daily which day's note, filed among its timestamped "
                  + "lines in time order."),
+            Flag("--", "The rest is the text, even where it starts with --. "
+                 + "Any other flag capture does not know is refused."),
         ], isReadOnly: false),
         Verb("daily", "<vault> [YYYY-MM-DD]", "Create a daily note from the template.",
              isReadOnly: false),
@@ -216,6 +218,55 @@ public enum CommandLineSpec {
             index += 1
         }
         return (positional, flags)
+    }
+
+    /// A verb's arguments read strictly, for a verb that writes without
+    /// review: a flag it does not declare is refused rather than skipped,
+    /// a flag that takes a value has to be given one, and everything after
+    /// a lone `--` is text.
+    ///
+    /// `split` is forgiving, and for `capture` that wrote wrong lines and
+    /// reported success: `--to --done` took `--done` for the note and went
+    /// to the inbox, a flag from a newer Heft was ignored, and text that
+    /// began with `--` vanished from the line.
+    public static func parse(
+        _ arguments: [String], forVerb name: String
+    ) -> Result<(positional: [String], switches: Set<String>, values: [String: String]), ArgumentError> {
+        let flags = verb(named: name)?.flags ?? []
+        var positional: [String] = []
+        var switches = Set<String>()
+        var values: [String: String] = [:]
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            index += 1
+            if argument == "--" {
+                positional.append(contentsOf: arguments[index...])
+                break
+            }
+            guard argument.hasPrefix("--") else {
+                positional.append(argument)
+                continue
+            }
+            guard let flag = flags.first(where: { $0.name == argument }) else {
+                return .failure(.unknown(argument))
+            }
+            guard flag.value != nil else {
+                switches.insert(argument)
+                continue
+            }
+            guard index < arguments.count, !arguments[index].hasPrefix("--") else {
+                return .failure(.missingValue(argument))
+            }
+            values[argument] = arguments[index]
+            index += 1
+        }
+        return .success((positional, switches, values))
+    }
+
+    public enum ArgumentError: Error, Equatable {
+        case unknown(String)
+        case missingValue(String)
     }
 
     public static func verb(named name: String) -> Verb? {

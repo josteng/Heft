@@ -48,6 +48,8 @@ heft capture <vault> "text"            # add one timestamped line to the inbox
     --at 2026-03-04T09:15:00+01:00     # ...stamped then, and with --daily into
                                        #    that day's note, in time order among
                                        #    its timestamped lines
+    -- "--text"                        # ...after a lone --, text; any flag it does
+                                       #    not know is refused, and nothing written
 
 heft propose <vault> <note.md> \       # the new body arrives on stdin
     --summary "what this is for" \
