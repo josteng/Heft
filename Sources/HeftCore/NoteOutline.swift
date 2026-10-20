@@ -45,17 +45,30 @@ public struct NoteOutline: Equatable, Sendable {
         // The line before, for a setext underline: its text, where it
         // started, and whether it can carry one.
         var previous: (text: String, line: Int, offset: Int, isParagraph: Bool)?
+        let raws = source.components(separatedBy: "\n")
+        // A file saved on Windows ends each line in a return as well.
+        let lines = raws.map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
+        // A comment hides what is inside only once it closes, as the
+        // decorator matches it: the last line that could close each kind.
+        let lastHTMLClose = lines.lastIndex { $0.contains("-->") } ?? -1
+        let lastPercentClose = lines.lastIndex { Self.isPercentFence($0) } ?? -1
+        var commentCloser: String?
 
-        for (index, raw) in source.components(separatedBy: "\n").enumerated() {
+        for (index, line) in lines.enumerated() {
             let lineOffset = offset
-            offset += raw.utf16.count + 1
-            // A file saved on Windows ends each line in a return as well.
-            let line = raw.hasSuffix("\r") ? String(raw.dropLast()) : raw
+            offset += raws[index].utf16.count + 1
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             // A `# comment` in the YAML is not a heading.
             if index < frontmatterLines { continue }
             if inFence {
-                if trimmed.hasPrefix(fenceMarker) { inFence = false }
+                // Only the opening three characters alone on a line close
+                // it, as the decorator has it; a ````swift` inside is code.
+                if trimmed == fenceMarker { inFence = false }
+                previous = nil
+                continue
+            }
+            if let closer = commentCloser {
+                if closer == "%%" ? Self.isPercentFence(line) : line.contains(closer) { commentCloser = nil }
                 previous = nil
                 continue
             }
@@ -65,8 +78,22 @@ public struct NoteOutline: Equatable, Sendable {
                 previous = nil
                 continue
             }
+            // A comment left open on this line hides the lines down to its
+            // close, and this one with them.
+            if Self.opensHTMLComment(line), lastHTMLClose > index {
+                commentCloser = "-->"
+                previous = nil
+                continue
+            }
+            if Self.isPercentFence(line), lastPercentClose > index {
+                commentCloser = "%%"
+                previous = nil
+                continue
+            }
 
-            if let level = Self.atxLevel(trimmed) {
+            // At the very start of the line: the decorator draws no indented
+            // `#` as a heading.
+            if let level = Self.atxLevel(line) {
                 let text = trimmed.dropFirst(level).trimmingCharacters(in: .whitespaces)
                 // A closing run of hashes is markup too.
                 let title = text.replacing(#/\s+#+$/#, with: "")
@@ -117,6 +144,18 @@ public struct NoteOutline: Equatable, Sendable {
         guard level <= 6 else { return nil }
         let rest = trimmed.dropFirst(level)
         return rest.isEmpty || rest.first == " " || rest.first == "\t" ? level : nil
+    }
+
+    /// `%%` alone on its line, which opens or closes Obsidian's block
+    /// comment.
+    private static func isPercentFence(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespaces) == "%%"
+    }
+
+    /// Whether the line leaves a `<!--` without its `-->`.
+    private static func opensHTMLComment(_ line: String) -> Bool {
+        guard let open = line.range(of: "<!--", options: .backwards) else { return false }
+        return line.range(of: "-->", range: open.upperBound..<line.endIndex) == nil
     }
 
     /// `===` makes an H1 and `--` or longer an H2, with at most three

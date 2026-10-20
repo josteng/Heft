@@ -88,6 +88,30 @@ struct NoteOutlineTests {
         #expect(drawn.count == 4)
     }
 
+    /// Each of these once put a heading in the outline that the note does
+    /// not show: one inside a comment, one indented, one below a line that
+    /// only looks like a closing fence.
+    @Test("Comments, indents and fence lookalikes agree with the surface", arguments: [
+        "<!--\n# Hidden\n-->\n# Shown",
+        "%%\n# Draft\n%%\n# Shown",
+        "Text <!-- open\n# Hidden\n--> after\n# Shown",
+        "# Not drawn <!--\nx\n-->\n# Shown",
+        "<!-- closed --> <!--\n# Hidden\n-->\n# Shown",
+        "<!--\n# Never closed\n# Shown",
+        "%%\n# Never closed\n# Shown",
+        "  # Indented\n# Shown",
+        "```md\n```python\n# Code\n```\n# Shown",
+        "```\n# Code\n````\n# Code\n```\n# Shown",
+    ])
+    func agreesOnEdgeCases(source: String) {
+        let text = source as NSString
+        let drawn = LiveDecorator.decorations(in: source).compactMap { decoration -> Int? in
+            guard case .heading = decoration.style else { return nil }
+            return text.lineRange(for: NSRange(location: decoration.range.location, length: 0)).location
+        }
+        #expect(NoteOutline(source: source).entries.map(\.offset) == drawn.sorted())
+    }
+
     @Test("Titles lose their markup")
     func plainTitles() {
         #expect(titles("## **Bold** and [[Note|alias]] `code` ##") == ["Bold and alias code"])
