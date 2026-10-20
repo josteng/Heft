@@ -185,11 +185,12 @@ public enum MarkdownEditing {
     ///
     /// Only a single address with a scheme counts, and only over a selection
     /// on one line that is not itself an address: replacing one link with
-    /// another is an ordinary paste.
+    /// another is an ordinary paste. A space inside is not an address, even
+    /// where `URL` would take one in its path, since it ends the link.
     public static func linkPasting(_ pasted: String, over selected: String) -> String? {
         let address = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selected.isEmpty, !selected.contains(where: \.isNewline),
-              isWebAddress(address),
+              !address.contains(where: \.isWhitespace), isWebAddress(address),
               !isWebAddress(selected.trimmingCharacters(in: .whitespaces))
         else { return nil }
         return link(text: selected, to: address)
@@ -202,8 +203,8 @@ public enum MarkdownEditing {
         return "[\(text)](\(destination))"
     }
 
-    /// A scheme and a host, so `todo:fix` is text and not an address. An
-    /// address with a space in it does not parse at all.
+    /// A scheme and a host, so `todo:fix` is text and not an address. A
+    /// space in the host does not parse, but one in the path does.
     static func isWebAddress(_ text: String) -> Bool {
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "mailto" ? text.count > 7 : url.host?.isEmpty == false

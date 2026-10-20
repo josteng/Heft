@@ -31,6 +31,8 @@ struct LinkPasteTests {
         #expect(MarkdownEditing.linkPasting("todo:fix", over: "text") == nil)
         #expect(MarkdownEditing.linkPasting("mailto:", over: "text") == nil)
         #expect(MarkdownEditing.linkPasting("https://example.com and more", over: "text") == nil)
+        // `URL` takes a space in the path, and `[text](a b)` is no link.
+        #expect(MarkdownEditing.linkPasting("https://example.com/a b", over: "text") == nil)
         #expect(MarkdownEditing.linkPasting("https://example.com", over: "two\nlines") == nil)
         #expect(MarkdownEditing.linkPasting("https://example.com", over: "https://example.net") == nil)
     }
