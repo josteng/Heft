@@ -556,6 +556,28 @@ struct VaultHostTests {
         #expect(model.current?.relativePath == "note.md")
     }
 
+    /// A slash typed into a name is part of the name, a date most often.
+    /// Read as a path it made folders from the vault's root, and `..`
+    /// climbed out of the vault altogether.
+    @Test("A slash typed into a name stays in the name")
+    func renameWithSlash() async throws {
+        let root = try vault(["Notes/Note.md": "# Note\n", "Notes/Other.md": "# Other\n"])
+        let outside = root.deletingLastPathComponent().appendingPathComponent("Outside.md")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let model = try await ready(model(root, ScriptedHost()))
+
+        #expect(model.rename(try item(model, "Notes/Note.md"), to: "Meeting 10/20"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path) == ["Notes"])
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Notes/Meeting 10-20.md").path))
+
+        #expect(model.rename(try await item(model, awaiting: "Notes/Other.md"), to: "../Outside"))
+        #expect(!FileManager.default.fileExists(atPath: outside.path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path) == ["Notes"])
+    }
+
     /// Renaming through the sidebar's inline field passes the name directly.
     /// It must not put a modal panel up on top of the field the reader is
     /// already typing in.

@@ -34,6 +34,18 @@ struct VaultOperationsTests {
         #expect(VaultOperations.sanitise("   ").isEmpty)
     }
 
+    /// The vault's tree skips a name that starts with a dot, as Obsidian
+    /// does: `../Outside` cleaned to `..-Outside.md` renamed a note out of
+    /// sight while every link to it was repointed at it.
+    @Test("A typed name never becomes a hidden file")
+    func sanitisingLeadingDots() {
+        #expect(VaultOperations.sanitise("../Outside") == "-Outside")
+        #expect(VaultOperations.sanitise(".hidden") == "hidden")
+        #expect(VaultOperations.sanitise(" . Notes") == "Notes")
+        #expect(VaultOperations.sanitise("v1.2 notes.") == "v1.2 notes.")
+        #expect(VaultOperations.sanitise("...").isEmpty)
+    }
+
     @Test("The extension a note is displayed without is put back")
     func markdownSuffix() {
         #expect(VaultOperations.filename(for: "Ideas", isMarkdown: true) == "Ideas.md")

@@ -27,10 +27,14 @@ public enum VaultOperations {
     /// folder level, and `:` is what the Finder still shows as `/`. Both
     /// become a dash rather than being stripped, so `Notes: 2026` keeps its
     /// shape instead of closing up to `Notes 2026`.
+    ///
+    /// A leading dot goes: the tree skips a name that starts with one, as
+    /// Obsidian does, so `../Outside` as `..-Outside` hid the note.
     public static func sanitise(_ name: String) -> String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
+        String(name.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
+            .trimmingPrefix(while: { $0 == "." || $0.isWhitespace }))
     }
 
     /// The filename a typed name should become, or nil when nothing was typed.

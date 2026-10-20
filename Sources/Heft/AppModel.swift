@@ -1657,17 +1657,22 @@ final class AppModel: ObservableObject {
             status = "Close \(item.name) in the other window before renaming it"
             return false
         }
-        let entered: String
+        let typed: String
         if let proposedName {
-            entered = proposedName
+            typed = proposedName
         } else {
             guard let prompted = host.name(
                 title: "Rename \(item.isFolder ? "Folder" : "Note")",
                 message: item.relativePath, initial: item.name, confirm: "Rename",
                 suggestFrom: item.isMarkdown ? item.url : nil
             ) else { return false }
-            entered = prompted
+            typed = prompted
         }
+        // Every caller here hands over a name somebody typed, where a slash
+        // is part of it, a date most often. `planRename` reads one as a path
+        // from the vault's root, which is the command line's spelling of a
+        // move: `Meeting 10/20` made a folder, and `../` left the vault.
+        let entered = VaultOperations.sanitise(typed)
 
         // Whether the name is usable, and where it lands, is `VaultOperations`
         // in HeftCore: the same rules the command line renames by. What is

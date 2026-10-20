@@ -639,8 +639,13 @@ final class MobileVault {
 
     /// Renames a note or folder in place and answers its new path. Links to
     /// it, or to anything inside it, are repointed as on the Mac.
-    func rename(_ path: String, to name: String) throws -> String {
+    func rename(_ path: String, to typed: String) throws -> String {
         guard let item = item(at: path) else { throw MobileVaultActionError.missing }
+        // A name somebody typed, where a slash is part of it, a date most
+        // often. `planRename` reads one as a path from the vault's root, the
+        // command line's spelling of a move: `Meeting 10/20` made a folder,
+        // and `../` left the vault.
+        let name = VaultOperations.sanitise(typed)
         let plan = VaultOperations.planRename(item, to: name) { [root] candidate in
             guard let root else { return false }
             return FileManager.default.fileExists(atPath: root.appendingPathComponent(candidate).path)
