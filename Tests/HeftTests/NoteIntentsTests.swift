@@ -266,6 +266,21 @@ struct NoteIntentsTests {
         #expect(try String(contentsOf: root.appendingPathComponent("Roof.md"), encoding: .utf8) == "body\n")
     }
 
+    /// A share or a Siri request runs unattended, so a note it cannot read
+    /// must stay as it is rather than be replaced by the line.
+    @Test("Appending to a note that cannot be read leaves it alone")
+    func appendUnreadable() throws {
+        let root = try vault(["Roof.md": ""])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("Roof.md")
+        let latin1 = Data("Dach überprüfen\n".data(using: .isoLatin1)!)
+        try latin1.write(to: url)
+        #expect(throws: (any Error).self) {
+            try NoteAppend.append("also look in the basement", to: "Roof.md", in: root)
+        }
+        #expect(try Data(contentsOf: url) == latin1)
+    }
+
     // MARK: - The entity itself
 
     /// Identified by path, not by name: two folders may each hold a Notes.md,

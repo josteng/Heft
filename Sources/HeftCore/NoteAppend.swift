@@ -39,7 +39,9 @@ public enum NoteAppend {
         var writeError: Error?
         coordinator.coordinate(writingItemAt: url, options: .forMerging, error: &coordinationError) { target in
             do {
-                let existing = (try? String(contentsOf: target, encoding: .utf8)) ?? ""
+                // Read or refuse: a note that cannot be read is not empty,
+                // and writing over it would replace it with the line.
+                let existing = try String(contentsOf: target, encoding: .utf8)
                 // A blank line before, so a sentence added to a paragraph does
                 // not join it, and exactly one newline after.
                 var separator = ""
