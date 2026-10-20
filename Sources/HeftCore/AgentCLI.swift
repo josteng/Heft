@@ -949,6 +949,17 @@ public enum AgentCLI {
             fail(error.localizedDescription)
         }
 
+        // One note, one pending proposal, as `propose` already holds. Each
+        // capture is the whole note plus its line, so a second accepted
+        // after the first took the first one's line back out.
+        if let waiting = ProposalStore.conflict(forNote: relative, among: ProposalStore.all(in: root)) {
+            fail("""
+                \(relative) already has a proposal waiting: \(waiting.id)
+                Accepting a second after it would take its changes back out, \
+                so review or drop that one first.
+                """)
+        }
+
         let summary = "Capture: \(text.prefix(50))"
         let proposal = Proposal(
             id: ProposalStore.identifier(

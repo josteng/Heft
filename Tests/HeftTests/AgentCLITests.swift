@@ -896,6 +896,26 @@ struct AgentCLITests {
         #expect(pending.kind == .create)
     }
 
+    /// Each reviewed capture is the whole note plus one line, measured
+    /// against the note as it is now. A second beside the first, once the
+    /// first was accepted, proposed taking its line back out again.
+    @Test("A reviewed capture into a note already waiting for review is refused")
+    func reviewedCapturesDoNotStack() throws {
+        let root = try vault(["Inbox.md": "# Inbox\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { Self.discardSuite(suite) }
+        AgentCaptureReviewPreference.set(true, in: try #require(UserDefaults(suiteName: suite)))
+
+        #expect(try run(["capture", root.path, "first"], defaultsSuite: suite).status == 0)
+        let second = try run(["capture", root.path, "second"], defaultsSuite: suite)
+        #expect(second.status != 0)
+        #expect(second.error.contains("already has a proposal waiting"), "\(second.error)")
+        let pending = ProposalStore.all(in: root)
+        #expect(pending.count == 1)
+        #expect(pending.first?.body.contains("first") == true)
+    }
+
     /// A note that is there but not UTF-8 read as no note at all, so the
     /// proposal was a create carrying the template, and accepting it
     /// replaced the file. The immediate path already refuses it.
