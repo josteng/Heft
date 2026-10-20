@@ -1545,8 +1545,13 @@ struct VimCoreTests {
         }
     }
 
+    /// Nil skips every oracle, as on a machine without Neovim. Set
+    /// `HEFT_SKIP_NVIM_ORACLE` to skip them on one that has it; the tests
+    /// still run, so `swift test --skip` need not know their names.
     private static var neovimURL: URL? {
-        let pathCandidates = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+        let environment = ProcessInfo.processInfo.environment
+        if !(environment["HEFT_SKIP_NVIM_ORACLE"] ?? "").isEmpty { return nil }
+        let pathCandidates = (environment["PATH"] ?? "")
             .split(separator: ":")
             .map { "\($0)/nvim" }
         return (pathCandidates + ["/opt/homebrew/bin/nvim", "/usr/local/bin/nvim", "/usr/bin/nvim"])
