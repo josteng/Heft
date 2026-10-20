@@ -180,5 +180,23 @@ struct VaultRenameTests {
                 == "[[Wirk/Plan]]")
         }
     }
+
+    /// On a case-insensitive volume, the Mac's default, `groceries.md` already
+    /// exists: it is `Groceries.md` itself.
+    @Test("A change of case alone is a rename, not a collision")
+    func caseOnlyRename() throws {
+        try withVault(["Groceries.md": "milk", "Index.md": "[[Groceries]]"]) { root, index, tree in
+            let summary = try VaultRename.perform(
+                item: try item(tree, "Groceries.md"), to: "groceries.md",
+                index: index, vaultRoot: root
+            )
+            let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            #expect(names.contains("groceries.md"))
+            #expect(!names.contains("Groceries.md"))
+            #expect(summary.notes == 1)
+            #expect(try String(contentsOf: root.appendingPathComponent("Index.md"), encoding: .utf8)
+                == "[[groceries]]")
+        }
+    }
 }
 

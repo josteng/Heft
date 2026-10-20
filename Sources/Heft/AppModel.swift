@@ -1677,6 +1677,9 @@ final class AppModel: ObservableObject {
                 atPath: vaultRoot.appendingPathComponent(candidate).path
             )
         }
+        let caseOnly = VaultOperations.destination(for: item, named: entered).flatMap {
+            $0 != item.relativePath && $0.lowercased() == item.relativePath.lowercased() ? $0 : nil
+        }
         let renamedPath: String
         switch planned {
         case .success(let move):
@@ -1690,6 +1693,11 @@ final class AppModel: ObservableObject {
                 return true
             }
             renamedPath = move.to
+        case .failure(.alreadyExists) where caseOnly != nil:
+            // "note" for `Note.md`: the disk ignores case, so the name found
+            // taken is this note's own. The move changes the case alone, and
+            // on a disk that does not ignore it, refuses a real other file.
+            renamedPath = caseOnly ?? item.relativePath
         case .failure(let refusal):
             status = refusal.message
             return false

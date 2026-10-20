@@ -178,7 +178,9 @@ public enum VaultRename {
     ) throws -> Summary {
         guard !newPath.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure.emptyName }
         let target = vaultRoot.appendingPathComponent(newPath)
-        guard !fileManager.fileExists(atPath: target.path) else {
+        // A change of case alone finds the item itself on a case-insensitive
+        // volume, and moving it there is the rename.
+        guard !fileManager.fileExists(atPath: target.path) || isSameFile(target, item.url) else {
             throw Failure.alreadyExists(newPath)
         }
 
@@ -192,5 +194,13 @@ public enum VaultRename {
         )
         try fileManager.moveItem(at: item.url, to: target)
         return apply(planned, after: changes, vaultRoot: vaultRoot)
+    }
+
+    private static func isSameFile(_ one: URL, _ other: URL) -> Bool {
+        let key = URLResourceKey.fileResourceIdentifierKey
+        guard let first = try? one.resourceValues(forKeys: [key]).fileResourceIdentifier,
+              let second = try? other.resourceValues(forKeys: [key]).fileResourceIdentifier
+        else { return false }
+        return first.isEqual(second)
     }
 }

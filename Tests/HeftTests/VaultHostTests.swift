@@ -539,6 +539,23 @@ struct VaultHostTests {
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Note.md").path))
     }
 
+    /// The Mac's disk ignores case, so the new name "exists" already: it is
+    /// the note itself.
+    @Test("A rename that changes only the capitals goes through")
+    func renameCaseOnly() async throws {
+        let root = try vault()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try await ready(model(root, ScriptedHost(), open: "Note.md"))
+        #expect(model.current?.relativePath == "Note.md")
+
+        #expect(model.rename(try item(model, "Note.md"), to: "note"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).sorted()
+            == ["Index.md", "note.md"])
+        #expect(try String(contentsOf: root.appendingPathComponent("note.md"), encoding: .utf8)
+            == "# Note\n")
+        #expect(model.current?.relativePath == "note.md")
+    }
+
     /// Renaming through the sidebar's inline field passes the name directly.
     /// It must not put a modal panel up on top of the field the reader is
     /// already typing in.
