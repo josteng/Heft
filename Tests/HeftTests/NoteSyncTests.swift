@@ -214,7 +214,8 @@ struct NoteSyncTests {
         sync.edited("mine\n")
         await sync.saveNow()
         #expect(sync.conflict)
-        let slow = probe.hold("overwrite", call: 1)
+        // The refused save, then Keep Mine's.
+        let slow = probe.hold("write", call: 2)
 
         let keep = Task { await sync.keepMine() }
         await slow.arrival()
@@ -345,6 +346,54 @@ struct NoteSyncTests {
 
         #expect(sync.conflict)
         #expect(try contents(url) == "a\nb theirs\n")
+    }
+
+    /// The reader decides against the version the banner was raised for;
+    /// a capture filed while they decided is not part of that choice.
+    @Test("A capture landing while the conflict is up survives Keep Mine")
+    func captureDuringConflictKept() async throws {
+        let (vault, url) = try vault("a\nb\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        try "a\nb theirs\n".write(to: url, atomically: true, encoding: .utf8)
+        sync.edited("a\nb mine\n")
+        await sync.saveNow()
+        #expect(sync.conflict)
+
+        try "a\nb theirs\ncaptured\n".write(to: url, atomically: true, encoding: .utf8)
+        await sync.keepMine()
+
+        #expect(!sync.conflict)
+        #expect(try contents(url) == "a\nb mine\ncaptured\n", "Keep Mine wrote over the capture")
+        #expect(sync.source == "a\nb mine\ncaptured\n")
+    }
+
+    /// A newer change to the same lines is one the reader has not seen.
+    @Test("A change to the same lines after the banner asks again")
+    func newerConflictAsksAgain() async throws {
+        let (vault, url) = try vault("a\nb\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        try "a\nb theirs\n".write(to: url, atomically: true, encoding: .utf8)
+        sync.edited("a\nb mine\n")
+        await sync.saveNow()
+
+        try "a\nb theirs again\n".write(to: url, atomically: true, encoding: .utf8)
+        await sync.keepMine()
+
+        #expect(sync.conflict, "Keep Mine wrote over a version the reader never saw")
+        #expect(try contents(url) == "a\nb theirs again\n")
+        try "a\nb theirs again\nlater\n".write(to: url, atomically: true, encoding: .utf8)
+        await sync.keepMine()
+        #expect(try contents(url) == "a\nb mine\nlater\n")
     }
 
     // MARK: Drafts

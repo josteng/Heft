@@ -71,6 +71,9 @@ public final class NoteSync {
 
     /// What is on disk as far as this document knows; a save checks it.
     @ObservationIgnored private var onDisk: String?
+    /// The version on disk the conflict was raised against, which Keep
+    /// Mine decides against; nil when the note was gone or unreadable.
+    @ObservationIgnored private var shown: String?
     /// Typed and not yet saved. Not observed: a keystroke changes nothing
     /// that any view draws.
     @ObservationIgnored private var pending: String?
@@ -193,9 +196,13 @@ public final class NoteSync {
                     // the merge read, so one landing meanwhile merges again;
                     // only the same lines changed on both sides ask.
                     attempts += 1
-                    guard attempts < 4, let theirs = try? await storage.read(url),
+                    let theirs = try? await storage.read(url)
+                    guard attempts < 4, let theirs,
                           let merged = NoteMerge.merge(base: base, mine: text, theirs: theirs)
-                    else { throw NoteWriteError.changedElsewhere }
+                    else {
+                        shown = theirs
+                        throw NoteWriteError.changedElsewhere
+                    }
                     written = merged
                     original = theirs
                 }
@@ -232,6 +239,7 @@ public final class NoteSync {
         }
         guard let carried = NoteMerge.merge(base: buffer, mine: typed, theirs: merged) else {
             // The typing reached the lines the capture changed meanwhile.
+            shown = merged
             conflict = true
             recordDraft()
             return
@@ -245,6 +253,11 @@ public final class NoteSync {
     /// Writes what was typed over the version that arrived meanwhile.
     /// In the queue with the saves, and like them it keeps typing that came
     /// in during the write for the next save.
+    ///
+    /// Over that version only: the file can change again while the reader
+    /// decides, and with captures it often has. So the save takes the shown
+    /// version as its base and merges a later change as any save does, or
+    /// asks again when the later change touches the same lines.
     public func keepMine() async {
         let previous = writing
         let current = Task { await previous?.value; await overwrite() }
@@ -254,6 +267,12 @@ public final class NoteSync {
 
     private func overwrite() async {
         guard let vault, let text = pending, let url = vault.noteURL(at: path) else { return }
+        if let decided = shown {
+            onDisk = decided
+            shown = nil
+            conflict = false
+            return await write()
+        }
         do {
             try await storage.overwrite(text, url)
             loadLanded = loadsStarted
@@ -274,6 +293,7 @@ public final class NoteSync {
         guard let vault else { return }
         pending = nil
         conflict = false
+        shown = nil
         discardDraft()
         await load(in: vault)
     }
