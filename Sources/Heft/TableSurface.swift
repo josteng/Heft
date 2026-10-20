@@ -426,7 +426,11 @@ extension HeftTextKit2View {
 
     @discardableResult
     private func apply(_ action: TableEditing.Action?) -> Bool {
-        guard let action else { return false }
+        guard var action else { return false }
+        // A row added or a table rewritten is in the note's line ending.
+        if inNoteLineEnding(action.replacement) != nil {
+            action = action.adapted(to: LineEnding(of: string))
+        }
         guard let replace = action.replace else {
             setSelectedRange(action.selection)
             updateTableCaret()

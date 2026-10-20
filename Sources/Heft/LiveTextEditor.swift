@@ -1788,11 +1788,15 @@ final class HeftTextKit2View: NSTextView {
                 in: string as NSString, at: selectedRange().location
             ))
             : ""
-        let typed = lead + insertion.text
-        insertText(typed, replacementRange: selectedRange())
-        let caret = selectedRange().location
-            - (typed as NSString).length + lead.count + insertion.caretOffset
-        setSelectedRange(NSRange(location: max(0, caret), length: 0))
+        let start = selectedRange().location
+        // Written in the note's line ending here rather than by
+        // `insertText`, so the caret offset can move with it.
+        let typed = LineEnding(of: string).adapting(
+            [(NSRange(location: start, length: selectedRange().length), lead + insertion.text)],
+            selections: [NSRange(location: start + lead.count + insertion.caretOffset, length: 0)]
+        )
+        insertText(typed.edits[0].replacement, replacementRange: selectedRange())
+        setSelectedRange(NSRange(location: max(0, typed.selections[0].location), length: 0))
         updateVimCursor()
     }
 
@@ -1985,6 +1989,7 @@ final class HeftTextKit2View: NSTextView {
     }
 
     private func applyVimOutput(_ output: VimOutput) {
+        let output = inNoteLineEnding(output)
         var changedText = false
         for edit in output.edits.sorted(by: { $0.range.location > $1.range.location }) {
             guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { continue }
@@ -3407,10 +3412,57 @@ final class HeftTextKit2View: NSTextView {
         ))
     }
 
+    /// `text` written in the note's own line ending, or nil when it already
+    /// is. A break inside it, `\n`, `\r\n` or a lone `\r`, becomes the
+    /// one most of the note uses; the note's own lines are never touched.
+    func inNoteLineEnding(_ text: String) -> String? {
+        guard text.utf16.contains(where: { $0 == 10 || $0 == 13 }) else { return nil }
+        let ending = LineEnding(of: string)
+        return ending.differs(in: text) ? ending.applied(to: text) : nil
+    }
+
+    /// Vim's edits in the note's line ending, `o` and `p` among them, with
+    /// the caret moved to match.
+    private func inNoteLineEnding(_ output: VimOutput) -> VimOutput {
+        guard output.edits.contains(where: { inNoteLineEnding($0.replacement) != nil }) else {
+            return output
+        }
+        let selections = output.selections ?? output.selection.map { [$0] } ?? []
+        let result = LineEnding(of: string).adapting(
+            output.edits.map { ($0.range, $0.replacement) }, selections: selections
+        )
+        var adapted = output
+        adapted.edits = result.edits.map { VimEdit(range: $0.range, replacement: $0.replacement) }
+        if output.selections != nil {
+            adapted.selections = result.selections
+        } else if output.selection != nil {
+            adapted.selection = result.selections.first
+        }
+        return adapted
+    }
+
+    /// Paste and drop arrive here rather than through `insertText`, so a
+    /// Unix paste into a Windows note is written in the note's ending here.
+    override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        if type == .string, let text = pboard.string(forType: .string),
+           let adapted = inNoteLineEnding(text) {
+            insertText(adapted, replacementRange: rangeForUserTextChange)
+            return true
+        }
+        return super.readSelection(from: pboard, type: type)
+    }
+
     /// Auto-pairs the second `[` so the caret remains inside `[[]]`, matching
     /// the completion flow in Obsidian. Existing closers are never duplicated.
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
-        let inserted = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
+        var insertString = insertString
+        var inserted = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
+        // Return, a list's continuation, a paste: every break typed is the
+        // note's own, so a Windows note does not end up mixed.
+        if let text = inserted, let adapted = inNoteLineEnding(text) {
+            insertString = adapted
+            inserted = adapted
+        }
         let selection = selectedRange()
 
         // `|` or `#` with the link menu open takes the highlighted note and

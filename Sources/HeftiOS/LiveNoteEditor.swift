@@ -381,6 +381,14 @@ struct LiveNoteEditor: UIViewRepresentable {
                continueStructure(at: range.location, in: view) {
                 return false
             }
+            // Return, a paste, a dictation: a break typed is the note's own,
+            // so a Windows note does not end up mixed. Rewritten and put in
+            // here, since the delegate cannot hand UIKit other text.
+            if let view = textView as? MobileTextView, let adapted = inNoteLineEnding(text, in: view) {
+                pendingPaste = (adapted as NSString).length > 1 ? (range.location, adapted) : nil
+                replace(range, with: adapted, in: view)
+                return false
+            }
             let delta = (text as NSString).length - range.length
             pendingShift = (NSMaxRange(range), delta)
             // More than a character at once is a paste or a dictation, never
@@ -452,8 +460,18 @@ struct LiveNoteEditor: UIViewRepresentable {
             return true
         }
 
+        /// `text` written in the note's own line ending, or nil when it
+        /// already is. Only the inserted text: the note's lines are its own.
+        private func inNoteLineEnding(_ text: String, in textView: MobileTextView) -> String? {
+            guard text.utf16.contains(where: { $0 == 10 || $0 == 13 }) else { return nil }
+            let ending = LineEnding(of: textView.text)
+            return ending.differs(in: text) ? ending.applied(to: text) : nil
+        }
+
         /// Through the text view, so undo and the delegate see it as typing.
+        /// A break in `text` is written in the note's line ending.
         private func replace(_ range: NSRange, with text: String, in textView: MobileTextView) {
+            let text = inNoteLineEnding(text, in: textView) ?? text
             guard let start = textView.position(from: textView.beginningOfDocument, offset: range.location),
                   let end = textView.position(from: start, offset: range.length),
                   let textRange = textView.textRange(from: start, to: end)
@@ -464,6 +482,7 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         func apply(_ edit: MarkdownEditing.Edit) {
             guard let textView, !edit.isEmpty else { return }
+            let edit = edit.adapted(to: LineEnding(of: textView.text))
             replace(edit.range, with: edit.replacement, in: textView)
             textView.selectedRange = edit.selection
             restyle(textView)
