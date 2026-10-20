@@ -343,6 +343,23 @@ struct AgentRunnerTests {
         #expect(fixture.runner.chats.isEmpty)
     }
 
+    /// The name comes from a model a second or two after the answer, and the
+    /// chat can be deleted in between.
+    @Test("A chat deleted while it is being named stays deleted")
+    func deleteWhileNaming() async throws {
+        let fixture = try fixture(stdout: answering)
+        fixture.runner.titler = { _, _ in
+            try? await Task.sleep(for: .milliseconds(300))
+            return "Model name"
+        }
+        fixture.runner.ask("What is due?", vaultRoot: fixture.vault, scope: "")
+        try await settle(fixture.runner)
+        fixture.runner.delete(try #require(fixture.runner.chat))
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(AgentChatStore.all(in: fixture.vault).isEmpty)
+        #expect(fixture.runner.chats.isEmpty)
+    }
+
     /// A window can open another vault while a chat is answered; the chat
     /// belongs to the vault it was asked in.
     @Test("A run that ends after the window changed vaults is saved in its own")

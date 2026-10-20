@@ -435,8 +435,11 @@ final class AgentRunner: ObservableObject {
         let answer = chat.turns[0].answer
         Task { [weak self] in
             guard let self, let title = await self.titler(question, answer) else { return }
-            let current = self.chats.first { $0.id == chat.id } ?? chat
-            guard current.title == AgentChat.title(for: question) else { return }
+            // Read back from its own vault: a chat deleted while the name
+            // was coming is not there, and naming it would save it again.
+            guard let current = AgentChatStore.all(in: root).first(where: { $0.id == chat.id }),
+                  current.title == AgentChat.title(for: question)
+            else { return }
             self.rename(current, to: title, in: root)
         }
     }
