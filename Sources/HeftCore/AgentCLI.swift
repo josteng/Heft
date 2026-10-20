@@ -348,8 +348,16 @@ public enum AgentCLI {
         exit(0)
     }
 
+    /// The proposals a run may see: in one limited to a folder, those for
+    /// a path inside it, as a note outside does not exist to it. `diff`
+    /// would otherwise print an outside note's lines as a hunk's context.
+    private static func visibleProposals(in root: URL) -> [Proposal] {
+        let scope = agentScope
+        return ProposalStore.all(in: root).filter { isInScope($0.notePath, scope: scope) }
+    }
+
     private static func list(root: URL) {
-        let pending = ProposalStore.pending(in: root)
+        let pending = ProposalStore.sort(visibleProposals(in: root))
         guard !pending.isEmpty else {
             print("no proposals pending")
             exit(0)
@@ -718,7 +726,9 @@ public enum AgentCLI {
             }
         }
         if kinds.contains("tags") {
-            for tag in index.allTags {
+            // Only tags a note inside the folder carries, in a scoped run.
+            for tag in index.allTags
+            where scope == nil || index.notes(taggedWith: tag).contains(where: { isInScope($0.relativePath, scope: scope) }) {
                 if let tier = CommandMatch.score(query: query, title: tag, terms: "") {
                     found.append(("tag", "#" + tag, tier))
                 }
@@ -1049,7 +1059,7 @@ public enum AgentCLI {
     private static func resolve(
         _ id: String?, in root: URL, verb: String, exactly: Bool = false
     ) -> Proposal {
-        let proposals = ProposalStore.all(in: root)
+        let proposals = visibleProposals(in: root)
         switch ProposalStore.match(id, among: proposals, exactly: exactly) {
         case let .one(found):
             return proposals.first { $0.id == found }!

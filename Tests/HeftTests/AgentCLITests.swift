@@ -126,7 +126,7 @@ struct AgentCLITests {
     func scopedAgent() throws {
         let root = try vault([
             "Work/Plan.md": "# Plan\nThe launch is Friday.\n",
-            "Home/Secret.md": "# Secret\nThe launch code.\n",
+            "Home/Secret.md": "# Secret\nThe launch code. #private\n",
             "Plan.md": "# Plan\nThe top-level plan.\n",
         ])
         defer { try? FileManager.default.removeItem(at: root) }
@@ -161,6 +161,24 @@ struct AgentCLITests {
             ["propose", root.path, "Work/Plan.md"], stdin: "# Plan\nMonday.\n", readLog: log, scope: "Work"
         )
         #expect(allowed.status == 0, "got \(allowed.error)")
+
+        // A proposal outside the folder, left by a run that had the whole
+        // vault: neither listed, shown nor dropped from inside the folder.
+        let outsider = try run(
+            ["propose", root.path, "Home/Secret.md", "--replace"],
+            stdin: "--- old\nThe launch code.\n--- new\nThe launch code is 1234.\n"
+        )
+        #expect(outsider.status == 0, "got \(outsider.error)")
+        let secret = try #require(ProposalStore.all(in: root).first { $0.notePath == "Home/Secret.md" }?.id)
+        let listed = try run(["proposals", root.path], scope: "Work")
+        #expect(listed.text.contains("Work/Plan.md") && !listed.text.contains("Secret"), "got \(listed.text)")
+        let shown = try run(["diff", root.path, secret], scope: "Work")
+        #expect(shown.status != 0 && !shown.text.contains("launch"), "got \(shown.text)")
+        #expect(try run(["drop", root.path, secret], scope: "Work").status != 0)
+        #expect(ProposalStore.all(in: root).contains { $0.id == secret })
+        // Nor its tags, which name what is outside.
+        #expect(try run(["search", root.path, "priv", "--kinds", "tags"], scope: "Work").text == "no matches\n")
+        #expect(try run(["search", root.path, "priv", "--kinds", "tags"]).text.contains("#private"))
 
         // Without a scope, the whole vault as before.
         #expect(try run(["read", root.path, "Home/Secret.md"]).status == 0)
