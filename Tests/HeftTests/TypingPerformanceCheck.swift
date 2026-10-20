@@ -122,6 +122,12 @@ enum TypingPerformanceCheck {
         var restyles: [Double] = []
         for index in 0..<keystrokes {
             view.setSelectedRange(NSRange(location: caret + index, length: 0))
+            // A held key at the fastest repeat. The gap the editor would see
+            // otherwise is this loop's own restyle below, which a held key
+            // never waits for: on a busy machine that grew past the burst
+            // gap, the keystroke was taken for a fresh one and styled at
+            // once, and the restyle landed inside what is measured here.
+            coordinator.pretendLastEdit(millisecondsAgo: 30)
             let start = DispatchTime.now().uptimeNanoseconds
             view.insertText("a", replacementRange: view.selectedRange())
             let mid = DispatchTime.now().uptimeNanoseconds

@@ -889,6 +889,16 @@ struct LiveTextEditor: NSViewRepresentable {
             lastRestyleMillis = .infinity
         }
 
+        /// For tests: makes the edits look `gap` milliseconds apart, the way
+        /// a held key's repeats are, whatever the test did in between. Unlike
+        /// `pretendEditsAreArrivingInABurst` it keeps what the last restyle
+        /// really cost, so whether a burst defers is still decided as it
+        /// would be.
+        func pretendLastEdit(millisecondsAgo gap: Double) {
+            lastEditAt = DispatchTime.now().uptimeNanoseconds - UInt64(gap * 1_000_000)
+            editGap = gap
+        }
+
         func pretendLastRestyleWasCheap() {
             lastRestyleMillis = 0
         }
