@@ -657,7 +657,10 @@ enum AppIntegrationCheck {
         // note's own. What the drop target reads is the payload, so that is
         // what this checks; the gesture itself belongs to AppKit.
         let dragged = root.appendingPathComponent("Archive/Research/Chapter.md")
-        let dragBoard = NSPasteboard(name: NSPasteboard.Name("dev.stenglein.Heft.tests.drag"))
+        // A named pasteboard is shared by every process on the machine, so
+        // one name for every run let a sibling run's drag land in this one.
+        let dragBoard = NSPasteboard(name: NSPasteboard.Name("dev.stenglein.Heft.tests.drag.\(UUID().uuidString)"))
+        defer { dragBoard.releaseGlobally() }
         dragBoard.clearContents()
         dragBoard.writeObjects([fileDragPasteboardWriter(for: dragged)])
         let draggedTypes = dragBoard.types ?? []
