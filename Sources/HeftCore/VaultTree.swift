@@ -114,7 +114,8 @@ public enum VaultScanner {
         guard let entries = try? fm.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [
-                .isDirectoryKey, .isRegularFileKey, .fileSizeKey, .contentModificationDateKey,
+                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
+                .contentModificationDateKey,
             ],
             options: []
         ) else { return [] }
@@ -159,8 +160,12 @@ public enum VaultScanner {
 
             // Read from the entry as listed, so a placeholder is fingerprinted
             // as the placeholder: when the real file arrives it has a
-            // different size and date, which is exactly a change.
-            let values = try? entry.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            // different size and date, which is exactly a change. A symlink
+            // is measured at its target: the link's own size and date stay
+            // put while the note it points at is edited.
+            let isLink = (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false
+            let measured = isLink ? entry.resolvingSymlinksInPath() : entry
+            let values = try? measured.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
             let fingerprint = values?.contentModificationDate.map {
                 FileFingerprint(size: values?.fileSize ?? 0, modified: $0)
             }

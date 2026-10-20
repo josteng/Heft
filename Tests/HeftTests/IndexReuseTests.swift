@@ -179,4 +179,25 @@ struct IndexReuseTests {
         let second = build(root, reusing: first)
         #expect(second.notesRead == 0)
     }
+
+    /// The link's own size and date never change when the note it points at
+    /// is edited, so a fingerprint taken from the link kept the old parse.
+    @Test("A symlinked note edited through its target is read again")
+    func symlinkedNoteIsReadAgain() throws {
+        let root = try makeVault(["Real/A.md": "See [[B]]", "B.md": "b", "C.md": "c"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("Linked.md"),
+            withDestinationURL: root.appendingPathComponent("Real/A.md")
+        )
+        let first = build(root)
+        #expect(first.backlinks(to: "B.md").map(\.source.relativePath).sorted() == ["Linked.md", "Real/A.md"])
+
+        settle()
+        try write("See [[C]] and more", to: root.appendingPathComponent("Real/A.md"))
+        let second = build(root, reusing: first)
+
+        #expect(second.backlinks(to: "B.md").isEmpty)
+        #expect(second.backlinks(to: "C.md").map(\.source.relativePath).sorted() == ["Linked.md", "Real/A.md"])
+    }
 }
