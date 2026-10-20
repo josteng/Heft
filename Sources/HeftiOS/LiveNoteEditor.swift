@@ -472,7 +472,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             guard let view = textView as? MobileTextView else { return }
             notePaste(in: view)
             restyle(view)
-            document?.edited(view.text)
+            document?.edited(view.text, at: loadedRevision)
             document?.updateUndo()
         }
 

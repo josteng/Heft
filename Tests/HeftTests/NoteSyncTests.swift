@@ -396,6 +396,101 @@ struct NoteSyncTests {
         #expect(try contents(url) == "a\nb mine\nlater\n")
     }
 
+    /// The editor takes a new revision on its next update, and a keystroke
+    /// can come first: it is typed into the text that revision replaced.
+    /// Taken as it was, it put that text back and its save dropped the
+    /// capture from the file, compared against the merge that held it.
+    @Test("A keystroke before the editor took a merge is carried onto it")
+    func keystrokeBeforeMergeTaken() async throws {
+        let (vault, url) = try vault("a\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        let shown = sync.revision
+        try "a\ncaptured\n".write(to: url, atomically: true, encoding: .utf8)
+        sync.edited("a typed\n", at: shown)
+        await sync.saveNow()
+        #expect(sync.revision == shown + 1)
+
+        sync.edited("a typed!\n", at: shown)
+        #expect(sync.source == "a typed!\ncaptured\n", "the keystroke put the unmerged text back")
+        #expect(sync.revision == shown + 2, "the editor was not given the carried text")
+        await sync.saveNow()
+        #expect(!sync.conflict)
+        #expect(try contents(url) == "a typed!\ncaptured\n")
+    }
+
+    /// The same for a plain reload: a line the Mac wrote is not dropped
+    /// by a keystroke on the text from before it.
+    @Test("A keystroke before the editor took a reload is carried onto it")
+    func keystrokeBeforeReloadTaken() async throws {
+        let (vault, url) = try vault("a\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        let shown = sync.revision
+        try "a\nfrom the Mac\n".write(to: url, atomically: true, encoding: .utf8)
+        await sync.load(in: vault)
+
+        sync.edited("a!\n", at: shown)
+        await sync.saveNow()
+
+        #expect(try contents(url) == "a!\nfrom the Mac\n", "the reloaded line was written over")
+        #expect(sync.source == "a!\nfrom the Mac\n")
+    }
+
+    /// Use Theirs drops what was typed; a keystroke on the dropped text
+    /// before the editor takes theirs carries only itself.
+    @Test("A keystroke before the editor took Use Theirs carries only itself")
+    func keystrokeBeforeUseTheirsTaken() async throws {
+        let (vault, url) = try vault("a\nb\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        let shown = sync.revision
+        try "a\nb theirs\n".write(to: url, atomically: true, encoding: .utf8)
+        sync.edited("a\nb mine\n", at: shown)
+        await sync.saveNow()
+        await sync.useTheirs()
+
+        sync.edited("a!\nb mine\n", at: shown)
+        await sync.saveNow()
+
+        #expect(try contents(url) == "a!\nb theirs\n", "Use Theirs brought the dropped typing back")
+    }
+
+    @Test("A keystroke on a line the reload changed asks")
+    func keystrokeOnReloadedLineAsks() async throws {
+        let (vault, url) = try vault("a\n")
+        defer {
+            try? FileManager.default.removeItem(at: vault.folder)
+            DraftStore.discard(vault: vault.folder, relativePath: "Note.md")
+        }
+        let sync = NoteSync(path: "Note.md", storage: Probe().storage)
+        await sync.load(in: vault)
+        let shown = sync.revision
+        try "a mac\n".write(to: url, atomically: true, encoding: .utf8)
+        await sync.load(in: vault)
+
+        sync.edited("a!\n", at: shown)
+        await sync.saveNow()
+
+        #expect(sync.conflict, "the keystroke was saved over the reloaded line unasked")
+        #expect(sync.source == "a!\n", "the keystroke vanished from the screen")
+        #expect(try contents(url) == "a mac\n")
+        await sync.keepMine()
+        #expect(try contents(url) == "a!\n")
+    }
+
     // MARK: Drafts
 
     private func draft(_ vault: Vault) -> String? {

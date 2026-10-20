@@ -102,8 +102,10 @@ final class NoteDocument {
         textView?.findInteraction?.presentFindNavigator(showingReplace: false)
     }
 
-    func edited(_ text: String) {
-        sync.edited(text)
+    /// `revision` is the one the editor last took, so a keystroke typed
+    /// before it took a newer text is carried onto that text.
+    func edited(_ text: String, at revision: Int? = nil) {
+        sync.edited(text, at: revision)
         outlineTask?.cancel()
         outlineTask = Task {
             try? await Task.sleep(for: .milliseconds(400))

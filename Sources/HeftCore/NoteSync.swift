@@ -77,6 +77,12 @@ public final class NoteSync {
     /// Typed and not yet saved. Not observed: a keystroke changes nothing
     /// that any view draws.
     @ObservationIgnored private var pending: String?
+    /// What the editor held when `revision` last moved, which a keystroke
+    /// made before the editor took the new text was typed into.
+    @ObservationIgnored private var replaced: String?
+    /// Typing Use Theirs dropped, still on screen until the editor takes
+    /// theirs.
+    @ObservationIgnored private var dropped: String?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     /// Reads begun and the latest one taken, so reads finishing out of
     /// order keep the newest.
@@ -126,17 +132,40 @@ public final class NoteSync {
             onDisk = text
             failure = nil
             if text != source {
+                replaced = dropped ?? source
                 source = text
                 revision += 1
             }
+            dropped = nil
         } catch {
             failure = error.localizedDescription
         }
     }
 
-    public func edited(_ text: String) {
-        pending = text
-        saveSoon()
+    /// `revision` is the one the editor last took, when it says.
+    public func edited(_ text: String, at revision: Int? = nil) {
+        defer { saveSoon() }
+        // The editor takes a new text on its next update, and a keystroke
+        // can come first, typed into the text that was replaced. Taken as
+        // it is, it put that text back, and its save dropped what the
+        // reload or merge brought in. Only the keystroke is carried over.
+        guard let revision, revision != self.revision, let replaced, let source else {
+            pending = text
+            return
+        }
+        self.revision += 1
+        self.replaced = text
+        if let carried = NoteMerge.merge(base: replaced, mine: text, theirs: source) {
+            self.source = carried
+            pending = carried
+        } else {
+            // The keystroke is on lines the new text changed: the typing
+            // stays on screen and the reader decides.
+            self.source = text
+            pending = text
+            shown = onDisk
+            conflict = true
+        }
     }
 
     public func saveSoon(immediately: Bool = false) {
@@ -232,6 +261,7 @@ public final class NoteSync {
     /// was merged, so the merge is carried into it in turn and saved next.
     private func takeMerge(_ merged: String, mergedFrom buffer: String) {
         guard let typed = pending, typed != buffer else {
+            replaced = buffer
             pending = nil
             source = merged
             revision += 1
@@ -244,6 +274,7 @@ public final class NoteSync {
             recordDraft()
             return
         }
+        replaced = typed
         pending = carried
         source = carried
         revision += 1
@@ -291,6 +322,7 @@ public final class NoteSync {
     /// Drops what was typed for the version that arrived meanwhile.
     public func useTheirs() async {
         guard let vault else { return }
+        dropped = pending
         pending = nil
         conflict = false
         shown = nil
