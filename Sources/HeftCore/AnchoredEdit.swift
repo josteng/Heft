@@ -103,19 +103,30 @@ extension AnchoredEdit {
     /// resolved by taking the first: an agent that meant the other one would
     /// otherwise produce a plausible-looking proposal that changes the wrong
     /// paragraph, which is the failure this whole flow exists to prevent.
+    ///
+    /// An agent writes `\n`, so in a Windows note both sides are taken in
+    /// the note's line ending: an anchor across lines matches, and the lines
+    /// it adds do not leave the note mixed. An anchor that only matches as
+    /// written, in a note mixed already, is still found.
     public static func apply(_ edits: [AnchoredEdit], to text: String) throws -> String {
         var result = text
+        let ending = LineEnding(of: text)
         for (index, edit) in edits.enumerated() {
             guard !edit.old.isEmpty else { throw AnchoredEditError.emptyAnchor(index: index) }
-            let count = occurrences(of: edit.old, in: result)
+            var old = ending.applied(to: edit.old)
+            var count = occurrences(of: old, in: result)
+            if count == 0, old != edit.old {
+                old = edit.old
+                count = occurrences(of: old, in: result)
+            }
             guard count > 0 else { throw AnchoredEditError.notFound(index: index) }
             guard count == 1 else {
                 throw AnchoredEditError.ambiguous(index: index, count: count)
             }
-            guard let range = result.range(of: edit.old) else {
+            guard let range = result.range(of: old) else {
                 throw AnchoredEditError.notFound(index: index)
             }
-            result.replaceSubrange(range, with: edit.new)
+            result.replaceSubrange(range, with: ending.applied(to: edit.new))
         }
         return result
     }

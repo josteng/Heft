@@ -124,6 +124,42 @@ struct AgentCLITests {
     /// An agent asked from the search bar in a focused folder is told it,
     /// and `heft` is how it would otherwise read past it: a note outside
     /// does not exist to read, search, or propose to.
+    /// An agent writes `\n` whatever the note uses. Proposed into a Windows
+    /// note as it came, every line read as changed and accepting it turned
+    /// the note Unix; an anchor spanning lines never matched at all.
+    @Test("A proposal to a Windows note is written in the note's line ending")
+    func windowsNoteProposal() throws {
+        let note = "# Plan\r\nThe launch is Friday.\r\nBring snacks.\r\n"
+        let root = try vault(["Plan.md": note])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let log = FileManager.default.temporaryDirectory.appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")
+        _ = try run(["read", root.path, "Plan.md"], readLog: log)
+
+        let whole = try run(
+            ["propose", root.path, "Plan.md"],
+            stdin: "# Plan\nThe launch is Monday.\nBring snacks.\n", readLog: log
+        )
+        #expect(whole.status == 0, "got \(whole.error)")
+        let proposal = try #require(ProposalStore.all(in: root).first)
+        #expect(proposal.body == "# Plan\r\nThe launch is Monday.\r\nBring snacks.\r\n")
+        #expect(whole.text.contains("+1 -1 in 1 hunk"), "got \(whole.text)")
+        ProposalStore.remove(proposal.id, in: root)
+
+        let anchored = try run(
+            ["propose", root.path, "Plan.md", "--replace"],
+            stdin: "--- old\nThe launch is Friday.\nBring snacks.\n--- new\nThe launch is Friday.\nBring tea.\nAnd cake.\n"
+        )
+        #expect(anchored.status == 0, "got \(anchored.error)")
+        let edit = try #require(ProposalStore.all(in: root).first)
+        #expect(edit.body == "# Plan\r\nThe launch is Friday.\r\nBring tea.\r\nAnd cake.\r\n")
+
+        // A note mixed already: an anchor written as the stray lines are is
+        // still found, and what it adds is in the note's ending.
+        let mixed = "a\r\nb\r\nc\nd\r\n"
+        #expect(try AnchoredEdit.apply([AnchoredEdit(old: "c\nd", new: "c\nD")], to: mixed)
+            == "a\r\nb\r\nc\r\nD\r\n")
+    }
+
     @Test("Told a scope, heft reads, searches and proposes inside it only")
     func scopedAgent() throws {
         let root = try vault([

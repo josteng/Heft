@@ -274,6 +274,13 @@ public enum AgentCLI {
             current = existing
         }
 
+        // A whole body arrives in `\n` from an agent, so in a Windows note
+        // every line would read as changed and accepting it would rewrite
+        // the note. `--replace` has done this edit by edit already.
+        if !options.flag("replace"), let current, !current.isEmpty {
+            body = LineEnding(of: current).applied(to: body)
+        }
+
         if let current, current == body {
             print("no change: \(relative) already reads that way")
             exit(0)
