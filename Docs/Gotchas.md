@@ -116,6 +116,10 @@ preferences or the icon.
   UTF-8 read drops it, so `String.write(to:atomically:encoding:)` over a note
   drops it from the file. Write over a note with `writeNote(to:)`, which puts
   it back only where the file had one.
+- **A Windows note's `\r\n` is one Swift `Character`.** `hasSuffix("\n")` and
+  `contains("\n")` are false on it; check UTF-16 units. A break Heft types is
+  the note's own, by `LineEnding`, and the note's other lines stay as they are,
+  where Obsidian rewrites the whole file to `\n` on save.
 
 ## SwiftUI and the window
 

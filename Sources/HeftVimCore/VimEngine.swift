@@ -790,7 +790,7 @@ public struct VimEngine: Sendable {
             unnamedRegister = register
             let key = Character(name.lowercased())
             if name.isUppercase, var existing = registers[key] {
-                if existing.linewise, !existing.text.hasSuffix("\n") { existing.text += "\n" }
+                if existing.linewise, !Self.endsInLineBreak(existing.text) { existing.text += "\n" }
                 existing.text += register.text
                 existing.linewise = existing.linewise || register.linewise
                 registers[key] = existing
@@ -801,7 +801,7 @@ public struct VimEngine: Sendable {
         }
         unnamedRegister = register
         guard isDelete else { registers["0"] = register; return }
-        if register.linewise || register.text.contains("\n") {
+        if register.linewise || Self.hasLineBreak(register.text) {
             for digit in stride(from: 8, through: 1, by: -1) {
                 registers[Character("\(digit + 1)")] = registers[Character("\(digit)")]
             }
@@ -899,7 +899,7 @@ public struct VimEngine: Sendable {
         if op == .change, linewise {
             let removed = text.value.substring(with: safe)
             let indent = String(removed.prefix { $0 == " " || $0 == "\t" })
-            let replacement = removed.hasSuffix("\n") ? indent + "\n" : indent
+            let replacement = Self.endsInLineBreak(removed) ? indent + "\n" : indent
             return output(
                 edits: [VimEdit(range: safe, replacement: replacement)],
                 selection: location + (indent as NSString).length
@@ -1001,6 +1001,18 @@ public struct VimEngine: Sendable {
         )
     }
 
+    /// By UTF-16 unit, not Character: a Windows note's `\r\n` is one
+    /// Character, so `hasSuffix("\n")` and `contains("\n")` never see it.
+    /// The `\n` added beside these is the host's to write in the note's
+    /// own ending.
+    private static func endsInLineBreak(_ text: String) -> Bool {
+        text.utf16.last == 10 || text.utf16.last == 13
+    }
+
+    private static func hasLineBreak(_ text: String) -> Bool {
+        text.utf16.contains { $0 == 10 || $0 == 13 }
+    }
+
     private mutating func put(after: Bool, text: VimText, cursor: Int) -> VimOutput {
         let register = namedRegister(pendingRegister)
         guard !register.text.isEmpty else { clearCommand(); return output(selection: cursor, message: "register is empty") }
@@ -1011,7 +1023,7 @@ public struct VimEngine: Sendable {
         if register.linewise {
             let line = text.lineRange(at: cursor)
             insertion = after ? NSMaxRange(line) : line.location
-            if !value.hasSuffix("\n") { value += "\n" }
+            if !Self.endsInLineBreak(value) { value += "\n" }
             let hasLineTerminator = NSMaxRange(text.lineContentRange(at: cursor)) < NSMaxRange(line)
             if after, !hasLineTerminator {
                 value = "\n" + value
@@ -1024,7 +1036,7 @@ public struct VimEngine: Sendable {
             // A characterwise put lands the caret on the last character it
             // wrote — unless the text spans lines, where Vim leaves it on the
             // first instead, so the caret stays where you can see it.
-            caret = value.contains("\n")
+            caret = Self.hasLineBreak(value)
                 ? insertion
                 : insertion + max(0, (value as NSString).length - 1)
         }
