@@ -330,9 +330,9 @@ setup can widen it:
   printed `../Home/` with `cat` before it was.
 - `heft` is told the vault in `HEFT_AGENT_VAULT` and the folder in
   `HEFT_AGENT_SCOPE`, and checks both before any verb runs: only the verbs
-  the flags allow, only that vault however it is spelled, and no `--from`
-  outside the folder. The run cannot unset them: no allowed command assigns
-  a variable.
+  the flags allow, only that vault however it is spelled, and no path,
+  `--from` included, that resolves outside the folder once symlinks are
+  followed. The run cannot unset them: no allowed command assigns a variable.
 - Nothing prompts. A refused read comes back as a denial, and allowing it adds
   its folder with `--add-dir` for the rest of the chat. A refused command is
   never offered: allowing one could run anything.

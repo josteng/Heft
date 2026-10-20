@@ -225,10 +225,9 @@ enum HeftMain {
             // the summary used to promise and the listing never delivered.
             let onlyNotes = flags.contains("--notes")
             // An agent asked in a folder lists that folder.
-            let scope = ProcessInfo.processInfo.environment[AgentCLI.scopeVariable].flatMap { $0.isEmpty ? nil : $0 }
             var notes = VaultScanner.scan(root: root).flattened()
                 .filter { !$0.isFolder && (!onlyNotes || $0.relativePath.hasSuffix(".md")) }
-                .filter { AgentCLI.isInScope($0.relativePath, scope: scope) }
+                .filter { AgentCLI.isVisible($0.relativePath, in: root) }
             switch sort {
             case "name":
                 notes.sort { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }

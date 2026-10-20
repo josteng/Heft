@@ -73,7 +73,8 @@ struct AgentCLITests {
 
     private func run(
         _ arguments: [String], stdin: String? = nil, readLog: URL? = nil,
-        defaultsSuite: String? = nil, scope: String? = nil, pin: URL? = nil
+        defaultsSuite: String? = nil, scope: String? = nil, pin: URL? = nil,
+        indexCache: URL? = nil
     ) throws -> Output {
         guard let binary = Self.binary else {
             throw CLIUnavailable()
@@ -93,8 +94,8 @@ struct AgentCLITests {
         // binary, and a test must not leave read snapshots behind in it.
         environment["HEFT_READ_LOG"] = (readLog ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("HeftCLIReads-\(UUID().uuidString)")).path
-        environment["HEFT_INDEX_CACHE"] = FileManager.default.temporaryDirectory
-            .appendingPathComponent("HeftCLIIndex-\(UUID().uuidString)").path
+        environment["HEFT_INDEX_CACHE"] = (indexCache ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftCLIIndex-\(UUID().uuidString)")).path
         environment[HeftDefaults.suiteEnvironmentKey] = suite
         environment[AgentCLI.scopeVariable] = scope
         environment[AgentCLI.vaultVariable] = pin?.path
@@ -383,6 +384,105 @@ struct AgentCLITests {
             scope: "Work", pin: root
         )
         #expect(inside.status == 0, "got \(inside.error)")
+    }
+
+    /// The scanner follows a symlinked folder, as Obsidian does, and a
+    /// note path is joined to the vault as written, so both went wherever
+    /// a link in the folder pointed.
+    @Test("Pinned, a symlink out of the folder or the vault leads nowhere")
+    func pinnedSymlinks() throws {
+        let root = try vault(["Work/Plan.md": "# Plan\n", "Home/Secret.md": "# Secret\nhidden words\n"])
+        let outside = try vault(["Far.md": "# Far\nhidden words far\n"])
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let fm = FileManager.default
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Work/Home"), withDestinationURL: root.appendingPathComponent("Home"))
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Work/Far"), withDestinationURL: outside)
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Work/Secret.md"), withDestinationURL: root.appendingPathComponent("Home/Secret.md"))
+        try fm.createSymbolicLink(at: root.appendingPathComponent("Away"), withDestinationURL: outside)
+
+        // Unpinned, a linked folder is a folder like any other.
+        #expect(try run(["read", root.path, "Work/Far/Far.md"], scope: "Work").text.contains("far"))
+
+        for note in ["Work/Home/Secret.md", "Work/Far/Far.md", "Work/Secret.md", "Secret"] {
+            let read = try run(["read", root.path, note], scope: "Work", pin: root)
+            #expect(read.status != 0 && !read.text.contains("hidden"), "\(note): \(read.text)")
+        }
+        #expect(try run(["find", root.path, "hidden"], scope: "Work", pin: root).text == "no matches\n")
+        #expect(try run(["files", root.path], scope: "Work", pin: root).text == "Work/Plan.md\n")
+        #expect(try run(["search", root.path, "far"], scope: "Work", pin: root).text == "no matches\n")
+
+        // The whole vault: its own Home is in it, a link out of it is not.
+        #expect(try run(["read", root.path, "Home/Secret.md"], pin: root).status == 0)
+        #expect(try run(["read", root.path, "Away/Far.md"], pin: root).status != 0)
+        #expect(try run(["outline", root.path, "Away/Far.md"], pin: root).status != 0)
+        #expect(!(try run(["find", root.path, "far"], pin: root)).text.contains("Away"))
+
+        // Accepting writes through the link, so proposing through one is
+        // refused, and `--replace` needs no read to get that far.
+        let through = try run(
+            ["propose", root.path, "Work/Far/Far.md", "--replace"],
+            stdin: "--- old\nhidden words far\n--- new\ngone\n", scope: "Work", pin: root
+        )
+        #expect(through.status != 0 && through.error.contains("limited to"), "got \(through.error)")
+        let away = try run(
+            ["propose", root.path, "Away/Far.md", "--replace"],
+            stdin: "--- old\nhidden words far\n--- new\ngone\n", pin: root
+        )
+        #expect(away.status != 0 && away.error.contains("limited to"), "got \(away.error)")
+        let moved = try run(["propose", root.path, "Work/Plan.md", "--move", "Work/Far/Plan.md"], scope: "Work", pin: root)
+        #expect(moved.status != 0 && moved.error.contains("limited to"), "got \(moved.error)")
+        let captured = try run(["capture", root.path, "a line", "--to", "Work/Far/Far.md"], scope: "Work", pin: root)
+        #expect(captured.status != 0 && captured.error.contains("limited to"), "got \(captured.error)")
+        #expect(ProposalStore.all(in: root).isEmpty)
+
+        // One left behind the link by a run that had it is not shown.
+        let left = try run(
+            ["propose", root.path, "Work/Far/Far.md", "--replace"],
+            stdin: "--- old\nhidden words far\n--- new\nhidden words near\n", scope: "Work"
+        )
+        #expect(left.status == 0, "got \(left.error)")
+        let id = try #require(ProposalStore.all(in: root).first?.id)
+        let shown = try run(["diff", root.path, id], scope: "Work", pin: root)
+        #expect(shown.status != 0 && !shown.text.contains("hidden"), "got \(shown.text)")
+        #expect(!(try run(["proposals", root.path], scope: "Work", pin: root)).text.contains("Far"))
+
+        // A folder reached through a link is still the way in to a scope
+        // inside it, and a scope that is itself a link is that folder.
+        try fm.createDirectory(at: outside.appendingPathComponent("Inner"), withIntermediateDirectories: true)
+        try Data("# Inner\n".utf8).write(to: outside.appendingPathComponent("Inner/Note.md"))
+        let within = try run(["read", root.path, "Away/Inner/Note.md"], scope: "Away/Inner", pin: root)
+        #expect(within.text == "# Inner\n", "got \(within.error)")
+        let linked = try run(["read", root.path, "Work/Far/Far.md"], scope: "Work/Far", pin: root)
+        #expect(linked.text.contains("far"), "got \(linked.error)")
+    }
+
+    /// The pinned scan leaves out what a symlink leads away to, so saving
+    /// its index would drop those notes from the cache the app reuses; and
+    /// a cache that holds them must not bring them back.
+    @Test("A pinned run reads the index cache and never writes it")
+    func pinnedIndexCache() throws {
+        let root = try vault(["Work/Plan.md": "# Plan\n"])
+        let outside = try vault(["Far.md": "# Far\nhidden words far #faraway\n"])
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent("HeftCLIIndex-\(UUID().uuidString)")
+        defer {
+            for url in [root, outside, cache] { try? FileManager.default.removeItem(at: url) }
+        }
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("Away"), withDestinationURL: outside)
+        #expect(try run(["find", root.path, "hidden"], indexCache: cache).text.contains("Away/Far.md"))
+        let file = IndexCache(directory: cache).url(for: root)
+        let saved = try Data(contentsOf: file)
+        #expect(String(decoding: saved, as: UTF8.self).contains("Far.md"), "the cache holds the linked note")
+
+        // A changed note, so the build reads one and would save.
+        try Data("# Plan\nhidden words near\n".utf8).write(to: root.appendingPathComponent("Work/Plan.md"))
+        let pinned = try run(["find", root.path, "hidden"], pin: root, indexCache: cache)
+        #expect(pinned.text.contains("Work/Plan.md") && !pinned.text.contains("Away"), "got \(pinned.text)")
+        #expect(try Data(contentsOf: file) == saved, "the pinned run left the cache alone")
+        #expect(!(try run(["tags", root.path], pin: root, indexCache: cache)).text.contains("faraway"))
+        #expect(try run(["outline", root.path, "Away/Far.md"], pin: root, indexCache: cache).status != 0)
     }
 
     // MARK: - read

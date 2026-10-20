@@ -107,7 +107,8 @@ public enum VaultScanner {
             name: name,
             children: scanChildren(
                 of: root, listing: root, prefix: "",
-                ancestors: [root.resolvingSymlinksInPath().path]
+                ancestors: [root.resolvingSymlinksInPath().path],
+                boundary: AgentCLI.pinnedBoundary
             )
         )
     }
@@ -116,9 +117,12 @@ public enum VaultScanner {
     /// folder's target, since listing at the link itself fails, while its
     /// items keep the vault's spelling under `directory`. `ancestors` holds
     /// the real path of every folder above, so a symlink back up the tree is
-    /// left out rather than recursed into forever.
+    /// left out rather than recursed into forever. `boundary` is the real
+    /// path an agent Heft asked is kept inside: a symlink out of it is not
+    /// there to be read, searched or listed.
     private static func scanChildren(
-        of directory: URL, listing: URL, prefix: String, ancestors: Set<String>
+        of directory: URL, listing: URL, prefix: String, ancestors: Set<String>,
+        boundary: String? = nil
     ) -> [VaultItem] {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
@@ -140,6 +144,15 @@ public enum VaultScanner {
             // entry's own values describe the link, which is not one.
             let target = isLink ? listed.resolvingSymlinksInPath() : listed
             let isDirectory = (try? target.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if let boundary, isLink {
+                let rel = prefix.isEmpty ? raw : "\(prefix)/\(raw)"
+                // A link that is a folder on the way down to the scope is
+                // the way in, not a way out of it.
+                let onTheWay = AgentCLI.agentScope?.hasPrefix(rel + "/") ?? false
+                if !onTheWay, !AgentCLI.isInside(AgentCLI.realPath(listed), boundary: boundary) {
+                    continue
+                }
+            }
 
             if isDirectory {
                 if raw.hasPrefix(".") || ignoredDirectories.contains(raw) { continue }
@@ -147,7 +160,8 @@ public enum VaultScanner {
                 if ancestors.contains(real) { continue }
                 let rel = prefix.isEmpty ? raw : "\(prefix)/\(raw)"
                 let children = scanChildren(
-                    of: entry, listing: target, prefix: rel, ancestors: ancestors.union([real])
+                    of: entry, listing: target, prefix: rel, ancestors: ancestors.union([real]),
+                    boundary: boundary
                 )
                 items.append(VaultItem(
                     url: entry, relativePath: rel, kind: .folder, name: raw, children: children

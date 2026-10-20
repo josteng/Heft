@@ -114,8 +114,11 @@ extension VaultIndex {
 
     /// The same, for a caller that has already scanned.
     public static func open(tree: VaultItem, vaultAt root: URL, cache: IndexCache = .shared) -> VaultIndex {
+        // Reading is safe for a pinned run: the build takes only the notes
+        // its own scan found. Writing is not, as that scan leaves out what a
+        // symlink leads away to, and the app would read them all again.
         let index = build(root: tree, reusing: cache.load(vault: root))
-        if index.notesRead > 0 { cache.save(index, vault: root) }
+        if index.notesRead > 0, AgentCLI.pinnedVault == nil { cache.save(index, vault: root) }
         return index
     }
 }

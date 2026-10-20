@@ -56,9 +56,10 @@ public enum AgentCLI {
         return relative == scope || relative.hasPrefix(scope + "/")
     }
 
-    private static func requireInScope(_ relative: String) {
-        guard let scope = agentScope, !isInScope(relative, scope: scope) else { return }
-        fail("\(relative) is outside \(scope), the folder this question is limited to")
+    private static func requireInScope(_ relative: String, root: URL) {
+        guard !isVisible(relative, in: root) else { return }
+        fail("\(relative) is outside \(agentScope ?? "the vault"), "
+            + "the \(agentScope == nil ? "vault" : "folder") this question is limited to")
     }
 
     /// The vault an agent asked from Heft is limited to, set beside the
@@ -99,6 +100,16 @@ public enum AgentCLI {
 
     static func isInside(_ path: String, boundary: String) -> Bool {
         path == boundary || path.hasPrefix(boundary == "/" ? "/" : boundary + "/")
+    }
+
+    /// Whether a vault-relative path is one this run may see: inside its
+    /// scope by name, and, when pinned, inside it on disk, so a symlink in
+    /// the folder that points out of it does not carry a read there.
+    public static func isVisible(_ relative: String, in root: URL) -> Bool {
+        guard isInScope(relative, scope: agentScope) else { return false }
+        guard let boundary = pinnedBoundary else { return true }
+        guard !relative.split(separator: "/").contains("..") else { return false }
+        return isInside(realPath(root.appendingPathComponent(relative)), boundary: boundary)
     }
 
     /// The arguments a run Heft pinned to a vault may go on with, or an
@@ -179,13 +190,15 @@ public enum AgentCLI {
         }
         let options = Options(arguments.dropFirst())
         let relative = normalized(notePath)
-        requireInScope(relative)
+        requireInScope(relative, root: root)
         // Accepting writes the vault root joined with this path, so a `..`
         // part would write outside the vault, scope or no scope.
         guard !relative.split(separator: "/").contains("..") else {
             fail("\(relative) climbs out of the vault: a note path stays inside the vault")
         }
-        if let destination = options["move"] { requireInScope(NewNoteLocation.normalised(destination)) }
+        if let destination = options["move"] {
+            requireInScope(NewNoteLocation.normalised(destination), root: root)
+        }
 
         // Deleting and moving are facts about the tree rather than about a
         // note's text, so neither reads a body and neither has hunks to
@@ -420,8 +433,7 @@ public enum AgentCLI {
     /// a path inside it, as a note outside does not exist to it. `diff`
     /// would otherwise print an outside note's lines as a hunk's context.
     private static func visibleProposals(in root: URL) -> [Proposal] {
-        let scope = agentScope
-        return ProposalStore.all(in: root).filter { isInScope($0.notePath, scope: scope) }
+        ProposalStore.all(in: root).filter { isVisible($0.notePath, in: root) }
     }
 
     private static func list(root: URL) {
@@ -674,9 +686,8 @@ public enum AgentCLI {
         }
 
         let index = VaultIndex.open(vaultAt: root)
-        let scope = agentScope
         let result = ContentSearch.run(
-            notes: index.notes.filter { isInScope($0.relativePath, scope: scope) },
+            notes: index.notes.filter { isVisible($0.relativePath, in: root) },
             query: words.joined(separator: " "), limit: limit
         )
         guard !result.matches.isEmpty else {
@@ -763,7 +774,6 @@ public enum AgentCLI {
         let kinds = Set((options["kinds"] ?? "notes,folders,tags").split(separator: ",").map {
             $0.trimmingCharacters(in: .whitespaces).lowercased()
         })
-        let scope = agentScope
         let index = VaultIndex.open(vaultAt: root)
         let frecency = FrecencyStore.notes(forVaultAt: root.standardizedFileURL.path)
         let pinned = Set(Pins.load(from: root).values(of: .note))
@@ -772,7 +782,7 @@ public enum AgentCLI {
             for hit in index.scoredSearch(
                 query, limit: limit, familiarity: { frecency.score($0.relativePath) },
                 pinned: { pinned.contains($0.relativePath) },
-                including: { isInScope($0.relativePath, scope: scope) }
+                including: { isVisible($0.relativePath, in: root) }
             ) {
                 found.append(("note", hit.note.relativePath, hit.score))
             }
@@ -786,7 +796,7 @@ public enum AgentCLI {
                     parts = parts.dropLast()
                 }
             }
-            for folder in folders where isInScope(folder, scope: scope) {
+            for folder in folders where isVisible(folder, in: root) {
                 let name = (folder as NSString).lastPathComponent
                 if let tier = CommandMatch.score(query: query, title: name, terms: folder) {
                     found.append(("folder", folder, tier))
@@ -796,7 +806,7 @@ public enum AgentCLI {
         if kinds.contains("tags") {
             // Only tags a note inside the folder carries, in a scoped run.
             for tag in index.allTags
-            where scope == nil || index.notes(taggedWith: tag).contains(where: { isInScope($0.relativePath, scope: scope) }) {
+            where index.notes(taggedWith: tag).contains(where: { isVisible($0.relativePath, in: root) }) {
                 if let tier = CommandMatch.score(query: query, title: tag, terms: "") {
                     found.append(("tag", "#" + tag, tier))
                 }
@@ -1021,6 +1031,11 @@ public enum AgentCLI {
             fail(error.localizedDescription)
         }
 
+        // Where the line lands, settings and symlinks followed, stays inside.
+        guard isVisible(relative, in: root) else {
+            fail("\(relative) is outside \(agentScope ?? "the vault"), what this question is limited to")
+        }
+
         // One note, one pending proposal, as `propose` already holds. Each
         // capture is the whole note plus its line, so a second accepted
         // after the first took the first one's line back out.
@@ -1190,12 +1205,13 @@ public enum AgentCLI {
     /// through it so that a name means the same thing to each.
     private static func resolveNote(named name: String, in root: URL) -> String {
         let index = VaultIndex.open(vaultAt: root)
-        if let scope = agentScope {
+        if agentScope != nil || pinnedBoundary != nil {
             // Resolved among the folder's notes alone, so a bare name finds
             // the one inside rather than failing on a likelier one outside.
-            let inside = index.notes.filter { isInScope($0.relativePath, scope: scope) }
+            let inside = index.notes.filter { isVisible($0.relativePath, in: root) }
             guard let found = VaultIndex.match(name, among: inside) else {
-                fail("no note called \(name) in \(scope), the folder this question is limited to")
+                fail("no note called \(name) in \(agentScope ?? "the vault"), "
+                    + "the \(agentScope == nil ? "vault" : "folder") this question is limited to")
             }
             return found.relativePath
         }
