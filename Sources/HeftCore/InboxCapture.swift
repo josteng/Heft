@@ -333,7 +333,7 @@ public struct InboxCapture: Sendable {
                     timestamped: CaptureTimestampPreference.isOn,
                     done: done
                 )
-                try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
+                try updated.writeNote(to: coordinatedURL)
             } catch {
                 writeError = error
             }

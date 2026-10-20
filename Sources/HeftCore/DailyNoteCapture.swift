@@ -71,7 +71,7 @@ public struct DailyNoteCapture: Sendable {
                     done: done,
                     inTimeOrder: inTimeOrder
                 )
-                try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
+                try updated.writeNote(to: coordinatedURL)
             } catch {
                 writeError = error
             }

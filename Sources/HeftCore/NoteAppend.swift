@@ -53,9 +53,7 @@ public enum NoteAppend {
                 }
                 let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
                     .replacingOccurrences(of: "\n", with: newline)
-                try (existing + separator + lines + newline).write(
-                    to: target, atomically: true, encoding: .utf8
-                )
+                try (existing + separator + lines + newline).writeNote(to: target)
             } catch {
                 writeError = error
             }

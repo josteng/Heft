@@ -112,6 +112,10 @@ preferences or the icon.
 - **Real-vault syntax that breaks naive parsers:** Obsidian writes `\|` for a
   literal pipe inside tables (`![[chart.png\|500]]`), and brackets can abut
   links (`\[[[Paper Name]]`), where the link is the innermost pair.
+- **A UTF-8 byte-order mark is the file's encoding, not its text.** Every
+  UTF-8 read drops it, so `String.write(to:atomically:encoding:)` over a note
+  drops it from the file. Write over a note with `writeNote(to:)`, which puts
+  it back only where the file had one.
 
 ## SwiftUI and the window
 

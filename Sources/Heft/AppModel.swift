@@ -2842,7 +2842,7 @@ final class AppModel: ObservableObject {
             at: templateURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
         if !templateExists || mayReplaceTemplate {
-            try templateBody.write(to: templateURL, atomically: true, encoding: .utf8)
+            try templateBody.writeNote(to: templateURL)
         }
 
         var updated = settings
@@ -3122,10 +3122,10 @@ final class AppModel: ObservableObject {
         guard let current else { return }
         do {
             if let target {
-                try text.write(to: target, atomically: true, encoding: .utf8)
+                try text.writeNote(to: target)
             } else {
                 try Self.coordinatingWrite(to: current.url) { target in
-                    try text.write(to: target, atomically: true, encoding: .utf8)
+                    try text.writeNote(to: target)
                 }
             }
             discardDraft()
@@ -3848,7 +3848,7 @@ final class AppModel: ObservableObject {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true
             )
-            try new.write(to: url, atomically: true, encoding: .utf8)
+            try new.writeNote(to: url)
             reload(immediately: true)
         } catch {
             status = "Could not write \(relativePath): \(error.localizedDescription)"

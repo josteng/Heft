@@ -15,10 +15,11 @@ public enum NoteText {
     /// is not UTF-8 reads as U+FFFD, as Obsidian reads it, instead of the
     /// whole note reading as nothing. Nil only when the file cannot be read.
     public static func readLeniently(_ url: URL) -> String? {
-        // Strict first, which also drops a byte-order mark.
+        // Strict first, which also drops a byte-order mark; the lenient
+        // decode keeps it as a character, which hid the frontmatter.
         if let text = try? String(contentsOf: url, encoding: .utf8) { return text }
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        return ByteOrderMark.stripped(String(decoding: data, as: UTF8.self))
     }
 
     /// Splits leading YAML frontmatter from the body.

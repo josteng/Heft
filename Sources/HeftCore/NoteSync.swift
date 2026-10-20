@@ -429,7 +429,7 @@ public enum NoteFile {
                 }
                 let current = try String(contentsOf: coordinated, encoding: .utf8)
                 guard current == original else { throw NoteWriteError.changedElsewhere }
-                try text.write(to: coordinated, atomically: true, encoding: .utf8)
+                try text.writeNote(to: coordinated)
             }
         }
         if let coordinationError { throw coordinationError }
@@ -457,7 +457,7 @@ public enum NoteFile {
         var result: Result<Void, Error> = .success(())
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing,
                                        error: &coordinationError) { coordinated in
-            result = Result { try text.write(to: coordinated, atomically: true, encoding: .utf8) }
+            result = Result { try text.writeNote(to: coordinated) }
         }
         if let coordinationError { throw coordinationError }
         try result.get()

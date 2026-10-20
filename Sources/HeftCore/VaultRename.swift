@@ -153,7 +153,7 @@ public enum VaultRename {
                 continue
             }
             do {
-                try plan.rewritten.write(to: url, atomically: true, encoding: .utf8)
+                try plan.rewritten.writeNote(to: url)
                 summary.links += plan.links
                 summary.notes += 1
             } catch {

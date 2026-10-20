@@ -135,7 +135,7 @@ public enum AgentGuide {
             let merged = merged(
                 into: existing, section: section, preamble: preamble(vaultName: name)
             )
-            try merged.write(to: target, atomically: true, encoding: .utf8)
+            try merged.writeNote(to: target)
             written.append(Written(url: target, created: existing == nil))
         }
 
