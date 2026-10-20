@@ -191,4 +191,30 @@ struct NoteSyncTests {
         #expect(!sync.conflict)
         #expect(try contents(url) == "mine more\n")
     }
+
+    /// Settling a conflict writes what was typed when Keep Mine was tapped;
+    /// typing during that write is still to be saved.
+    @Test("Typing during Keep Mine is saved after it")
+    func typingDuringKeepMine() async throws {
+        let (vault, url) = try vault("old\n")
+        defer { try? FileManager.default.removeItem(at: vault.root) }
+        let probe = Probe()
+        let sync = NoteSync(path: "Note.md", storage: probe.storage)
+        await sync.load(in: vault)
+        try "theirs\n".write(to: url, atomically: true, encoding: .utf8)
+        sync.edited("mine\n")
+        await sync.saveNow()
+        #expect(sync.conflict)
+        let slow = probe.hold("overwrite", call: 1)
+
+        let keep = Task { await sync.keepMine() }
+        await slow.arrival()
+        sync.edited("mine more\n")
+        await slow.open()
+        await keep.value
+        await sync.saveNow()
+
+        #expect(!sync.conflict)
+        #expect(try contents(url) == "mine more\n", "the typing made during Keep Mine was dropped")
+    }
 }

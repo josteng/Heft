@@ -178,15 +178,24 @@ public final class NoteSync {
     }
 
     /// Writes what was typed over the version that arrived meanwhile.
+    /// In the queue with the saves, and like them it keeps typing that came
+    /// in during the write for the next save.
     public func keepMine() async {
+        let previous = writing
+        let current = Task { await previous?.value; await overwrite() }
+        writing = current
+        await current.value
+    }
+
+    private func overwrite() async {
         guard let vault, let text = pending, let url = vault.noteURL(at: path) else { return }
         do {
             try await storage.overwrite(text, url)
             loadLanded = loadsStarted
             onDisk = text
             source = text
-            pending = nil
             conflict = false
+            if pending == text { pending = nil } else { saveSoon() }
             vault.noteWritten()
         } catch {
             saveError = error.localizedDescription
