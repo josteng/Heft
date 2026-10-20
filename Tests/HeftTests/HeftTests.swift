@@ -5,6 +5,9 @@ import SwiftUI
 import Testing
 @testable import Heft
 @testable import HeftCore
+#if canImport(HeftTestDefaults)
+import HeftTestDefaults
+#endif
 
 @Suite("Heft Core")
 struct HeftCoreTests {
@@ -2638,11 +2641,28 @@ struct HeftDefaultsTests {
     /// The runner's own domain gains every disposable vault's recents, run
     /// after run, until each write stalls the main thread. `swift test` gets
     /// the suite from `Tests/HeftTestDefaults`, Xcode from the scheme.
+    ///
+    /// Under `swift test` the suite carries the process id: one fixed name
+    /// let a run in one worktree empty the suite under a run in another.
     @Test("The test process writes to a suite of its own")
-    func testsAreIsolated() {
+    func testsAreIsolated() throws {
         #expect(HeftDefaults.isSandboxed)
         #expect(HeftDefaults.shared != UserDefaults.standard)
-        #expect(ProcessInfo.processInfo.environment[HeftDefaults.suiteEnvironmentKey] == "com.example.heft.tests")
+        let suite = ProcessInfo.processInfo.environment[HeftDefaults.suiteEnvironmentKey]
+        #if canImport(HeftTestDefaults)
+        // Nil when whoever launched the run named a suite, which wins.
+        guard let chosen = heft_test_defaults_suite() else { return }
+        let expected = "com.example.heft.tests.\(getpid())"
+        #expect(String(cString: chosen) == expected)
+        #expect(suite == expected)
+        // And it is the suite the accessor writes, not merely the name.
+        let key = "isolation-probe-\(UUID().uuidString)"
+        HeftDefaults.shared.set("here", forKey: key)
+        defer { HeftDefaults.shared.removeObject(forKey: key) }
+        #expect(try #require(UserDefaults(suiteName: expected)).string(forKey: key) == "here")
+        #else
+        #expect(suite == "com.example.heft.tests")
+        #endif
     }
 }
 
