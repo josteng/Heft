@@ -242,14 +242,17 @@ struct NoteView: View {
         let note = vault.note(at: path)
         NoteContent(document: document)
             .environment(\.noteItemAction) { action = $0 }
-            .itemActionHost($action) { action in
-                // Typing is written first, so the file moves with it; a note
-                // being deleted keeps none.
-                if case .delete = action { document.abandon() } else { await document.saveNow() }
+            .itemActionHost($action) { _ in
+                // Typing is written first, so the file moves with it, or goes
+                // to the Trash with it. Dropped only once the delete is done:
+                // a delete that fails leaves the note, and the typing, open.
+                await document.saveNow()
             } done: { outcome in
                 switch outcome {
                 case .moved(let path): replace(.note(path))
-                case .deleted: if let close { close() } else { dismiss() }
+                case .deleted:
+                    document.abandon()
+                    if let close { close() } else { dismiss() }
                 }
             }
             .navigationTitle(note?.name ?? (path as NSString).lastPathComponent)
