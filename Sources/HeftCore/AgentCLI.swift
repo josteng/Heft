@@ -61,6 +61,57 @@ public enum AgentCLI {
         fail("\(relative) is outside \(scope), the folder this question is limited to")
     }
 
+    /// The vault an agent asked from Heft is limited to, set beside the
+    /// scope. Without it every verb took whatever vault it was handed, so a
+    /// run could read any folder on the disk by naming it as a vault.
+    public static let vaultVariable = "HEFT_AGENT_VAULT"
+
+    static var pinnedVault: URL? {
+        guard let path = ProcessInfo.processInfo.environment[vaultVariable], !path.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    /// Where a path really is: symlinks followed, `/var` as `/private/var`,
+    /// and the case the disk has. A part that does not exist yet keeps its
+    /// spelling after the real path of the part that does.
+    public static func realPath(_ url: URL) -> String {
+        var existing = url.standardizedFileURL
+        var missing: [String] = []
+        while true {
+            if let resolved = realpath(existing.path, nil) {
+                defer { free(resolved) }
+                return ([String(cString: resolved)] + missing.reversed()).joined(separator: "/")
+            }
+            guard existing.path != "/" else { return url.standardizedFileURL.path }
+            missing.append(existing.lastPathComponent)
+            existing.deleteLastPathComponent()
+        }
+    }
+
+    /// The arguments a run Heft pinned to a vault may go on with, or an
+    /// exit. Checked before any verb runs, so no verb can forget it: the
+    /// verb must be one the run's own flags allow, and the vault, however
+    /// it is spelled, must be the pinned one, which then stands in for it.
+    /// Unpinned, the arguments come back as they were.
+    public static func pinned(_ arguments: [String]) -> [String] {
+        guard let vault = pinnedVault, let verb = arguments.first else { return arguments }
+        let verbs = agentScope == nil ? AgentInvocation.heftVerbs : AgentInvocation.scopedHeftVerbs
+        guard verbs.contains(verb) else {
+            fail("\(verb) is not one of the verbs this question may use: "
+                + verbs.joined(separator: ", "))
+        }
+        guard arguments.count > 1 else { return arguments }
+        let named = URL(fileURLWithPath: (arguments[1] as NSString).expandingTildeInPath)
+        guard realPath(named) == realPath(vault) else {
+            fail("\(arguments[1]) is not this question's vault, \(vault.path)")
+        }
+        var pinned = arguments
+        pinned[1] = vault.path
+        return pinned
+    }
+
     /// Returns true when it handled the arguments (and has exited).
     public static func run(_ arguments: [String]) -> Bool {
         guard let verb = arguments.first, verbs.contains(verb) else { return false }
@@ -865,7 +916,9 @@ public enum AgentCLI {
             }
         }
 
-        if AgentCaptureReviewPreference.isOn || isAsked {
+        // A pinned run is one Heft asked, so it is reviewed whatever else
+        // the environment says.
+        if AgentCaptureReviewPreference.isOn || isAsked || pinnedVault != nil {
             captureAsProposal(
                 text, root: root, daily: daily, to: target, at: moment, done: done,
                 inTimeOrder: atGiven)

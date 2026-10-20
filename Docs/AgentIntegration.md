@@ -328,8 +328,10 @@ setup can widen it:
 - `blockReadsOutsideWorkingDirectories` is set, because the read-only shell
   commands otherwise read anywhere on the disk: a run limited to `Work/`
   printed `../Home/` with `cat` before it was.
-- `heft` is told the scope in `HEFT_AGENT_SCOPE` and keeps to it for `read`,
-  `find`, `changes` and `propose`; a folder run gets only those verbs.
+- `heft` is told the vault in `HEFT_AGENT_VAULT` and the folder in
+  `HEFT_AGENT_SCOPE`, and checks both before any verb runs: only the verbs
+  the flags allow, and only that vault however it is spelled. The run cannot
+  unset them: no allowed command assigns a variable.
 - Nothing prompts. A refused read comes back as a denial, and allowing it adds
   its folder with `--add-dir` for the rest of the chat. A refused command is
   never offered: allowing one could run anything.

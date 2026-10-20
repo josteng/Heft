@@ -7,7 +7,7 @@ import SwiftUI
 @main
 enum HeftMain {
     static func main() {
-        let arguments = Array(CommandLine.arguments.dropFirst())
+        var arguments = Array(CommandLine.arguments.dropFirst())
 
         // Discovery first, so `heft` alone and `heft help` both answer.
         // Everything printed here comes from `CommandLineSpec`, which is also
@@ -46,6 +46,10 @@ enum HeftMain {
             }
             exit(0)
         }
+
+        // An agent Heft asked runs only the verbs its flags allow, on its
+        // own vault, before any verb sees the arguments.
+        arguments = AgentCLI.pinned(arguments)
 
         // The agent verbs: propose, proposals, diff, drop, read, find.
         if AgentCLI.run(arguments) { return }

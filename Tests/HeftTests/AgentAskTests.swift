@@ -99,6 +99,7 @@ struct AgentInvocationTests {
         #expect(environment["PATH"]?.hasPrefix("/support/agent-bin:/tools/bin:/usr/bin:/bin") == true)
         #expect(environment["HOME"] == "/home/reader")
         #expect(environment[AgentCLI.scopeVariable] == "Work")
+        #expect(environment[AgentCLI.vaultVariable] == "/vault", "and pinned to its vault")
         let whole = invocation(scope: "/vault").environment(base: [AgentCLI.scopeVariable: "Stale"])
         #expect(whole[AgentCLI.scopeVariable] == nil, "the whole vault, whatever was inherited")
     }

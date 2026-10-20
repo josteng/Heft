@@ -73,7 +73,7 @@ struct AgentCLITests {
 
     private func run(
         _ arguments: [String], stdin: String? = nil, readLog: URL? = nil,
-        defaultsSuite: String? = nil, scope: String? = nil
+        defaultsSuite: String? = nil, scope: String? = nil, pin: URL? = nil
     ) throws -> Output {
         guard let binary = Self.binary else {
             throw CLIUnavailable()
@@ -97,6 +97,7 @@ struct AgentCLITests {
             .appendingPathComponent("HeftCLIIndex-\(UUID().uuidString)").path
         environment[HeftDefaults.suiteEnvironmentKey] = suite
         environment[AgentCLI.scopeVariable] = scope
+        environment[AgentCLI.vaultVariable] = pin?.path
         process.environment = environment
         let out = Pipe(), err = Pipe(), input = Pipe()
         process.standardOutput = out
@@ -269,6 +270,84 @@ struct AgentCLITests {
             try Data(body.utf8).write(to: url)
         }
         return root
+    }
+
+    // MARK: - A run pinned to its vault
+
+    /// Ask tells `heft` its vault as well as its folder. Before, the vault
+    /// was whichever path came first, so naming another folder as the vault
+    /// read it, scope or none.
+    @Test("Pinned to a vault, heft takes no other, however this one is spelled")
+    func pinnedVault() throws {
+        let root = try vault(["Plan.md": "# Plan\nFriday.\n"])
+        let other = try vault(["Secret.md": "# Secret\nThe code. #private\n"])
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: other)
+        }
+        let elsewhere = try run(["read", other.path, "Secret.md"], pin: root)
+        #expect(elsewhere.status != 0 && !elsewhere.text.contains("code"), "got \(elsewhere.text)")
+        #expect(elsewhere.error.contains("not this question's vault"), "got \(elsewhere.error)")
+        for verb in [["find", "code"], ["files"], ["search", "secret"], ["tags"], ["proposals"]] {
+            let refused = try run([verb[0], other.path] + verb.dropFirst(), pin: root)
+            #expect(refused.status != 0 && !refused.text.contains("Secret") && !refused.text.contains("private"),
+                    "\(verb[0]) got \(refused.text)")
+        }
+        let proposed = try run(["propose", other.path, "Secret.md", "--replace"],
+                               stdin: "--- old\nThe code.\n--- new\nNone.\n", pin: root)
+        #expect(proposed.status != 0 && ProposalStore.all(in: other).isEmpty)
+
+        // The same vault, spelled any other way, is still it.
+        let real = AgentCLI.realPath(root)
+        #expect(real.hasPrefix("/private/"), "the temporary folder is a /var one; got \(real)")
+        var spellings = [
+            root.path + "/", root.path + "/.", real,
+            "~" + String(repeating: "/..", count: NSHomeDirectory().split(separator: "/").count) + real,
+        ]
+        let alias = other.appendingPathComponent("Alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root)
+        spellings.append(alias.path)
+        let shouted = root.deletingLastPathComponent().appendingPathComponent(root.lastPathComponent.uppercased())
+        if FileManager.default.fileExists(atPath: shouted.path) { spellings.append(shouted.path) }
+        for spelling in spellings {
+            let read = try run(["read", spelling, "Plan.md"], pin: root)
+            #expect(read.text.contains("Friday"), "\(spelling): \(read.error)")
+        }
+    }
+
+    /// The flags already keep these from an Ask run; `heft` keeps them too,
+    /// so nothing else has to be right for them to stay out.
+    @Test("Pinned, heft runs only the verbs an Ask run is given")
+    func pinnedVerbs() throws {
+        let root = try vault(["Plan.md": "# Plan\n", "Work/Note.md": "# Note\n#tagged\n"])
+        let pdf = FileManager.default.temporaryDirectory.appendingPathComponent("HeftPinned-\(UUID().uuidString).pdf")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: pdf)
+        }
+        for arguments in [
+            ["rename", root.path, "Plan.md", "Renamed", "--now"],
+            ["export", root.path, "Plan", pdf.path],
+            ["daily", root.path, "2026-01-02"],
+            ["agent-setup", root.path],
+            ["stats", root.path],
+        ] {
+            let refused = try run(arguments, pin: root)
+            #expect(refused.status != 0 && refused.error.contains("not one of the verbs"),
+                    "\(arguments[0]) got \(refused.error)")
+        }
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path).sorted()
+        #expect(names == ["Plan.md", "Work"], "nothing renamed or written; got \(names)")
+        #expect(!FileManager.default.fileExists(atPath: pdf.path))
+
+        // In a folder, the verbs that answer about the whole vault go too.
+        let tags = try run(["tags", root.path], scope: "Work", pin: root)
+        #expect(tags.status != 0 && !tags.text.contains("tagged"), "got \(tags.text)")
+
+        // A capture from a pinned run is reviewed, never written.
+        let captured = try run(["capture", root.path, "a line", "--to", "Plan.md"], pin: root)
+        #expect(captured.status == 0 && captured.text.contains("proposed"), "got \(captured.text) \(captured.error)")
+        #expect(try String(contentsOf: root.appendingPathComponent("Plan.md"), encoding: .utf8) == "# Plan\n")
     }
 
     // MARK: - read

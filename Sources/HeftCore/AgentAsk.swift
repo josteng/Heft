@@ -16,7 +16,8 @@ import Foundation
 ///   (`rename --now`, `capture`, `daily`, `export`) are not among them.
 /// - Nothing reads outside the scope: not Claude's own tools, not the shell
 ///   commands it trusts as read-only (`cat` would otherwise read anywhere on
-///   the disk), and not `heft`, which is told the scope and keeps to it.
+///   the disk), and not `heft`, which is told the vault and the scope and
+///   keeps every verb and every path it is given to them.
 /// - Anything that would ask is refused, and reported back as a denial.
 /// - No settings, hooks or MCP servers load from the reader's setup or the
 ///   vault: an allow rule there could otherwise reopen what this closes.
@@ -115,8 +116,9 @@ public struct AgentInvocation: Equatable, Sendable {
     /// The process environment: the reader's, with this app's `heft` first.
     public func environment(base: [String: String]) -> [String: String] {
         var environment = base
-        environment["HEFT_AGENT_SCOPE"] = scope
-        environment["HEFT_AGENT_ASK"] = "1"
+        environment[AgentCLI.scopeVariable] = scope
+        environment[AgentCLI.vaultVariable] = vaultRoot.standardizedFileURL.path
+        environment[AgentCLI.askVariable] = "1"
         let path = base["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         let extra = [heftDirectory?.path, executable.deletingLastPathComponent().path].compactMap { $0 }
         environment["PATH"] = (extra + [path, "/opt/homebrew/bin", "/usr/local/bin"]).joined(separator: ":")
