@@ -50,7 +50,9 @@ public enum NoteText {
         var fenceMarker = ""
 
         for (index, line) in source.components(separatedBy: "\n").enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Without a Windows line break's return, or the text carried it
+            // into every `[[Note#Heading]]` completed from it.
+            let trimmed = line.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\r")))
 
             if inFence {
                 if trimmed.hasPrefix(fenceMarker) { inFence = false }
@@ -120,7 +122,8 @@ public enum NoteText {
     public static func lineOfBlockID(_ blockID: String, in source: String) -> Int? {
         let needle = "^" + blockID
         for (index, line) in source.components(separatedBy: "\n").enumerated()
-        where line.trimmingCharacters(in: .whitespaces).hasSuffix(needle) {
+        where line.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\r")))
+            .hasSuffix(needle) {
             return index
         }
         return nil
@@ -142,7 +145,7 @@ public enum NoteText {
             // The marker is an anchor, not content, so it is not shown.
             return lines[index]
                 .replacingOccurrences(of: "^" + blockID, with: "")
-                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         guard let heading, !heading.isEmpty else {

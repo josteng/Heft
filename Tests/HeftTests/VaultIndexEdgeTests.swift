@@ -70,7 +70,7 @@ struct VaultIndexEdgeTests {
 
 /// A vault synced from Windows ends every line in `\r\n`, frontmatter
 /// fences included.
-@Suite("Windows line breaks in frontmatter")
+@Suite("Windows line breaks")
 struct CRLFFrontmatterTests {
     private let note = "---\r\ntags: [work, plan]\r\naliases:\r\n  - Roadmap\r\n---\r\nBody #inline\r\n"
 
@@ -90,6 +90,17 @@ struct CRLFFrontmatterTests {
             NoteProperty(key: "title", value: .text("X")),
             NoteProperty(key: "kind", value: .text("y")),
         ])
+    }
+
+    /// A heading or block id is found, and named, without the return:
+    /// completed into a link, the return broke the line it was typed on.
+    @Test("Headings and block ids are read without a return")
+    func headingsAndBlockIDs() {
+        let source = "# Title\r\ntext ^abc\r\n## Part\r\nbody\r\n"
+        #expect(NoteText.headings(in: source).map(\.text) == ["Title", "Part"])
+        #expect(NoteText.lineOfHeading("Part", in: source) == 2)
+        #expect(NoteText.lineOfBlockID("abc", in: source) == 1)
+        #expect(NoteText.embedBody(of: source, heading: nil, blockID: "abc") == "text")
     }
 
     @Test("The surface draws it as frontmatter")
