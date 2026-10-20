@@ -52,14 +52,16 @@ enum SharedVault {
 
     /// `date` is when the line was captured, which for a queued share can be
     /// a while before it is filed: it still belongs to that day's note.
+    /// `inTimeOrder` files it among lines written since, by its time.
     static func file(_ text: String, to destination: Destination, in root: URL,
-                     at date: Date = Date()) throws {
+                     at date: Date = Date(), inTimeOrder: Bool = false) throws {
         switch destination {
         case .today:
             let settings = ObsidianSettings.load(vaultRoot: root)
-            try DailyNoteCapture(vaultRoot: root, settings: settings).capture(text, at: date)
+            try DailyNoteCapture(vaultRoot: root, settings: settings)
+                .capture(text, at: date, inTimeOrder: inTimeOrder)
         case .inbox:
-            try InboxCapture(vaultRoot: root).capture(text, at: date)
+            try InboxCapture(vaultRoot: root).capture(text, at: date, inTimeOrder: inTimeOrder)
         case .note(let path):
             try NoteAppend.append(text, to: path, in: root)
         }
@@ -205,12 +207,14 @@ enum SharedVault {
         for (url, pending) in queued {
             do {
                 do {
-                    try file(pending.text, to: pending.destination, in: root, at: pending.date)
+                    try file(pending.text, to: pending.destination, in: root, at: pending.date,
+                             inTimeOrder: true)
                 } catch NoteAppend.Failure.missing(let path) where !awaitsDownload(path, in: root) {
                     // Renamed or deleted since it was shared. Queued, it was
                     // retried on every scan and never seen; the inbox is
                     // where a share with no other home goes.
-                    try file(pending.text, to: .inbox, in: root, at: pending.date)
+                    try file(pending.text, to: .inbox, in: root, at: pending.date,
+                             inTimeOrder: true)
                 }
                 try? FileManager.default.removeItem(at: url)
                 filed += 1

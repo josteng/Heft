@@ -156,8 +156,8 @@ public enum CommandLineSpec {
             Flag("--done", "As a ticked task, `- [x]`: a record of something finished."),
             Flag("--at", value: "<time>",
                  "That moment instead of now, in ISO 8601: the time on the line, "
-                 + "and with --daily which day's note, filed among its timestamped "
-                 + "lines in time order."),
+                 + "filed where it would have gone then: under that day in the "
+                 + "inbox, or with --daily in that day's note, in time order."),
             Flag("--", "The rest is the text, even where it starts with --. "
                  + "Any other flag capture does not know is refused."),
         ], isReadOnly: false),

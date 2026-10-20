@@ -164,32 +164,66 @@ public struct DailyNoteCapture: Sendable {
         of minute: Int, in text: String, before limit: String.Index, newline: String
     ) -> String.Index? {
         var stamped: [(start: String.Index, minute: Int)] = []
+        for line in captureLines(in: text, before: limit, newline: newline) {
+            if line.heading != nil {
+                stamped.removeAll()
+            } else if let value = line.minute {
+                stamped.append((line.range.lowerBound, value))
+            }
+        }
+        let lastAtOrBefore = stamped.lastIndex { $0.minute <= minute }
+        let after = stamped[(lastAtOrBefore.map { $0 + 1 } ?? 0)...]
+        return after.first { $0.minute > minute }?.start
+    }
+
+    /// One line as filing in time order reads it.
+    struct CaptureLine {
+        /// The line without its break.
+        let range: Range<String.Index>
+        /// Where the next line starts, or the end of the text.
+        let next: String.Index
+        let hasBreak: Bool
+        /// The line, when it is a heading.
+        let heading: Substring?
+        /// Minutes past midnight, when it is a top-level timestamped item
+        /// (`- 09:15 …`, `- [x] 09:15 …`).
+        let minute: Int?
+    }
+
+    /// The lines that start before `limit`, read for headings and times.
+    ///
+    /// A code block's lines are neither: `# comment` in a shell snippet
+    /// ended the section, and a list in one took the item inside it.
+    /// Opened and closed the way `NoteText.headings` reads them.
+    static func captureLines(
+        in text: String, before limit: String.Index, newline: String
+    ) -> [CaptureLine] {
+        var lines: [CaptureLine] = []
         var start = text.startIndex
-        // A code block's lines are neither: `# comment` in a shell snippet
-        // ended the section, and a list in one took the item inside it.
-        // Opened and closed the way `NoteText.headings` reads them.
         var fence: String?
         while start < limit {
             let lineBreak = text.range(of: newline, range: start..<text.endIndex)
             let end = lineBreak?.lowerBound ?? text.endIndex
             let line = text[start..<end]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            var heading: Substring?
+            var minute: Int?
             if let open = fence {
                 if trimmed.hasPrefix(open) { fence = nil }
             } else if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 fence = String(trimmed.prefix(3))
             } else if line.range(of: #"^#{1,6}( |$)"#, options: .regularExpression) != nil {
-                stamped.removeAll()
-            } else if let found = line.firstMatch(of: #/^- (?:\[[ xX]\] )?(\d{2}):(\d{2})(?: |$)/#),
-                      let value = minutes("\(found.1):\(found.2)") {
-                stamped.append((start, value))
+                heading = line
+            } else if let found = line.firstMatch(of: #/^- (?:\[[ xX]\] )?(\d{2}):(\d{2})(?: |$)/#) {
+                minute = minutes("\(found.1):\(found.2)")
             }
+            lines.append(CaptureLine(
+                range: start..<end, next: lineBreak?.upperBound ?? text.endIndex,
+                hasBreak: lineBreak != nil, heading: heading, minute: minute))
             guard let lineBreak else { break }
             start = lineBreak.upperBound
         }
-        let lastAtOrBefore = stamped.lastIndex { $0.minute <= minute }
-        let after = stamped[(lastAtOrBefore.map { $0 + 1 } ?? 0)...]
-        return after.first { $0.minute > minute }?.start
+        return lines
     }
 
     /// Minutes past midnight for `HH:mm`, or nil.

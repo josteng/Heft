@@ -294,7 +294,8 @@ public struct InboxCapture: Sendable {
         _ rawText: String,
         at date: Date = Date(),
         calendar: Calendar = .current,
-        done: Bool = false
+        done: Bool = false,
+        inTimeOrder: Bool = false
     ) throws -> URL {
         var vaultIsDirectory: ObjCBool = false
         guard FileManager.default.fileExists(
@@ -331,7 +332,8 @@ public struct InboxCapture: Sendable {
                     calendar: calendar,
                     title: title,
                     timestamped: CaptureTimestampPreference.isOn,
-                    done: done
+                    done: done,
+                    inTimeOrder: inTimeOrder
                 )
                 try updated.writeNote(to: coordinatedURL)
             } catch {
@@ -349,6 +351,8 @@ public struct InboxCapture: Sendable {
     ///
     /// - Parameter done: write the item as a ticked task, `- [x] …`, for a
     ///   record of something finished rather than a thought to act on.
+    /// - Parameter inTimeOrder: file the item where it would have gone had it
+    ///   been captured at `date`, for a moment that has already passed.
     public static func contents(
         byCapturing rawText: String,
         in existing: String,
@@ -356,7 +360,8 @@ public struct InboxCapture: Sendable {
         calendar: Calendar = .current,
         title: String = "Inbox",
         timestamped: Bool = true,
-        done: Bool = false
+        done: Bool = false,
+        inTimeOrder: Bool = false
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw InboxCaptureError.emptyCapture }
@@ -369,6 +374,13 @@ public struct InboxCapture: Sendable {
 
         guard !existing.isEmpty else {
             return "# \(title)\(newline)\(newline)\(dayHeading)\(newline)\(entry)\(newline)"
+        }
+
+        if inTimeOrder, let placed = timeOrdered(
+            entry, day: day, minute: DailyNoteCapture.minutes(time),
+            in: existing, title: title, newline: newline
+        ) {
+            return placed
         }
 
         if let heading = lineRange(named: dayHeading, in: existing, newline: newline) {
@@ -385,6 +397,78 @@ public struct InboxCapture: Sendable {
         // An Inbox.md may predate this feature. Preserve it byte-for-byte and
         // add the new dated section ahead of its existing content.
         return section + existing
+    }
+
+    /// The inbox with a late item filed in order, or nil when it goes where
+    /// a capture made now would, so a capture at the current time writes
+    /// exactly what it always has.
+    ///
+    /// Days run newest first, and so do a day's items. A day without a
+    /// heading gets one above the first older day; a heading that is not a
+    /// day (`## Someday`) is a boundary the new one stops at rather than
+    /// crosses. Subheadings belong to the day above. Within its day the item
+    /// goes below the last later item, above any already at its minute, as a
+    /// live capture goes above them; untimed lines keep their place.
+    private static func timeOrdered(
+        _ entry: String, day: String, minute: Int?,
+        in text: String, title: String, newline: String
+    ) -> String? {
+        let lines = DailyNoteCapture.captureLines(in: text, before: text.endIndex, newline: newline)
+        let ownHeading = "## \(day)"
+
+        if let own = lines.firstIndex(where: {
+            $0.heading.map { lineText($0.startIndex..<$0.endIndex, in: text) } == ownHeading
+        }) {
+            let section = lines[(own + 1)...].prefix { $0.heading == nil }
+            let stamped = section.filter { $0.minute != nil }
+            guard let minute,
+                  let lastLater = stamped.lastIndex(where: { $0.minute! > minute })
+            else {
+                return prepending(entry, toBodyOf: lines[own].range, in: text, newline: newline)
+            }
+            var result = text
+            if let earlier = stamped[(lastLater + 1)...].first(where: { $0.minute! <= minute }) {
+                result.insert(contentsOf: entry + newline, at: earlier.range.lowerBound)
+                return result
+            }
+            // Older than every item of the day: after the last one and the
+            // indented lines that continue it.
+            var last = stamped[lastLater]
+            for line in section where line.range.lowerBound > last.range.lowerBound {
+                guard let first = text[line.range].first, first == " " || first == "\t",
+                      !text[line.range].allSatisfy(\.isWhitespace) else { break }
+                last = line
+            }
+            result.insert(
+                contentsOf: last.hasBreak ? entry + newline : newline + entry, at: last.next)
+            return result
+        }
+
+        // A new day: past every newer day heading, up to an older one.
+        var sawNewer = false
+        let start = lines.first?.heading.map { lineText($0.startIndex..<$0.endIndex, in: text) }
+            == "# \(title)" ? 1 : 0
+        for line in lines.dropFirst(start) {
+            guard let heading = line.heading,
+                  heading.range(of: #"^#{1,2}( |$)"#, options: .regularExpression) != nil
+            else { continue }
+            let named = lineText(heading.startIndex..<heading.endIndex, in: text)
+            if let other = named.wholeMatch(of: #/## (\d{4}-\d{2}-\d{2})/#)?.1, other > day {
+                sawNewer = true
+                continue
+            }
+            guard sawNewer else { return nil }
+            let point = line.range.lowerBound
+            let gap = text[..<point].hasSuffix(newline + newline) ? "" : newline
+            var result = text
+            result.insert(
+                contentsOf: "\(gap)\(ownHeading)\(newline)\(entry)\(newline)\(newline)", at: point)
+            return result
+        }
+        guard sawNewer else { return nil }
+        let gap = text.hasSuffix(newline + newline) ? ""
+            : text.hasSuffix(newline) ? newline : newline + newline
+        return text + "\(gap)\(ownHeading)\(newline)\(entry)\(newline)"
     }
 
     private static func formatted(

@@ -1324,6 +1324,41 @@ struct AgentCLITests {
         #expect(inbox.contains("## \(day)\n- \(time) late note"))
     }
 
+    /// A local `--at` has no offset, so the day and time are the ones typed.
+    private let lateInbox = "# Inbox\n\n## 2025-03-06\n- 09:00 a\n\n## 2025-03-04\n- 15:00 c\n- 09:00 d\n\n## 2025-03-02\n- 10:00 b\n"
+
+    @Test("--at files into the inbox by day and time, not at the top")
+    func captureAtKeepsTheInboxInOrder() throws {
+        let root = try vault(["Inbox.md": lateInbox])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        #expect(try run(["capture", root.path, "mid", "--at", "2025-03-04T12:00"]).status == 0)
+        #expect(try run(["capture", root.path, "new day", "--at", "2025-03-03T08:00"]).status == 0)
+        let inbox = try String(
+            contentsOf: root.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        #expect(inbox == lateInbox
+            .replacingOccurrences(of: "- 15:00 c\n", with: "- 15:00 c\n- 12:00 mid\n")
+            .replacingOccurrences(
+                of: "## 2025-03-02\n", with: "## 2025-03-03\n- 08:00 new day\n\n## 2025-03-02\n"))
+    }
+
+    /// Accepting the proposal has to write what the immediate path would.
+    @Test("A reviewed --at capture into the inbox is in the same order")
+    func reviewedCaptureAtKeepsTheInboxInOrder() throws {
+        let root = try vault(["Inbox.md": lateInbox])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { Self.discardSuite(suite) }
+        AgentCaptureReviewPreference.set(true, in: try #require(UserDefaults(suiteName: suite)))
+
+        let output = try run(
+            ["capture", root.path, "mid", "--at", "2025-03-04T12:00"], defaultsSuite: suite)
+        #expect(output.status == 0, "\(output.error)")
+        let pending = try #require(ProposalStore.all(in: root).first)
+        #expect(pending.body == lateInbox.replacingOccurrences(
+            of: "- 15:00 c\n", with: "- 15:00 c\n- 12:00 mid\n"))
+    }
+
     @Test("--done before the text still ticks it")
     func captureDoneBeforeTheText() throws {
         let root = try vault(["Inbox.md": "# Inbox\n"])

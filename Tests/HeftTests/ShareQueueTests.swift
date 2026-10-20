@@ -87,4 +87,33 @@ struct ShareQueueTests {
         #expect(queued(queue).count == 1)
         #expect(notes(in: vault).isEmpty)
     }
+
+    /// Filed when the app next runs, a share still belongs where it would
+    /// have gone when it was made: its own day in the inbox, and its own
+    /// time among the daily note's lines.
+    @Test("A share filed late goes in by its day and time")
+    func lateShareKeepsTimeOrder() throws {
+        let inbox = "# Inbox\n\n## 2026-10-20\n- 09:00 a\n\n## 2026-10-17\n- 10:00 b\n"
+        let (queue, vault) = try folders(["Inbox.md": inbox])
+        defer { try? FileManager.default.removeItem(at: queue.deletingLastPathComponent()) }
+        let shared = try #require(Calendar.current.date(from: DateComponents(
+            year: 2026, month: 10, day: 18, hour: 12, minute: 0)))
+        let settings = ObsidianSettings.load(vaultRoot: vault)
+        let daily = vault.appendingPathComponent(
+            DailyNotes(vaultRoot: vault, settings: settings).relativePath(for: shared))
+        try FileManager.default.createDirectory(
+            at: daily.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "# Day\n\n- 09:00 x\n- 15:00 y\n".write(to: daily, atomically: true, encoding: .utf8)
+        try SharedVault.enqueue(.init(text: "the share", destination: .inbox, date: shared), in: queue)
+        try SharedVault.enqueue(.init(text: "the share", destination: .today, date: shared), in: queue)
+
+        #expect(SharedVault.drainQueue(from: queue, into: vault) == 2)
+
+        let filed = try String(contentsOf: vault.appendingPathComponent("Inbox.md"), encoding: .utf8)
+        let headings = filed.split(separator: "\n").filter { $0.hasPrefix("## ") }
+        #expect(headings == ["## 2026-10-20", "## 2026-10-18", "## 2026-10-17"])
+        let lines = try String(contentsOf: daily, encoding: .utf8)
+            .split(separator: "\n").filter { $0.hasPrefix("- ") }
+        #expect(lines == ["- 09:00 x", "- 12:00 the share", "- 15:00 y"])
+    }
 }

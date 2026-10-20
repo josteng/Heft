@@ -876,12 +876,13 @@ public enum AgentCLI {
             if daily {
                 let settings = ObsidianSettings.load(vaultRoot: root)
                 // A moment named with --at may have passed, and the note
-                // may have later lines by now: file it among them in order.
+                // may have later lines by now: file it among them in order,
+                // as the inbox does below.
                 written = try DailyNoteCapture(vaultRoot: root, settings: settings)
                     .capture(text, at: moment, done: done, inTimeOrder: atGiven)
             } else {
                 written = try InboxCapture(vaultRoot: root, relativePath: target)
-                    .capture(text, at: moment, done: done)
+                    .capture(text, at: moment, done: done, inTimeOrder: atGiven)
             }
             // Both sides standardised, or /tmp against /private/tmp made the
             // daily note print an absolute path where the inbox printed a
@@ -942,7 +943,8 @@ public enum AgentCLI {
                     .deletingPathExtension
                 proposed = try InboxCapture.contents(
                     byCapturing: text, in: starting ?? "", at: now, title: title,
-                    timestamped: CaptureTimestampPreference.isOn, done: done
+                    timestamped: CaptureTimestampPreference.isOn, done: done,
+                    inTimeOrder: inTimeOrder
                 )
             }
         } catch {
