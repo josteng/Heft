@@ -32,6 +32,10 @@ final class NoteDocument {
     /// that any view draws.
     @ObservationIgnored private var pending: String?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
+    /// Reads begun and the latest one taken, so reads finishing out of
+    /// order keep the newest.
+    @ObservationIgnored private var loadsStarted = 0
+    @ObservationIgnored private var loadLanded = 0
     /// The last save started, which the next one waits for.
     @ObservationIgnored private var writing: Task<Void, Never>?
     @ObservationIgnored private weak var vault: MobileVault?
@@ -72,8 +76,17 @@ final class NoteDocument {
             failure = "The note is no longer in the vault."
             return
         }
+        loadsStarted += 1
+        let load = loadsStarted
         do {
             let text = try await Task.detached { try MobileVault.read(url) }.value
+            // Asked again after the read, which can wait on iCloud for
+            // seconds: typing that began meanwhile is based on the old text,
+            // and taking this as the base would let its save replace the
+            // newer file unasked. Nor does a read that a later one overtook
+            // put its older text back.
+            guard pending == nil, load > loadLanded else { return }
+            loadLanded = load
             onDisk = text
             failure = nil
             if text != source {
@@ -263,6 +276,8 @@ final class NoteDocument {
         else { return }
         do {
             try await Task.detached { try MobileVault.write(text, to: url, replacing: base) }.value
+            // A read begun before this write holds what it replaced.
+            loadLanded = loadsStarted
             onDisk = text
             source = text
             if pending == text { pending = nil } else { saveSoon() }
@@ -279,6 +294,7 @@ final class NoteDocument {
         guard let vault, let text = pending, let url = vault.note(at: path)?.url else { return }
         do {
             try await Task.detached { try MobileVault.overwrite(text, at: url) }.value
+            loadLanded = loadsStarted
             onDisk = text
             source = text
             pending = nil
