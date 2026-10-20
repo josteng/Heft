@@ -958,6 +958,204 @@ struct AgentCLITests {
         #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent(today).path))
     }
 
+    /// The daily note `--at <day>T…` writes to, made beforehand with `body`.
+    private func dailyNote(
+        in root: URL, day: String, body: String
+    ) throws -> URL {
+        let moment = try #require(AgentCLI.captureMoment("\(day)T12:00"))
+        let path = DailyNotes(vaultRoot: root, settings: ObsidianSettings.load(vaultRoot: root))
+            .relativePath(for: moment)
+        let url = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(body.utf8).write(to: url)
+        return url
+    }
+
+    private func captureDaily(
+        _ root: URL, _ text: String, at time: String, defaultsSuite: String? = nil
+    ) throws {
+        let output = try run(
+            ["capture", root.path, text, "--daily", "--done", "--at", "2025-03-04T\(time)"],
+            defaultsSuite: defaultsSuite)
+        #expect(output.status == 0, "\(output.error)")
+    }
+
+    /// Lines captured late, as a queue delivered after the fact would.
+    @Test("--at files a late line in time order, whatever order they arrive in")
+    func captureAtKeepsTimeOrder() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let note = try dailyNote(in: root, day: "2025-03-04", body: "# 2025-03-04\n\n")
+
+        try captureDaily(root, "third", at: "16:40")
+        try captureDaily(root, "first", at: "09:05")
+        try captureDaily(root, "second", at: "12:30")
+
+        #expect(try String(contentsOf: note, encoding: .utf8) == """
+            # 2025-03-04
+
+            - [x] 09:05 first
+            - [x] 12:30 second
+            - [x] 16:40 third
+
+            """)
+    }
+
+    @Test("--at goes between lines typed by hand, and keeps their continuations")
+    func captureAtInterleavesWithManualLines() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let note = try dailyNote(in: root, day: "2025-03-04", body: """
+            # 2025-03-04
+
+            ## Agenda
+            - 12:00 meeting with the team
+
+            ## Log
+            - 08:00 coffee
+            A loose paragraph without a time.
+            - [ ] 09:30 standup
+              notes from the standup
+            - 11:00 lunch plans
+            - [x] 14:00 review
+            <!-- heft:daily-log -->
+
+            ## Later
+            - 07:00 not in the log
+
+            """)
+
+        try captureDaily(root, "late tick", at: "10:15")
+        try captureDaily(root, "early tick", at: "07:30")
+        try captureDaily(root, "evening tick", at: "21:00")
+
+        #expect(try String(contentsOf: note, encoding: .utf8) == """
+            # 2025-03-04
+
+            ## Agenda
+            - 12:00 meeting with the team
+
+            ## Log
+            - [x] 07:30 early tick
+            - 08:00 coffee
+            A loose paragraph without a time.
+            - [ ] 09:30 standup
+              notes from the standup
+            - [x] 10:15 late tick
+            - 11:00 lunch plans
+            - [x] 14:00 review
+            - [x] 21:00 evening tick
+            <!-- heft:daily-log -->
+
+            ## Later
+            - 07:00 not in the log
+
+            """)
+    }
+
+    @Test("--at at a time already there goes after it, in the order delivered")
+    func captureAtEqualTimesKeepArrivalOrder() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let note = try dailyNote(in: root, day: "2025-03-04", body: """
+            # 2025-03-04
+
+            - 09:30 typed by hand
+            - 10:00 also typed
+
+            """)
+
+        try captureDaily(root, "one", at: "09:30")
+        try captureDaily(root, "two", at: "09:30")
+
+        #expect(try String(contentsOf: note, encoding: .utf8) == """
+            # 2025-03-04
+
+            - 09:30 typed by hand
+            - [x] 09:30 one
+            - [x] 09:30 two
+            - 10:00 also typed
+
+            """)
+    }
+
+    /// Lines typed out of order: the item follows the last line at or
+    /// before its time, so it never jumps above something already later
+    /// in the section that came after an earlier line.
+    @Test("Out-of-order lines: after the last one at or before the time")
+    func timeOrderFollowsTheLastEarlierLine() {
+        let text = "- 09:30 a\n- 10:00 b\n- 09:30 c\n- 11:00 d\n"
+        let point = DailyNoteCapture.timeOrderedInsertion(
+            of: 9 * 60 + 30, in: text, before: text.endIndex, newline: "\n")
+        #expect(point.map { text.distance(from: text.startIndex, to: $0) } == 30)
+        #expect(DailyNoteCapture.timeOrderedInsertion(
+            of: 12 * 60, in: text, before: text.endIndex, newline: "\n") == nil)
+    }
+
+    /// A shell comment in a code block read as a heading and ended the
+    /// section, and a list line in one read as a time: the item went
+    /// after a later line, or into the code block itself.
+    @Test("Lines inside a code block are neither headings nor times")
+    func timeOrderSkipsCodeBlocks() throws {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let eight = try #require(utc.date(from: DateComponents(
+            year: 2025, month: 3, day: 4, hour: 8, minute: 0)))
+        let capture = { (note: String, at: Date) in
+            try DailyNoteCapture.contents(
+                byCapturing: "late", in: note, at: at, calendar: utc, inTimeOrder: true)
+        }
+
+        let comment = "## Log\n- 09:00 a\n```sh\n# a comment\n```\n- 11:00 b\n"
+        #expect(try capture(comment, eight)
+            == "## Log\n- 08:00 late\n- 09:00 a\n```sh\n# a comment\n```\n- 11:00 b\n")
+
+        let listing = "- 09:00 a\n~~~\n- 12:00 printed by a script\n~~~\n- 13:00 b\n"
+        let eleven = eight.addingTimeInterval(3 * 3600)
+        #expect(try capture(listing, eleven)
+            == "- 09:00 a\n~~~\n- 12:00 printed by a script\n~~~\n- 11:00 late\n- 13:00 b\n")
+    }
+
+    @Test("With timestamps off, --at appends as any capture does")
+    func captureAtWithoutTimestampsAppends() throws {
+        let root = try vault(["Note.md": "# Note\n"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { Self.discardSuite(suite) }
+        CaptureTimestampPreference.set(false, in: try #require(UserDefaults(suiteName: suite)))
+        let note = try dailyNote(in: root, day: "2025-03-04", body: """
+            # 2025-03-04
+
+            - 09:30 typed by hand
+            - 10:00 also typed
+
+            """)
+
+        try captureDaily(root, "untimed", at: "09:00", defaultsSuite: suite)
+
+        #expect(try String(contentsOf: note, encoding: .utf8) == """
+            # 2025-03-04
+
+            - 09:30 typed by hand
+            - 10:00 also typed
+            - [x] untimed
+
+            """)
+    }
+
+    @Test("Without --at a capture is appended, even before earlier times")
+    func captureWithoutAtStillAppends() throws {
+        // Time order is for a moment named after the fact. A capture made
+        // now goes where it always has, so typing out of order by hand is
+        // the reader's business.
+        let written = try DailyNoteCapture.contents(
+            byCapturing: "now", in: "# Day\n\n- 23:59 later\n", at: Date(timeIntervalSince1970: 0),
+            calendar: { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!; return c }()
+        )
+        #expect(written == "# Day\n\n- 23:59 later\n- 00:00 now\n")
+    }
+
     @Test("--at with an offset is that instant, and dates the inbox's heading")
     func captureAtAnInstantIntoTheInbox() throws {
         let root = try vault(["Inbox.md": "# Inbox\n"])

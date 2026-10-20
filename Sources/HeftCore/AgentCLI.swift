@@ -798,7 +798,8 @@ public enum AgentCLI {
             fail("--daily and --to name two different notes; pick one")
         }
         var moment = Date()
-        if parsed.flags.contains("--at") {
+        let atGiven = parsed.flags.contains("--at")
+        if atGiven {
             guard let asked = options["at"], let named = captureMoment(asked) else {
                 fail("""
                     --at takes an ISO 8601 date and time: \(options["at"] ?? "nothing")
@@ -836,15 +837,18 @@ public enum AgentCLI {
 
         if AgentCaptureReviewPreference.isOn || isAsked {
             captureAsProposal(
-                text, root: root, daily: daily, to: target, at: moment, done: done)
+                text, root: root, daily: daily, to: target, at: moment, done: done,
+                inTimeOrder: atGiven)
         }
 
         do {
             let written: URL
             if daily {
                 let settings = ObsidianSettings.load(vaultRoot: root)
+                // A moment named with --at may have passed, and the note
+                // may have later lines by now: file it among them in order.
                 written = try DailyNoteCapture(vaultRoot: root, settings: settings)
-                    .capture(text, at: moment, done: done)
+                    .capture(text, at: moment, done: done, inTimeOrder: atGiven)
             } else {
                 written = try InboxCapture(vaultRoot: root, relativePath: target)
                     .capture(text, at: moment, done: done)
@@ -873,7 +877,8 @@ public enum AgentCLI {
     /// would drift and the preference would change more than when the write
     /// happens.
     private static func captureAsProposal(
-        _ text: String, root: URL, daily: Bool, to target: String?, at now: Date, done: Bool
+        _ text: String, root: URL, daily: Bool, to target: String?, at now: Date, done: Bool,
+        inTimeOrder: Bool
     ) -> Never {
         let relative: String
         let starting: String?
@@ -894,7 +899,8 @@ public enum AgentCLI {
                 } ?? "# \(title)\n\n"
                 proposed = try DailyNoteCapture.contents(
                     byCapturing: text, in: base, at: now, title: title,
-                    timestamped: CaptureTimestampPreference.isOn, done: done
+                    timestamped: CaptureTimestampPreference.isOn, done: done,
+                    inTimeOrder: inTimeOrder
                 )
             } else {
                 let inbox = InboxCapture(vaultRoot: root, relativePath: target)

@@ -34,7 +34,8 @@ public struct DailyNoteCapture: Sendable {
         _ rawText: String,
         at date: Date = Date(),
         calendar: Calendar = .current,
-        done: Bool = false
+        done: Bool = false,
+        inTimeOrder: Bool = false
     ) throws -> URL {
         var vaultIsDirectory: ObjCBool = false
         guard FileManager.default.fileExists(
@@ -63,7 +64,8 @@ public struct DailyNoteCapture: Sendable {
                     calendar: calendar,
                     title: dailyNotes.stem(for: date),
                     timestamped: CaptureTimestampPreference.isOn,
-                    done: done
+                    done: done,
+                    inTimeOrder: inTimeOrder
                 )
                 try updated.write(to: coordinatedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -80,6 +82,9 @@ public struct DailyNoteCapture: Sendable {
     /// - Parameter title: the note's own name, used to give an empty note a
     ///   heading before its first captured item.
     /// - Parameter done: write the item as a ticked task, `- [x] …`.
+    /// - Parameter inTimeOrder: file the item among the section's
+    ///   timestamped lines by its time rather than at the end, for a
+    ///   capture made at a moment that has already passed.
     public static func contents(
         byCapturing rawText: String,
         in existing: String,
@@ -87,7 +92,8 @@ public struct DailyNoteCapture: Sendable {
         calendar: Calendar = .current,
         title: String? = nil,
         timestamped: Bool = true,
-        done: Bool = false
+        done: Bool = false,
+        inTimeOrder: Bool = false
     ) throws -> String {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw DailyNoteCaptureError.emptyCapture }
@@ -103,7 +109,17 @@ public struct DailyNoteCapture: Sendable {
         // The same line the inbox writes, so the two cannot drift apart.
         let entry = InboxCapture.markdownEntry(text, time: time, done: done, newline: newline)
 
-        if let marker = markerLine(in: existing, newline: newline) {
+        let marker = markerLine(in: existing, newline: newline)
+        if inTimeOrder, let minute = minutes(time),
+           let point = timeOrderedInsertion(
+               of: minute, in: existing, before: marker?.lowerBound ?? existing.endIndex, newline: newline
+           ) {
+            var result = existing
+            result.insert(contentsOf: entry + newline, at: point)
+            return result
+        }
+
+        if let marker {
             var result = existing
             result.insert(contentsOf: entry + newline, at: marker.lowerBound)
             return result
@@ -127,6 +143,57 @@ public struct DailyNoteCapture: Sendable {
             + (existing.hasSuffix(newline) ? "" : newline)
             + entry
             + newline
+    }
+
+    /// Where an item at `minute` goes among the timestamped lines of the
+    /// section it would otherwise end: before the first line later than
+    /// it that follows the last line at or before it, so equal times keep
+    /// the order they arrived in. Nil when no later line follows, and the
+    /// item goes where any capture does.
+    ///
+    /// The section runs from the last heading before `limit`. Only
+    /// top-level items read as timestamped (`- 09:15 …`, `- [x] 09:15 …`);
+    /// anything else keeps its place, and an item's indented continuation
+    /// lines stay with it because the insertion is always at the start of
+    /// a top-level line.
+    static func timeOrderedInsertion(
+        of minute: Int, in text: String, before limit: String.Index, newline: String
+    ) -> String.Index? {
+        var stamped: [(start: String.Index, minute: Int)] = []
+        var start = text.startIndex
+        // A code block's lines are neither: `# comment` in a shell snippet
+        // ended the section, and a list in one took the item inside it.
+        // Opened and closed the way `NoteText.headings` reads them.
+        var fence: String?
+        while start < limit {
+            let lineBreak = text.range(of: newline, range: start..<text.endIndex)
+            let end = lineBreak?.lowerBound ?? text.endIndex
+            let line = text[start..<end]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let open = fence {
+                if trimmed.hasPrefix(open) { fence = nil }
+            } else if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                fence = String(trimmed.prefix(3))
+            } else if line.range(of: #"^#{1,6}( |$)"#, options: .regularExpression) != nil {
+                stamped.removeAll()
+            } else if let found = line.firstMatch(of: #/^- (?:\[[ xX]\] )?(\d{2}):(\d{2})(?: |$)/#),
+                      let value = minutes("\(found.1):\(found.2)") {
+                stamped.append((start, value))
+            }
+            guard let lineBreak else { break }
+            start = lineBreak.upperBound
+        }
+        let lastAtOrBefore = stamped.lastIndex { $0.minute <= minute }
+        let after = stamped[(lastAtOrBefore.map { $0 + 1 } ?? 0)...]
+        return after.first { $0.minute > minute }?.start
+    }
+
+    /// Minutes past midnight for `HH:mm`, or nil.
+    static func minutes(_ time: String) -> Int? {
+        let parts = time.split(separator: ":")
+        guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]),
+              (0 ..< 24).contains(hour), (0 ..< 60).contains(minute) else { return nil }
+        return hour * 60 + minute
     }
 
     /// The marker captures are inserted above: the **last** one in the note.
