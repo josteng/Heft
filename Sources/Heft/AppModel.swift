@@ -3049,20 +3049,40 @@ final class AppModel: ObservableObject {
     /// `.keepMine` does.
     func applyMergedConflict(_ merged: String) {
         guard current != nil else { return }
+        let shown = (reviewingConflict ?? saveConflict)?.disk
         reviewingConflict = nil
         saveConflict = nil
         saveTask?.cancel()
         saveTask = nil
         setText(merged, keepingPosition: true)
-        writeCurrentBuffer()
+        writeEndingConflict(decidedAgainst: shown)
+    }
+
+    /// Writes the buffer as the end of a conflict, decided against `shown`,
+    /// the disk version the reader was looking at.
+    ///
+    /// Only that version: the file can have changed again while they
+    /// decided, and with a capture a minute it usually has. Writing straight
+    /// over it threw that capture away. So the save treats `shown` as what it
+    /// last read, and merges a later change the way it merges any other, or
+    /// asks again when the later change touches the same lines.
+    private func writeEndingConflict(decidedAgainst shown: String?) {
+        guard let shown else {
+            writeCurrentBuffer()
+            return
+        }
+        lastKnownDiskText = shown
+        isDirty = true
+        save()
     }
 
     func resolveSaveConflict(_ resolution: SaveConflictResolution) {
         guard saveConflict != nil, let current else { return }
         switch resolution {
         case .keepMine:
+            let shown = saveConflict?.disk
             saveConflict = nil
-            writeCurrentBuffer()
+            writeEndingConflict(decidedAgainst: shown)
         case .useDisk:
             guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else {
                 status = "The disk version of \(current.name) is no longer available"

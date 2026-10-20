@@ -129,4 +129,56 @@ struct ExternalAppendTests {
         #expect(model.text == "# Today\n\nfirst, mine\n", "the buffer was changed")
         #expect(try disk(root) == "# Today\n\nfirst, theirs\n", "the disk version was written over")
     }
+
+    /// A conflict the reader is still deciding about, with a capture filed
+    /// into the note meanwhile: a capture a minute, as a time tracker files
+    /// them, outlasts most decisions.
+    private func conflictThenCapture() throws -> (URL, AppModel) {
+        let root = try vault()
+        let model = model(root)
+        model.text = "# Today\n\nfirst, mine\n"
+        try "# Today\n\nfirst, theirs\n".write(
+            to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8
+        )
+        model.save()
+        try NoteAppend.append("- 10:00 call", to: "Note.md", in: root)
+        return (root, model)
+    }
+
+    /// "Keep mine" answered the version the reader was shown, and wrote the
+    /// buffer over whatever the file had become since, the capture with it.
+    @Test("Keep mine keeps a line captured while the conflict was up")
+    func keepMineKeepsALaterCapture() throws {
+        let (root, model) = try conflictThenCapture()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        try #require(model.saveConflict != nil, "no conflict was raised")
+
+        model.resolveSaveConflict(.keepMine)
+
+        let expected = "# Today\n\nfirst, mine\n\n- 10:00 call\n"
+        #expect(try disk(root) == expected, "the captured line was written over")
+        #expect(model.text == expected)
+        #expect(model.saveConflict == nil)
+    }
+
+    @Test("A reviewed merge keeps a line captured while it was reviewed")
+    func reviewedMergeKeepsALaterCapture() throws {
+        let (root, model) = try conflictThenCapture()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let conflict = try #require(model.saveConflict, "no conflict was raised")
+        model.reviewSaveConflict(conflict)
+
+        model.applyMergedConflict("# Today\n\nfirst, both\n")
+
+        let expected = "# Today\n\nfirst, both\n\n- 10:00 call\n"
+        #expect(try disk(root) == expected, "the captured line was written over")
+        #expect(model.text == expected)
+        #expect(model.saveConflict == nil)
+    }
 }
