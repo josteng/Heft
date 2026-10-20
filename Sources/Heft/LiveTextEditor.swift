@@ -3400,8 +3400,13 @@ final class HeftTextKit2View: NSTextView {
         if let inserted, inserted == "|" || inserted == "#", continueLinkCompletion(with: inserted) {
             return
         }
+        // The `]]` is checked again: replacing the buffer, as opening another
+        // note does, can leave the caret at the same offset, and only a caret
+        // move forgets the link.
         if let inserted, inserted == "|" || inserted == "#", let linked = justLinkedAt,
-           selection == NSRange(location: linked, length: 0), linked >= 2 {
+           selection == NSRange(location: linked, length: 0), linked >= 2,
+           linked <= (string as NSString).length,
+           (string as NSString).substring(with: NSRange(location: linked - 2, length: 2)) == "]]" {
             justLinkedAt = nil
             let inside = NSRange(location: linked - 2, length: 0)
             if shouldChangeText(in: inside, replacementString: inserted) {

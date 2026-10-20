@@ -45,6 +45,17 @@ struct LinkPartAfterAcceptTests {
         #expect(view.string == "See [[Note|]]")
     }
 
+    /// Replacing the buffer, another note opened or this one changed on
+    /// disk, is not a caret move when the caret lands at the same offset.
+    @Test("After the text under the link is replaced, | is typed where it is")
+    func onlyWhileTheLinkIsThere() throws {
+        let view = try editor(after: "See ")
+        view.string = "Other words."
+        view.setSelectedRange(NSRange(location: 12, length: 0))
+        view.insertText("|", replacementRange: view.selectedRange())
+        #expect(view.string == "Other words.|")
+    }
+
     @Test("Once the caret has moved on, | is typed where it is")
     func onlyRightThen() throws {
         let view = try editor(after: "| ")
