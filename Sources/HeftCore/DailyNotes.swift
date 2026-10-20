@@ -106,6 +106,19 @@ public struct DailyNotes: Sendable {
         vaultRoot.appendingPathComponent(relativePath(for: date))
     }
 
+    /// The note for `date`, or a refusal when the settings put it outside
+    /// the vault. `daily-notes.json` is a file in the vault, synced and
+    /// edited by hand, and `"folder": "../outside"` made every daily note
+    /// a write beside the vault rather than in it.
+    public func checkedURL(for date: Date) throws -> URL {
+        let target = url(for: date)
+        let root = vaultRoot.standardizedFileURL.path
+        guard target.standardizedFileURL.path.hasPrefix(root + "/") else {
+            throw DailyNoteCaptureError.outsideVault(relativePath(for: date))
+        }
+        return target
+    }
+
     public func exists(for date: Date) -> Bool {
         FileManager.default.fileExists(atPath: url(for: date).path)
     }
@@ -126,7 +139,7 @@ public struct DailyNotes: Sendable {
     /// Never overwrites: an existing note is returned untouched.
     @discardableResult
     public func ensureNote(for date: Date) throws -> URL {
-        let target = url(for: date)
+        let target = try checkedURL(for: date)
         if FileManager.default.fileExists(atPath: target.path) { return target }
 
         try FileManager.default.createDirectory(

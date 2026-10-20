@@ -896,6 +896,32 @@ struct AgentCLITests {
         #expect(pending.kind == .create)
     }
 
+    /// The daily note's folder comes from a file in the vault, and one that
+    /// climbs out of it is refused whether the line is written or proposed.
+    @Test("--daily cannot leave the vault, written or reviewed")
+    func dailyCaptureCannotEscapeTheVault() throws {
+        let enclosing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftEscape-\(UUID().uuidString)")
+        let root = enclosing.appendingPathComponent("Vault")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".obsidian"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: enclosing) }
+        try Data(#"{"folder": "../outside"}"#.utf8)
+            .write(to: root.appendingPathComponent(".obsidian/daily-notes.json"))
+        let suite = "HeftCLIDefaults-\(UUID().uuidString)"
+        defer { Self.discardSuite(suite) }
+        AgentCaptureReviewPreference.set(true, in: try #require(UserDefaults(suiteName: suite)))
+
+        let written = try run(["capture", root.path, "escaped", "--daily"])
+        #expect(written.status != 0)
+        #expect(written.error.contains("outside the vault"))
+        let reviewed = try run(["capture", root.path, "escaped", "--daily"], defaultsSuite: suite)
+        #expect(reviewed.status != 0)
+        #expect(ProposalStore.all(in: root).isEmpty)
+        #expect(!FileManager.default.fileExists(
+            atPath: enclosing.appendingPathComponent("outside").path))
+    }
+
     /// `--to` names a note, and a note is inside the vault. Without this the
     /// argument went straight to the capture, so `--to "../file"` prepended a
     /// heading and a bullet to a file outside it. "It only adds" is a safety

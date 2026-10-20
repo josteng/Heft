@@ -3,9 +3,13 @@ import Foundation
 public enum DailyNoteCaptureError: LocalizedError, Sendable {
     case emptyCapture
     case vaultUnavailable
+    case outsideVault(String)
 
     public var errorDescription: String? {
         switch self {
+        case let .outsideVault(path):
+            return "The daily note would be \(path), outside the vault. "
+                + "Check the folder and format in .obsidian/daily-notes.json."
         case .emptyCapture:
             return "Enter something to add to today's note."
         case .vaultUnavailable:

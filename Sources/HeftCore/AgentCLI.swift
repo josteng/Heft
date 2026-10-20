@@ -906,7 +906,9 @@ public enum AgentCLI {
                 let notes = DailyNotes(vaultRoot: root, settings: settings)
                 relative = notes.relativePath(for: now)
                 let title = notes.stem(for: now)
-                starting = try? String(contentsOf: notes.url(for: now), encoding: .utf8)
+                // Refused here too, or accepting the proposal wrote there.
+                let url = try notes.checkedURL(for: now)
+                starting = try? String(contentsOf: url, encoding: .utf8)
                 // What `ensureNote` would have written, so a proposal for a
                 // day with no note yet still carries the template.
                 let base = starting ?? notes.templateBody().map {

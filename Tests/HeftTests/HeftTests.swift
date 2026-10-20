@@ -1587,6 +1587,38 @@ struct DailyCaptureTests {
         }
     }
 
+    /// `daily-notes.json` is a file in the vault, synced and edited by
+    /// hand, and `"folder": "../outside"` put the note beside the vault:
+    /// created there, and appended to there when one already was.
+    @Test("A daily-notes folder that climbs out of the vault is refused")
+    func dailyNoteStaysInTheVault() throws {
+        let enclosing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HeftDailyEscape-\(UUID().uuidString)")
+        let root = enclosing.appendingPathComponent("Vault")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".obsidian"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: enclosing) }
+        try Data(#"{"folder": "Notes/../../outside"}"#.utf8)
+            .write(to: root.appendingPathComponent(".obsidian/daily-notes.json"))
+        let capture = DailyNoteCapture(
+            vaultRoot: root, settings: ObsidianSettings.load(vaultRoot: root))
+        let day = stamp(9, 0)
+
+        #expect(throws: DailyNoteCaptureError.self) { try capture.capture("escaped", at: day) }
+        #expect(throws: DailyNoteCaptureError.self) { try capture.dailyNotes.ensureNote(for: day) }
+        #expect(!FileManager.default.fileExists(
+            atPath: enclosing.appendingPathComponent("outside").path))
+
+        // Nor added to one that is already there.
+        let outsider = enclosing.appendingPathComponent("outside")
+            .appendingPathComponent(capture.dailyNotes.stem(for: day) + ".md")
+        try FileManager.default.createDirectory(
+            at: outsider.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("precious\n".utf8).write(to: outsider)
+        #expect(throws: DailyNoteCaptureError.self) { try capture.capture("escaped", at: day) }
+        #expect(try String(contentsOf: outsider, encoding: .utf8) == "precious\n")
+    }
+
     @Test("Nothing is captured from nothing")
     func rejectsEmptyCaptures() {
         #expect(throws: DailyNoteCaptureError.self) {
