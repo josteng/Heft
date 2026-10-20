@@ -95,7 +95,12 @@ public enum ContentSearch {
 
         for note in notes {
             guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { continue }
-            for (offset, rawLine) in text.components(separatedBy: .newlines).enumerated() {
+            // Lines as the editor counts them when it reveals one: a Windows
+            // `\r\n` is a single break, where splitting on `.newlines` made
+            // it two and sent every hit below the first to the wrong line.
+            var lines: [String] = []
+            text.enumerateLines { line, _ in lines.append(line) }
+            for (offset, rawLine) in lines.enumerated() {
                 let occurrences = occurrenceCount(of: term, in: rawLine)
                 guard occurrences > 0 else { continue }
                 totalOccurrences += occurrences
