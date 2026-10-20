@@ -42,7 +42,10 @@ public enum Frontmatter {
 
     public static func parse(_ yaml: String) -> [NoteProperty] {
         var properties: [NoteProperty] = []
+        // Without the return a Windows line break leaves, or every value
+        // carried one.
         let lines = yaml.components(separatedBy: "\n")
+            .map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
         var index = 0
 
         while index < lines.count {

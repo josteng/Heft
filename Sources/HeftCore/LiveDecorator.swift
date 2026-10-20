@@ -495,7 +495,7 @@ public enum LiveDecorator {
         // them, so `**not bold**` inside a fence stays literal.
         var protected = ProtectedRanges()
 
-        if let fm = firstMatch(#"\A---\n[\s\S]*?\n---"#, text) {
+        if let fm = firstMatch(#"\A---\r?\n[\s\S]*?\n---"#, text) {
             result.append(MarkdownDecoration(range: fm, style: .frontmatter))
             protected.insert(fm)
         }

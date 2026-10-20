@@ -42,3 +42,34 @@ struct VaultIndexEdgeTests {
         #expect(index.backlinks(to: "xab/Note.md").isEmpty)
     }
 }
+
+/// A vault synced from Windows ends every line in `\r\n`, frontmatter
+/// fences included.
+@Suite("Windows line breaks in frontmatter")
+struct CRLFFrontmatterTests {
+    private let note = "---\r\ntags: [work, plan]\r\naliases:\r\n  - Roadmap\r\n---\r\nBody #inline\r\n"
+
+    @Test("The block is found and its fences keep their returns")
+    func splitsAndRejoins() {
+        let split = NoteText.splitFrontmatter(note)
+        #expect(split.frontmatter == "tags: [work, plan]\r\naliases:\r\n  - Roadmap\r")
+        #expect(split.body == "Body #inline\r\n")
+        #expect("---\r\n" + (split.frontmatter ?? "") + "\n---\r\n" + split.body == note)
+    }
+
+    @Test("Tags and aliases come out without a return")
+    func tagsAndAliases() {
+        #expect(NoteTags.all(in: note) == ["work", "plan", "inline"])
+        #expect(NoteAliases.all(in: note) == ["Roadmap"])
+        #expect(Frontmatter.parse("title: X\r\nkind: y\r") == [
+            NoteProperty(key: "title", value: .text("X")),
+            NoteProperty(key: "kind", value: .text("y")),
+        ])
+    }
+
+    @Test("The surface draws it as frontmatter")
+    func decoratedAsFrontmatter() {
+        let decoration = LiveDecorator.decorations(in: note).first { $0.style == .frontmatter }
+        #expect(decoration?.range == NSRange(location: 0, length: 51))
+    }
+}

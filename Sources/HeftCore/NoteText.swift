@@ -13,13 +13,18 @@ public enum NoteText {
 
     /// Splits leading YAML frontmatter from the body.
     /// Returns `nil` frontmatter when the note does not open with `---`.
+    /// A fence line may end in the return a Windows line break leaves on it;
+    /// the parts keep theirs, so they join back into the file.
     public static func splitFrontmatter(_ source: String) -> (frontmatter: String?, body: String) {
         let lines = source.components(separatedBy: "\n")
-        guard let first = lines.first, first.trimmingCharacters(in: .whitespaces) == "---" else {
+        func isFence(_ line: String) -> Bool {
+            line.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\r"))) == "---"
+        }
+        guard let first = lines.first, isFence(first) else {
             return (nil, source)
         }
         // Find the closing fence. An unterminated block is not frontmatter.
-        for i in 1..<lines.count where lines[i].trimmingCharacters(in: .whitespaces) == "---" {
+        for i in 1..<lines.count where isFence(lines[i]) {
             let fm = lines[1..<i].joined(separator: "\n")
             let body = lines[(i + 1)...].joined(separator: "\n")
             return (fm, body)
