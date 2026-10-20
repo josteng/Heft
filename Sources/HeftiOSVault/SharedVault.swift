@@ -82,8 +82,9 @@ enum SharedVault {
     }
 
     /// The bookmarked vault with access held, or why not. The caller stops
-    /// the access when done.
-    static func openBookmarkedRoot() throws -> URL {
+    /// the access when done, and only when it was granted: a stop without
+    /// its start can take away access the process holds otherwise.
+    static func openBookmarkedRoot() throws -> (url: URL, granted: Bool) {
         guard let data = defaults.data(forKey: bookmarkKey)
                 ?? HeftDefaults.shared.data(forKey: bookmarkKey)
         else { throw Unreachable.noBookmark }
@@ -99,7 +100,7 @@ enum SharedVault {
             if granted { url.stopAccessingSecurityScopedResource() }
             throw Unreachable.denied
         }
-        return url
+        return (url, granted)
     }
 
     /// Files into the bookmarked vault, holding access for the one write.
@@ -107,8 +108,8 @@ enum SharedVault {
     @discardableResult
     static func fileIntoBookmarkedVault(_ text: String, to destination: Destination,
                                         at date: Date = Date()) throws -> String {
-        let root = try openBookmarkedRoot()
-        defer { root.stopAccessingSecurityScopedResource() }
+        let (root, granted) = try openBookmarkedRoot()
+        defer { if granted { root.stopAccessingSecurityScopedResource() } }
         try file(text, to: destination, in: root, at: date)
         return root.lastPathComponent
     }

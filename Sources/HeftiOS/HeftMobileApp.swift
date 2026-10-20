@@ -17,10 +17,14 @@ struct HeftMobileApp: App {
         // Intents resolve notes in this process, sometimes before a window:
         // the vault on screen, else the bookmarked one.
         NoteEntityQuery.vaultLocator = {
-            MobileVault.currentRoot ?? SharedVault.bookmarkedRoot(startAccessing: true)
+            MobileVault.currentRoot ?? Self.bookmarkedRoot
         }
         HeftMobileShortcuts.updateAppShortcutParameters()
     }
+
+    /// Opened once and held for the run: each query starting access of its
+    /// own, never stopped, took one more grant from the sandbox per call.
+    private static let bookmarkedRoot: URL? = SharedVault.bookmarkedRoot(startAccessing: true)
 
     var body: some Scene {
         WindowGroup {

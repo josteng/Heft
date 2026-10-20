@@ -55,8 +55,10 @@ final class MobileVault {
             return
         }
         #endif
-        if let url = SharedVault.bookmarkedRoot(startAccessing: true) {
-            accessed = url
+        if let url = SharedVault.bookmarkedRoot(startAccessing: false) {
+            // Kept only when granted, so the stop on choosing another
+            // folder balances a start that happened.
+            accessed = url.startAccessingSecurityScopedResource() ? url : nil
             adopt(url)
         }
     }
