@@ -3399,6 +3399,10 @@ final class AppModel: ObservableObject {
         )
         if (try? text.write(to: sibling, atomically: true, encoding: .utf8)) != nil {
             isDirty = false
+            // The copy beside the note is the recovery now. A draft left
+            // behind was promoted on the next open as a second copy. One in
+            // Application Support below keeps it, since nobody looks there.
+            discardDraft()
             status = "Preserved unsaved edits in \(sibling.lastPathComponent)"
             return
         }

@@ -3180,6 +3180,30 @@ struct DraftRecoveryTests {
         #expect(onDisk == "first version\n")
     }
 
+    /// Closing the window over a conflict already puts the buffer in the
+    /// vault as a recovery note, so the draft has done its work.
+    @Test("A window closed over a conflict leaves one recovery note, not two")
+    func closingOverAConflictRecoversOnce() throws {
+        let root = try vault()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let first = model(root)
+        first.text = "what I typed\n"
+        try "changed elsewhere\n".write(
+            to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8
+        )
+        first.save()
+        #expect(first.saveConflict != nil, "no conflict was raised")
+        first.closeWorkspace()
+
+        _ = model(root)
+
+        let names = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        #expect(names.filter { $0.contains("Heft Recovery") }.count == 1, "found \(names)")
+    }
+
     /// The common case after a clean quit: a draft that says exactly what the
     /// note says is not work at risk, and promoting it would litter the vault.
     @Test("A draft matching the note is discarded, not promoted")
