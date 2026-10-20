@@ -31,9 +31,12 @@ struct AgentRunnerTests {
     ///   - status: its exit status.
     ///   - leavesProposal: whether it drops a proposal into the vault, as
     ///     `heft propose` would.
+    ///   - quietUntilStopped: whether it stays silent until it is killed,
+    ///     for a test that needs it still running however long another
+    ///     run takes; a fixed `delay` runs out on a busy machine.
     private func fixture(
         stdout: [String], stderr: String = "", status: Int32 = 0, leavesProposal: Bool = false,
-        delay: Double = 0, stderrBytes: Int = 0
+        delay: Double = 0, stderrBytes: Int = 0, quietUntilStopped: Bool = false
     ) throws -> Fixture {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("heft-runner-\(UUID().uuidString)", isDirectory: true)
@@ -63,6 +66,7 @@ struct AgentRunnerTests {
         #!/bin/sh
         { printf '%s\\037' "$PWD"; for a in "$@"; do printf '%s\\037' "$a"; done; printf '\\036'; } >> "\(calls.path)"
         sleep \(delay)
+        \(quietUntilStopped ? "while :; do sleep 1; done" : "")
         \(leavesProposal ? "mkdir -p \"\(vault.path)/.heft/proposals\" && for f in \"\(staged.path)\"/.heft/proposals/*.json; do sed -e \"s|\\\"claude-code\\\"|\\\"$HEFT_AGENT_NAME\\\"|\" -e \"s|\\\"plan\\\"|\\\"plan-$$\\\"|\" \"$f\" > \"\(vault.path)/.heft/proposals/$(basename \"$f\" .json)-$$.json\"; done" : "")
         cat "\(output.path)"
         printf '%s' '\(stderr)' >&2
@@ -80,8 +84,11 @@ struct AgentRunnerTests {
         return Fixture(vault: vault, script: script, calls: calls, runner: runner)
     }
 
+    /// Bounded only so a hung run fails rather than stalls. A fake agent
+    /// ends in milliseconds, but on a busy machine starting one alone has
+    /// taken seconds.
     private func settle(_ runner: AgentRunner) async throws {
-        for _ in 0..<500 where runner.isBusy { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<3000 where runner.isBusy { try await Task.sleep(for: .milliseconds(10)) }
         try #require(!runner.isBusy, "the run never ended")
     }
 
@@ -314,7 +321,7 @@ struct AgentRunnerTests {
     /// prints nothing for as long as it thinks.
     @Test("A quiet agent does not hold up another chat's answer")
     func quietRunDoesNotStallAnother() async throws {
-        let slow = try fixture(stdout: answering, delay: 4)
+        let slow = try fixture(stdout: answering, quietUntilStopped: true)
         let quick = try fixture(stdout: answering)
         let runner = slow.runner
         runner.ask("Slow?", vaultRoot: slow.vault, scope: "")
@@ -323,7 +330,10 @@ struct AgentRunnerTests {
         runner.command = { quick.script.path }
         runner.ask("Quick?", vaultRoot: slow.vault, scope: "")
         let second = try #require(runner.chat)
-        for _ in 0..<200 where runner.isRunning(second.id) { try await Task.sleep(for: .milliseconds(10)) }
+        // The quiet one never ends by itself, so the quick one can be given
+        // as long as a busy machine needs; it was a 4s sleep against a 2s
+        // wait, and either side could run out first.
+        for _ in 0..<3000 where runner.isRunning(second.id) { try await Task.sleep(for: .milliseconds(10)) }
         #expect(!runner.isRunning(second.id), "answered while the other was still quiet")
         #expect(runner.isRunning(first.id))
         runner.stopAll()
@@ -396,7 +406,9 @@ struct AgentRunnerTests {
         }
         fixture.runner.ask("When is it due?", vaultRoot: fixture.vault, scope: "")
         try await settle(fixture.runner)
-        try await Task.sleep(for: .milliseconds(100))
+        for _ in 0..<3000 where fixture.runner.chat?.title != "Parser deadline" {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(fixture.runner.chat?.title == "Parser deadline")
         #expect(asked.count == 1 && asked.first?.0 == "When is it due?" && asked.first?.1 == "Due Friday, see [[Plan]].")
         #expect(!(fixture.calledArguments().first ?? []).contains { $0.contains("Title") }, "the agent is not asked")
