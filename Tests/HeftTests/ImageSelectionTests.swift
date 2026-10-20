@@ -159,6 +159,25 @@ struct ImageSelectionTests {
         }
     }
 
+    /// A restyle after typing redoes only the lines that changed and
+    /// carries the rest over, so the pictures it did not redraw must come
+    /// along, moved by the edit, or a click on one reveals its source.
+    @Test("A picture stays clickable after typing elsewhere in the note")
+    func clickableAfterTyping() throws {
+        try withEditor("intro\n\n![[shot.png]]\n\nafter") { view in
+            let end = (view.string as NSString).length
+            view.insertText("x", replacementRange: NSRange(location: end, length: 0))
+            view.restyleNow()
+            let below = try centre(of: view)
+            #expect(view.picture(at: below)?.range == NSRange(location: 7, length: 13))
+
+            view.insertText("y", replacementRange: NSRange(location: 0, length: 0))
+            view.restyleNow()
+            let above = try centre(of: view)
+            #expect(view.picture(at: above)?.range == NSRange(location: 8, length: 13))
+        }
+    }
+
     /// The frame the view hit-tests and rings is checked against what the
     /// fragment actually paints: the picture is solid blue, so its pixels
     /// are found in a bitmap of the fragment.

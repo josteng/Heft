@@ -270,6 +270,16 @@ enum LiveStyler {
                 )
             }
         }
+        // What a click on a picture selects. Left behind, every picture the
+        // pass did not redraw stopped answering clicks after one keystroke.
+        for (start, picture) in previous.images {
+            let start = moved(start)
+            guard !rebuilt(start) else { continue }
+            layout.images[start] = DrawnPicture(
+                range: NSRange(location: moved(picture.range.location), length: picture.range.length),
+                url: picture.url
+            )
+        }
         return layout
     }
 
