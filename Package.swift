@@ -50,6 +50,14 @@ let package = Package(
             path: "Sources/HeftiOSVault",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // The Today widget's snapshot, for the same reason; the rest of the
+        // folder is App Intents the widget and app declare for themselves.
+        .target(
+            name: "HeftiOSShared",
+            path: "Sources/HeftiOSShared",
+            sources: ["TodaySnapshot.swift"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "Heft",
             dependencies: [
@@ -72,7 +80,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HeftTests",
-            dependencies: ["Heft", "HeftCore", "HeftVimCore", "HeftiOSVault", "HeftTestDefaults"],
+            dependencies: ["Heft", "HeftCore", "HeftVimCore", "HeftiOSVault", "HeftiOSShared", "HeftTestDefaults"],
             path: "Tests/HeftTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
