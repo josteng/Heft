@@ -73,3 +73,39 @@ struct CRLFFrontmatterTests {
         #expect(decoration?.range == NSRange(location: 0, length: 51))
     }
 }
+
+/// Obsidian follows a symlinked folder, so a vault may be built on them.
+@Suite("Symlinked folders")
+struct SymlinkedFolderTests {
+
+    @Test("A linked folder is scanned as a folder, and a loop is not followed")
+    func linkedFolderIsAFolder() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-linked-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let vault = base.appendingPathComponent("Vault")
+        let outside = base.appendingPathComponent("Elsewhere")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("Linked #shared".utf8).write(to: outside.appendingPathComponent("Shared.md"))
+        try Data("See [[Shared]]".utf8).write(to: vault.appendingPathComponent("Home.md"))
+        try FileManager.default.createSymbolicLink(
+            at: vault.appendingPathComponent("Projects"), withDestinationURL: outside
+        )
+        // Back up to the vault itself.
+        try FileManager.default.createSymbolicLink(
+            at: outside.appendingPathComponent("Up"), withDestinationURL: vault
+        )
+
+        let tree = VaultScanner.scan(root: vault)
+        let projects = tree.children.first { $0.relativePath == "Projects" }
+        #expect(projects?.kind == .folder)
+        #expect(tree.flattened().map(\.relativePath).sorted() == [
+            "", "Home.md", "Projects", "Projects/Shared.md",
+        ])
+
+        let index = VaultIndex.build(root: tree)
+        #expect(index.backlinks(to: "Projects/Shared.md").count == 1)
+        #expect(index.notes(taggedWith: "shared").map(\.relativePath) == ["Projects/Shared.md"])
+    }
+}

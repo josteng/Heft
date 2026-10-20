@@ -105,14 +105,24 @@ public enum VaultScanner {
             relativePath: "",
             kind: .folder,
             name: name,
-            children: scanChildren(of: root, prefix: "")
+            children: scanChildren(
+                of: root, listing: root, prefix: "",
+                ancestors: [root.resolvingSymlinksInPath().path]
+            )
         )
     }
 
-    private static func scanChildren(of directory: URL, prefix: String) -> [VaultItem] {
+    /// `listing` is where the folder's entries are read from: a symlinked
+    /// folder's target, since listing at the link itself fails, while its
+    /// items keep the vault's spelling under `directory`. `ancestors` holds
+    /// the real path of every folder above, so a symlink back up the tree is
+    /// left out rather than recursed into forever.
+    private static func scanChildren(
+        of directory: URL, listing: URL, prefix: String, ancestors: Set<String>
+    ) -> [VaultItem] {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
-            at: directory,
+            at: listing,
             includingPropertiesForKeys: [
                 .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
                 .contentModificationDateKey,
@@ -122,14 +132,23 @@ public enum VaultScanner {
 
         var items: [VaultItem] = []
 
-        for entry in entries {
-            let raw = entry.lastPathComponent
-            let isDirectory = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        for listed in entries {
+            let raw = listed.lastPathComponent
+            let entry = listing == directory ? listed : directory.appendingPathComponent(raw)
+            let isLink = (try? listed.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false
+            // A symlinked folder is a folder, as Obsidian lists it: the
+            // entry's own values describe the link, which is not one.
+            let target = isLink ? listed.resolvingSymlinksInPath() : listed
+            let isDirectory = (try? target.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
 
             if isDirectory {
                 if raw.hasPrefix(".") || ignoredDirectories.contains(raw) { continue }
+                let real = target.resolvingSymlinksInPath().path
+                if ancestors.contains(real) { continue }
                 let rel = prefix.isEmpty ? raw : "\(prefix)/\(raw)"
-                let children = scanChildren(of: entry, prefix: rel)
+                let children = scanChildren(
+                    of: entry, listing: target, prefix: rel, ancestors: ancestors.union([real])
+                )
                 items.append(VaultItem(
                     url: entry, relativePath: rel, kind: .folder, name: raw, children: children
                 ))
@@ -163,9 +182,7 @@ public enum VaultScanner {
             // different size and date, which is exactly a change. A symlink
             // is measured at its target: the link's own size and date stay
             // put while the note it points at is edited.
-            let isLink = (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) ?? false
-            let measured = isLink ? entry.resolvingSymlinksInPath() : entry
-            let values = try? measured.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let values = try? target.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
             let fingerprint = values?.contentModificationDate.map {
                 FileFingerprint(size: values?.fileSize ?? 0, modified: $0)
             }
