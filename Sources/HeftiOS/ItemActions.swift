@@ -227,6 +227,16 @@ private struct ItemActionHost: ViewModifier {
                 switch action {
                 case .rename(let item): newName = item.name
                 case .duplicate: run(action)
+                #if DEBUG
+                case .delete where ProcessInfo.processInfo.environment["HEFT_IOS_NOTE_ACTION"] == "delete":
+                    // The dialog's Delete, tapped for the launch hook. A
+                    // dialog's button runs once the dialog has gone, so an
+                    // alert it raises has somewhere to appear.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        self.action = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { run(action) }
+                    }
+                #endif
                 case .create(let folder, let makesFolder):
                     creating = NewNoteRequest(folder: folder, makesFolder: makesFolder)
                     self.action = nil

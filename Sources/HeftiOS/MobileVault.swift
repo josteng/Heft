@@ -54,6 +54,12 @@ final class MobileVault {
             open(URL(fileURLWithPath: path))
             return
         }
+        // `HEFT_IOS_CHOOSE=<path>` takes a folder as the Files picker hands
+        // one over, bookmark and all, for a later launch to reopen.
+        if let path = ProcessInfo.processInfo.environment["HEFT_IOS_CHOOSE"], !path.isEmpty {
+            choose(URL(fileURLWithPath: path))
+            return
+        }
         #endif
         if let url = SharedVault.bookmarkedRoot(startAccessing: false) {
             // Kept only when granted, so the stop on choosing another

@@ -20,6 +20,19 @@ struct HeftMobileApp: App {
             MobileVault.currentRoot ?? Self.bookmarkedRoot
         }
         HeftMobileShortcuts.updateAppShortcutParameters()
+        #if DEBUG
+        // `HEFT_IOS_INTENT_CAPTURE=<text>` files a line to the inbox through
+        // the bookmark twice, as two runs of the capture intent do.
+        if let text = ProcessInfo.processInfo.environment["HEFT_IOS_INTENT_CAPTURE"] {
+            for run in 1...2 {
+                do {
+                    _ = try MobileCapture.fileFromIntent("\(text) \(run)", to: .inbox)
+                } catch {
+                    print("HEFT_IOS_INTENT_CAPTURE failed: \(error.localizedDescription)")
+                }
+            }
+        }
+        #endif
     }
 
     /// Opened once and held for the run: each query starting access of its

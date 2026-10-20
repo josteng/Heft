@@ -276,6 +276,20 @@ struct NoteView: View {
                     if let close { close() } else { dismiss() }
                 }
             }
+            #if DEBUG
+            // `HEFT_IOS_NOTE_ACTION=delete` deletes the open note from its own
+            // menu, once any `HEFT_IOS_TYPE` typing is in and before it saves.
+            .task {
+                let environment = ProcessInfo.processInfo.environment
+                guard environment["HEFT_IOS_NOTE_ACTION"] == "delete" else { return }
+                var waited = 0
+                while environment["HEFT_IOS_TYPE"] != nil, !document.sync.hasUnsavedText, waited < 200 {
+                    try? await Task.sleep(for: .milliseconds(20))
+                    waited += 1
+                }
+                action = .delete(ItemRef(path: path, isFolder: false))
+            }
+            #endif
             .navigationTitle(note?.name ?? (path as NSString).lastPathComponent)
             // Inline, because most notes open with their own title as a heading
             // and a large bar title above it says the same thing twice.
