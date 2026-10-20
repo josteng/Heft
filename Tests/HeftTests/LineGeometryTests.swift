@@ -357,9 +357,13 @@ struct PointerCursorTests {
         let view = editor(lines.joined(separator: "\n") + "\n")
         #expect(!view.pointerRects().isEmpty)
 
-        let start = Date()
+        // The thread's own CPU time, not the wall clock: the whole budget is
+        // 25ms for 500 calls, which one moment descheduled on a busy machine
+        // used up, while a layout query per call costs fifty times it in work.
+        let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         for _ in 0..<500 { _ = view.pointerRects() }
-        let each = Date().timeIntervalSince(start) / 500 * 1000
+        let elapsed = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start
+        let each = Double(elapsed) / 500 / 1_000_000
         #expect(each < 0.05, "\(each) ms per call is a layout query on every mouse move")
     }
 
