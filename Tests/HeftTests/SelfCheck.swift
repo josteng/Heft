@@ -1533,9 +1533,16 @@ public enum SelfCheck {
         expectTrue(emptyAnchor, "an empty anchor is refused")
 
         expectTrue(
-            AnchoredEdit.occurrences(of: "aa", in: "aaaa") == 2,
-            "overlapping anchors are counted without looping"
+            AnchoredEdit.occurrences(of: "aa", in: "aaaa") == 3,
+            "overlapping anchors are each counted, without looping"
         )
+        var overlapping = false
+        do {
+            _ = try AnchoredEdit.apply([AnchoredEdit(old: "x\nx", new: "y")], to: "x\nx\nx\n")
+        } catch let error as AnchoredEditError {
+            overlapping = error == .ambiguous(index: 0, count: 2)
+        } catch {}
+        expectTrue(overlapping, "an anchor that stands in two overlapping places is refused")
 
         // The guide has to describe the mode, and say which version it is.
         let guideV2 = AgentGuide.section(binaryPath: "/x/Heft")

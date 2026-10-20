@@ -120,15 +120,16 @@ extension AnchoredEdit {
         return result
     }
 
+    /// Every place the anchor could stand, overlapping ones included:
+    /// `x\nx` stands twice in `x\nx\nx`, and counting it once took the
+    /// first while the agent may have meant the second.
     static func occurrences(of needle: String, in haystack: String) -> Int {
         guard !needle.isEmpty else { return 0 }
         var count = 0
         var searchStart = haystack.startIndex
         while let found = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
             count += 1
-            searchStart = found.lowerBound < found.upperBound
-                ? found.upperBound
-                : haystack.index(after: found.lowerBound)
+            searchStart = haystack.index(after: found.lowerBound)
             if searchStart >= haystack.endIndex { break }
         }
         return count
