@@ -203,7 +203,14 @@ enum SharedVault {
         var filed = 0
         for (url, pending) in queued {
             do {
-                try file(pending.text, to: pending.destination, in: root, at: pending.date)
+                do {
+                    try file(pending.text, to: pending.destination, in: root, at: pending.date)
+                } catch NoteAppend.Failure.missing(let path) where !awaitsDownload(path, in: root) {
+                    // Renamed or deleted since it was shared. Queued, it was
+                    // retried on every scan and never seen; the inbox is
+                    // where a share with no other home goes.
+                    try file(pending.text, to: .inbox, in: root, at: pending.date)
+                }
                 try? FileManager.default.removeItem(at: url)
                 filed += 1
             } catch {
@@ -211,5 +218,14 @@ enum SharedVault {
             }
         }
         return filed
+    }
+
+    /// Whether iCloud holds the note but has not brought it down yet: the
+    /// scan asks for it, so a share for it waits rather than moving.
+    private static func awaitsDownload(_ path: String, in root: URL) -> Bool {
+        let url = root.appendingPathComponent(path)
+        let placeholder = url.deletingLastPathComponent()
+            .appendingPathComponent(".\(url.lastPathComponent).icloud")
+        return FileManager.default.fileExists(atPath: placeholder.path)
     }
 }
