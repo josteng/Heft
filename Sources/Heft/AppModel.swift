@@ -1011,7 +1011,15 @@ final class AppModel: ObservableObject {
         }
 
         guard !isDirty else {
-            presentExternalChangeConflict(for: current, diskVersionExists: true)
+            // A save merges the change into the unsaved edits when the two
+            // touch different lines, and raises the conflict itself when
+            // they do not. It re-reads the file under coordination, so what
+            // it merges is what it writes over.
+            if saveConflict == nil {
+                saveTask?.cancel()
+                saveTask = nil
+                save()
+            }
             return
         }
 
@@ -2960,6 +2968,21 @@ final class AppModel: ObservableObject {
                 lastKnownDiskText = text
                 isDirty = false
                 saveConflict = nil
+                return
+            }
+            // Edits on both sides that touch different lines, which is what
+            // a capture landing in the note being typed in looks like, are
+            // merged rather than put to the user: they are not a choice, and
+            // "keep mine" was a way to lose the captured line. The merge goes
+            // into the buffer the way a reload does, and is saved here, still
+            // inside the coordinated write it was read in.
+            if diskExists, let diskText, let base = lastKnownDiskText,
+               let merged = NoteMerge.merge(base: base, mine: text, theirs: diskText) {
+                setText(merged, keepingPosition: true)
+                status = "Merged a change on disk into \(current.relativePath)"
+                // What the merge read, so a failed write retries against it.
+                lastKnownDiskText = diskText
+                writeCurrentBuffer(at: target)
                 return
             }
             saveConflict = SaveConflict(

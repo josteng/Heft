@@ -58,4 +58,75 @@ struct ExternalAppendTests {
 
         #expect(try disk(root) == "# Today\n\nfirst, edited\n\n- 10:00 call\n", "the captured line was lost")
     }
+
+    /// The usual case: typing in today's note while a capture lands in it.
+    /// The poll found unsaved edits and a changed file and paused saving, and
+    /// "keep mine" then wrote the buffer and dropped the captured line.
+    @Test("An append while typing is merged by the poll, not a conflict")
+    func appendWhileTypingIsMerged() throws {
+        let root = try vault()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let model = model(root)
+        #expect(model.current?.relativePath == "Note.md")
+        model.text = "# Today\n\nfirst, edited\n"
+        try NoteAppend.append("- 10:00 call", to: "Note.md", in: root)
+
+        model.reloadCurrentIfChangedExternally()
+
+        let merged = "# Today\n\nfirst, edited\n\n- 10:00 call\n"
+        #expect(model.saveConflict == nil, "a disjoint append raised a conflict")
+        #expect(model.text == merged, "the captured line did not reach the buffer")
+        #expect(try disk(root) == merged, "the merge was not saved")
+        #expect(model.flushPendingSave())
+        #expect(DraftStore.draft(vault: root, relativePath: "Note.md") == nil)
+    }
+
+    /// The same, found by the autosave rather than the poll.
+    @Test("An append found by a save is merged into it")
+    func appendFoundBySave() throws {
+        let root = try vault("# Today\n\nfirst")
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let model = model(root)
+        #expect(model.current?.relativePath == "Note.md")
+        // Typing on an unfinished last line, which the capture finishes.
+        model.text = "# Today\n\nfirst, edi"
+        try DailyNoteCapture.contents(
+            byCapturing: "call", in: "# Today\n\nfirst", at: Date(), timestamped: false
+        ).write(to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8)
+
+        model.save()
+
+        let merged = "# Today\n\nfirst, edi\n- call\n"
+        #expect(model.saveConflict == nil, "a disjoint append raised a conflict")
+        #expect(model.text == merged)
+        #expect(try disk(root) == merged)
+    }
+
+    /// A real conflict is still a person's call: both changed the same line.
+    @Test("An overlapping change from outside still pauses saving")
+    func overlappingChangeStillConflicts() throws {
+        let root = try vault()
+        defer {
+            DraftStore.discard(vault: root, relativePath: "Note.md")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let model = model(root)
+        #expect(model.current?.relativePath == "Note.md")
+        model.text = "# Today\n\nfirst, mine\n"
+        try "# Today\n\nfirst, theirs\n".write(
+            to: root.appendingPathComponent("Note.md"), atomically: true, encoding: .utf8
+        )
+
+        model.reloadCurrentIfChangedExternally()
+
+        #expect(model.isSaveConflictAlertPresented, "no conflict was raised")
+        #expect(model.text == "# Today\n\nfirst, mine\n", "the buffer was changed")
+        #expect(try disk(root) == "# Today\n\nfirst, theirs\n", "the disk version was written over")
+    }
 }
