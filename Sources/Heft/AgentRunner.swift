@@ -304,23 +304,57 @@ final class AgentRunner: ObservableObject {
         let chatID = chat.id
         let handle = output.fileHandleForReading
         let errorHandle = errors.fileHandleForReading
+        // Standard error is read while the agent runs, not after: a pipe
+        // holds about 64 KB, and an agent writing more blocks there and never
+        // closes its output. Only the start is kept, which is where the
+        // error is.
+        let errorText = Task.detached { () -> String in
+            var kept = ""
+            for await line in Self.lines(of: errorHandle) where kept.utf8.count < 64_000 {
+                kept += line + "\n"
+            }
+            return kept
+        }
         Task.detached { [weak self] in
             var parser = AgentStreamParser()
             var outcome: AgentOutcome?
-            do {
-                for try await line in handle.bytes.lines {
-                    let events = parser.parse(line)
-                    for case .finished(let found) in events { outcome = found }
-                    guard !events.isEmpty else { continue }
-                    await self?.apply(events, to: chatID)
-                }
-            } catch {}
+            for await line in Self.lines(of: handle) {
+                let events = parser.parse(line)
+                for case .finished(let found) in events { outcome = found }
+                guard !events.isEmpty else { continue }
+                await self?.apply(events, to: chatID)
+            }
             process.waitUntilExit()
-            let stderr = String(decoding: errorHandle.readDataToEndOfFile(), as: UTF8.self)
+            let stderr = await errorText.value
             await self?.ended(
                 chatID, outcome: outcome, status: process.terminationStatus,
                 reason: process.terminationReason, stderr: stderr
             )
+        }
+    }
+
+    /// A pipe's lines as they arrive, read as the system says there is
+    /// something to read. Not `FileHandle.bytes`, which reads every handle
+    /// in the process through one reader: an agent that had gone quiet held
+    /// up every other chat's answer, and its own standard error.
+    nonisolated static func lines(of handle: FileHandle) -> AsyncStream<String> {
+        AsyncStream { continuation in
+            // Touched only by the handler, which the handle calls one at a time.
+            var pending = Data()
+            handle.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                guard !chunk.isEmpty else {
+                    handle.readabilityHandler = nil
+                    if !pending.isEmpty { continuation.yield(String(decoding: pending, as: UTF8.self)) }
+                    continuation.finish()
+                    return
+                }
+                pending.append(chunk)
+                while let newline = pending.firstIndex(of: 0x0A) {
+                    continuation.yield(String(decoding: pending[pending.startIndex..<newline], as: UTF8.self))
+                    pending.removeSubrange(pending.startIndex...newline)
+                }
+            }
         }
     }
 

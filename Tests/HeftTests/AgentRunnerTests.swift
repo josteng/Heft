@@ -33,7 +33,7 @@ struct AgentRunnerTests {
     ///     `heft propose` would.
     private func fixture(
         stdout: [String], stderr: String = "", status: Int32 = 0, leavesProposal: Bool = false,
-        delay: Double = 0
+        delay: Double = 0, stderrBytes: Int = 0
     ) throws -> Fixture {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("heft-runner-\(UUID().uuidString)", isDirectory: true)
@@ -66,6 +66,7 @@ struct AgentRunnerTests {
         \(leavesProposal ? "mkdir -p \"\(vault.path)/.heft/proposals\" && for f in \"\(staged.path)\"/.heft/proposals/*.json; do sed -e \"s|\\\"claude-code\\\"|\\\"$HEFT_AGENT_NAME\\\"|\" -e \"s|\\\"plan\\\"|\\\"plan-$$\\\"|\" \"$f\" > \"\(vault.path)/.heft/proposals/$(basename \"$f\" .json)-$$.json\"; done" : "")
         cat "\(output.path)"
         printf '%s' '\(stderr)' >&2
+        \(stderrBytes > 0 ? "yes warning | head -c \(stderrBytes) >&2" : "")
         exit \(status)
         """.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
@@ -274,6 +275,36 @@ struct AgentRunnerTests {
         // The script was killed, so it never got to print its answer.
         try await Task.sleep(for: .milliseconds(500))
         #expect(AgentChatStore.all(in: fixture.vault).first?.turns[0].answer == "")
+    }
+
+    /// A pipe holds about 64 KB. An agent that writes more than that to
+    /// standard error, warnings or a verbose log, blocks until somebody
+    /// reads it, and so never closes its output either.
+    @Test("An agent writing a lot to standard error still finishes")
+    func stderrFlood() async throws {
+        let fixture = try fixture(stdout: answering, stderrBytes: 300_000)
+        fixture.runner.ask("What is due?", vaultRoot: fixture.vault, scope: "")
+        try await settle(fixture.runner)
+        #expect(fixture.runner.chat?.turns[0].answer == "Due Friday, see [[Plan]].")
+    }
+
+    /// Two chats can be answering at once, and an agent that is thinking
+    /// prints nothing for as long as it thinks.
+    @Test("A quiet agent does not hold up another chat's answer")
+    func quietRunDoesNotStallAnother() async throws {
+        let slow = try fixture(stdout: answering, delay: 4)
+        let quick = try fixture(stdout: answering)
+        let runner = slow.runner
+        runner.ask("Slow?", vaultRoot: slow.vault, scope: "")
+        let first = try #require(runner.chat)
+        runner.close()
+        runner.command = { quick.script.path }
+        runner.ask("Quick?", vaultRoot: slow.vault, scope: "")
+        let second = try #require(runner.chat)
+        for _ in 0..<200 where runner.isRunning(second.id) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!runner.isRunning(second.id), "answered while the other was still quiet")
+        #expect(runner.isRunning(first.id))
+        runner.stopAll()
     }
 
     @Test("A run past its time limit is stopped and says why")
