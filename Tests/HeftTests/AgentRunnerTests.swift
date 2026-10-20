@@ -307,6 +307,20 @@ struct AgentRunnerTests {
         runner.stopAll()
     }
 
+    /// The run ends after the chat is gone, and saving it as it ends would
+    /// put it back.
+    @Test("A chat deleted while it is answered stays deleted")
+    func deleteWhileRunning() async throws {
+        let fixture = try fixture(stdout: answering, delay: 0.5)
+        fixture.runner.ask("What is due?", vaultRoot: fixture.vault, scope: "")
+        let chat = try #require(fixture.runner.chat)
+        fixture.runner.delete(chat)
+        try await settle(fixture.runner)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(AgentChatStore.all(in: fixture.vault).isEmpty)
+        #expect(fixture.runner.chats.isEmpty)
+    }
+
     @Test("A run past its time limit is stopped and says why")
     func timeLimit() async throws {
         let fixture = try fixture(stdout: answering, delay: 5)

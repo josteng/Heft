@@ -127,6 +127,10 @@ final class AgentRunner: ObservableObject {
     func delete(_ chat: AgentChat) {
         guard let vaultRoot else { return }
         runs[chat.id]?.process.terminate()
+        // Forgotten now rather than when the process ends, or ending it saves
+        // the chat again and the deleted chat comes back.
+        runs[chat.id] = nil
+        activities[chat.id] = nil
         if self.chat?.id == chat.id { close() }
         AgentChatStore.delete(chat.id, in: vaultRoot)
         load(vaultRoot: vaultRoot)
