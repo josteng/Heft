@@ -290,7 +290,7 @@ public final class VaultIndex: @unchecked Sendable {
                 continue
             }
             notesRead += 1
-            if let text = try? String(contentsOf: note.url, encoding: .utf8) {
+            if let text = NoteText.readLeniently(note.url) {
                 parsed[note.relativePath] = ParsedNote.parse(text, fingerprint: fingerprint)
             } else {
                 parsed[note.relativePath] = ParsedNote.unreadable(fingerprint: fingerprint)

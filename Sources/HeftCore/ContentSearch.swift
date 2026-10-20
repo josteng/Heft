@@ -94,7 +94,7 @@ public enum ContentSearch {
         var perNote: [String: (lines: Int, occurrences: Int)] = [:]
 
         for note in notes {
-            guard let text = try? String(contentsOf: note.url, encoding: .utf8) else { continue }
+            guard let text = NoteText.readLeniently(note.url) else { continue }
             // Lines as the editor counts them when it reveals one: a Windows
             // `\r\n` is a single break, where splitting on `.newlines` made
             // it two and sent every hit below the first to the wrong line.

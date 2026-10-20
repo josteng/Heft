@@ -25,4 +25,20 @@ struct ContentSearchTests {
         let revealed = try #require(NoteText.range(ofLine: hit.line, in: source))
         #expect((source as NSString).substring(with: revealed) == "the needle")
     }
+
+    /// The index already reads such a note; search skipped it whole.
+    @Test("A note that is not UTF-8 is searched")
+    func notUTF8() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("heft-content-search-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("Menu.md")
+        // `Café` in Latin-1: E9 is not UTF-8.
+        try (Data([0x43, 0x61, 0x66, 0xE9]) + Data("\nthe needle\n".utf8)).write(to: url)
+        let note = NoteRef(relativePath: "Menu.md", url: url, name: "Menu", kind: .markdown)
+
+        let hit = try #require(ContentSearch.run(notes: [note], query: "needle").matches.first)
+        #expect(hit.line == 2)
+    }
 }

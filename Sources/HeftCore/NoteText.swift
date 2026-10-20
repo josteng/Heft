@@ -11,6 +11,16 @@ public enum NoteText {
         public let line: Int
     }
 
+    /// A note's text for what it says, never for writing back: a byte that
+    /// is not UTF-8 reads as U+FFFD, as Obsidian reads it, instead of the
+    /// whole note reading as nothing. Nil only when the file cannot be read.
+    public static func readLeniently(_ url: URL) -> String? {
+        // Strict first, which also drops a byte-order mark.
+        if let text = try? String(contentsOf: url, encoding: .utf8) { return text }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// Splits leading YAML frontmatter from the body.
     /// Returns `nil` frontmatter when the note does not open with `---`.
     /// A fence line may end in the return a Windows line break leaves on it;

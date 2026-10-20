@@ -25,6 +25,31 @@ struct VaultIndexEdgeTests {
         VaultIndex.build(root: VaultScanner.scan(root: root))
     }
 
+    /// Latin-1 from an old editor: `é` is the lone byte E9, which is not
+    /// UTF-8, and a strict read made the whole note unreadable.
+    @Test("A note that is not UTF-8 keeps its links and tags")
+    func notUTF8KeepsLinksAndTags() throws {
+        let root = try makeVault(["B.md": "b"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try (Data([0x43, 0x61, 0x66, 0xE9]) + Data(" [[B]] #menu\n".utf8))
+            .write(to: root.appendingPathComponent("Caf.md"))
+        let index = build(root)
+
+        #expect(index.backlinks(to: "B.md").map(\.source.relativePath) == ["Caf.md"])
+        #expect(index.notes(taggedWith: "menu").map(\.relativePath) == ["Caf.md"])
+    }
+
+    /// A byte-order mark is not text: kept, it would stand before the
+    /// frontmatter's opening fence.
+    @Test("A byte-order mark does not hide the frontmatter")
+    func byteOrderMark() throws {
+        let root = try makeVault([:])
+        defer { try? FileManager.default.removeItem(at: root) }
+        try (Data([0xEF, 0xBB, 0xBF]) + Data("---\ntags: [x]\n---\nbody\n".utf8))
+            .write(to: root.appendingPathComponent("N.md"))
+        #expect(build(root).notes(taggedWith: "x").map(\.relativePath) == ["N.md"])
+    }
+
     /// `xab/Note.md` is shallower, so it is first among the candidates and
     /// a plain suffix test let it answer for the folder `b`.
     @Test("A link's folder matches whole path components")
