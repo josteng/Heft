@@ -398,48 +398,7 @@ final class MobileVault {
     /// Reads through a file coordinator, which is also what makes iCloud
     /// fetch a note that is not on the phone yet.
     nonisolated static func read(_ url: URL) throws -> String {
-        var coordinationError: NSError?
-        var result: Result<String, Error> = .failure(CocoaError(.fileReadUnknown))
-        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) {
-            coordinated in
-            result = Result { try String(contentsOf: coordinated, encoding: .utf8) }
-        }
-        if let coordinationError { throw coordinationError }
-        return try result.get()
-    }
-
-    /// Writes `text` over the note only if it still holds `original`.
-    ///
-    /// The phone's edit is the one most likely to be stale: the Mac autosaves,
-    /// iCloud delivers that late, and silently replacing what the Mac wrote is
-    /// the one outcome worse than not saving. A changed file is refused and
-    /// the reader sees the newer text.
-    nonisolated static func write(_ text: String, to url: URL, replacing original: String) throws {
-        var coordinationError: NSError?
-        var result: Result<Void, Error> = .success(())
-        NSFileCoordinator().coordinate(writingItemAt: url, options: .forMerging,
-                                       error: &coordinationError) { coordinated in
-            result = Result {
-                let current = try String(contentsOf: coordinated, encoding: .utf8)
-                guard current == original else { throw MobileWriteError.changedElsewhere }
-                try text.write(to: coordinated, atomically: true, encoding: .utf8)
-            }
-        }
-        if let coordinationError { throw coordinationError }
-        try result.get()
-    }
-
-    /// Writes `text` whatever the file holds now: what the reader chose when
-    /// told the note had changed on another device.
-    nonisolated static func overwrite(_ text: String, at url: URL) throws {
-        var coordinationError: NSError?
-        var result: Result<Void, Error> = .success(())
-        NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing,
-                                       error: &coordinationError) { coordinated in
-            result = Result { try text.write(to: coordinated, atomically: true, encoding: .utf8) }
-        }
-        if let coordinationError { throw coordinationError }
-        try result.get()
+        try NoteFile.read(url)
     }
 
     /// Where New Note starts when it is not made inside a folder: the vault's
@@ -830,13 +789,7 @@ enum MobileVaultActionError: LocalizedError {
     }
 }
 
-enum MobileWriteError: LocalizedError {
-    case changedElsewhere
-
-    var errorDescription: String? {
-        switch self {
-        case .changedElsewhere:
-            "This note changed on another device while you were editing. Heft kept that version; your edit is still in the editor."
-        }
-    }
+extension MobileVault: NoteSyncVault {
+    func noteURL(at path: String) -> URL? { note(at: path)?.url }
+    func noteWritten() { refresh() }
 }

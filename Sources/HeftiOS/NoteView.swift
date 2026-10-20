@@ -6,39 +6,29 @@ import UIKit
 /// note view and the calendar load, edit and save it the same way.
 ///
 /// Edits save themselves a moment after typing stops, and when the note is
-/// left. A save only lands on the text it was based on: the Mac autosaves,
-/// iCloud brings that late, and quietly replacing what the Mac wrote is the
-/// one outcome worse than not saving. A refused save becomes a `conflict`
-/// for the reader to settle.
+/// left. The loading and saving are `NoteSync`'s, in the core; this adds
+/// what the editor around it needs.
 @MainActor @Observable
 final class NoteDocument {
     let path: String
+    /// The note's loading and saving.
+    let sync: NoteSync
     /// The text as last read or saved.
-    private(set) var source: String?
+    var source: String? { sync.source }
     /// Moves only when `source` is replaced from disk, which is the one time
     /// the editor takes the text back rather than keeping its own.
-    private(set) var revision = 0
-    private(set) var failure: String?
+    var revision: Int { sync.revision }
+    var failure: String? { sync.failure }
+    var conflict: Bool { sync.conflict }
+    var saveError: String? {
+        get { sync.saveError }
+        set { sync.saveError = newValue }
+    }
     /// Whether the keyboard is up in the editor.
     var editing = false
     /// Moved to ask the editor for the keyboard.
     private(set) var focusRequest = 0
-    private(set) var conflict = false
-    var saveError: String?
 
-    /// What is on disk as far as this document knows; a save checks it.
-    @ObservationIgnored private var onDisk: String?
-    /// Typed and not yet saved. Not observed: a keystroke changes nothing
-    /// that any view draws.
-    @ObservationIgnored private var pending: String?
-    @ObservationIgnored private var saveTask: Task<Void, Never>?
-    /// Reads begun and the latest one taken, so reads finishing out of
-    /// order keep the newest.
-    @ObservationIgnored private var loadsStarted = 0
-    @ObservationIgnored private var loadLanded = 0
-    /// The last save started, which the next one waits for.
-    @ObservationIgnored private var writing: Task<Void, Never>?
-    @ObservationIgnored private weak var vault: MobileVault?
     /// The editor showing this note, for the bar's undo, redo and find.
     @ObservationIgnored weak var textView: UITextView?
     /// What applies at the caret, for the iPad's format popover.
@@ -65,37 +55,14 @@ final class NoteDocument {
 
     init(path: String) {
         self.path = path
+        sync = NoteSync(path: path)
     }
 
     func load(in vault: MobileVault) async {
-        self.vault = vault
-        // Unsaved typing wins until it is saved; a rescan arriving meanwhile
-        // must not put the old text back under the caret.
-        guard pending == nil else { return }
-        guard let url = vault.note(at: path)?.url else {
-            failure = "The note is no longer in the vault."
-            return
-        }
-        loadsStarted += 1
-        let load = loadsStarted
-        do {
-            let text = try await Task.detached { try MobileVault.read(url) }.value
-            // Asked again after the read, which can wait on iCloud for
-            // seconds: typing that began meanwhile is based on the old text,
-            // and taking this as the base would let its save replace the
-            // newer file unasked. Nor does a read that a later one overtook
-            // put its older text back.
-            guard pending == nil, load > loadLanded else { return }
-            loadLanded = load
-            onDisk = text
-            failure = nil
-            if text != source {
-                source = text
-                revision += 1
-                setOutline(NoteOutline(source: text))
-            }
-        } catch {
-            failure = error.localizedDescription
+        let before = sync.revision
+        await sync.load(in: vault)
+        if sync.revision != before, let text = sync.source {
+            setOutline(NoteOutline(source: text))
         }
     }
 
@@ -136,8 +103,7 @@ final class NoteDocument {
     }
 
     func edited(_ text: String) {
-        pending = text
-        saveSoon()
+        sync.edited(text)
         outlineTask?.cancel()
         outlineTask = Task {
             try? await Task.sleep(for: .milliseconds(400))
@@ -235,83 +201,19 @@ final class NoteDocument {
         return CGPoint(x: current.x, y: min(max(y, -inset.top), lowest))
     }
 
-    func saveSoon(immediately: Bool = false) {
-        guard pending != nil else { return }
-        saveTask?.cancel()
-        saveTask = Task {
-            if !immediately {
-                try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else { return }
-            }
-            await save()
-        }
-    }
+    func saveSoon(immediately: Bool = false) { sync.saveSoon(immediately: immediately) }
 
     /// Whatever was typed, written before the file is renamed or moved.
-    func saveNow() async {
-        saveTask?.cancel()
-        await save()
-    }
+    func saveNow() async { await sync.saveNow() }
 
     /// Typing that will never be written: the note is being deleted.
-    func abandon() {
-        saveTask?.cancel()
-        pending = nil
-    }
-
-    /// One write at a time. A second started while the first is on disk
-    /// still holds the first's base, finds the first's text in the file and
-    /// calls that a change from elsewhere: leaving the app asks for a save
-    /// on inactive and again on background, two saves that can overlap.
-    private func save() async {
-        let previous = writing
-        let current = Task { await previous?.value; await write() }
-        writing = current
-        await current.value
-    }
-
-    private func write() async {
-        guard let vault, let text = pending, let base = onDisk, !conflict,
-              let url = vault.note(at: path)?.url
-        else { return }
-        do {
-            try await Task.detached { try MobileVault.write(text, to: url, replacing: base) }.value
-            // A read begun before this write holds what it replaced.
-            loadLanded = loadsStarted
-            onDisk = text
-            source = text
-            if pending == text { pending = nil } else { saveSoon() }
-            vault.refresh()
-        } catch MobileWriteError.changedElsewhere {
-            conflict = true
-        } catch {
-            saveError = error.localizedDescription
-        }
-    }
+    func abandon() { sync.abandon() }
 
     /// Writes what was typed over the version that arrived meanwhile.
-    func keepMine() async {
-        guard let vault, let text = pending, let url = vault.note(at: path)?.url else { return }
-        do {
-            try await Task.detached { try MobileVault.overwrite(text, at: url) }.value
-            loadLanded = loadsStarted
-            onDisk = text
-            source = text
-            pending = nil
-            conflict = false
-            vault.refresh()
-        } catch {
-            saveError = error.localizedDescription
-        }
-    }
+    func keepMine() async { await sync.keepMine() }
 
     /// Drops what was typed for the version that arrived meanwhile.
-    func useTheirs() async {
-        guard let vault else { return }
-        pending = nil
-        conflict = false
-        await load(in: vault)
-    }
+    func useTheirs() async { await sync.useTheirs() }
 }
 
 /// A note, editable in place.
