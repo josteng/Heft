@@ -288,6 +288,28 @@ struct AgentRunnerTests {
         #expect(fixture.runner.chat?.turns[0].answer == "Due Friday, see [[Plan]].")
     }
 
+    /// A pipe hands over whatever has arrived, which is not a line: one can
+    /// come in pieces, a character can be cut in two, and the last one may
+    /// have no newline at all.
+    @Test("A pipe's lines survive arriving in pieces, the last unterminated")
+    func pipeLinesInPieces() async throws {
+        let pipe = Pipe()
+        let lines = AgentRunner.lines(of: pipe.fileHandleForReading)
+        let writer = pipe.fileHandleForWriting
+        let euro = Array("€".utf8)
+        let pieces: [[UInt8]] = [
+            Array("fir".utf8), Array("st\nsec".utf8), [euro[0]], Array(euro[1...]), Array("ond\n\nlast".utf8),
+        ]
+        for piece in pieces {
+            writer.write(Data(piece))
+            try await Task.sleep(for: .milliseconds(30))
+        }
+        try writer.close()
+        var read: [String] = []
+        for await line in lines { read.append(line) }
+        #expect(read == ["first", "sec€ond", "", "last"])
+    }
+
     /// Two chats can be answering at once, and an agent that is thinking
     /// prints nothing for as long as it thinks.
     @Test("A quiet agent does not hold up another chat's answer")

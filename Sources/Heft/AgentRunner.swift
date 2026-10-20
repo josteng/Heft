@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import HeftCore
+import os
 
 /// Runs the reader's agent for one window's search bar and keeps the
 /// conversations it is in.
@@ -346,21 +347,26 @@ final class AgentRunner: ObservableObject {
     /// up every other chat's answer, and its own standard error.
     nonisolated static func lines(of handle: FileHandle) -> AsyncStream<String> {
         AsyncStream { continuation in
-            // Touched only by the handler, which the handle calls one at a time.
-            var pending = Data()
+            // The part line still waiting for its newline, behind a lock:
+            // the handler runs on a queue of the handle's choosing, and
+            // nothing documents that two calls never overlap.
+            let pending = OSAllocatedUnfairLock(initialState: Data())
             handle.readabilityHandler = { handle in
                 let chunk = handle.availableData
-                guard !chunk.isEmpty else {
-                    handle.readabilityHandler = nil
-                    if !pending.isEmpty { continuation.yield(String(decoding: pending, as: UTF8.self)) }
-                    continuation.finish()
-                    return
+                pending.withLock { pending in
+                    guard !chunk.isEmpty else {
+                        if !pending.isEmpty { continuation.yield(String(decoding: pending, as: UTF8.self)) }
+                        pending.removeAll()
+                        continuation.finish()
+                        return
+                    }
+                    pending.append(chunk)
+                    while let newline = pending.firstIndex(of: 0x0A) {
+                        continuation.yield(String(decoding: pending[pending.startIndex..<newline], as: UTF8.self))
+                        pending.removeSubrange(pending.startIndex...newline)
+                    }
                 }
-                pending.append(chunk)
-                while let newline = pending.firstIndex(of: 0x0A) {
-                    continuation.yield(String(decoding: pending[pending.startIndex..<newline], as: UTF8.self))
-                    pending.removeSubrange(pending.startIndex...newline)
-                }
+                if chunk.isEmpty { handle.readabilityHandler = nil }
             }
         }
     }
