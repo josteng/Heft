@@ -45,7 +45,9 @@ struct TodaySnapshot: Codable, Equatable {
     /// `latest` keeps the last lines rather than the first: what was added
     /// most recently, which in a daily note is what is worth a glance.
     static func lines(from markdown: String, limit: Int = 8, latest: Bool = false) -> [Line] {
-        var body = markdown[...]
+        // `\r\n` is one Character, which neither `"\n"` below matches.
+        let unix = markdown.replacingOccurrences(of: "\r\n", with: "\n")
+        var body = unix[...]
         if body.hasPrefix("---\n"), let end = body.range(of: "\n---", range: body.index(body.startIndex, offsetBy: 4)..<body.endIndex) {
             body = body[end.upperBound...]
         }
