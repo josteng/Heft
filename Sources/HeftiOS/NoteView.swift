@@ -206,6 +206,25 @@ final class NoteDocument {
     /// Whatever was typed, written before the file is renamed or moved.
     func saveNow() async { await sync.saveNow() }
 
+    /// Leaving the app. The save runs as a background task, or iOS could
+    /// suspend the app halfway through a coordinated write that waits on
+    /// iCloud.
+    func saveBeforeSuspending() {
+        guard sync.hasUnsavedText else { return }
+        final class Token { var id = UIBackgroundTaskIdentifier.invalid }
+        let token = Token()
+        let end = {
+            guard token.id != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(token.id)
+            token.id = .invalid
+        }
+        token.id = UIApplication.shared.beginBackgroundTask(withName: "Save note", expirationHandler: end)
+        Task {
+            await sync.saveNow()
+            end()
+        }
+    }
+
     /// Typing that will never be written: the note is being deleted.
     func abandon() { sync.abandon() }
 
@@ -563,7 +582,7 @@ struct NoteContent: View {
         #endif
         .onDisappear { document.saveSoon(immediately: true) }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { document.saveSoon(immediately: true) }
+            if phase != .active { document.saveBeforeSuspending() }
         }
         .alert("Not Saved", isPresented: .constant(document.saveError != nil)) {
             Button("OK") { document.saveError = nil }
