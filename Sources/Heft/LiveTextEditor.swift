@@ -470,6 +470,14 @@ struct LiveTextEditor: NSViewRepresentable {
             // assigning `string` is not an edit, so nothing else drops it.
             textView.selectImage(nil)
             textView.string = text
+            // Undo history is of the text just replaced, and its ranges point
+            // into it: ⌘Z after a reload, or after a capture merged into the
+            // note being typed in, deleted whatever now sat at an old offset.
+            // Typing registers on the storage, the caret restore on the view.
+            if let undo = textView.undoManager {
+                if let storage = textView.textStorage { undo.removeAllActions(withTarget: storage) }
+                undo.removeAllActions(withTarget: textView)
+            }
             // The assignment records itself as an edit that deleted the whole
             // old note, and carried into the next pass that shift would remap
             // the new document's offsets into the old one.

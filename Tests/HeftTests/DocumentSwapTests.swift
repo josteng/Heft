@@ -68,4 +68,41 @@ struct DocumentSwapTests {
         coordinator.restyle(view)
         #expect(widgets(in: view).isEmpty)
     }
+
+    /// A note rewritten underneath the reader (a reload, or a capture merged
+    /// into what they are typing) kept the undo history of the old text. Its
+    /// ranges point into that text, so ⌘Z then deleted whatever sat at the
+    /// old offset in the new one: a letter of another line, not the last
+    /// keystroke.
+    /// An offscreen window does not make one of its own.
+    private final class UndoWindow: NSWindow {
+        let manager = UndoManager()
+        override var undoManager: UndoManager? { manager }
+    }
+
+    @Test("Replacing the text forgets the undo history of the old one")
+    func loadForgetsUndo() throws {
+        let (view, coordinator) = editor("line\n")
+        let window = UndoWindow(
+            contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: true
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.close() }
+        view.allowsUndo = true
+        view.isEditable = true
+        let undo = try #require(view.undoManager)
+        undo.groupsByEvent = false
+        view.setSelectedRange(NSRange(location: 5, length: 0))
+        for character in "ab" {
+            undo.beginUndoGrouping()
+            view.insertText(String(character), replacementRange: view.selectedRange())
+            undo.endUndoGrouping()
+        }
+        try #require(undo.canUndo, "typing left nothing to undo")
+
+        coordinator.load("CAP\nline\nab", into: view)
+        if undo.canUndo { undo.undo() }
+        #expect(view.string == "CAP\nline\nab", "undo edited the new text at the old offsets")
+    }
 }
