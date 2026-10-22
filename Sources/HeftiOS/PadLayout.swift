@@ -198,8 +198,11 @@ struct PadRootView: View {
             // More on the leading side, as Notes keeps Edit there, so it does
             // not sit between New Note and Search.
             ToolbarItem(placement: .topBarLeading) {
-                VaultMenu(calendarShown: $showsCalendar, capture: capture)
+                VaultMenu(calendarShown: $showsCalendar)
             }
+            // Always in reach, as each of the phone's tabs has it; the
+            // sidebar's bar has the room.
+            ToolbarItem(placement: .topBarTrailing) { CaptureButton() }
             ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
             }
@@ -353,6 +356,8 @@ struct PadRootView: View {
             mode = chosen
         }
         if let note = environment["HEFT_IOS_NOTE"] { selection = .note(note) }
+        // The sidebar over the note, as portrait hides it.
+        if environment["HEFT_IOS_PAD_SIDEBAR"] != nil { columns = .all }
         if let shift = environment["HEFT_IOS_DAY"].flatMap(Int.init) {
             pick(Calendar.current.date(byAdding: .day, value: shift, to: Date()) ?? Date())
         }
