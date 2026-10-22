@@ -66,6 +66,31 @@ struct LiveNoteEditor: UIViewRepresentable {
             guard let coordinator, let view else { return false }
             return coordinator.pictureRange(at: point, in: view) != nil
         }
+        view.addInteraction(UIScribbleInteraction(delegate: coordinator))
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let pencil = UIPencilInteraction(delegate: coordinator)
+            view.addInteraction(pencil)
+            coordinator.pencil = pencil
+            coordinator.updatePencilInteraction()
+            NotificationCenter.default.addObserver(
+                coordinator, selector: #selector(Coordinator.updatePencilInteraction),
+                name: UIApplication.didBecomeActiveNotification, object: nil
+            )
+            #if DEBUG
+            // `HEFT_IOS_PENCIL_PALETTE=x,y`: the palette as a squeeze with
+            // the Pencil at that point would open it, for a screenshot.
+            let palette = ProcessInfo.processInfo.environment["HEFT_IOS_PENCIL_PALETTE"]?
+                .split(separator: ",").compactMap { Double($0) }
+            if let palette, palette.count == 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak coordinator, weak view] in
+                    guard let view else { return }
+                    coordinator?.togglePalette(near: CGPoint(
+                        x: palette[0], y: palette[1] + view.contentOffset.y
+                    ))
+                }
+            }
+            #endif
+        }
         coordinator.update(from: self)
         return view
     }
@@ -80,6 +105,10 @@ struct LiveNoteEditor: UIViewRepresentable {
     {
         weak var textView: MobileTextView?
         private var document: NoteDocument?
+        /// Double-tap and squeeze, on an iPad.
+        var pencil: UIPencilInteraction?
+        /// The format palette a Pencil gesture opened, while it shows.
+        weak var palette: UIViewController?
         private var renderContext: RenderContext?
         private var scrolledDown: ((Bool) -> Void)?
         private var follow: ((URL) -> Void)?
@@ -535,6 +564,12 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         /// The embed under a drawn picture at `point`, if there is one.
         func pictureRange(at point: CGPoint, in textView: MobileTextView) -> NSRange? {
+            lineStart(at: point, in: textView).flatMap { layout.images[$0]?.range }
+        }
+
+        /// Where the line drawn at `point` starts, which is what widgets are
+        /// keyed by.
+        func lineStart(at point: CGPoint, in textView: MobileTextView) -> Int? {
             guard let manager = textView.textLayoutManager, let content = manager.textContentManager else { return nil }
             let inContainer = CGPoint(x: point.x - textView.textContainerInset.left,
                                       y: point.y - textView.textContainerInset.top)
@@ -542,7 +577,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             let start = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
             let text = textView.text as NSString
             guard start >= 0, start <= text.length else { return nil }
-            return layout.images[text.lineRange(for: NSRange(location: start, length: 0)).location]?.range
+            return text.lineRange(for: NSRange(location: start, length: 0)).location
         }
 
         private func target(at point: CGPoint, in textView: MobileTextView) -> Target? {
@@ -1677,4 +1712,82 @@ struct SuggestionChip: Equatable {
     var detail: String
     var symbol: String?
     var tint: UIColor?
+}
+
+// MARK: - Apple Pencil
+
+extension LiveNoteEditor.Coordinator: UIPencilInteractionDelegate, UIScribbleInteractionDelegate {
+    /// On only while Settings sends a double-tap or a squeeze to the app's
+    /// palette. An interaction that is on takes squeeze from the system, so
+    /// with any other choice it stays off and the system does what was asked.
+    @objc func updatePencilInteraction() {
+        pencil?.isEnabled = UIPencilInteraction.preferredTapAction == .showContextualPalette
+            || UIPencilInteraction.preferredSqueezeAction == .showContextualPalette
+    }
+
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+        guard UIPencilInteraction.preferredTapAction == .showContextualPalette else { return }
+        togglePalette(near: tap.hoverPose?.location)
+    }
+
+    func pencilInteraction(
+        _ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze
+    ) {
+        // Once per squeeze, when it ends, as Apple asks.
+        guard squeeze.phase == .ended,
+              UIPencilInteraction.preferredSqueezeAction == .showContextualPalette
+        else { return }
+        togglePalette(near: squeeze.hoverPose?.location)
+    }
+
+    /// The format palette at the Pencil's tip, or at the caret when the
+    /// Pencil is away from the screen; the same gesture again puts it away.
+    /// Presented on the text view itself, so the tip's point needs no
+    /// converting: the note view's space starts below the bar the text runs
+    /// under.
+    func togglePalette(near tip: CGPoint?) {
+        guard let textView, let document else { return }
+        if let palette, palette.presentingViewController != nil {
+            palette.dismiss(animated: true)
+            return
+        }
+        var point = tip
+        if point == nil, let caret = textView.selectedTextRange?.end {
+            let rect = textView.caretRect(for: caret)
+            point = CGPoint(x: rect.midX, y: rect.maxY)
+        }
+        guard let point, var top = textView.window?.rootViewController else { return }
+        while let presented = top.presentedViewController { top = presented }
+        let host = UIHostingController(rootView: FormatPopover(document: document))
+        host.sizingOptions = .preferredContentSize
+        host.modalPresentationStyle = .popover
+        host.popoverPresentationController?.sourceView = textView
+        host.popoverPresentationController?.sourceRect = CGRect(origin: point, size: CGSize(width: 1, height: 1))
+        palette = host
+        top.present(host, animated: true)
+    }
+
+    /// Not where the text under the Pencil is drawn rather than shown: a
+    /// picture, a table, display maths, an embedded note, the properties or
+    /// a rule. Writing there went into the hidden source.
+    func scribbleInteraction(_ interaction: UIScribbleInteraction, shouldBeginAt location: CGPoint) -> Bool {
+        guard let textView, let line = lineStart(at: location, in: textView),
+              let block = layout.blocks[line]
+        else { return true }
+        switch block {
+        case .image, .table, .blockMath, .embed, .properties, .thematicBreak, .agentGuide: return false
+        default: return true
+        }
+    }
+
+    /// A touch on a link while reading holds focus back, so that following
+    /// it does not raise the keyboard; writing that starts there waits for
+    /// the pause after a word instead of failing to focus.
+    func scribbleInteractionShouldDelayFocus(_ interaction: UIScribbleInteraction) -> Bool {
+        textView?.refusesFocus ?? false
+    }
+
+    func scribbleInteractionWillBeginWriting(_ interaction: UIScribbleInteraction) {
+        textView?.refusesFocus = false
+    }
 }

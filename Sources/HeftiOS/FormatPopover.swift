@@ -26,7 +26,7 @@ struct FormatButton: View {
     }
 }
 
-private struct FormatPopover: View {
+struct FormatPopover: View {
     let document: NoteDocument
     @Environment(\.dismiss) private var dismiss
 

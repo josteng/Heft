@@ -28,7 +28,7 @@ way the Open Note intent does. `HEFT_IOS_NOTE_ACTION=delete` deletes the open
 note from its own menu, right after `HEFT_IOS_TYPE`'s typing. `HEFT_IOS_CHOOSE=<path>` takes a
 folder as the picker does, bookmark included, for a later plain launch to reopen, and
 `HEFT_IOS_INTENT_CAPTURE=<text>` files two lines to the inbox through that bookmark. `HEFT_IOS_SEARCH_TAG=<tag>` opens Search in a tag's scope, and
-`HEFT_IOS_TAG=<tag>` pushes a tag's list over the note, as a tapped tag does. `HEFT_IOS_OUTLINE` opens the note's Outline, and `jump:<n>`
+`HEFT_IOS_TAG=<tag>` pushes a tag's list over the note, as a tapped tag does. `HEFT_IOS_PENCIL_PALETTE=x,y` opens the format palette as a Pencil squeeze at that point would, and `HEFT_IOS_OUTLINE` opens the note's Outline, and `jump:<n>`
 goes to its nth heading. Point them at
 a copy of a vault: the editor saves.
 
