@@ -422,7 +422,7 @@ struct WidgetKeysWhileRepeating {
 
         /// What a fragment beginning at `start` would be handed right now.
         func hasMarker(at start: Int) -> Bool {
-            if case .list = coordinator.layout.blocks[coordinator.layoutKey(for: start)] {
+            if case .list = coordinator.layout.blocks[coordinator.restyler.layoutKey(for: start)] {
                 return true
             }
             return false

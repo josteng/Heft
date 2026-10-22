@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 /// `UITextView` on the same TextKit 2 stack.
 ///
 /// Everything below the view is shared: `LiveDecorator` and `RestyleScope`
-/// from HeftCore, `LiveStyler` and `HeftLayoutFragment` from HeftTextKit.
+/// from HeftCore, `LiveRestyler`, `LiveStyler` and `HeftLayoutFragment` from
+/// HeftTextKit.
 /// What lives here is what touch needs instead of a mouse and a menu bar:
 /// reading with every mark hidden until the text is tapped into, a keyboard
 /// bar, checkboxes and links that answer a tap, and saving as it goes.
@@ -86,9 +87,8 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// Where the caret was when a picker took the keyboard away.
         private var attachAt: NSRange?
 
-        private var layout = LiveLayout()
-        private var styled: RestyleScope.Snapshot?
-        private var styleKey = ""
+        private let restyler = LiveRestyler()
+        private var layout: LiveLayout { restyler.layout }
         /// The text revision this view last took from the document, so a
         /// rescan that re-read the same text does not reset the caret.
         private var loadedRevision = -1
@@ -97,10 +97,6 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// Until when a fold just reported is still animating; the view is
         /// changing size under the scroll position meanwhile.
         private var settlingUntil = Date.distantPast
-        /// How far the text has moved since the widgets were computed: an
-        /// edit lands before the restyle that follows it, and a fragment laid
-        /// out in between looks its widget up by an offset that has moved.
-        private var pendingShift: (fromOldOffset: Int, delta: Int)?
         /// Whether the text view had the keyboard when a tap began, so a
         /// checkbox tapped while reading does not leave the keyboard up.
         private var hadFocusAtTap = false
@@ -221,9 +217,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         private func load(_ text: String, into textView: MobileTextView) {
             let selection = textView.selectedRange
             let caret = NoteSync.caret(selection.location, from: textView.text, to: text)
-            layout = LiveLayout()
-            styled = nil
-            pendingShift = nil
+            restyler.reset()
             textView.text = text
             textView.selectedRange = NSRange(location: caret, length: 0)
             restyle(textView)
@@ -252,7 +246,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             if !textView.isFirstResponder {
                 reveal = .none
             } else if selection.length > 0 {
-                reveal = styled.flatMap { $0.source.isEqual(to: source as String) ? $0.reveal : nil }
+                reveal = restyler.styled.flatMap { $0.source.isEqual(to: source as String) ? $0.reveal : nil }
                     ?? Reveal(selection: NSRange(location: selection.location, length: 0), in: source)
             } else {
                 reveal = Reveal(selection: selection, in: source)
@@ -260,77 +254,21 @@ struct LiveNoteEditor: UIViewRepresentable {
 
             var context = renderContext
             context.appearance = textView.traitCollection
-            let width = textView.textContainer.size.width
-            // Everything a pass draws with, the appearance included: with only
-            // the note and the width in it, a colour or heading setting
-            // changed in Settings matched the key, and the note kept its old
-            // look until it was opened again.
-            let key = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-                + "\(context.strictLineBreaks)/\(width)/\(textView.traitCollection.userInterfaceStyle.rawValue)/"
-                + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.palette)/"
-                + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/\(context.codeColor)/"
-                + "\(context.boldColor)/\(context.italicColor)/\(context.headingColors)"
-
-            if let styled, styleKey == key, styled.reveal == reveal,
-               styled.source.isEqual(to: source as String) {
+            switch restyler.restyle(
+                storage, source: source, reveal: reveal, context: context,
+                width: textView.textContainer.size.width, minimumContentWidth: 200
+            ) {
+            case .current:
                 updateTypingAttributes(in: textView)
-                return
-            }
-            let decorations: [MarkdownDecoration]
-            if let styled, styled.source.isEqual(to: source as String) {
-                decorations = styled.decorations
-            } else {
-                decorations = LiveDecorator.decorations(
-                    in: source,
-                    reusing: styled.map {
-                        LiveDecorator.DecorationCache(source: $0.source, decorations: $0.decorations)
-                    }
-                )
-            }
-            spellExclusions = SpellCheckScope.exclusions(for: decorations, in: source)
-            let snapshot = RestyleScope.Snapshot(source: source, decorations: decorations, reveal: reveal)
-            let comparable = styleKey == key ? styled : nil
-            let scope = comparable.map { RestyleScope.scope(from: $0, to: snapshot) }
-            styleKey = key
-            styled = snapshot
-            if let scope, scope.isEmpty {
-                pendingShift = nil
+            case .unchanged(let exclusions):
+                spellExclusions = exclusions
                 updateTypingAttributes(in: textView)
-                return
+            case .restyled(let exclusions, let relayout):
+                spellExclusions = exclusions
+                relayout.apply(to: textView.textLayoutManager)
+                updateTypingAttributes(in: textView)
+                refreshFormatState()
             }
-
-            let previous = layout.signature
-            layout = LiveStyler.apply(
-                to: storage,
-                reveal: reveal,
-                context: context,
-                contentWidth: max(200, width - 8),
-                decorations: decorations,
-                incremental: scope.map {
-                    LiveStyler.Incremental(dirty: $0.dirty, edit: $0.edit, previous: layout)
-                }
-            )
-            pendingShift = nil
-            if let scope {
-                for range in scope.dirty { invalidate(range, in: textView) }
-            } else if layout.signature != previous || styled == nil,
-                      let manager = textView.textLayoutManager,
-                      let content = manager.textContentManager {
-                manager.invalidateLayout(for: content.documentRange)
-            }
-            updateTypingAttributes(in: textView)
-            refreshFormatState()
-        }
-
-        private func invalidate(_ range: NSRange, in textView: MobileTextView) {
-            guard range.location != NSNotFound, range.length > 0,
-                  let manager = textView.textLayoutManager,
-                  let content = manager.textContentManager,
-                  let start = content.location(content.documentRange.location, offsetBy: range.location),
-                  let end = content.location(start, offsetBy: range.length),
-                  let textRange = NSTextRange(location: start, end: end)
-            else { return }
-            manager.invalidateLayout(for: textRange)
         }
 
         /// A blank line takes plain body text, as on the Mac; anywhere else
@@ -349,27 +287,13 @@ struct LiveNoteEditor: UIViewRepresentable {
             ]
         }
 
-        private func layoutKey(for start: Int) -> Int {
-            guard let shift = pendingShift, shift.delta != 0 else { return start }
-            return start >= shift.fromOldOffset + shift.delta ? start - shift.delta : start
-        }
-
         nonisolated func textLayoutManager(
             _ textLayoutManager: NSTextLayoutManager,
             textLayoutFragmentFor location: NSTextLocation,
             in textElement: NSTextElement
         ) -> NSTextLayoutFragment {
             MainActor.assumeIsolated {
-                let fragment = HeftLayoutFragment(textElement: textElement, range: textElement.elementRange)
-                guard let content = textLayoutManager.textContentManager else { return fragment }
-                let start = content.offset(from: content.documentRange.location, to: location)
-                fragment.elementStart = start
-                let key = layoutKey(for: start)
-                fragment.widget = layout.blocks[key]
-                fragment.inlineMath = layout.inlineMath[key] ?? []
-                fragment.inlineTags = layout.inlineTags[key] ?? []
-                fragment.palette = layout.palette
-                return fragment
+                restyler.fragment(for: location, in: textElement, manager: textLayoutManager)
             }
         }
 
@@ -389,8 +313,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                 replace(range, with: adapted, in: view)
                 return false
             }
-            let delta = (text as NSString).length - range.length
-            pendingShift = (NSMaxRange(range), delta)
+            noteEdit(range, replacedBy: text)
             // More than a character at once is a paste or a dictation, never
             // typing; a web address arriving that way is offered as a link.
             pendingPaste = (text as NSString).length > 1 ? (range.location, text) : nil
@@ -476,8 +399,16 @@ struct LiveNoteEditor: UIViewRepresentable {
                   let end = textView.position(from: start, offset: range.length),
                   let textRange = textView.textRange(from: start, to: end)
             else { return }
-            pendingShift = (NSMaxRange(range), (text as NSString).length - range.length)
+            noteEdit(range, replacedBy: text)
             textView.replace(textRange, withText: text)
+        }
+
+        /// Each edit restyles before the next, so the shift is replaced
+        /// rather than added to: should UIKit report an edit made through
+        /// `replace` to the delegate as well, it is not counted twice.
+        private func noteEdit(_ range: NSRange, replacedBy text: String) {
+            restyler.discardShift()
+            restyler.noteEdit(endingAt: NSMaxRange(range), delta: (text as NSString).length - range.length)
         }
 
         func apply(_ edit: MarkdownEditing.Edit) {
@@ -1269,7 +1200,7 @@ struct LiveNoteEditor: UIViewRepresentable {
             } else if item.range(of: #"^\d+[.)][ \t]"#, options: .regularExpression) != nil {
                 state.list = .numbers
             }
-            for decoration in styled?.decorations ?? []
+            for decoration in restyler.styled?.decorations ?? []
             where decoration.range.location <= caret && caret <= NSMaxRange(decoration.range) {
                 switch decoration.style {
                 case .bold: state.inline.insert(.bold)
@@ -1297,7 +1228,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         private func highlightAtCaret() -> NSRange? {
             guard let textView else { return nil }
             let selection = textView.selectedRange
-            return styled?.decorations.first { decoration in
+            return restyler.styled?.decorations.first { decoration in
                 guard case .highlight = decoration.style else { return false }
                 return decoration.range.location <= selection.location
                     && NSMaxRange(selection) <= NSMaxRange(decoration.range)

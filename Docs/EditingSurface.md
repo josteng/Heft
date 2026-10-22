@@ -26,10 +26,12 @@ quote markers, fences, tables) reveals when the caret is anywhere on its line,
 inline spans (`**bold**`, `$math$`, links) only when the caret is inside them.
 The policy is `Reveal` in HeftCore.
 
-Four files carry it:
+Five files carry it:
 
 - `LiveDecorator` (HeftCore): what to style and where. Pure.
 - `RestyleScope` (HeftCore): how much of that has to be redone. Pure.
+- `LiveRestyler`: the pass both editors run over those two, and the widget
+  each fragment is handed. When a pass may run is each editor's own.
 - `LiveStyler`: turns decorations into attributes and decides which widgets
   to draw.
 - `LiveWidgets`: measures tables and draws every widget.

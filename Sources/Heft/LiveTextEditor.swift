@@ -171,7 +171,7 @@ struct LiveTextEditor: NSViewRepresentable {
         // The delegate hands each paragraph its widgets; without it tables,
         // formulae, images and list glyphs have nothing to draw them.
         textView.textLayoutManager?.delegate = nsContext.coordinator
-        // Widget keys go stale the moment the text moves; see `layoutKey`.
+        // Widget keys go stale the moment the text moves; see `LiveRestyler.layoutKey`.
         textView.textStorage?.delegate = nsContext.coordinator
 
         let scrollView = NSScrollView()
@@ -404,41 +404,24 @@ struct LiveTextEditor: NSViewRepresentable {
         var parent: LiveTextEditor
         var lastGeneration = -1
         var lastIdentity: String?
-        var layout = LiveLayout()
+        let restyler = LiveRestyler()
+        var layout: LiveLayout { restyler.layout }
         var indexFingerprint = ""
-        /// `ImageCache.generation` as of the last full pass. A figure replaced
-        /// at the same size moves no widget, so the signature cannot say so.
-        var styledImageGeneration = ImageCache.generation
         var lastFindGeneration = -1
         var lastInsertionGeneration = -1
         var lastChecklistToggle = 0
         var lastFormat: AppModel.PendingFormat?
         var lastListCommand: AppModel.PendingListCommand?
-        /// How far the text has moved since the widgets were computed.
-        ///
-        /// Only ever non-nil in the window between a storage edit and the
-        /// restyle that follows it — which is empty while typing normally, and
-        /// is the whole of a held key, because those defer their styling.
-        var pendingShift: (fromOldOffset: Int, delta: Int)?
+        var pendingShift: (fromOldOffset: Int, delta: Int)? { restyler.pendingShift }
         private var reveal = Reveal.none
         private var revealedSpans = ""
         private var needsRevealRestyle = false
         private var restyleTask: Task<Void, Never>?
         private var revealsSelection = true
-        /// What the storage's attributes currently represent, and the settings
-        /// they were produced under. Together they are what makes a restyle
-        /// incremental: the next one only has to touch where these disagree
-        /// with the document in front of it.
-        private var styled: RestyleScope.Snapshot?
-        private var styleKey = ""
 
-        /// Forgets that the storage is styled at all, forcing the next restyle
-        /// to do the whole document.
-        ///
-        /// Assigning `NSTextView.string` replaces the storage's contents *and*
-        /// drops every attribute on the floor, so the next pass cannot assume
-        /// anything it did not rewrite is still styled.
-        func resetStyling() { styled = nil }
+        /// Assigning `NSTextView.string` drops every attribute; see
+        /// `LiveRestyler.forgetStyling`.
+        func resetStyling() { restyler.forgetStyling() }
 
         var lastFocusRequest = 0
 
@@ -455,16 +438,13 @@ struct LiveTextEditor: NSViewRepresentable {
 
         /// Replaces the buffer with another document.
         ///
-        /// The layout and the pending shift describe the text that is going,
-        /// and they go first: TextKit builds the new document's first
-        /// fragment during the assignment, before any restyle, and the
-        /// delegate would hand it the old document's widget at that offset.
+        /// The old layout goes first, or the delegate would hand the new
+        /// document's first fragment the old document's widget at that offset.
         /// The restyle that follows invalidates the document range, which
         /// for an empty note is nothing, so a new note kept a table it never
         /// had until the first keystroke.
         func load(_ text: String, into textView: HeftTextKit2View) {
-            layout = LiveLayout()
-            styled = nil
+            restyler.reset()
             textView.liveLayout = layout
             // A selected picture is a range into the text that is going, and
             // assigning `string` is not an edit, so nothing else drops it.
@@ -481,7 +461,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // The assignment records itself as an edit that deleted the whole
             // old note, and carried into the next pass that shift would remap
             // the new document's offsets into the old one.
-            pendingShift = nil
+            restyler.discardShift()
         }
 
         init(_ parent: LiveTextEditor) { self.parent = parent }
@@ -765,7 +745,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // as a burst.
             let inTable = (textView as? HeftTextKit2View)?.activeTable != nil
             if !inTable, editGap < Self.burstGap,
-               lastRestyleMillis > Self.deferralThresholdMillis, let styled,
+               lastRestyleMillis > Self.deferralThresholdMillis, let styled = restyler.styled,
                styled.source.length != (textView.string as NSString).length {
                 scheduleRestyle(textView)
                 return
@@ -977,104 +957,36 @@ struct LiveTextEditor: NSViewRepresentable {
             // resolving `labelColor` against whatever is current.
             var context = parent.context
             context.appearance = textView.effectiveAppearance
-            let key = Self.styleKey(context: context, width: width)
 
-            // Cheapest exit of all, and the common one: the debounced restyle
-            // arriving after the caret's has already styled this exact state.
-            // Taken before decorating, because decorating is the expensive part.
-            if let styled, styleKey == key, styled.reveal == reveal,
-               styled.source.isEqual(to: source as String) {
+            let relayout: LiveRestyler.Relayout
+            switch restyler.restyle(
+                storage, source: source, reveal: reveal,
+                context: context, width: width, minimumContentWidth: 240
+            ) {
+            case .current:
                 updateTypingAttributes(for: selection, in: textView)
                 (textView as? HeftTextKit2View)?.updateFormatBar()
                 return
-            }
-
-            // Moving the caret changes what is revealed, not what is there, so
-            // the previous parse still describes the document exactly. Worth
-            // the check on its own: decorating a long note costs more than
-            // every other part of an arrow key put together.
-            let decorations: [MarkdownDecoration]
-            if let styled, styled.source.isEqual(to: source as String) {
-                decorations = styled.decorations
-            } else {
-                // Reuse the previous parse where the edit provably could not
-                // have changed anything outside one paragraph. Decorating is
-                // the largest single cost of a keystroke, and it is the reason
-                // typing scales with the length of the note rather than with
-                // the size of the edit.
-                decorations = LiveDecorator.decorations(
-                    in: source,
-                    reusing: styled.map {
-                        LiveDecorator.DecorationCache(
-                            source: $0.source, decorations: $0.decorations
-                        )
-                    }
-                )
-            }
-            // Before the early return below, not after it: "nothing changed"
-            // there means the same constructs, which have still *moved*, and
-            // an exclusion is a range.
-            (textView as? HeftTextKit2View)?.spellExclusions =
-                SpellCheckScope.exclusions(for: decorations, in: source)
-            let snapshot = RestyleScope.Snapshot(
-                source: source, decorations: decorations, reveal: reveal
-            )
-            // Anything the styler reads besides the document — colours, the
-            // link index, the usable width — invalidates the lot when it moves,
-            // and no part of the previous pass can be kept.
-            let comparable = styleKey == key ? styled : nil
-            let imagesReplaced = styledImageGeneration != context.imageGeneration
-            styledImageGeneration = context.imageGeneration
-            let scope = comparable.map { RestyleScope.scope(from: $0, to: snapshot) }
-            styleKey = key
-            styled = snapshot
-
-            if let scope, scope.isEmpty {
-                // The decorations moved with the text but nothing about them
-                // changed, so what is on screen is already right.
+            case .unchanged(let exclusions):
+                (textView as? HeftTextKit2View)?.spellExclusions = exclusions
                 revealedSpans = spanSignature(for: selection)
                 updateTypingAttributes(for: selection, in: textView)
                 (textView as? HeftTextKit2View)?.updateFormatBar()
                 restyleTask?.cancel()
                 return
+            case .restyled(let exclusions, let stale):
+                (textView as? HeftTextKit2View)?.spellExclusions = exclusions
+                relayout = stale
             }
-
-            let previous = layout.signature
-            layout = LiveStyler.apply(
-                to: storage,
-                reveal: reveal,
-                context: context,
-                contentWidth: max(240, width - 8),
-                decorations: decorations,
-                incremental: scope.map {
-                    LiveStyler.Incremental(dirty: $0.dirty, edit: $0.edit, previous: layout)
-                }
-            )
             // The view resolves clicks and places the table caret against the
             // same measurement the fragments draw with, so it needs the layout
             // this pass produced, not the one before it.
-            pendingShift = nil
             (textView as? HeftTextKit2View)?.liveLayout = layout
             // Recorded after styling: the span list is only known once the
             // decorator has run over the current text.
             revealedSpans = spanSignature(for: selection)
             updateTypingAttributes(for: selection, in: textView)
-
-            if let scope {
-                // A widget belongs to the first paragraph of the construct it
-                // draws, and the rewritten attributes already invalidate those
-                // paragraphs. Asking explicitly is what guarantees the layout
-                // manager comes back for a fragment whose *widget* changed
-                // while its text did not — a table gaining a row, say.
-                for range in scope.dirty { invalidate(range, in: textView) }
-            } else if layout.signature != previous || imagesReplaced,
-                      let manager = textView.textLayoutManager,
-                      let content = manager.textContentManager {
-                // Editing inside a paragraph already invalidates it, so a full
-                // relayout is only needed when widgets appear or disappear, or
-                // a picture was replaced on disk.
-                manager.invalidateLayout(for: content.documentRange)
-            }
+            relayout.apply(to: textView.textLayoutManager)
 
             settleLayout(textView)
             keepCaretVisible(selection, in: textView)
@@ -1095,18 +1007,6 @@ struct LiveTextEditor: NSViewRepresentable {
             // Only a full pass is timed; the early exits above are cheap and
             // say nothing about what the next real one will cost.
             lastRestyleMillis = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
-        }
-
-        /// Everything a restyle depends on that is not the document itself.
-        /// When any of it moves, no part of the previous pass can be kept.
-        private static func styleKey(context: RenderContext, width: CGFloat) -> String {
-            "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-                + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.palette)/"
-                + "\(context.strictLineBreaks)/\(width)/"
-                + "\(context.appearance?.name.rawValue ?? "")/"
-                + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
-                + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/"
-                + "\(context.headingColors)/\(context.imageGeneration)"
         }
 
         private func updateTypingAttributes(for selection: NSRange, in textView: NSTextView) {
@@ -1197,17 +1097,6 @@ struct LiveTextEditor: NSViewRepresentable {
             manager.ensureLayout(for: content.documentRange)
         }
 
-        private func invalidate(_ range: NSRange, in textView: NSTextView) {
-            guard range.location != NSNotFound, range.length > 0,
-                  let manager = textView.textLayoutManager,
-                  let content = manager.textContentManager,
-                  let start = content.location(content.documentRange.location, offsetBy: range.location),
-                  let end = content.location(start, offsetBy: range.length),
-                  let textRange = NSTextRange(location: start, end: end)
-            else { return }
-            manager.invalidateLayout(for: textRange)
-        }
-
         /// Drops what the checker found in a span it should not have read.
         ///
         /// Only reached for a check Heft asks for by hand, never for the
@@ -1243,9 +1132,6 @@ struct LiveTextEditor: NSViewRepresentable {
 
 extension LiveTextEditor.Coordinator: NSTextStorageDelegate {
     /// Records how far the text has moved, without moving the widgets.
-    ///
-    /// The restyle shifts them itself when it carries them over, so doing it
-    /// here as well would move them twice.
     func textStorage(
         _ textStorage: NSTextStorage,
         didProcessEditing editedMask: NSTextStorageEditActions,
@@ -1254,28 +1140,7 @@ extension LiveTextEditor.Coordinator: NSTextStorageDelegate {
     ) {
         guard editedMask.contains(.editedCharacters), delta != 0 else { return }
         // `editedRange` is in the new text; the old text ended the edit here.
-        let oldEnd = editedRange.location + max(0, editedRange.length - delta)
-        if let pending = pendingShift {
-            pendingShift = (min(pending.fromOldOffset, oldEnd), pending.delta + delta)
-        } else {
-            pendingShift = (oldEnd, delta)
-        }
-    }
-}
-
-extension LiveTextEditor.Coordinator {
-    /// Where to look a widget up, for a fragment starting at `start` in the
-    /// text as it is now.
-    ///
-    /// Widgets are keyed by absolute offset, so an edit above them leaves every
-    /// key below it short by the size of that edit until the restyle rebuilds
-    /// them. While a key is held there is no restyle until it stops, so a
-    /// fragment rebuilt during the repeat looks its widget up at an offset that
-    /// has moved, finds nothing, and draws the line without its bullet — the
-    /// marker on the line below the caret vanishing as the key repeats.
-    func layoutKey(for start: Int) -> Int {
-        guard let shift = pendingShift, shift.delta != 0 else { return start }
-        return start >= shift.fromOldOffset + shift.delta ? start - shift.delta : start
+        restyler.noteEdit(endingAt: editedRange.location + max(0, editedRange.length - delta), delta: delta)
     }
 }
 
@@ -1286,18 +1151,7 @@ extension LiveTextEditor.Coordinator: NSTextLayoutManagerDelegate {
         textLayoutFragmentFor location: NSTextLocation,
         in textElement: NSTextElement
     ) -> NSTextLayoutFragment {
-        let fragment = HeftLayoutFragment(
-            textElement: textElement, range: textElement.elementRange
-        )
-        guard let content = textLayoutManager.textContentManager else { return fragment }
-        let start = content.offset(from: content.documentRange.location, to: location)
-        fragment.elementStart = start
-        let key = layoutKey(for: start)
-        fragment.widget = layout.blocks[key]
-        fragment.inlineMath = layout.inlineMath[key] ?? []
-        fragment.inlineTags = layout.inlineTags[key] ?? []
-        fragment.palette = layout.palette
-        return fragment
+        restyler.fragment(for: location, in: textElement, manager: textLayoutManager)
     }
 }
 
