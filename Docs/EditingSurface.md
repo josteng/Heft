@@ -140,6 +140,9 @@ them its layout, which is the whole saving.
 Two invariants make it safe. The dirty ranges are line-aligned, and every
 decoration is wholly inside one or wholly outside all of them (`normalize`
 grows the set to a fixpoint), so nothing is left half-styled at a boundary.
+The edited span is widened to every place in a run of one character the edit
+could have been, since the text diff cannot tell which `\n` of several was
+typed, and what was typed carries the typing attributes, not the styling.
 And the returned `LiveLayout` still describes the whole document, because
 TextKit can rebuild any fragment at any time; widgets outside the dirty ranges
 are carried over and shifted rather than re-measured.

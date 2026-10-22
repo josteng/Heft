@@ -37,6 +37,24 @@ public struct SourceEdit: Equatable, Sendable {
         return NSMaxRange(changed)
     }
 
+    /// How far the edit could slide left and still describe the same change.
+    ///
+    /// The prefix scan puts an insertion into a run of one character at the
+    /// run's end, but the editor may have made it anywhere in the run, in
+    /// whatever attributes it typed with: Return after `---x` with blank
+    /// lines below inserts its break before them, not after.
+    public func slack(from old: NSString, to new: NSString) -> Int {
+        let (text, span) = previous.length == 0 ? (new, changed) : (old, previous)
+        guard changed.length == 0 || previous.length == 0, span.length > 0 else { return 0 }
+        var reach = 0
+        while span.location - reach > 0,
+              text.character(at: span.location - reach - 1)
+                == text.character(at: NSMaxRange(span) - reach - 1) {
+            reach += 1
+        }
+        return reach
+    }
+
     public static func between(_ old: NSString, _ new: NSString) -> SourceEdit {
         let oldLength = old.length
         let newLength = new.length
@@ -190,10 +208,14 @@ public enum RestyleScope {
             let onlyMarkers = beforeEdit.trimmingCharacters(
                 in: CharacterSet(charactersIn: " \t-*+>#0123456789.[]x")
             ).isEmpty
+            // Wherever in a run of one character the edit really was, which
+            // the scan cannot tell, so what was typed there gets restyled.
+            let reach = edit.slack(from: old.source, to: new.source)
+            let span = NSRange(location: edit.changed.location - reach, length: edit.changed.length + reach)
             if changed.contains("\n") || removed.contains("\n") || onlyMarkers {
-                dirty.append(edit.changed)
+                dirty.append(span)
             } else {
-                local.append(edit.changed)
+                local.append(span)
             }
         }
 
