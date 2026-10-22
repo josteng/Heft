@@ -15,8 +15,8 @@ struct BarRequest: Identifiable, Equatable {
 enum BarRow: Identifiable {
     /// A section title, which only labels: the arrows pass over it. Some
     /// headings once led into a scope and others did not, so the arrows
-    /// stopped on some and skipped others; every scope is a chip, ⌘1 to ⌘5
-    /// and a name to type instead.
+    /// stopped on some and skipped others; every scope is a chip, with a
+    /// number (⌘6 is Ask, while it is on) and a name to type instead.
     case heading(String)
     case note(NoteRef)
     case command(AppCommand)

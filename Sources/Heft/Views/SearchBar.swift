@@ -145,9 +145,10 @@ struct SearchBarView: View {
         // One height whatever the scope: the chip row leaving gives its room
         // to the list rather than shrinking the sheet under the pointer.
         .frame(width: PaletteMetrics.barWidth, height: PaletteMetrics.barHeight, alignment: .top)
-        // ⌘1 to ⌘5 go to the chips by their place in the row, from any scope,
-        // as Spotlight's categories are numbered. Invisible buttons, since a
-        // shortcut needs something to belong to.
+        // ⌘1 to ⌘5 go to the chips by their place in the row, and ⌘6 to Ask
+        // while Ask is on, from any scope, as Spotlight's categories are
+        // numbered. Invisible buttons, since a shortcut needs something to
+        // belong to.
         .background { chipShortcuts }
         .background(PaletteSheetBackground())
         .presentationBackground(.clear)
