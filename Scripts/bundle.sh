@@ -36,7 +36,12 @@ SIGNING_IDENTITY="$(
 # a Handoff only from an app that names its team that way. Xcode registers
 # this Mac and fetches the profile on the first build. Releases never set
 # HEFT_APP_ENTITLEMENTS; release.sh signs with Developer ID and no profile.
-TEAM="$(sed -n 's/^DEVELOPMENT_TEAM *= *\([A-Z0-9]*\).*/\1/p' "$ROOT/Config/Local.xcconfig" 2>/dev/null | head -1)"
+# A fresh checkout has no Local.xcconfig, and sed failing on it ended the
+# script under pipefail without a word.
+TEAM=""
+if [[ -f "$ROOT/Config/Local.xcconfig" ]]; then
+    TEAM="$(sed -n 's/^DEVELOPMENT_TEAM *= *\([A-Z0-9]*\).*/\1/p' "$ROOT/Config/Local.xcconfig" | head -1)"
+fi
 PROFILE_ARGS=()
 if [[ -n "$SIGNING_IDENTITY" && -n "$TEAM" ]]; then
     PROFILE_ARGS=(
