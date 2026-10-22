@@ -36,10 +36,10 @@ public enum ByteOrderMark {
 }
 
 extension String {
-    /// Writes the string over a note, atomically and as UTF-8, keeping the
+    /// Writes the string over a note, atomically, keeping the encoding and the
     /// byte-order mark the file has. Every write over an existing note goes
     /// through this rather than `write(to:atomically:encoding:)`.
     public func writeNote(to url: URL) throws {
-        try ByteOrderMark.data(self, replacing: url).write(to: url, options: .atomic)
+        try NoteEncoding.data(self, replacing: url).write(to: url, options: .atomic)
     }
 }

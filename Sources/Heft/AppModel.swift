@@ -1004,7 +1004,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else { return }
+        guard let fresh = NoteEncoding.read(current.url) else { return }
         guard fresh != lastKnownDiskText else {
             lastKnownModification = modified
             return
@@ -1044,7 +1044,7 @@ final class AppModel: ObservableObject {
             diskVersionExists: diskVersionExists,
             mine: text,
             disk: diskVersionExists
-                ? (try? String(contentsOf: current.url, encoding: .utf8))
+                ? NoteEncoding.read(current.url)
                 : nil
         )
         status = diskVersionExists
@@ -1250,8 +1250,8 @@ final class AppModel: ObservableObject {
             status = "Downloading \(url.lastPathComponent) from iCloud…"
             return nil
         }
-        // Fall back to a lenient encoding rather than refusing to open the file.
-        return try? String(contentsOf: url, encoding: .isoLatin1)
+        // Not UTF-8: read in the encoding the save writes back in.
+        return NoteEncoding.read(url)
     }
 
     private func setText(_ new: String, keepingPosition: Bool = false) {
@@ -2956,7 +2956,7 @@ final class AppModel: ObservableObject {
     private func saveCoordinated(_ current: NoteRef, at target: URL) {
         let diskExists = FileManager.default.fileExists(atPath: target.path)
         let diskText = diskExists
-            ? (try? String(contentsOf: target, encoding: .utf8))
+            ? NoteEncoding.read(target)
             : nil
 
         // Never recreate a file that disappeared, or overwrite an externally
@@ -3084,7 +3084,7 @@ final class AppModel: ObservableObject {
             saveConflict = nil
             writeEndingConflict(decidedAgainst: shown)
         case .useDisk:
-            guard let fresh = try? String(contentsOf: current.url, encoding: .utf8) else {
+            guard let fresh = NoteEncoding.read(current.url) else {
                 status = "The disk version of \(current.name) is no longer available"
                 return
             }
@@ -3175,7 +3175,7 @@ final class AppModel: ObservableObject {
         else { return }
         defer { DraftStore.discard(vault: vaultRoot, relativePath: note.relativePath) }
 
-        let onDisk = try? String(contentsOf: note.url, encoding: .utf8)
+        let onDisk = NoteEncoding.read(note.url)
         guard draft != onDisk, !draft.isEmpty else { return }
 
         let target = uniqueURL(
