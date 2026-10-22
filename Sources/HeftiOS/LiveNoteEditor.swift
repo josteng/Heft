@@ -1487,30 +1487,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// one already has it.
         @objc private func quote() {
             guard let textView else { return }
-            let text = textView.text as NSString
-            let selection = textView.selectedRange
-            let block = text.lineRange(for: selection)
-            var lines = text.substring(with: block).components(separatedBy: "\n")
-            let trailing = lines.last == "" ? lines.removeLast() : nil
-            let quoted = lines.allSatisfy { $0.hasPrefix(">") || $0.isEmpty }
-                && lines.contains { $0.hasPrefix(">") }
-            var shift = 0
-            for index in lines.indices where !(lines[index].isEmpty && lines.count > 1) {
-                if quoted {
-                    let drop = lines[index].hasPrefix("> ") ? 2 : (lines[index].hasPrefix(">") ? 1 : 0)
-                    lines[index].removeFirst(drop)
-                    if index == 0 { shift = -drop }
-                } else {
-                    lines[index] = "> " + lines[index]
-                    if index == 0 { shift = 2 }
-                }
-            }
-            if trailing != nil { lines.append("") }
-            apply(MarkdownEditing.Edit(
-                range: block, replacement: lines.joined(separator: "\n"),
-                selection: NSRange(location: max(block.location, selection.location + shift),
-                                   length: selection.length)
-            ))
+            apply(MarkdownEditing.toggleQuote(in: textView.text, range: textView.selectedRange))
         }
 
         @objc private func numbered() {
@@ -1566,45 +1543,8 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// how Obsidian nests a list item.
         private func shiftLines(outdent: Bool) {
             guard let textView else { return }
-            let text = textView.text as NSString
-            let selection = textView.selectedRange
-            let block = text.lineRange(for: selection)
-            var lines = text.substring(with: block).components(separatedBy: "\n")
-            let trailing = lines.last == "" ? lines.removeLast() : nil
-            var removedBeforeCaret = 0
-            var addedBeforeCaret = 0
-            // A blank line takes its tab at the caret, so a list can be
-            // nested from the line Return just made; the caret only moves by
-            // what was actually put in front of it.
-            if !outdent, selection.length == 0, lines.count <= 1,
-               (lines.first ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
-                apply(MarkdownEditing.Edit(
-                    range: NSRange(location: selection.location, length: 0), replacement: "\t",
-                    selection: NSRange(location: selection.location + 1, length: 0)
-                ))
-                return
-            }
-            for index in lines.indices {
-                if outdent {
-                    if lines[index].hasPrefix("\t") {
-                        lines[index].removeFirst()
-                        if index == 0 { removedBeforeCaret = 1 }
-                    } else if lines[index].hasPrefix("  ") {
-                        lines[index].removeFirst(2)
-                        if index == 0 { removedBeforeCaret = 2 }
-                    }
-                } else if !lines[index].isEmpty {
-                    lines[index] = "\t" + lines[index]
-                    if index == 0 { addedBeforeCaret = 1 }
-                }
-            }
-            if trailing != nil { lines.append("") }
-            let replacement = lines.joined(separator: "\n")
-            let shift = outdent ? -removedBeforeCaret : addedBeforeCaret
-            let caret = max(block.location, selection.location + shift)
-            apply(MarkdownEditing.Edit(
-                range: block, replacement: replacement,
-                selection: NSRange(location: caret, length: selection.length)
+            apply(MarkdownEditing.shiftLines(
+                in: textView.text, range: textView.selectedRange, outdent: outdent
             ))
         }
 
