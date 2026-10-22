@@ -190,7 +190,10 @@ final class SearchModel {
             return term.isEmpty ? startSections(vault: vault, commands: commands)
                 : everything(term, vault: vault, commands: commands)
         case .notes:
-            guard !term.isEmpty else { return arranged(vault.index.notes, kind: .notes, vault: vault) }
+            guard !term.isEmpty else {
+                return withPinned(.note, arranged(vault.index.notes, kind: .notes, vault: vault),
+                                  vault: vault, commands: commands)
+            }
             return [SearchSection(title: nil, rows: notes(term, in: vault.index.notes, vault: vault, limit: 100))]
         case .commands:
             let ranked = commands.compactMap { command -> (MobileCommand, Int)? in
@@ -199,10 +202,12 @@ final class SearchModel {
                 return (command, score)
             }
             .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : Self.commandUse.score($0.0.id) > Self.commandUse.score($1.0.id) }
-            return [SearchSection(title: nil, rows: ranked.map { .command($0.0) })]
+            let section = [SearchSection(title: nil, rows: ranked.map { .command($0.0) })]
+            return term.isEmpty ? withPinned(.command, section, vault: vault, commands: commands) : section
         case .tags:
             let tags = term.isEmpty ? vault.index.allTags : vault.index.tags(matching: term)
-            return [SearchSection(title: nil, rows: tags.map { .tag($0, count: vault.index.noteCount(forTag: $0)) })]
+            let section = [SearchSection(title: nil, rows: tags.map { .tag($0, count: vault.index.noteCount(forTag: $0)) })]
+            return term.isEmpty ? withPinned(.tag, section, vault: vault, commands: commands) : section
         case .folders:
             let folders = vault.folderPaths.filter { !$0.isEmpty }
                 .compactMap { path -> (String, Int)? in
@@ -211,7 +216,8 @@ final class SearchModel {
                     return (path, score)
                 }
                 .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
-            return [SearchSection(title: nil, rows: folders.map { .folder($0.0, count: folderCount($0.0, vault: vault)) })]
+            let section = [SearchSection(title: nil, rows: folders.map { .folder($0.0, count: folderCount($0.0, vault: vault)) })]
+            return term.isEmpty ? withPinned(.folder, section, vault: vault, commands: commands) : section
         case .tag, .folder:
             if term.isEmpty {
                 return arranged(scopedNotes(vault), kind: isTag ? .tag : .folder, vault: vault)
@@ -266,12 +272,10 @@ final class SearchModel {
         let kinds = row.kinds
         if row.order == .pinned {
             var rows: [SearchRow] = []
-            if kinds.contains(.notes) {
-                rows += vault.pins.values(of: .note).compactMap { vault.note(at: $0) }.map(SearchRow.note)
-            }
-            if kinds.contains(.folders) {
-                rows += vault.pins.values(of: .folder).map { .folder($0, count: folderCount($0, vault: vault)) }
-            }
+            if kinds.contains(.notes) { rows += pinnedRows(.note, vault: vault, commands: commands) }
+            if kinds.contains(.folders) { rows += pinnedRows(.folder, vault: vault, commands: commands) }
+            if kinds.contains(.tags) { rows += pinnedRows(.tag, vault: vault, commands: commands) }
+            if kinds.contains(.commands) { rows += pinnedRows(.command, vault: vault, commands: commands) }
             return rows
         }
         var scored: [(SearchRow, Double)] = []
@@ -355,6 +359,40 @@ final class SearchModel {
     /// A scope's notes before anything is typed, in the order Settings ▸
     /// Search sets for it: recent or frequent first, one of them alone, by
     /// name, or by last edit.
+    /// What is pinned of one kind, as rows, in the order pinned; a pin
+    /// whose note, folder, tag or command is gone is left out.
+    private func pinnedRows(_ kind: Pins.Kind, vault: MobileVault, commands: [MobileCommand]) -> [SearchRow] {
+        let values = vault.pins.values(of: kind)
+        guard !values.isEmpty else { return [] }
+        switch kind {
+        case .note:
+            return values.compactMap { vault.note(at: $0) }.map(SearchRow.note)
+        case .folder:
+            let folders = Set(vault.folderPaths)
+            return values.filter(folders.contains).map { .folder($0, count: folderCount($0, vault: vault)) }
+        case .tag:
+            let tags = Set(vault.index.allTags)
+            return values.filter(tags.contains).map { .tag($0, count: vault.index.noteCount(forTag: $0)) }
+        case .command:
+            let byID = Dictionary(commands.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            return values.compactMap { byID[$0] }.map(SearchRow.command)
+        }
+    }
+
+    /// A scope's list with its pins first, under their own heading and out
+    /// of the rest, as the Mac's bar lists them.
+    private func withPinned(
+        _ kind: Pins.Kind, _ sections: [SearchSection], vault: MobileVault, commands: [MobileCommand]
+    ) -> [SearchSection] {
+        let pinned = pinnedRows(kind, vault: vault, commands: commands)
+        guard !pinned.isEmpty else { return sections }
+        let taken = Set(pinned.map(\.id))
+        let rest = sections
+            .map { SearchSection(title: $0.title ?? "Other", rows: $0.rows.filter { !taken.contains($0.id) }) }
+            .filter { !$0.rows.isEmpty }
+        return [SearchSection(title: "Pinned", rows: pinned)] + rest
+    }
+
     private func arranged(_ pool: [NoteRef], kind: ScopeOrders.Kind, vault: MobileVault) -> [SearchSection] {
         let order = ScopeOrders.current[kind]
         let opened = vault.openedAt
@@ -519,8 +557,25 @@ struct UniversalSearchList: View {
     private func withMenu(_ view: some View, for row: SearchRow) -> some View {
         if let itemAction, let item = Self.item(row) {
             view.contextMenu { ItemMenu(item: item, perform: itemAction) }
+        } else if let pin = Self.pin(row) {
+            // A tag or a command has nothing else to do from here.
+            view.contextMenu {
+                let pinned = vault.isPinned(pin)
+                Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+                    vault.togglePin(pin)
+                }
+                .tint(.primary)
+            }
         } else {
             view
+        }
+    }
+
+    private static func pin(_ row: SearchRow) -> Pins.Pin? {
+        switch row {
+        case .tag(let tag, _): Pins.Pin(.tag, tag)
+        case .command(let command): Pins.Pin(.command, command.id)
+        default: nil
         }
     }
 

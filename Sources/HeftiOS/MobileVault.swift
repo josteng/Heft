@@ -328,16 +328,19 @@ final class MobileVault {
         return item(top, path: "", name: root.lastPathComponent)
     }
 
-    func isPinned(_ path: String) -> Bool {
-        pins.contains(Pins.Pin(.note, path))
-    }
+    func isPinned(_ path: String) -> Bool { isPinned(Pins.Pin(.note, path)) }
+
+    /// A note, folder, tag or command, as the Mac's bar pins them.
+    func isPinned(_ pin: Pins.Pin) -> Bool { pins.contains(pin) }
+
+    func togglePin(_ path: String) { togglePin(Pins.Pin(.note, path)) }
 
     /// Pins live in the vault, beside the Mac's, so the file is read again
     /// just before the change: a pin made on the Mac meanwhile is kept.
-    func togglePin(_ path: String) {
+    func togglePin(_ pin: Pins.Pin) {
         guard let root else { return }
         var current = Pins.load(from: root)
-        current.toggle(Pins.Pin(.note, path))
+        current.toggle(pin)
         do {
             try current.save(to: root)
             pins = current

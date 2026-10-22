@@ -93,12 +93,14 @@ struct ItemMenu: View {
     var body: some View {
         let parent = (item.path as NSString).deletingLastPathComponent
         Group {
+            // First, as on the Mac: a folder pins as a note does.
+            let pin = Pins.Pin(item.isFolder ? .folder : .note, item.path)
+            let pinned = vault.isPinned(pin)
+            Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
+                vault.togglePin(pin)
+            }
+            Divider()
             if !item.isFolder {
-                let pinned = vault.isPinned(item.path)
-                Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin") {
-                    vault.togglePin(item.path)
-                }
-                Divider()
                 Button("New Note Here", systemImage: "square.and.pencil") {
                     perform(.create(inFolder: parent, folder: false))
                 }
