@@ -125,6 +125,26 @@ struct LineEndingEditorTests {
         #expect(!unix.string.unicodeScalars.contains { $0 == "\u{2028}" || $0 == "\u{2029}" })
     }
 
+    @Test("Shift-Return breaks the line without continuing the list")
+    func shiftReturnKey() throws {
+        func returnKey(_ modifiers: NSEvent.ModifierFlags) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                windowNumber: 0, context: nil, characters: "\r",
+                charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
+            ))
+        }
+        let view = editor("- one\r\n", caret: 5)
+        view.keyDown(with: try returnKey(.shift))
+        #expect(view.string == "- one\r\n\r\n")
+        #expect(view.selectedRange() == NSRange(location: 7, length: 0))
+
+        // Return itself still continues it.
+        let plain = editor("- one\n", caret: 5)
+        plain.keyDown(with: try returnKey([]))
+        #expect(plain.string == "- one\n- \n")
+    }
+
     @Test("Return continues and ends a list in the note's ending")
     func listContinuation() {
         let view = editor("- one\r\n- two\r\n", caret: 12)

@@ -1533,6 +1533,9 @@ final class HeftTextKit2View: NSTextView {
     private var vimLastRepeat: VimRepeatRecipe?
     private var vimIsReplaying = false
     var vimContinuesMarkdownStructure = true
+    /// Set while Shift-Return is being handled: a break that does not
+    /// continue a list, as Shift-Return is in Obsidian.
+    private var returnBreaksPlainly = false
     /// Pushed straight into the engine: unlike the Markdown-structure
     /// option, which the host applies to the transaction afterwards, this
     /// one changes what a text object matches and so has to be in scope
@@ -1664,6 +1667,11 @@ final class HeftTextKit2View: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        // AppKit sends Shift-Return as plain Return's insertNewline, so it is
+        // told apart here, for the length of this key.
+        returnBreaksPlainly = (event.keyCode == 36 || event.keyCode == 76)
+            && event.modifierFlags.intersection([.shift, .command, .control, .option]) == .shift
+        defer { returnBreaksPlainly = false }
         if selectedImage != nil,
            event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
            handleImageKey(characters: event.characters ?? "", keyCode: event.keyCode) {
@@ -3742,7 +3750,7 @@ final class HeftTextKit2View: NSTextView {
         let line = text.substring(with: text.lineRange(for: NSRange(location: caret.location, length: 0)))
             .trimmingCharacters(in: .newlines)
 
-        guard let structure = Self.markdownContinuation(of: line) else {
+        guard !returnBreaksPlainly, let structure = Self.markdownContinuation(of: line) else {
             super.insertNewline(sender)
             return
         }
