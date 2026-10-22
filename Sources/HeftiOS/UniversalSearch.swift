@@ -420,6 +420,9 @@ struct UniversalSearchList: View {
     /// The scope chips at the head of the list, while no scope is chosen;
     /// the phone has them under its field instead.
     var showsChips = true
+    /// Rename, move, delete and the rest, from a row's long press or right
+    /// click; the screen holding the list carries them out.
+    var itemAction: ((ItemAction) -> Void)? = nil
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobileLibrary) private var library
     @Environment(\.mobilePush) private var push
@@ -437,7 +440,7 @@ struct UniversalSearchList: View {
         ForEach(model.sections(for: query, vault: vault, commands: commands)) { section in
             Section {
                 ForEach(section.rows) { row in
-                    rowView(row)
+                    withMenu(rowView(row), for: row)
                         .listRowInsets(asButtons ? Self.panelRowInsets : nil)
                         .listRowBackground(highlighted == row.id ? Rectangle().fill(.tint.opacity(0.22)) : nil)
                         // The panel has none, as the Mac's bar has none: a
@@ -507,6 +510,26 @@ struct UniversalSearchList: View {
         case .allText(let count):
             Button { act(row) } label: { Label("All \(count) matches in text", systemImage: "text.magnifyingglass") }
                 .tint(.primary)
+        }
+    }
+
+    /// The Files list's menu on a note, a text match's note or a folder, as
+    /// the Mac's bar gives its rows the file tree's menus.
+    @ViewBuilder
+    private func withMenu(_ view: some View, for row: SearchRow) -> some View {
+        if let itemAction, let item = Self.item(row) {
+            view.contextMenu { ItemMenu(item: item, perform: itemAction) }
+        } else {
+            view
+        }
+    }
+
+    private static func item(_ row: SearchRow) -> ItemRef? {
+        switch row {
+        case .note(let note): ItemRef(path: note.relativePath, isFolder: false)
+        case .hit(let hit): ItemRef(path: hit.note.relativePath, isFolder: false)
+        case .folder(let path, _): ItemRef(path: path, isFolder: true)
+        default: nil
         }
     }
 
@@ -701,6 +724,7 @@ struct SearchPanel: View {
     let model: SearchModel
     @State private var query = ""
     @State private var selected = 0
+    @State private var action: ItemAction?
     @FocusState private var focused: Bool
     @Environment(MobileVault.self) private var vault
     @Environment(\.mobileLibrary) private var library
@@ -762,9 +786,11 @@ struct SearchPanel: View {
                 List {
                     UniversalSearchList(
                         query: query, model: model, setQuery: { query = $0 },
-                        asButtons: true, highlighted: rows.indices.contains(selected) ? rows[selected].id : nil
+                        asButtons: true, highlighted: rows.indices.contains(selected) ? rows[selected].id : nil,
+                        itemAction: { action = $0 }
                     )
                 }
+                .itemActionHost($action)
                 .listStyle(.plain)
                 .environment(\.defaultMinListRowHeight, 34)
                 .environment(\.defaultMinListHeaderHeight, 0)

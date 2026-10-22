@@ -138,6 +138,7 @@ struct TagView: View {
     let tag: String
     @State private var query = ""
     @State private var model: SearchModel
+    @State private var action: ItemAction?
 
     init(tag: String) {
         self.tag = tag
@@ -148,8 +149,12 @@ struct TagView: View {
 
     var body: some View {
         List {
-            UniversalSearchList(query: query, model: model, setQuery: { query = $0 }, showsChips: false)
+            UniversalSearchList(
+                query: query, model: model, setQuery: { query = $0 }, showsChips: false,
+                itemAction: { action = $0 }
+            )
         }
+        .itemActionHost($action)
         .searchingText(query, model: model)
         // Always showing, under the title: the list is for narrowing down.
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),

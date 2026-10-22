@@ -11,6 +11,7 @@ struct SearchView: View {
     @State private var request = SearchRequest.shared
     @State private var query = ""
     @State private var model = SearchModel()
+    @State private var action: ItemAction?
     @FocusState private var fieldFocused: Bool
     /// Whether the keyboard is up, for the close button; the field's focus
     /// state does not update from inside the bar it sits in.
@@ -21,8 +22,12 @@ struct SearchView: View {
 
     var body: some View {
         List {
-            UniversalSearchList(query: query, model: model, setQuery: { query = $0 }, showsChips: false)
+            UniversalSearchList(
+                query: query, model: model, setQuery: { query = $0 }, showsChips: false,
+                itemAction: { action = $0 }
+            )
         }
+        .itemActionHost($action)
         .searchingText(query, model: model)
         .safeAreaBar(edge: .top) {
             VStack(spacing: 8) {
