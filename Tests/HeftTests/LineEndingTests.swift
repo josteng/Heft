@@ -112,6 +112,19 @@ struct LineEndingEditorTests {
         #expect(unix.string == "one\n\ntwo\n")
     }
 
+    @Test("Ctrl-Return types a plain break in the note's ending, with no list marker")
+    func lineBreakKey() {
+        let view = editor("- one\r\ntwo\r\n", caret: 5)
+        view.insertLineBreak(nil)
+        #expect(view.string == "- one\r\n\r\ntwo\r\n")
+        #expect(view.selectedRange() == NSRange(location: 7, length: 0))
+
+        let unix = editor("one\n", caret: 3)
+        unix.insertParagraphSeparator(nil)
+        #expect(unix.string == "one\n\n")
+        #expect(!unix.string.unicodeScalars.contains { $0 == "\u{2028}" || $0 == "\u{2029}" })
+    }
+
     @Test("Return continues and ends a list in the note's ending")
     func listContinuation() {
         let view = editor("- one\r\n- two\r\n", caret: 12)

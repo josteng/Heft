@@ -3922,6 +3922,18 @@ final class HeftTextKit2View: NSTextView {
         insertText(continuation, replacementRange: selectedRange())
     }
 
+    /// Ctrl-Return, and its paragraph twin: a plain break that does not
+    /// continue a list, as Shift-Return is in Obsidian. AppKit's own put in
+    /// U+2028 and U+2029, which no Markdown reader takes for a break.
+    override func insertLineBreak(_ sender: Any?) {
+        defer { restyleNow() }
+        insertText("\n", replacementRange: rangeForUserTextChange)
+    }
+
+    override func insertParagraphSeparator(_ sender: Any?) {
+        insertLineBreak(sender)
+    }
+
     override func insertTab(_ sender: Any?) {
         // Indenting changes a bullet's shape, which is drawn, not styled.
         defer { restyleNow() }
