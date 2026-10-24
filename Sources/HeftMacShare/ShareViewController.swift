@@ -1,4 +1,5 @@
 import AppKit
+import HeftCore
 import SwiftUI
 
 /// The Mac share sheet's entry point, as `HeftShare`'s is the phone's: the
@@ -11,6 +12,8 @@ import SwiftUI
 /// never queued.
 final class ShareViewController: NSViewController {
     override func loadView() {
+        // Before the sheet reads the vault: see `DatalessFiles`.
+        DatalessFiles.allowDownloads()
         let items = extensionContext?.inputItems.compactMap { $0 as? NSExtensionItem } ?? []
         let host = NSHostingController(rootView: ShareView(
             items: items,

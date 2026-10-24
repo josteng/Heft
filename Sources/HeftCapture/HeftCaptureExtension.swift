@@ -1,4 +1,5 @@
 import AppIntents
+import HeftCore
 import ExtensionFoundation
 
 /// The process a capture runs in, which is not the app's.
@@ -24,6 +25,8 @@ struct HeftCaptureExtension: AppIntentsExtension {
     // Without it, an app update can leave the capture actions missing until
     // the extension happens to be reinstalled rather than just overwritten.
     init() {
+        // Before any intent reads a note: see `DatalessFiles`.
+        DatalessFiles.allowDownloads()
         HeftCaptureShortcuts.updateAppShortcutParameters()
     }
 }

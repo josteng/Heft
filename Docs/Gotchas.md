@@ -55,6 +55,10 @@ preferences or the icon.
   with.** The system starts it, so `HEFT_DEFAULTS_SUITE` never reaches it; a
   capture during a `--sandbox` session still lands in the vault the installed
   app last opened.
+- **An extension cannot read an evicted iCloud note until it says so.**
+  macOS starts extensions with dataless-file downloads off, so the read
+  fails with `EDEADLK` ("couldn't be opened") even inside a coordination
+  claim. Both Mac extensions call `DatalessFiles.allowDownloads()` first.
 - **Without `--sandbox`, launching the GUI repoints Spotlight capture.**
   Opening a vault writes `dev.stenglein.Heft.vaultPath`, which is where the App
   Intents file things. Put it back afterwards:

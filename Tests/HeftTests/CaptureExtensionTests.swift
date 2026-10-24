@@ -162,4 +162,34 @@ struct CaptureExtensionTests {
             #expect(!file.text.contains("import SwiftUI"), Comment(rawValue: file.name))
         }
     }
+
+    // MARK: - Evicted notes
+
+    /// macOS starts an extension unable to download an evicted iCloud file,
+    /// and a capture into such an inbox failed with "couldn't be opened".
+    @Test("Each Mac extension allows iCloud downloads as it starts")
+    func extensionsAllowDownloads() throws {
+        let launches = [
+            ("Sources/HeftCapture/HeftCaptureExtension.swift", "init() {"),
+            ("Sources/HeftMacShare/ShareViewController.swift", "override func loadView() {"),
+        ]
+        for (path, start) in launches {
+            let source = try text(path)
+            let body = try #require(source.range(of: start), Comment(rawValue: path))
+            let firstLines = source[body.upperBound...].prefix(160)
+            #expect(firstLines.contains("DatalessFiles.allowDownloads()"), Comment(rawValue: path))
+        }
+    }
+
+    @Test("Allowing downloads turns the process policy on")
+    func allowDownloadsTurnsPolicyOn() {
+        let before = getiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_PROCESS)
+        defer { setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_PROCESS, before) }
+        // Off, as an extension is launched.
+        setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_PROCESS,
+                       IOPOL_MATERIALIZE_DATALESS_FILES_OFF)
+        #expect(!DatalessFiles.downloadsAllowed)
+        #expect(DatalessFiles.allowDownloads())
+        #expect(DatalessFiles.downloadsAllowed)
+    }
 }
