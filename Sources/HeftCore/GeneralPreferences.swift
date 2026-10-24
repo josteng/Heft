@@ -145,3 +145,22 @@ public enum CalendarVisibility: String, Codable, CaseIterable, Sendable, Identif
     }
 }
 
+
+/// The two link-title switches in Settings ▸ Typing, named here because the
+/// Mac share extension honours them too: a shared page should not be loaded,
+/// or retitled by the model, when a pasted one would not be. Both are on
+/// until turned off.
+public enum LinkTitlePreference {
+    /// Loading the page to read its title, a visit the site sees.
+    public static let pageTitlesKey = "dev.stenglein.Heft.typing.suggestsLinkTitles"
+    /// Short titles from Apple's on-device model.
+    public static let shortTitlesKey = "dev.stenglein.Heft.typing.suggestsShortLinkTitles"
+
+    public static func pageTitles(in defaults: UserDefaults = HeftDefaults.shared) -> Bool {
+        defaults.object(forKey: pageTitlesKey) == nil || defaults.bool(forKey: pageTitlesKey)
+    }
+
+    public static func shortTitles(in defaults: UserDefaults = HeftDefaults.shared) -> Bool {
+        defaults.object(forKey: shortTitlesKey) == nil || defaults.bool(forKey: shortTitlesKey)
+    }
+}

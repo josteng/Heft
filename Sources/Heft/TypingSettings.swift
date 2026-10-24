@@ -162,8 +162,8 @@ final class TypingSettings: ObservableObject {
     private static let bracketsKey = "dev.stenglein.Heft.typing.pairsBrackets"
     private static let markdownKey = "dev.stenglein.Heft.typing.pairsMarkdown"
     private static let pastedMarkerKey = "dev.stenglein.Heft.typing.trimsPastedListMarker"
-    private static let linkTitlesKey = "dev.stenglein.Heft.typing.suggestsLinkTitles"
-    private static let shortLinkTitlesKey = "dev.stenglein.Heft.typing.suggestsShortLinkTitles"
+    private static let linkTitlesKey = LinkTitlePreference.pageTitlesKey
+    private static let shortLinkTitlesKey = LinkTitlePreference.shortTitlesKey
     private static let spellingKey = "dev.stenglein.Heft.typing.checksSpelling"
     private static let grammarKey = "dev.stenglein.Heft.typing.checksGrammar"
     private static let correctionKey = "dev.stenglein.Heft.typing.correctsSpelling"
