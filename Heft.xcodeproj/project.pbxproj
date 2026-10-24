@@ -31,6 +31,10 @@
 		010000000000000000000023 /* LinkTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000019 /* LinkTitles.swift */; };
 		010000000000000000000024 /* NameSuggester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000098 /* NameSuggester.swift */; };
 		010000000000000000000022 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000002 /* SwiftMath */; };
+		010000000000000000000025 /* HeftMacShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 020000000000000000000020 /* HeftMacShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		010000000000000000000026 /* libHeftCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 020000000000000000000002 /* libHeftCore.a */; };
+		010000000000000000000027 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 0D0000000000000000000001 /* Markdown */; };
+		010000000000000000000028 /* LinkTitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020000000000000000000019 /* LinkTitles.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,6 +80,13 @@
 			remoteGlobalIDString = 090000000000000000000009;
 			remoteInfo = HeftShare;
 		};
+		030000000000000000000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 080000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 090000000000000000000010;
+			remoteInfo = HeftMacShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -98,6 +109,17 @@
 			files = (
 				010000000000000000000017 /* HeftControls.appex in Embed Foundation Extensions */,
 				010000000000000000000018 /* HeftShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		110000000000000000000003 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				010000000000000000000025 /* HeftMacShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -125,6 +147,9 @@
 		020000000000000000000018 /* HeftShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HeftShare.entitlements; sourceTree = "<group>"; };
 		020000000000000000000019 /* LinkTitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LinkTitles.swift; path = Sources/Heft/LinkTitles.swift; sourceTree = SOURCE_ROOT; };
 		020000000000000000000098 /* NameSuggester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NameSuggester.swift; path = Sources/Heft/NameSuggester.swift; sourceTree = SOURCE_ROOT; };
+		020000000000000000000020 /* HeftMacShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = HeftMacShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		020000000000000000000021 /* HeftMacShare-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "HeftMacShare-Info.plist"; sourceTree = "<group>"; };
+		020000000000000000000022 /* HeftMacShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HeftMacShare.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -140,6 +165,8 @@
 		040000000000000000000010 /* HeftiOSVault */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftiOSVault; sourceTree = "<group>"; };
 		040000000000000000000011 /* HeftShare */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftShare; sourceTree = "<group>"; };
 		040000000000000000000012 /* HeftTextKit */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftTextKit; sourceTree = "<group>"; };
+		040000000000000000000013 /* HeftMacShare */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftMacShare; sourceTree = "<group>"; };
+		040000000000000000000014 /* HeftShareShared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftShareShared; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -215,6 +242,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		050000000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				010000000000000000000026 /* libHeftCore.a in Frameworks */,
+				010000000000000000000027 /* Markdown in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -242,6 +278,8 @@
 				040000000000000000000009 /* HeftControls */,
 				040000000000000000000010 /* HeftiOSVault */,
 				040000000000000000000011 /* HeftShare */,
+				040000000000000000000014 /* HeftShareShared */,
+				040000000000000000000013 /* HeftMacShare */,
 				060000000000000000000005 /* Shared with the share extension */,
 				060000000000000000000003 /* Resources */,
 				060000000000000000000004 /* Config */,
@@ -261,6 +299,7 @@
 				020000000000000000000012 /* HeftiOS.app */,
 				020000000000000000000013 /* HeftControls.appex */,
 				020000000000000000000015 /* HeftShare.appex */,
+				020000000000000000000020 /* HeftMacShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -284,6 +323,8 @@
 				020000000000000000000016 /* HeftShare-Info.plist */,
 				020000000000000000000017 /* HeftiOS.entitlements */,
 				020000000000000000000018 /* HeftShare.entitlements */,
+				020000000000000000000021 /* HeftMacShare-Info.plist */,
+				020000000000000000000022 /* HeftMacShare.entitlements */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -299,6 +340,7 @@
 				050000000000000000000001 /* Frameworks */,
 				0E0000000000000000000001 /* Resources */,
 				110000000000000000000001 /* Embed ExtensionKit Extensions */,
+				110000000000000000000003 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -306,6 +348,7 @@
 				0B0000000000000000000001 /* PBXTargetDependency */,
 				0B0000000000000000000004 /* PBXTargetDependency */,
 				0B0000000000000000000006 /* PBXTargetDependency */,
+				0B0000000000000000000013 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				040000000000000000000001 /* Heft */,
@@ -505,6 +548,7 @@
 			fileSystemSynchronizedGroups = (
 				040000000000000000000011 /* HeftShare */,
 				040000000000000000000010 /* HeftiOSVault */,
+				040000000000000000000014 /* HeftShareShared */,
 			);
 			name = HeftShare;
 			packageProductDependencies = (
@@ -512,6 +556,32 @@
 			);
 			productName = HeftShare;
 			productReference = 020000000000000000000015 /* HeftShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		090000000000000000000010 /* HeftMacShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A0000000000000000000011 /* Build configuration list for PBXNativeTarget "HeftMacShare" */;
+			buildPhases = (
+				0F0000000000000000000010 /* Sources */,
+				050000000000000000000009 /* Frameworks */,
+				0E0000000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0B0000000000000000000014 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				040000000000000000000013 /* HeftMacShare */,
+				040000000000000000000014 /* HeftShareShared */,
+				040000000000000000000010 /* HeftiOSVault */,
+			);
+			name = HeftMacShare;
+			packageProductDependencies = (
+				0D0000000000000000000001 /* Markdown */,
+			);
+			productName = HeftMacShare;
+			productReference = 020000000000000000000020 /* HeftMacShare.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -531,6 +601,7 @@
 					090000000000000000000007 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000008 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000009 = { CreatedOnToolsVersion = 26.0; };
+					090000000000000000000010 = { CreatedOnToolsVersion = 26.0; };
 					090000000000000000000003 = {
 						CreatedOnToolsVersion = 26.0;
 						TestTargetID = 090000000000000000000001;
@@ -569,6 +640,7 @@
 				090000000000000000000007 /* HeftiOS */,
 				090000000000000000000008 /* HeftControls */,
 				090000000000000000000009 /* HeftShare */,
+				090000000000000000000010 /* HeftMacShare */,
 			);
 		};
 /* End PBXProject section */
@@ -618,6 +690,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0E0000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -630,6 +709,7 @@
 		0F0000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000023 /* LinkTitles.swift in Sources */, 010000000000000000000024 /* NameSuggester.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		0F0000000000000000000009 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000021 /* LinkTitles.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		0F0000000000000000000010 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (010000000000000000000028 /* LinkTitles.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -645,6 +725,8 @@
 		0B0000000000000000000010 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000008 /* HeftControls */; targetProxy = 030000000000000000000005 /* PBXContainerItemProxy */; };
 		0B0000000000000000000011 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000009 /* HeftShare */; targetProxy = 030000000000000000000006 /* PBXContainerItemProxy */; };
 		0B0000000000000000000012 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000002 /* HeftCore */; targetProxy = 030000000000000000000001 /* PBXContainerItemProxy */; };
+		0B0000000000000000000013 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000010 /* HeftMacShare */; targetProxy = 030000000000000000000007 /* PBXContainerItemProxy */; };
+		0B0000000000000000000014 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 090000000000000000000002 /* HeftCore */; targetProxy = 030000000000000000000001 /* PBXContainerItemProxy */; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -980,6 +1062,44 @@
 			};
 			name = Release;
 		};
+		100000000000000000000021 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/HeftMacShare.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/HeftMacShare-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Share;
+				PRODUCT_NAME = HeftMacShare;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		100000000000000000000022 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 020000000000000000000007 /* Heft.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/HeftMacShare.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/HeftMacShare-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Share;
+				PRODUCT_NAME = HeftMacShare;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -993,6 +1113,7 @@
 		0A0000000000000000000008 /* Build configuration list for PBXNativeTarget "HeftiOS" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000015 /* Debug */, 100000000000000000000016 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0A0000000000000000000009 /* Build configuration list for PBXNativeTarget "HeftControls" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000017 /* Debug */, 100000000000000000000018 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		0A0000000000000000000010 /* Build configuration list for PBXNativeTarget "HeftShare" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000019 /* Debug */, 100000000000000000000020 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		0A0000000000000000000011 /* Build configuration list for PBXNativeTarget "HeftMacShare" */ = {isa = XCConfigurationList; buildConfigurations = (100000000000000000000021 /* Debug */, 100000000000000000000022 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */

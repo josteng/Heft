@@ -167,16 +167,7 @@ struct ShareView: View {
 
     private func retitle(_ title: String) {
         guard let url else { return }
-        let replacement = SharedContent.link(title, url)
-        // The link as it stands: `[anything](url)`, or the bare address.
-        let pattern = #"\[[^\n]*\]\("# + NSRegularExpression.escapedPattern(for: url.absoluteString) + #"\)"#
-        if let range = text.range(of: pattern, options: .regularExpression) {
-            text.replaceSubrange(range, with: replacement)
-        } else if let range = text.range(of: url.absoluteString) {
-            text.replaceSubrange(range, with: replacement)
-        } else {
-            text = replacement
-        }
+        text = SharedContent.retitled(text, url: url, title: title)
         selection = TextSelection(insertionPoint: text.endIndex)
     }
 

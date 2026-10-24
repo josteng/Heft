@@ -82,7 +82,9 @@ a vault, the six things worth trying first, daily notes and capture.
   banner above the note, to accept or reject hunk by hunk.
 
 Also in there: daily notes and a calendar, PDF export of the rendered note
-rather than the source, and capture from Spotlight.
+rather than the source, capture from Spotlight, and Heft in the Share menu,
+which links a page from Safari under its title or a shorter one from the
+on-device model.
 
 Built because Obsidian plus Claude Code is a genuinely good way to keep notes,
 and Obsidian is the half I stopped enjoying: slow to start, and never quite a

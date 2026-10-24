@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- macOS runs no extension that is not sandboxed. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <!-- The vault is wherever the reader keeps it, as for HeftCapture. -->
+    <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+    <array>
+        <string>/</string>
+    </array>
+    <!-- Which vault, its inbox note, the link-title settings. -->
+    <key>com.apple.security.temporary-exception.shared-preference.read-write</key>
+    <array>
+        <string>dev.stenglein.Heft</string>
+    </array>
+    <!-- Loading a shared page to read its title. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>

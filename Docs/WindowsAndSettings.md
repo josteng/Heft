@@ -463,6 +463,14 @@ Daily captures have no setting: the log
 marker in the template is the placement control, and the pane offers it to
 copy.
 
+The Share menu is `HeftMacShare`, the phone's share sheet on the Mac. It is
+sandboxed with `HeftCapture`'s exceptions and files into the same vault
+directly, so unlike the phone's it never queues; the note list is the
+vault's index read from disk. Its sheet keeps the size it opened at, so the
+title choices and the note picker take turns in one fixed panel. A new share
+extension starts switched off: Safari's Share menu ▸ Edit Extensions, or
+Settings ▸ General ▸ Login Items & Extensions ▸ Sharing, turns it on.
+
 ## Telling Siri what a view is showing
 
 macOS 27 puts an Ask Siri item into every context menu, an app's own rows

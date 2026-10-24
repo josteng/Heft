@@ -50,6 +50,13 @@ let package = Package(
             path: "Sources/HeftiOSVault",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // What a share becomes in a note, compiled into both share
+        // extensions; built here so that tests reach it.
+        .target(
+            name: "HeftShareShared",
+            path: "Sources/HeftShareShared",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         // The Today widget's snapshot, for the same reason; the rest of the
         // folder is App Intents the widget and app declare for themselves.
         .target(
@@ -80,7 +87,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HeftTests",
-            dependencies: ["Heft", "HeftCore", "HeftVimCore", "HeftiOSVault", "HeftiOSShared", "HeftTestDefaults"],
+            dependencies: ["Heft", "HeftCore", "HeftVimCore", "HeftiOSVault", "HeftiOSShared", "HeftShareShared", "HeftTestDefaults"],
             path: "Tests/HeftTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
