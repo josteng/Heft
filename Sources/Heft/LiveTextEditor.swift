@@ -3882,9 +3882,11 @@ final class HeftTextKit2View: NSTextView {
 
         if !completionIsActive {
             // Only ever opens on the empty query — the moment `[[` or `[!` is
-            // finished. Starting later would make the menu appear in the
-            // middle of a word someone is already typing.
-            guard allowStart, query.isEmpty else { return }
+            // finished — or for a tag on its first letter, since a `#` alone
+            // may be a heading's. Starting later would make the menu appear
+            // in the middle of a word someone is already typing.
+            let opening = completionKind == .tag ? query.count == 1 : query.isEmpty
+            guard allowStart, opening else { return }
             completionIsActive = true
         }
         if completionQuery != query {

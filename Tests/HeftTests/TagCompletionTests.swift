@@ -4,7 +4,7 @@ import HeftCore
 import Testing
 @testable import Heft
 
-/// Typing `#` offers the vault's tags, most used first.
+/// Typing `#` and a letter offers the vault's tags, most used first.
 @Suite("Tag completion")
 struct TagCompletionTests {
 
@@ -13,9 +13,9 @@ struct TagCompletionTests {
         return TagCompletionContext.detect(in: source, selection: NSRange(location: location, length: 0))
     }
 
-    @Test("A # starting a word is a tag being typed")
+    @Test("A # and a letter starting a word is a tag being typed")
     func detectsTag() {
-        #expect(detect("Notes #")?.query == "")
+        #expect(detect("Notes #t")?.query == "t")
         #expect(detect("Notes #th")?.queryRange == NSRange(location: 7, length: 2))
         #expect(detect("#th")?.query == "th")
         #expect(detect("Notes #work/ad")?.query == "work/ad")
@@ -24,6 +24,9 @@ struct TagCompletionTests {
 
     @Test("Headings, numbers, URLs, code, links and frontmatter are not tags")
     func refusesOthers() {
+        // A # alone may be a heading on its way.
+        #expect(detect("#") == nil)
+        #expect(detect("Notes #") == nil)
         #expect(detect("# ") == nil)
         #expect(detect("## H") == nil)
         #expect(detect("Issue #12") == nil)
@@ -43,7 +46,6 @@ struct TagCompletionTests {
         let context = try #require(detect("x #th"))
         #expect(context.suggestions(from: ["math", "thesis", "other", "theory", "plain"])
             == ["thesis", "theory", "math", "other"])
-        #expect(try #require(detect("x #")).suggestions(from: ["a", "b"]) == ["a", "b"])
     }
 
     @Test("Accepting writes the tag and one space")
@@ -74,12 +76,22 @@ struct TagCompletionTests {
         view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
         view.completionIndex = VaultIndex.build(root: VaultScanner.scan(root: root))
 
+        // Not on the # alone, which may be a heading's.
         view.string = "Notes #"
         view.setSelectedRange(NSRange(location: 7, length: 0))
         view.updateLinkCompletion(allowStart: true)
+        #expect(view.visibleCompletions.isEmpty)
+
+        // On the first letter, and narrowing from there.
+        view.string = "Notes #t"
+        view.setSelectedRange(NSRange(location: 8, length: 0))
+        view.updateLinkCompletion(allowStart: true)
         #expect(view.visibleCompletions.first == "thesis")
         #expect(Set(view.visibleCompletions) == ["thesis", "travel", "math"])
-
+        view.string = "Notes #tr"
+        view.setSelectedRange(NSRange(location: 9, length: 0))
+        view.updateLinkCompletion(allowStart: false)
+        #expect(view.visibleCompletions == ["travel"])
         view.string = "Notes #t"
         view.setSelectedRange(NSRange(location: 8, length: 0))
         view.updateLinkCompletion(allowStart: false)
@@ -88,14 +100,19 @@ struct TagCompletionTests {
         view.insertNewline(nil)
         #expect(view.string == "Notes #travel ")
 
-        // A space after # is a heading's, and closes the menu.
+        // A heading's # opens nothing, and a second letter does not open
+        // a menu that was never started.
         view.string = "#"
         view.setSelectedRange(NSRange(location: 1, length: 0))
         view.updateLinkCompletion(allowStart: true)
-        #expect(!view.visibleCompletions.isEmpty)
+        #expect(view.visibleCompletions.isEmpty)
         view.string = "# "
         view.setSelectedRange(NSRange(location: 2, length: 0))
-        view.updateLinkCompletion(allowStart: false)
+        view.updateLinkCompletion(allowStart: true)
+        #expect(view.visibleCompletions.isEmpty)
+        view.string = "x #th"
+        view.setSelectedRange(NSRange(location: 5, length: 0))
+        view.updateLinkCompletion(allowStart: true)
         #expect(view.visibleCompletions.isEmpty)
     }
 }

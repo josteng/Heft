@@ -16,9 +16,11 @@ public struct TagCompletionContext: Equatable, Sendable {
         self.queryRange = queryRange
     }
 
-    /// The tag being typed at `selection`, or nil. Not in code, in a link,
-    /// in a URL's `/#part` or in the frontmatter, where tags carry no `#`;
-    /// and not with the caret inside a tag already written, where
+    /// The tag being typed at `selection`, or nil. Not before its first
+    /// letter: a `#` alone is as often a heading on its way, and offering
+    /// tags there put the menu over every heading typed. Not in code, in a
+    /// link, in a URL's `/#part` or in the frontmatter, where tags carry no
+    /// `#`; and not with the caret inside a tag already written, where
     /// completing would leave its tail behind.
     public static func detect(in source: String, selection: NSRange) -> Self? {
         guard selection.length == 0 else { return nil }
@@ -39,7 +41,7 @@ public struct TagCompletionContext: Equatable, Sendable {
 
         let query = text.substring(with: NSRange(location: start, length: caret - start))
         // A tag begins with a letter: `#1` is a number, not a tag.
-        if let first = query.unicodeScalars.first, !CharacterSet.letters.contains(first) { return nil }
+        guard let first = query.unicodeScalars.first, CharacterSet.letters.contains(first) else { return nil }
 
         let before = text.substring(with: NSRange(location: line.location, length: hash - line.location))
         guard before.filter({ $0 == "`" }).count % 2 == 0,
@@ -54,7 +56,6 @@ public struct TagCompletionContext: Equatable, Sendable {
     /// starting with it first, then those merely containing it.
     public func suggestions(from tags: [String]) -> [String] {
         let needle = query.lowercased()
-        guard !needle.isEmpty else { return tags }
         let starting = tags.filter { $0.lowercased().hasPrefix(needle) }
         let containing = tags.filter { !$0.lowercased().hasPrefix(needle) && $0.lowercased().contains(needle) }
         return starting + containing
