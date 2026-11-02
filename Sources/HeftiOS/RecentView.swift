@@ -17,6 +17,21 @@ struct RecentView: View {
             List {
                 RecentSections { action = $0 }
             }
+            // On the list itself, which is what decides whether its rows
+            // move: a note changed elsewhere slides to its new place, as the
+            // Mac's list moves, rather than the list redrawing. Set on the
+            // sections inside, it was never asked.
+            .animation(.snappy, value: vault.recent.map(\.path))
+            #if DEBUG
+            // `HEFT_IOS_RESCAN_AFTER=<s>` rescans once that long after
+            // opening, with the list on screen, as a change from elsewhere does.
+            .task {
+                guard let after = ProcessInfo.processInfo.environment["HEFT_IOS_RESCAN_AFTER"].flatMap(Double.init)
+                else { return }
+                try? await Task.sleep(for: .seconds(after))
+                vault.refresh()
+            }
+            #endif
             .pullDownAction(.recent)
             #if DEBUG
             // Scrolled to a note at launch, to see the bar as it is mid-list.
@@ -73,16 +88,22 @@ struct RecentSections: View {
         let pinnedPaths = Set(pinned.map(\.path))
         let groups = dating.grouped(ordered.filter { !pinnedPaths.contains($0.path) },
                                     date: \.modified)
-        if !pinned.isEmpty {
-            Section {
-                ForEach(pinned) { RecentRow(note: $0, dating: dating, perform: perform) }
-            } header: {
-                Label("Pinned", systemImage: "pin.fill")
+            .map { (title: $0.section.map(dating.title(of:)) ?? "", items: $0.items) }
+        Group {
+            if !pinned.isEmpty {
+                Section {
+                    ForEach(pinned) { RecentRow(note: $0, dating: dating, perform: perform) }
+                } header: {
+                    Label("Pinned", systemImage: "pin.fill")
+                }
             }
-        }
-        ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
-            Section(group.section.map(dating.title(of:)) ?? "") {
-                ForEach(group.items) { RecentRow(note: $0, dating: dating, perform: perform) }
+            // Keyed by their title, not their place: a "Today" appearing at the
+            // top shifted every place, and a re-sort animated sections into one
+            // another rather than moving notes between them.
+            ForEach(Array(groups.enumerated()), id: \.element.title) { _, group in
+                Section(group.title) {
+                    ForEach(group.items) { RecentRow(note: $0, dating: dating, perform: perform) }
+                }
             }
         }
     }

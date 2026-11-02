@@ -180,6 +180,8 @@ struct PadRootView: View {
             // column's own, and fell back to taller, padded rows.
             .listStyle(.sidebar)
             .environment(\.defaultMinListRowHeight, 36)
+            // Rows move to their new places as notes change, as on the phone.
+            .animation(.snappy, value: vault.recent.map(\.path))
             .refreshable { vault.refresh() }
             ScanStatus()
             if showsCalendar {
