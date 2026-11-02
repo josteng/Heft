@@ -324,8 +324,18 @@ struct MobileRootView: View {
         if let tag = environment["HEFT_IOS_SEARCH_TAG"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { phoneLibrary.search(.tag(tag)) }
         }
-        // The path an Open Note intent takes, without Shortcuts.
-        if let path = environment["HEFT_IOS_OPEN"] { NoteOpenRequest.shared.path = path }
+        // The path an Open Note intent takes, without Shortcuts; several,
+        // comma-separated, open one after another, two seconds apart.
+        let opened = (environment["HEFT_IOS_OPEN"] ?? "").split(separator: ",").map(String.init)
+        for (step, path) in opened.enumerated() {
+            if step == 0 {
+                NoteOpenRequest.shared.path = path
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2 * Double(step)) {
+                    NoteOpenRequest.shared.path = path
+                }
+            }
+        }
         if environment["HEFT_IOS_CAPTURE"] != nil {
             if environment["HEFT_IOS_QUICK"] != nil {
                 quickCapture = CaptureSheetRequest(target: .inbox)
@@ -361,13 +371,20 @@ struct MobileStack<Root: View>: View {
                 }
                 .onPreferenceChange(TypingInNoteKey.self) { typing = $0 }
                 .navigationDestination(for: MobileRoute.self) { route in
-                    switch route {
-                    case .folder(let folder): FolderView(path: folder)
-                    case .note(let note): NoteView(path: note)
-                    case .newNote(let note): NoteView(path: note, startsTyping: true)
-                    case .tag(let tag): TagView(tag: tag)
-                    case .image(let image): ImageFileView(path: image)
+                    // Identified by its route: a route replaced in place, as
+                    // a note opened from Spotlight over one already open, kept
+                    // the old screen's state and showed the old note's text
+                    // under the new one's name.
+                    Group {
+                        switch route {
+                        case .folder(let folder): FolderView(path: folder)
+                        case .note(let note): NoteView(path: note)
+                        case .newNote(let note): NoteView(path: note, startsTyping: true)
+                        case .tag(let tag): TagView(tag: tag)
+                        case .image(let image): ImageFileView(path: image)
+                        }
                     }
+                    .id(route)
                 }
         }
         .environment(\.mobilePush) { path.append($0) }

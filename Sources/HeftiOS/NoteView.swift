@@ -732,11 +732,32 @@ private struct HidesTabBarWhenPushed: UIViewControllerRepresentable {
             // handoff, and the next tab needs its bar.
             guard let navigation = navigationController,
                   let coming = navigation.topViewController,
-                  Self.holdsMarker(coming), !isOrContains(coming)
+                  Self.holdsMarker(coming)
             else {
                 tabBarController?.setTabBarHidden(false, animated: animated)
                 return
             }
+            guard isOrContains(coming), let tabBar = tabBarController else { return }
+            // Or the note was swapped for another in place, as one opened
+            // from Spotlight over it is, and the screen stays: told apart
+            // once the swap has settled, by whether a note is still on top
+            // of the selected tab.
+            DispatchQueue.main.async { [weak navigation] in
+                let stays = navigation.map { navigation in
+                    Self.holdsMarker(navigation.topViewController ?? navigation)
+                        && Self.isWithin(navigation, tabBar.selectedViewController)
+                } ?? false
+                tabBar.setTabBarHidden(stays, animated: animated && !stays)
+            }
+        }
+
+        private static func isWithin(_ controller: UIViewController, _ ancestor: UIViewController?) -> Bool {
+            var current: UIViewController? = controller
+            while let next = current {
+                if next === ancestor { return true }
+                current = next.parent
+            }
+            return false
         }
 
         /// Whether `controller` is the screen this marker sits in.
