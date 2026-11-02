@@ -153,6 +153,8 @@ struct MobileRootView: View {
     /// The phone's own New Note and Settings, for the search's commands.
     @State private var creating: NewNoteRequest?
     @State private var settings: SettingsRequest?
+    /// A file opened from Files that is not in the vault.
+    @State private var outsideFile: String?
     private var request = CaptureRequest.shared
     private var noteRequest = NoteOpenRequest.shared
 
@@ -228,7 +230,14 @@ struct MobileRootView: View {
                 } else if let path = HeftURL.openedPath(in: url),
                           let note = HandoffNote(userInfo: ["path": path]) {
                     show(note.path)
+                } else if url.isFileURL {
+                    openFile(url)
                 }
+            }
+            .alert("Not in Your Vault", isPresented: .constant(outsideFile != nil)) {
+                Button("OK") { outsideFile = nil }
+            } message: {
+                Text("“\(outsideFile ?? "")” is not inside “\(vault.name)”. Heft opens notes from its vault; move the file into it to open it here.")
             }
             .onContinueUserActivity(HandoffNote.activityType) { activity in
                 guard let note = HandoffNote(userInfo: activity.userInfo) else { return }
@@ -236,6 +245,19 @@ struct MobileRootView: View {
             }
             .onAppear(perform: applyLaunchRequest)
         }
+    }
+
+    /// A Markdown file handed over by Files or a share sheet's Open In.
+    /// Opened in place, never copied: one in the vault opens as its note,
+    /// by the vault's own path to it. One outside the vault is not taken
+    /// in, since Heft edits only the vault it shows.
+    private func openFile(_ url: URL) {
+        guard let root = vault.root else { return }
+        guard VaultOperations.isInside(url, vaultRoot: root) else {
+            outsideFile = url.lastPathComponent
+            return
+        }
+        show(VaultOperations.relativePath(of: url, in: root))
     }
 
     /// A note from outside the app: a daily note on its day in the
@@ -332,6 +354,10 @@ struct MobileRootView: View {
         // tapped in a note does, once a note has had time to open.
         if let tag = environment["HEFT_IOS_SEARCH_TAG"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { phoneLibrary.search(.tag(tag)) }
+        }
+        // `HEFT_IOS_OPEN_FILE=<path>` hands over a file as Files does.
+        if let file = environment["HEFT_IOS_OPEN_FILE"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { openFile(URL(fileURLWithPath: file)) }
         }
         // The path an Open Note intent takes, without Shortcuts; several,
         // comma-separated, open one after another, two seconds apart.
