@@ -375,6 +375,7 @@ struct PadRootView: View {
         }
         if environment["HEFT_IOS_QUERY"] != nil { showsSearch = true }
         if environment["HEFT_IOS_PAD_MONTH"] != nil { calendarExpanded = true }
+        if environment["HEFT_IOS_PAD_NO_CALENDAR"] != nil { showsCalendar = false }
         // `HEFT_IOS_PAD_STEPS=A.md,B.md,back` opens notes and goes back or
         // forward, a step a second, as a reader clicking through would.
         if let steps = environment["HEFT_IOS_PAD_STEPS"]?.split(separator: ",") {
@@ -517,6 +518,11 @@ private struct PadMonth: View {
     @Environment(MobileVault.self) private var vault
     /// Any day in what is showing: its week when folded, its month open.
     @State private var anchor = Date()
+    /// Pages turned, which names the days on show, so a turn slides them
+    /// and folding does not.
+    @State private var pageTurns = 0
+    /// Which way the last turn went: forward slides in from the right.
+    @State private var lastStep = 1
 
     private let calendar = Calendar.current
 
@@ -563,21 +569,33 @@ private struct PadMonth: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            ForEach(weeks, id: \.first) { week in
-                HStack(spacing: 0) {
-                    ForEach(week, id: \.self) { date in cell(date) }
+            // The days slide in from the side the reader swiped toward, a
+            // page at a time; folding and opening only grow and shrink.
+            VStack(spacing: 6) {
+                ForEach(weeks, id: \.first) { week in
+                    HStack(spacing: 0) {
+                        ForEach(week, id: \.self) { date in cell(date) }
+                    }
                 }
             }
+            .id(pageTurns)
+            .transition(.push(from: lastStep > 0 ? .trailing : .leading))
+            .clipped()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .contentShape(.rect)
-        // Up and down page, as the phone's calendar does; sideways too,
-        // since the folded week reads as a strip.
+        // At the sidebar's foot it is a panel: sideways turns the week or
+        // the month, up opens the month above the week, down folds it back.
+        // Up and down used to page as well, which left nothing to open it
+        // with but a tap on the title.
         .gesture(DragGesture(minimumDistance: 20).onEnded { drag in
             let x = drag.translation.width, y = drag.translation.height
-            if abs(y) > abs(x), abs(y) > 30 { page(y < 0 ? 1 : -1) }
-            else if abs(x) > 30 { page(x < 0 ? 1 : -1) }
+            if abs(x) > abs(y), abs(x) > 30 {
+                page(x < 0 ? 1 : -1)
+            } else if abs(y) > 30, (y < 0) != expanded {
+                withAnimation(.smooth(duration: 0.3)) { expanded = y < 0 }
+            }
         })
         .onChange(of: chosen) { _, chosen in
             guard let chosen else { return }
@@ -615,7 +633,9 @@ private struct PadMonth: View {
     }
 
     private func page(_ direction: Int) {
+        lastStep = direction
         withAnimation(.snappy) {
+            pageTurns += 1
             anchor = calendar.date(byAdding: expanded ? .month : .weekOfYear, value: direction, to: anchor) ?? anchor
         }
     }
