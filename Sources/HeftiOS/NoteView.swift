@@ -56,6 +56,20 @@ final class NoteDocument {
     init(path: String) {
         self.path = path
         sync = NoteSync(path: path)
+        Self.made.add(self)
+    }
+
+    /// Every document still alive, held weakly, so typing can be written
+    /// before something else reads the note's file: an agent's proposal is
+    /// measured against the file, and typing not yet saved would read as
+    /// lines the proposal removes.
+    private static let made = NSHashTable<NoteDocument>.weakObjects()
+
+    /// Writes whatever is typed in `path`, wherever it is open.
+    static func saveOpen(_ path: String) async {
+        for document in made.allObjects where document.path == path {
+            await document.saveNow()
+        }
     }
 
     /// A document read ahead of its screen, for that screen to take rather
@@ -482,6 +496,9 @@ struct NoteContent: View {
     /// Only a note on screen is offered to the Mac: a tab left on another
     /// note would otherwise compete with it.
     @State private var onScreen = false
+    /// How tall the proposal banner over the note's top is, which the
+    /// text is pushed down by.
+    @State private var bannerHeight: CGFloat = 0
 
     var body: some View {
         let backlinks = vault.index.backlinks(to: document.path)
@@ -507,7 +524,7 @@ struct NoteContent: View {
                     ),
                     scrolledDown: scrolledDown,
                     follow: { follow($0, from: note) },
-                    topInset: topInset,
+                    topInset: topInset + (showsProposalBanner ? bannerHeight : 0),
                     attach: { [vault, path = document.path] attachment in
                         switch attachment {
                         case .image(let data, let ext): try vault.attachImage(data, extension: ext, to: path)
@@ -527,7 +544,14 @@ struct NoteContent: View {
                 // clears it.
                 .ignoresSafeArea(.container, edges: underTopBar ? [.top, .bottom] : .bottom)
                 .overlay(alignment: .top) {
-                    if document.conflict { conflictBanner }
+                    if document.conflict {
+                        conflictBanner
+                    } else {
+                        proposalBanner
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                                bannerHeight = $0
+                            }
+                    }
                 }
                 // The one moment that needs the reader, who may be looking
                 // away: felt when the banner comes, not when it goes.
@@ -655,6 +679,23 @@ struct NoteContent: View {
 
     /// The note changed on another device while this one was being typed
     /// into, so saving stopped rather than write over it.
+    private var showsProposalBanner: Bool {
+        !document.conflict && !vault.review.banner(for: document.path).isEmpty
+    }
+
+    /// What an agent proposed for this note, over its top as on the Mac;
+    /// a save conflict, which needs answering first, takes the place.
+    private var proposalBanner: some View {
+        let review = vault.review
+        return ProposalBannerCard(
+            items: review.banner(for: document.path).map { ProposalBannerItem($0, in: review) },
+            floats: true,
+            review: { proposal in Task { await review.begin(proposal) } },
+            discard: { review.discard($0) }
+        )
+        .animation(.snappy, value: review.banner(for: document.path).map(\.id))
+    }
+
     private var conflictBanner: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Changed on another device", systemImage: "exclamationmark.triangle.fill")

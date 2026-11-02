@@ -82,6 +82,12 @@ enum ReviewStyle {
     }
 }
 
+extension EnvironmentValues {
+    /// The vault's accent, for what takes a colour rather than the tint:
+    /// a swipe action's background is given one outright.
+    @Entry var reviewAccent: Color = .accentColor
+}
+
 // MARK: - The banner over a note
 
 /// One proposal for the note on screen, as the banner over it shows one.
@@ -256,6 +262,10 @@ struct ProposalReviewSheet: View {
     let acceptAll: () -> Void
     let discard: () -> Void
     let later: () -> Void
+    #if !os(macOS)
+    @State private var swipes = 0
+    @Environment(\.reviewAccent) private var accent
+    #endif
 
     private var diff: NoteDiff { proposal.diff(against: current) }
 
@@ -286,14 +296,7 @@ struct ProposalReviewSheet: View {
                 )
                 .frame(maxHeight: .infinity)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(diff.hunks) { hunk in
-                            HunkCard(hunk: hunk) { accept in decide(hunk.id, accept) }
-                        }
-                    }
-                    .padding(16)
-                }
+                hunks(diff)
             }
 
             Divider()
@@ -308,6 +311,59 @@ struct ProposalReviewSheet: View {
         .frame(width: 720, height: 560)
         #endif
     }
+}
+
+extension ProposalReviewSheet {
+    #if os(macOS)
+    private func hunks(_ diff: NoteDiff) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(diff.hunks) { hunk in
+                    HunkCard(hunk: hunk) { accept in decide(hunk.id, accept) }
+                }
+            }
+            .padding(16)
+        }
+    }
+    #else
+    /// On iOS a list, for its swipes: right accepts a hunk and left rejects
+    /// it, as a row under Waiting for Review is accepted or discarded, with
+    /// the card's buttons still there. The list's own swipe rather than a
+    /// drag on each card, which fought the scrolling and the selecting of
+    /// text in the lines; a full swipe decides, a partial one shows the
+    /// button.
+    private func hunks(_ diff: NoteDiff) -> some View {
+        List(diff.hunks) { hunk in
+            HunkCard(hunk: hunk) { accept in decide(hunk.id, accept) }
+                .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button("Accept", systemImage: "checkmark") { swiped(hunk, accept: true) }
+                        .tint(accent)
+                }
+                // Red, as Apple's destructive role is for an operation that
+                // cannot be undone, which a rejected hunk is: it leaves the
+                // proposal for good.
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button("Reject", systemImage: "xmark", role: .destructive) {
+                        swiped(hunk, accept: false)
+                    }
+                    .tint(.red)
+                }
+        }
+        .listStyle(.plain)
+        .contentMargins(.vertical, 9, for: .scrollContent)
+        .sensoryFeedback(.impact(weight: .light), trigger: swipes)
+    }
+
+    /// A swipe is felt as it decides, the reader's own gesture; a button's
+    /// press already is.
+    private func swiped(_ hunk: NoteDiff.Hunk, accept: Bool) {
+        swipes += 1
+        decide(hunk.id, accept)
+    }
+    #endif
 }
 
 /// What a proposal is and who made it, over its review.

@@ -90,6 +90,7 @@ struct RecentSections: View {
                                     date: \.modified)
             .map { (title: $0.section.map(dating.title(of:)) ?? "", items: $0.items) }
         Group {
+            ReviewSection()
             if !pinned.isEmpty {
                 Section {
                     ForEach(pinned) { RecentRow(note: $0, dating: dating, perform: perform) }

@@ -28,7 +28,7 @@ way the Open Note intent does, and several, comma-separated, one after another. 
 note from its own menu, right after `HEFT_IOS_TYPE`'s typing. `HEFT_IOS_CHOOSE=<path>` takes a
 folder as the picker does, bookmark included, for a later plain launch to reopen, and
 `HEFT_IOS_INTENT_CAPTURE=<text>` files two lines to the inbox through that bookmark. `HEFT_IOS_SEARCH_TAG=<tag>` opens Search in a tag's scope, and
-`HEFT_IOS_TAG=<tag>` pushes a tag's list over the note, as a tapped tag does. `HEFT_IOS_PENCIL_PALETTE=x,y` opens the format palette as a Pencil squeeze at that point would, and `HEFT_IOS_OUTLINE` opens the note's Outline, and `jump:<n>`
+`HEFT_IOS_TAG=<tag>` pushes a tag's list over the note, as a tapped tag does. `HEFT_IOS_REVIEW=<path>` opens the review of that note's agent proposal, and `HEFT_IOS_REVIEW_ANSWER` answers it (`accept:<hunk>`, `reject:<hunk>`, `all`, `apply`). `HEFT_IOS_PENCIL_PALETTE=x,y` opens the format palette as a Pencil squeeze at that point would, and `HEFT_IOS_OUTLINE` opens the note's Outline, and `jump:<n>`
 goes to its nth heading. Point them at
 a copy of a vault: the editor saves.
 
@@ -118,6 +118,18 @@ be saved is kept as a `DraftStore` draft, as on the Mac, and a draft still
 there when the note next opens becomes a recovery note beside it. The
 loading and saving are `NoteSync` in `HeftCore`, so their ordering is tested
 on the Mac.
+
+## Agent proposals
+
+Proposals are the files the Mac's `heft propose` writes into
+`.heft/proposals/`, which iCloud brings over like notes, so review on the
+phone needs no store or sync of its own. `MobileReview` reads them on every
+scan and asks iCloud for any still a placeholder; the review itself is the
+Mac's, shared (`Docs/Proposals.md`). Typing in the note is saved before a
+review opens, since the hunks are measured against the file, and an
+accepted change is written through a coordinator and reaches an open note
+by its usual reload. The banner floats over the note, which runs under the
+bar, so the editor's top inset grows by its height.
 
 ## Handoff
 

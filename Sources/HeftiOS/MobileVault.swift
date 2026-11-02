@@ -49,8 +49,11 @@ final class MobileVault {
     private var watcher: VaultWatcher?
     /// A change heard while a scan ran, which that scan may have missed.
     private var rescanAfterScan = false
+    /// The agent proposals waiting in this vault, read again on every scan.
+    let review = MobileReview()
 
     init() {
+        review.vault = self
         #if DEBUG
         // Lets a simulator launch open a vault without the picker:
         // `SIMCTL_CHILD_HEFT_IOS_VAULT=<path> xcrun simctl launch …`.
@@ -169,7 +172,13 @@ final class MobileVault {
         refresh()
         watcher?.stop()
         watcher = VaultWatcher(root: url, notes: { [weak self] in
-            self?.index.notes.map(\.url) ?? []
+            guard let self else { return [] }
+            // The agent proposals too, which no scan indexes: one the Mac
+            // made smaller or answered would otherwise wait for the next
+            // change that is heard.
+            let proposals = ProposalStore.directory(in: url)
+            let waiting = self.review.proposals.map { proposals.appendingPathComponent("\($0.id).json") }
+            return self.index.notes.map(\.url) + waiting
         }) { [weak self] in
             guard let self else { return }
             // A change from elsewhere: ask again for anything still coming
@@ -291,6 +300,7 @@ final class MobileVault {
         status = pending > 0 && downloadRetries > 0
             ? "Downloading \(pending) note\(pending == 1 ? "" : "s") from iCloud…" : nil
         generation += 1
+        review.refreshProposals()
         if treeChanged || generation == 1 { donateToSpotlight() }
         publishToday()
         #if DEBUG
@@ -692,6 +702,20 @@ final class MobileVault {
         case .success(let move): return try perform(move, of: item)
         case .failure(let refusal): throw MobileVaultActionError.refused(refusal)
         }
+    }
+
+    /// Moves a note to a vault-relative path, folders and all, as an agent's
+    /// proposal names one; links to it are repointed as for any move.
+    func move(_ path: String, to destination: String) throws -> String {
+        guard let root, let item = item(at: path) else { throw MobileVaultActionError.missing }
+        guard !FileManager.default.fileExists(atPath: root.appendingPathComponent(destination).path) else {
+            throw MobileVaultActionError.refused(.alreadyExists(name: (destination as NSString).lastPathComponent))
+        }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(destination).deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        return try perform(VaultOperations.Move(from: path, to: destination), of: item)
     }
 
     private func perform(_ move: VaultOperations.Move, of item: VaultItem) throws -> String {

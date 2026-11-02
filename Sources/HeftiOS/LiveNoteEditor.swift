@@ -100,6 +100,12 @@ struct LiveNoteEditor: UIViewRepresentable {
     }
 
     func updateUIView(_ view: MobileTextView, context: Context) {
+        // Grows while a banner sits over the note's top, so its first
+        // lines start below the banner rather than under it.
+        if view.topInset != topInset {
+            view.topInset = topInset
+            view.setNeedsLayout()
+        }
         context.coordinator.update(from: self)
     }
 

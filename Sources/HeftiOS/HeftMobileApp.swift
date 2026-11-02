@@ -241,6 +241,7 @@ struct MobileRootView: View {
                 show(note.path)
             }
             .onAppear(perform: applyLaunchRequest)
+            .reviewSheet(vault)
             // What the system draws blue takes the vault's accent; the bar's
             // icons stay neutral, as iOS draws them whatever an app's colour.
             // Outermost, so the sheets get it too: set before them, it
