@@ -185,9 +185,6 @@ struct MobileRootView: View {
                 tab = .recent
                 handedOff = route
             }
-            // What the system draws blue takes the vault's accent; the bar's
-            // icons stay neutral, as iOS draws them whatever an app's colour.
-            .tint(vault.appearance.appTint)
             .sheet(item: $capture) { capture in
                 CaptureSheet(requested: capture.target)
             }
@@ -244,6 +241,12 @@ struct MobileRootView: View {
                 show(note.path)
             }
             .onAppear(perform: applyLaunchRequest)
+            // What the system draws blue takes the vault's accent; the bar's
+            // icons stay neutral, as iOS draws them whatever an app's colour.
+            // Outermost, so the sheets get it too: set before them, it
+            // reached the screens but not Capture, Settings or New Note,
+            // which were drawn in the system's blue.
+            .tint(vault.appearance.appTint)
         }
     }
 
