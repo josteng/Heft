@@ -1,8 +1,8 @@
 import HeftCore
 import SwiftUI
 
-/// What agents are waiting on, at the top of Recent on the phone and of the
-/// iPad's sidebar, as the Mac lists it at the top of its sidebar: the place
+/// What agents are waiting on, at the top of the phone's Recent; the iPad
+/// has the Mac's card at the foot of its sidebar instead. The place
 /// for a change with no note to show a banner over, and for a change across
 /// several notes. A row opens the review; a swipe accepts or discards it
 /// whole.
@@ -86,6 +86,45 @@ struct ReviewSection: View {
 
     /// Asked once before a group that deletes files, as on the Mac; one
     /// that deletes nothing is accepted at once.
+    private func accept(_ group: ProposalGroup) {
+        if ReviewQuestion.deletes(in: group) != nil {
+            confirming = group
+        } else {
+            Task {
+                for proposal in group.proposals { await NoteDocument.saveOpen(proposal.notePath) }
+                vault.review.acceptGroup(group)
+            }
+        }
+    }
+}
+
+/// The Mac's review card at the foot of the iPad's sidebar, shared, over
+/// the iOS review. Accepting a group that deletes files asks once first.
+struct PadReviewCard: View {
+    @Environment(MobileVault.self) private var vault
+    @State private var confirming: ProposalGroup?
+
+    var body: some View {
+        let review = vault.review
+        ReviewCard(
+            pending: review.pendingProposals,
+            review: { proposal in Task { await review.begin(proposal) } },
+            discard: { review.discard($0) },
+            acceptGroup: accept,
+            discardGroup: { review.discardGroup($0) }
+        )
+        .confirmationDialog(
+            confirming.flatMap(ReviewQuestion.deletes(in:))?.title ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+            titleVisibility: .visible,
+            presenting: confirming
+        ) { group in
+            Button("Delete", role: .destructive) { review.acceptGroup(group) }
+        } message: { group in
+            Text(ReviewQuestion.deletes(in: group)?.message ?? "")
+        }
+    }
+
     private func accept(_ group: ProposalGroup) {
         if ReviewQuestion.deletes(in: group) != nil {
             confirming = group

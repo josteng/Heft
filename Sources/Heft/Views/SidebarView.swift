@@ -129,16 +129,19 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             header
 
-            // Above the lists rather than in them: it is not a fourth way of
-            // browsing the vault, it is something waiting for an answer, and
-            // it has to be visible whichever list is showing.
-            ReviewCenter()
-
-            switch mode {
-            case .tags: tagList
-            case .recent: recentList
-            case .files: if filter.isEmpty { treeList } else { filteredList }
+            Group {
+                switch mode {
+                case .tags: tagList
+                case .recent: recentList
+                case .files: if filter.isEmpty { treeList } else { filteredList }
+                }
             }
+            // At the foot, under whichever list is showing and above the
+            // calendar: what waits for an answer belongs to no one list,
+            // and `ReviewCard` says why the top was wrong. An inset of the
+            // list, so the list scrolls on behind it and its last rows can
+            // still come up above it. The iPad's sidebar does the same.
+            .safeAreaInset(edge: .bottom, spacing: 0) { ReviewCenter() }
 
             if model.isCalendarVisible {
                 VStack(spacing: 0) {

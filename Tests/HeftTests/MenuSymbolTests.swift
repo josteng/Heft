@@ -20,7 +20,9 @@ struct MenuSymbolTests {
         // Every menu Heft builds for itself, the AppKit one included.
         let sources = [
             "Sources/Heft/Views/SidebarView.swift",
-            "Sources/Heft/Views/MenuButton.swift",
+            "Sources/HeftReview/MenuButton.swift",
+            "Sources/HeftReview/ReviewCard.swift",
+            "Sources/HeftReview/ReviewViews.swift",
             "Sources/Heft/Views/CalendarPanel.swift",
             "Sources/Heft/Views/ReviewCenter.swift",
             "Sources/Heft/TableSurface.swift",
@@ -61,7 +63,7 @@ struct MenuSymbolTests {
         // dimming a disabled row does for its title, which left Paste grey
         // beside a full-strength icon.
         let menuRow = try String(
-            contentsOf: root.appendingPathComponent("Sources/Heft/Views/MenuButton.swift"),
+            contentsOf: root.appendingPathComponent("Sources/HeftReview/MenuButton.swift"),
             encoding: .utf8
         )
         #expect(

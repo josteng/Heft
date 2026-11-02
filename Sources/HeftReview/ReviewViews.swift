@@ -31,6 +31,19 @@ enum ReviewStyle {
     static let rowDetail = Font.system(size: 9.5)
     static let rowSpacing: CGFloat = 5
     static let bannerRadius: CGFloat = 8
+    static let cardSymbol = Font.system(size: 10, weight: .semibold)
+    static let cardTitle = Font.system(size: 11, weight: .semibold)
+    static let cardCount = Font.system(size: 10, weight: .medium)
+    static let cardChevron = Font.system(size: 8, weight: .semibold)
+    static let cardGroupActions = Font.system(size: 10.5)
+    static let cardRowPadding: CGFloat = 4
+    static let cardHeaderPadding: CGFloat = 7
+    /// How much accent the docked panel takes. More than the banner's:
+    /// on the Mac's dark sidebar, and under the Muted palette, which
+    /// softens the accent itself, less hardly showed.
+    static let panelTint = 0.22
+    /// Under the tint, so the list passing behind the panel is hidden.
+    static let panelBase = AnyShapeStyle(.background)
     #else
     static let titleSymbol = Font.headline
     static let title = Font.headline
@@ -50,6 +63,17 @@ enum ReviewStyle {
     static let rowDetail = Font.footnote
     static let rowSpacing: CGFloat = 10
     static let bannerRadius: CGFloat = 16
+    static let cardSymbol = Font.subheadline.weight(.semibold)
+    static let cardTitle = Font.subheadline.weight(.semibold)
+    static let cardCount = Font.subheadline
+    static let cardChevron = Font.footnote.weight(.semibold)
+    static let cardGroupActions = Font.subheadline
+    static let cardRowPadding: CGFloat = 8
+    static let cardHeaderPadding: CGFloat = 10
+    static let panelTint = 0.10
+    /// Opaque: in the iPad's glass sidebar `.background` is translucent,
+    /// and the rows passing behind the panel showed through it.
+    static let panelBase = AnyShapeStyle(Color(uiColor: .systemBackground))
     #endif
 
     /// Where the other changes of a group are listed.

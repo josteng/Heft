@@ -1,179 +1,26 @@
 import HeftCore
 import SwiftUI
 
-/// Everything an agent is waiting on, at the top of the sidebar.
-///
-/// The per-note banner was the only way to review agent work, and two things
-/// ran it out. A proposal for a note that does not exist has no note to draw a
-/// banner above, so it could not be reached from the app at all. And a change
-/// spanning several notes was several unrelated proposals: accepting seven of
-/// twelve left the vault half-changed with nothing recording that they belonged
-/// together.
-///
-/// At the top of the sidebar because the banner already trained the eye to look
-/// near the top of the window, and because this is the one place that can show
-/// a change with no note behind it.
-///
-/// **The banner stays.** Seeing a diff where you are reading it is the part
-/// that already works, and centralising it would be a downgrade. The rule that
-/// keeps the two from fighting is *one banner per note, ever*: a note whose
-/// change belongs to a group gets a line saying so and a way in here, never a
-/// second banner stacked on the first.
+/// The Mac's review card, fed from `AppModel`, with the offer to set the
+/// vault up for agents in the same slot.
 struct ReviewCenter: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.appAccent) private var accent
-    @State private var isExpanded = true
-    @State private var openGroups: Set<String> = []
 
     var body: some View {
-        let pending = model.pendingProposals
-        // The offer to set the vault up lives in this slot too, under the
-        // list when there is one: a proposal in a vault with no guide means
-        // an agent is already at work here without instructions, which is
-        // the case the setup exists for, and the offer is gone for good
-        // after Set Up or Not Now. It used to be a banner over the note,
-        // which a half-width window truncated and which competed with the
-        // text someone had come to read.
-        if !pending.isEmpty {
-            VStack(spacing: 0) {
-                header(pending)
-                if isExpanded {
-                    VStack(alignment: .leading, spacing: 1) {
-                        ForEach(pending.groups) { group in
-                            groupRow(group)
-                            if openGroups.contains(group.id) {
-                                ForEach(group.proposals) { proposal in
-                                    row(proposal, depth: 1)
-                                }
-                                groupActions(group)
-                            }
-                        }
-                        ForEach(pending.edits) { row($0, depth: 0) }
-                        ForEach(pending.structural) { row($0, depth: 0) }
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 6)
-                }
-            }
-            // A card inset to the header's margins rather than a full-width
-            // band: flush to the sidebar's edges and against the filter field
-            // above it, the tint read as part of the chrome instead of as one
-            // thing waiting for an answer.
-            .background(accent.opacity(0.08), in: .rect(cornerRadius: 8))
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 2)
-        }
+        // A proposal in a vault with no guide means an agent is already at
+        // work here without instructions, which is the case the setup
+        // exists for; the offer is gone for good after Set Up or Not Now.
+        // Above the review panel, which docks on the calendar.
         if model.shouldOfferAgentSetup {
             AgentSetupOffer()
         }
-    }
-
-    private func header(_ pending: ProposalStore.Pending) -> some View {
-        Button {
-            isExpanded.toggle()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(accent)
-                Text("Waiting for Review")
-                    .font(.system(size: 11, weight: .semibold))
-                Text("\(pending.count)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func groupRow(_ group: ProposalGroup) -> some View {
-        HStack(spacing: 5) {
-            Button {
-                if openGroups.contains(group.id) { openGroups.remove(group.id) }
-                else { openGroups.insert(group.id) }
-            } label: {
-                ProposalGroupLabel(group: group, isOpen: openGroups.contains(group.id))
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .contextMenu {
-            MenuButton("Accept All \(group.proposals.count) Changes", symbol: "checkmark") {
-                model.acceptGroup(group)
-            }
-            MenuButton("Discard", symbol: "xmark", role: .destructive) {
-                model.discardGroup(group)
-            }
-        }
-    }
-
-    /// Accepting or discarding a whole group, under the group when it is open.
-    ///
-    /// These were reachable only by right-clicking the group's row, which is
-    /// not an affordance: nobody found them, and the first thing a person does
-    /// to a row with a chevron on it is click the row. That expands it, so this
-    /// is where the eye already is.
-    ///
-    /// Not on the row itself. The row *is* the disclosure control, and hanging
-    /// a destructive button off a control whose whole job is to toggle invites
-    /// exactly the misclick it would be there to save.
-    ///
-    /// Accept All matters more than it looks. Applying a group is deliberately
-    /// not atomic, so accepting members one at a time really can leave the
-    /// vault half-changed — five new notes linking to each other, three of them
-    /// created. This button is the answer to that, and it was invisible.
-    private func groupActions(_ group: ProposalGroup) -> some View {
-        HStack(spacing: 6) {
-            // Named with its count, because "Accept All" already means
-            // something else one sheet away: every *hunk* of the one proposal
-            // in front of you. Two scopes under one label is a thing you only
-            // learn by pressing the wrong one.
-            Button("Accept All \(group.proposals.count) Changes") {
-                model.acceptGroup(group)
-            }
-            .buttonStyle(.borderedProminent)
-            .lineLimit(1)
-            Button("Discard", role: .destructive) { model.discardGroup(group) }
-                .buttonStyle(.bordered)
-            Spacer(minLength: 0)
-        }
-        .controlSize(.small)
-        .font(.system(size: 10.5))
-        // Lined up with the member rows above it, which sit at depth 1.
-        .padding(.leading, 20)
-        .padding(.trailing, 6)
-        .padding(.top, 3)
-        .padding(.bottom, 5)
-    }
-
-    private func row(_ proposal: Proposal, depth: Int) -> some View {
-        Button {
-            model.review(proposal)
-        } label: {
-            ProposalRowLabel(proposal: proposal)
-                .padding(.leading, CGFloat(depth) * 14 + 6)
-                .padding(.trailing, 6)
-                .padding(.vertical, 4)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            MenuButton("Review", symbol: "eye") { model.review(proposal) }
-            MenuButton("Discard", symbol: "xmark", role: .destructive) {
-                model.discard(proposal)
-            }
-        }
+        ReviewCard(
+            pending: model.pendingProposals,
+            review: { model.review($0) },
+            discard: { model.discard($0) },
+            acceptGroup: { model.acceptGroup($0) },
+            discardGroup: { model.discardGroup($0) }
+        )
     }
 }
 

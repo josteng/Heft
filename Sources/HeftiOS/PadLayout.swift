@@ -183,6 +183,10 @@ struct PadRootView: View {
             // Rows move to their new places as notes change, as on the phone.
             .animation(.snappy, value: vault.recent.map(\.path))
             .refreshable { vault.refresh() }
+            // At the foot, under every list and above the month, as on the
+            // Mac: it belongs to no one list. An inset of the list, so the
+            // list scrolls on behind it.
+            .safeAreaInset(edge: .bottom, spacing: 0) { PadReviewCard() }
             ScanStatus()
             if showsCalendar {
                 Divider()

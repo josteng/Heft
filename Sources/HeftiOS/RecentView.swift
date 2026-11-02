@@ -15,6 +15,9 @@ struct RecentView: View {
     var body: some View {
         ScrollViewReader { proxy in
             List {
+                // The phone's Recent only: the iPad's sidebar shows it over
+                // whichever list is open.
+                ReviewSection()
                 RecentSections { action = $0 }
             }
             // On the list itself, which is what decides whether its rows
@@ -90,7 +93,6 @@ struct RecentSections: View {
                                     date: \.modified)
             .map { (title: $0.section.map(dating.title(of:)) ?? "", items: $0.items) }
         Group {
-            ReviewSection()
             if !pinned.isEmpty {
                 Section {
                     ForEach(pinned) { RecentRow(note: $0, dating: dating, perform: perform) }
