@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A few choices as one glass capsule: icon and name, the chosen one under a
 /// highlight. A tap slides the highlight over with a click; a sideways swipe
@@ -64,7 +65,7 @@ struct GlassSwitch<Value: Hashable>: View {
 }
 
 extension View {
-    /// Sideways swipes anywhere on this view move `selection` through
+    /// Sideways finger swipes anywhere on this view move `selection` through
     /// `values`, the first on the left, with `dragged` following the finger
     /// for a `GlassSwitch` to draw. Past halfway or flicked it switches,
     /// short of that it springs back, and it clicks as the highlight crosses
@@ -96,31 +97,69 @@ private struct SwitchSwipe<Value: Hashable>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contentShape(.rect)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 20)
-                    .onChanged { drag in
-                        guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
-                        let now = along(after: drag.translation.width)
-                        dragged = now
-                        let nearer = Int(now.rounded())
-                        if nearer != (clickedAt ?? rest) {
-                            clickedAt = nearer
-                            clicks += 1
-                        }
-                    }
-                    .onEnded { drag in
-                        guard dragged != nil else { return }
-                        let next = Int(along(after: drag.predictedEndTranslation.width).rounded())
-                        // A flick that switches without having crossed a
-                        // middle under the finger clicks as it is let go.
-                        if next != (clickedAt ?? rest) { clicks += 1 }
-                        clickedAt = nil
-                        withAnimation(.spring(duration: 0.3, bounce: 0.15)) {
-                            selection = values[next]
-                            dragged = nil
-                        }
-                    }
-            )
+            .gesture(FingerPan { translation in
+                guard abs(translation.width) > abs(translation.height) else { return }
+                let now = along(after: translation.width)
+                dragged = now
+                let nearer = Int(now.rounded())
+                if nearer != (clickedAt ?? rest) {
+                    clickedAt = nearer
+                    clicks += 1
+                }
+            } ended: { predicted in
+                guard dragged != nil else { return }
+                let next = Int(along(after: predicted.width).rounded())
+                // A flick that switches without having crossed a
+                // middle under the finger clicks as it is let go.
+                if next != (clickedAt ?? rest) { clicks += 1 }
+                clickedAt = nil
+                withAnimation(.spring(duration: 0.3, bounce: 0.15)) {
+                    selection = values[next]
+                    dragged = nil
+                }
+            })
             .sensoryFeedback(.selection, trigger: clicks)
+    }
+}
+
+/// A sideways pan for fingers only, alongside whatever else the sheet does.
+///
+/// A SwiftUI drag saw the Pencil too, and handwriting is mostly sideways
+/// strokes longer than a drag's start: writing in Capture switched the
+/// destination and cancelled Scribble. A UIKit pan can be told its touch
+/// types, so the Pencil is left to write.
+private struct FingerPan: UIGestureRecognizerRepresentable {
+    let changed: (CGSize) -> Void
+    /// Where the finger was heading when it let go, as a drag's predicted
+    /// end: the translation carried on by a quarter second of its speed.
+    let ended: (CGSize) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        pan.delegate = context.coordinator
+        // Text selection and the sheet's own drag keep working beneath it.
+        pan.cancelsTouchesInView = false
+        return pan
+    }
+
+    func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
+        let moved = pan.translation(in: pan.view)
+        switch pan.state {
+        case .changed:
+            changed(CGSize(width: moved.x, height: moved.y))
+        case .ended, .cancelled:
+            let speed = pan.velocity(in: pan.view)
+            ended(CGSize(width: moved.x + speed.x * 0.25, height: moved.y + speed.y * 0.25))
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
