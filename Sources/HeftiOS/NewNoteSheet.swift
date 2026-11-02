@@ -54,6 +54,7 @@ private struct NewNoteSheet: View {
     @State private var makesFolder: Bool
     @State private var problem: String?
     @FocusState private var naming: Bool
+    @State private var switchDragged: CGFloat?
 
     init(start: NewNoteRequest, created: @escaping (MobileRoute) -> Void) {
         self.start = start
@@ -86,19 +87,19 @@ private struct NewNoteSheet: View {
                     if let problem { Text(problem).foregroundStyle(.red) }
                 }
             }
+            // Swiped sideways as Capture's destinations are.
+            .switchSwipe($makesFolder, among: [false, true], dragged: $switchDragged)
             .onChange(of: makesFolder) { problem = nil }
             .navigationTitle(makesFolder ? "New Folder" : "New Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // In the title's place, so the form below stays one group.
                 ToolbarItem(placement: .principal) {
-                    Picker("Kind", selection: $makesFolder) {
-                        Text("Note").tag(false)
-                        Text("Folder").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
+                    GlassSwitch(selection: $makesFolder, options: [
+                        (false, "Note", "doc.text"), (true, "Folder", "folder"),
+                    ], dragged: switchDragged)
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", systemImage: "xmark", role: .cancel) { dismiss() }
                         .tint(.primary)
@@ -142,3 +143,4 @@ private struct NewNoteSheet: View {
         }
     }
 }
+

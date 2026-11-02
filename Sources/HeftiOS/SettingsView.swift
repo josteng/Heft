@@ -5,13 +5,14 @@ import UIKit
 /// The pages of Settings, as the Mac has tabs: a list to pick one from, so a
 /// new page is a new row and not a longer form.
 enum SettingsPage: String, Hashable, CaseIterable {
-    case appearance, browsing, search, vault
+    case appearance, browsing, search, capture, vault
 
     var title: String {
         switch self {
         case .appearance: "Appearance"
         case .browsing: "Browsing"
         case .search: "Search"
+        case .capture: "Capture"
         case .vault: "Vault"
         }
     }
@@ -21,6 +22,7 @@ enum SettingsPage: String, Hashable, CaseIterable {
         case .appearance: "paintpalette"
         case .browsing: "sidebar.left"
         case .search: "magnifyingglass"
+        case .capture: "text.badge.plus"
         case .vault: "books.vertical"
         }
     }
@@ -103,6 +105,7 @@ struct SettingsView: View {
                 case .appearance: AppearanceSettingsView()
                 case .browsing: BrowsingSettingsView()
                 case .search: SearchSettingsView()
+                case .capture: CaptureSettingsView()
                 case .vault: VaultSettingsView()
                 }
             }
@@ -640,6 +643,35 @@ private struct ScopeOrderRows: View {
             .foregroundStyle(.secondary)
             .padding(.leading, kind.isNested ? 24 : 12)
         }
+    }
+}
+
+/// Where Capture opens. This device's own, as the Mac's capture settings are.
+private struct CaptureSettingsView: View {
+    @Bindable private var preferences = BrowsingPreferences.shared
+    @Environment(MobileVault.self) private var vault
+
+    /// The inbox by the name it has in this vault, as Capture shows it.
+    private func title(_ start: BrowsingPreferences.CaptureStart) -> String {
+        guard start == .inbox, let root = vault.root else { return start.title }
+        return ((InboxNotePreference.path(for: root) as NSString).lastPathComponent as NSString)
+            .deletingPathExtension
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Opens On", selection: $preferences.captureStart) {
+                    ForEach(BrowsingPreferences.CaptureStart.allCases) { Text(title($0)).tag($0) }
+                }
+            } footer: {
+                Text("Where Capture starts when you open it. A Control Center or Home Screen action "
+                    + "that names a destination still opens on that one.")
+            }
+        }
+        .syncBadge(synced: false)
+        .navigationTitle("Capture")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

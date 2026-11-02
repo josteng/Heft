@@ -62,6 +62,9 @@ public struct TagSuggester: Sendable {
 
     public static let empty = TagSuggester(examples: [:])
 
+    /// Whether there is nothing to learn from: no line in the vault has a tag.
+    public var isEmpty: Bool { lineTotal == 0 }
+
     /// The examples in a note: each prose line carrying inline tags, by tag,
     /// with the tags taken out of the line.
     public static func examples(in source: String) -> [String: [String]] {

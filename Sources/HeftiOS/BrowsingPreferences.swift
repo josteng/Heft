@@ -36,6 +36,21 @@ final class BrowsingPreferences {
         }
     }
 
+    /// Where Capture starts: wherever the last line went, or always one.
+    enum CaptureStart: String, CaseIterable, Identifiable {
+        case lastUsed, inbox, today
+        var id: Self { self }
+        var title: String {
+            switch self {
+            case .lastUsed: "Last Used"
+            // The vault's own name for it is shown in Settings; this is the
+            // name when there is no vault to ask.
+            case .inbox: (InboxNotePreference.defaultPath as NSString).deletingPathExtension
+            case .today: "Today's Note"
+            }
+        }
+    }
+
     /// What the iPad's panel beside a note shows, as the Mac's right sidebar.
     enum NotePanel: String, CaseIterable, Identifiable {
         case outline, backlinks
@@ -64,6 +79,9 @@ final class BrowsingPreferences {
     /// Whether going to the phone's Search tab brings the keyboard up. Off
     /// unless asked for: the list before typing is there to be tapped, and
     /// a tap on the tab while already there brings the keyboard anyway.
+    var captureStart: CaptureStart {
+        didSet { HeftDefaults.shared.set(captureStart.rawValue, forKey: Self.captureStartKey) }
+    }
     var searchShowsKeyboard: Bool {
         didSet { HeftDefaults.shared.set(searchShowsKeyboard, forKey: Self.searchKeyboardKey) }
     }
@@ -73,6 +91,7 @@ final class BrowsingPreferences {
     private static let startKey = "dev.stenglein.Heft.iOS.start"
     private static let panelShownKey = "dev.stenglein.Heft.iOS.notePanelShown"
     private static let panelKey = "dev.stenglein.Heft.iOS.notePanel"
+    private static let captureStartKey = "dev.stenglein.Heft.iOS.captureStart"
     private static let searchKeyboardKey = "dev.stenglein.Heft.iOS.searchShowsKeyboard"
 
     private init() {
@@ -82,6 +101,7 @@ final class BrowsingPreferences {
         start = Start(rawValue: defaults.string(forKey: Self.startKey) ?? "") ?? .recent
         showsNotePanel = defaults.bool(forKey: Self.panelShownKey)
         notePanel = NotePanel(rawValue: defaults.string(forKey: Self.panelKey) ?? "") ?? .outline
+        captureStart = CaptureStart(rawValue: defaults.string(forKey: Self.captureStartKey) ?? "") ?? .lastUsed
         searchShowsKeyboard = defaults.object(forKey: Self.searchKeyboardKey) as? Bool ?? false
     }
 }

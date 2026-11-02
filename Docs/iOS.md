@@ -24,7 +24,7 @@ also creates it), `HEFT_IOS_SETTINGS` opens Settings on a page (`root`,
 `appearance`, `vault`), `HEFT_IOS_ITEM_ACTION=rename|move|delete:<path>`
 asks for one in Files, and `HEFT_IOS_RUN` carries one out after the first
 scan (`rename:<path>:<name>`, `move:<path>:<folder>`, `delete:<path>`, `duplicate:<path>`). `HEFT_IOS_OPEN=<path>` opens a note the
-way the Open Note intent does, and several, comma-separated, one after another. `HEFT_IOS_OPEN_FILE=<path>` hands over a file as Files does. `HEFT_IOS_NOTE_ACTION=delete` deletes the open
+way the Open Note intent does, and several, comma-separated, one after another. `HEFT_IOS_OPEN_FILE=<path>` hands over a file as Files does. `HEFT_IOS_CAPTURE=<text>` opens Capture with it (lines ending in a newline are filed, `HEFT_IOS_QUICK` makes it the full-screen panel), `HEFT_IOS_CAPTURE_SWITCH` turns to the other destination after opening, and `HEFT_IOS_CAPTURE_DRAG=<0…1>` holds the switch's highlight where a drag would. `HEFT_IOS_NOTE_ACTION=delete` deletes the open
 note from its own menu, right after `HEFT_IOS_TYPE`'s typing. `HEFT_IOS_CHOOSE=<path>` takes a
 folder as the picker does, bookmark included, for a later plain launch to reopen, and
 `HEFT_IOS_INTENT_CAPTURE=<text>` files two lines to the inbox through that bookmark. `HEFT_IOS_SEARCH_TAG=<tag>` opens Search in a tag's scope, and
