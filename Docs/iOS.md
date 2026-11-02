@@ -99,9 +99,12 @@ The Today widget cannot open the vault either: the app writes
 draws that. `heft://today` and `heft://open?path=` open the calendar or a
 note.
 
-There is no file watcher on iOS. The app rescans on launch, on returning to
-the foreground and after its own writes, starting from the Mac's
-`IndexCache` so a scan reads only what changed.
+There is no FSEvents on iOS. The app rescans on launch, on returning to the
+foreground, after its own writes, and when `VaultWatcher` hears of a change
+from another device, starting from the Mac's `IndexCache` so a scan reads
+only what changed. The watcher presents the vault folder, which iCloud's
+writes notify; a Spotlight metadata query sees nothing in a vault inside
+another app's iCloud folder, so it is not used.
 
 ## Saving
 

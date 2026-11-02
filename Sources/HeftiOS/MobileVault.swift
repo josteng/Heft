@@ -45,6 +45,10 @@ final class MobileVault {
     /// How many more scans to run while iCloud is still downloading notes.
     private var downloadRetries = 0
     private var appearanceWrite: Task<Void, Never>?
+    /// Notes changed elsewhere while Heft is open, for a rescan.
+    private var watcher: VaultWatcher?
+    /// A change heard while a scan ran, which that scan may have missed.
+    private var rescanAfterScan = false
 
     init() {
         #if DEBUG
@@ -163,6 +167,17 @@ final class MobileVault {
         frecency = FrecencyStore.notes(forVaultAt: url.path)
         downloadRetries = 3
         refresh()
+        watcher?.stop()
+        watcher = VaultWatcher(root: url, notes: { [weak self] in
+            self?.index.notes.map(\.url) ?? []
+        }) { [weak self] in
+            guard let self else { return }
+            // A change from elsewhere: ask again for anything still coming
+            // down, and read the vault, unless a scan is already under way.
+            self.downloadRetries = max(self.downloadRetries, 1)
+            if self.isScanning { self.rescanAfterScan = true } else { self.refresh() }
+        }
+        watcher?.start()
     }
 
     /// Scans the folder again. There is no FSEvents on iOS, so this runs on
@@ -187,6 +202,14 @@ final class MobileVault {
             // built from what is present now and rebuilt as the rest arrives.
             let pending = tree.flattened().filter { $0.needsDownload && $0.isMarkdown }
             for item in pending {
+                try? FileManager.default.startDownloadingUbiquitousItem(at: item.url)
+            }
+            // A note here in an older version than iCloud holds: changed on
+            // the Mac, its copy here keeps the old text and the old date
+            // until something reads it, so Recent listed it where it was
+            // before. Asked for as well, and the scan repeats once they land.
+            let stale = tree.flattened().filter { $0.isMarkdown && !$0.needsDownload && Self.isOutdated($0.url) }
+            for item in stale {
                 try? FileManager.default.startDownloadingUbiquitousItem(at: item.url)
             }
             // Straight from the folder scan, before the index is built: the
@@ -225,7 +248,8 @@ final class MobileVault {
             SharedVault.publishNoteList(listed)
             let pins = Pins.load(from: root)
             await self.land(token: token, tree: tree, index: index, settings: settings,
-                            appearance: appearance, listed: listed, pins: pins, pending: pending.count)
+                            appearance: appearance, listed: listed, pins: pins, pending: pending.count,
+                            outdated: stale.count)
         }
     }
 
@@ -244,7 +268,7 @@ final class MobileVault {
 
     private func land(token: Int, tree: VaultItem, index: VaultIndex, settings: ObsidianSettings,
                       appearance: AppearancePreferences?, listed: [SharedVault.ListedNote],
-                      pins: Pins, pending: Int) {
+                      pins: Pins, pending: Int, outdated: Int = 0) {
         guard token == scanToken else { return }
         // Only what changed, so a rescan that found nothing new redraws nothing.
         let treeChanged = self.tree != tree
@@ -260,6 +284,10 @@ final class MobileVault {
         }
         isScanning = false
         firstScan = false
+        if rescanAfterScan {
+            rescanAfterScan = false
+            DispatchQueue.main.async { self.refresh() }
+        }
         status = pending > 0 && downloadRetries > 0
             ? "Downloading \(pending) note\(pending == 1 ? "" : "s") from iCloud…" : nil
         generation += 1
@@ -268,13 +296,24 @@ final class MobileVault {
         #if DEBUG
         runLaunchOperation()
         #endif
-        if pending > 0, downloadRetries > 0 {
+        // Rescanned while anything is still on its way, missing or outdated;
+        // only the missing are worth a word on screen.
+        if pending + outdated > 0, downloadRetries > 0 {
             downloadRetries -= 1
             Task {
                 try? await Task.sleep(for: .seconds(4))
                 self.refresh()
             }
         }
+    }
+
+    /// Whether iCloud holds a newer version of the file than the one here.
+    nonisolated static func isOutdated(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]),
+              values.isUbiquitousItem == true,
+              let status = values.ubiquitousItemDownloadingStatus
+        else { return false }
+        return status != .current
     }
 
     /// Not while a scan is running: at launch the app becomes active just
