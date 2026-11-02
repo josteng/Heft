@@ -167,6 +167,7 @@
 		040000000000000000000012 /* HeftTextKit */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftTextKit; sourceTree = "<group>"; };
 		040000000000000000000013 /* HeftMacShare */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftMacShare; sourceTree = "<group>"; };
 		040000000000000000000014 /* HeftShareShared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftShareShared; sourceTree = "<group>"; };
+		040000000000000000000015 /* HeftReview */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftReview; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -268,6 +269,7 @@
 			children = (
 				040000000000000000000001 /* Heft */,
 				040000000000000000000012 /* HeftTextKit */,
+				040000000000000000000015 /* HeftReview */,
 				040000000000000000000002 /* HeftCore */,
 				040000000000000000000003 /* HeftTests */,
 				040000000000000000000004 /* HeftVimCore */,
@@ -353,6 +355,7 @@
 			fileSystemSynchronizedGroups = (
 				040000000000000000000001 /* Heft */,
 				040000000000000000000012 /* HeftTextKit */,
+				040000000000000000000015 /* HeftReview */,
 			);
 			name = Heft;
 			packageProductDependencies = (
@@ -499,6 +502,7 @@
 				040000000000000000000008 /* HeftiOSShared */,
 				040000000000000000000010 /* HeftiOSVault */,
 				040000000000000000000012 /* HeftTextKit */,
+				040000000000000000000015 /* HeftReview */,
 			);
 			name = HeftiOS;
 			packageProductDependencies = (

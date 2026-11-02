@@ -101,25 +101,8 @@ struct ReviewCenter: View {
                 if openGroups.contains(group.id) { openGroups.remove(group.id) }
                 else { openGroups.insert(group.id) }
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(.system(size: 10))
-                        .foregroundStyle(accent)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(group.summary)
-                            .font(.system(size: 11.5, weight: .medium))
-                            .lineLimit(1)
-                        Text("\(group.proposals.count) changes · \(group.agent)")
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(openGroups.contains(group.id) ? 90 : 0))
-                }
-                .contentShape(.rect)
+                ProposalGroupLabel(group: group, isOpen: openGroups.contains(group.id))
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
         }
@@ -178,27 +161,11 @@ struct ReviewCenter: View {
         Button {
             model.review(proposal)
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: symbol(for: proposal.kind))
-                    .font(.system(size: 10))
-                    .foregroundStyle(proposal.kind == .delete ? Color.red : .secondary)
-                    .frame(width: 12)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(proposal.summary)
-                        .font(.system(size: 11.5))
-                        .lineLimit(1)
-                    Text(proposal.headline)
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, CGFloat(depth) * 14 + 6)
-            .padding(.trailing, 6)
-            .padding(.vertical, 4)
-            .contentShape(.rect)
+            ProposalRowLabel(proposal: proposal)
+                .padding(.leading, CGFloat(depth) * 14 + 6)
+                .padding(.trailing, 6)
+                .padding(.vertical, 4)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -207,178 +174,6 @@ struct ReviewCenter: View {
                 model.discard(proposal)
             }
         }
-    }
-
-    private func symbol(for kind: Proposal.Kind) -> String {
-        switch kind {
-        case .edit: "pencil"
-        case .create: "doc.badge.plus"
-        case .delete: "trash"
-        case .move: "arrow.right.doc.on.clipboard"
-        }
-    }
-}
-
-/// The sheet for a change that has no hunks to answer.
-///
-/// A delete and a move happen or they do not; there is nothing to accept part
-/// of. A create has a body but no note to diff it against, so what is worth
-/// showing is the note itself rather than a diff whose every line is an
-/// addition.
-struct StructuralReviewView: View {
-    let proposal: Proposal
-    @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.appAccent) private var accent
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(proposal.summary).font(.system(size: 14, weight: .semibold))
-                    Text("\(proposal.agent) · \(proposal.headline)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    if let group = proposal.group {
-                        Text("Part of “\(group.summary)”")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-            }
-            .padding(16)
-            Divider()
-
-            if proposal.kind == .create {
-                ScrollView {
-                    Text(proposal.body)
-                        .font(.system(size: 12, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                }
-            } else {
-                ContentUnavailableView(
-                    proposal.headline,
-                    systemImage: proposal.kind == .delete ? "trash" : "arrow.right.doc.on.clipboard",
-                    description: Text(structuralDescription)
-                )
-                .frame(maxHeight: .infinity)
-            }
-
-            // Above the buttons rather than in the description, which is the
-            // same grey the standard sentence is: a consequence written in
-            // the same ink as the explanation is read as more explanation.
-            if let warning = ReviewWarning.dailyDeparture(
-                kind: proposal.kind, notePath: proposal.notePath,
-                destination: proposal.destination, daily: model.dailyNotes
-            ) {
-                WarningBand(text: warning)
-            }
-
-            Divider()
-            // Every button says its style. Left to `.automatic`, the
-            // destructive role picked a different shape from the two beside
-            // it, so one footer held two corner radii.
-            HStack {
-                Button("Discard Proposal", role: .destructive) { model.discard(proposal) }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("Later") { dismiss() }
-                    .buttonStyle(.bordered)
-                    .keyboardShortcut(.cancelAction)
-                // The button says the act, and is the *only* time it is
-                // asked. This sheet has already named the file and described
-                // what happens to it, so the alert that used to follow was a
-                // second question about a decision just made deliberately —
-                // the same thing that made a group of deletes ask four times.
-                //
-                // Which is why the label cannot stay "Apply": with no alert
-                // behind it, this press is the whole commitment, and "Move to
-                // Trash" is what it commits to. It also has to read clearly
-                // against "Discard Proposal" beside it, which throws the
-                // request away rather than carrying it out.
-                Button(applyLabel) {
-                    if proposal.kind == .create { model.acceptAll(proposal) }
-                    else { model.applyStructural(proposal, confirmed: true) }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(12)
-        }
-        .frame(width: 660, height: 480)
-        .onChange(of: model.reviewing) { _, reviewing in
-            if reviewing == nil { dismiss() }
-        }
-    }
-
-    private var structuralDescription: String {
-        proposal.kind == .delete
-            ? "The file is moved to the Trash."
-            : "Every link pointing at it is repointed to the new path."
-    }
-
-    private var applyLabel: String {
-        switch proposal.kind {
-        case .create: "Create"
-        case .delete: "Move to Trash"
-        case .move: "Move"
-        case .edit: "Apply"
-        }
-    }
-}
-
-/// Whether a proposal costs something the reader would not expect from its
-/// summary, and what to say about it.
-///
-/// A value rather than a line of view code, so what raises a warning is
-/// decided in one place and can be asked about without a window.
-enum ReviewWarning {
-    /// A move that takes a note out of the folder the calendar looks in.
-    /// Deleting one is not this: a delete says what it is.
-    static func dailyDeparture(
-        kind: Proposal.Kind, notePath: String, destination: String?, daily: DailyNotes?
-    ) -> String? {
-        guard kind == .move, let daily, let destination,
-              daily.leavesDailyFolder(notePath, movingTo: destination)
-        else { return nil }
-        return daily.departureNote(count: 1)
-    }
-}
-
-/// A consequence worth stopping at, in the ink macOS uses for a caution:
-/// enough to catch the eye above the button that carries it out, without
-/// the alarm of a destructive red.
-private struct WarningBand: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.orange)
-            Text(text)
-                .font(.system(size: 12))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
-        }
-        // The same inset all round as the footer below it keeps, so the band
-        // sits in the panel rather than against its divider.
-        .padding(.horizontal, 12)
-        .padding(.bottom, 12)
     }
 }
 

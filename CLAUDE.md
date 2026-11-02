@@ -62,6 +62,9 @@ Five targets:
   app and the iOS app. It is written against AppKit's names; on iOS
   `PlatformText.swift` maps them to UIKit, and only what has no counterpart
   of the same shape is branched with `#if os(macOS)`.
+- `HeftReview` (a folder too): reviewing agent proposals, the decisions in
+  `ProposalReviewing` and the banner, sheets and rows, compiled into both
+  apps. Each app wraps the views in a few lines over its own model.
 - `HeftiOS`: the iPhone and iPad companion. Browse, read, search, the daily
   calendar, and capture, over `HeftCore`. Notes open in the live surface,
   `LiveNoteEditor`: a `UITextView` on TextKit 2 styled and drawn by

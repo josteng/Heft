@@ -95,6 +95,13 @@ atomic: refusing eleven changes because the twelfth is stale is worse, and
 what is left unanswered stays as a smaller change. `performMove` is split out
 of `rename` so an accepted move repoints the same links.
 
+The review is shared with iOS through `Sources/HeftReview`, compiled into
+both apps. `ProposalReviewing` holds the decisions above; an app supplies
+only reading the note now, writing an accepted text, carrying out a delete
+or move, and the delete question. Its views take values and closures rather
+than a model, because the Mac's `AppModel` is an `ObservableObject` and iOS's
+vault `@Observable`, and a view holding either redrew on one platform only.
+
 #### Reading a hunk, as opposed to deciding it
 
 `InlineDiff` marks which words moved inside a changed line. It is display

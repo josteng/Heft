@@ -161,7 +161,7 @@ final class NotePresence: ObservableObject {
 }
 
 @MainActor
-final class AppModel: ObservableObject {
+final class AppModel: ObservableObject, ProposalReviewing {
 
     // MARK: Vault state
     let workspaceID: UUID
@@ -3597,16 +3597,6 @@ final class AppModel: ObservableObject {
     /// done thousands of times for one answer.
     @Published private(set) var pendingProposals = ProposalStore.Pending()
 
-    /// The group the open note's proposal belongs to, if it belongs to one.
-    ///
-    /// One banner per note, ever: if the change is part of something larger,
-    /// the banner says so and points at the centre rather than a second banner
-    /// appearing above it.
-    func group(of proposal: Proposal) -> ProposalGroup? {
-        guard let id = proposal.group?.id else { return nil }
-        return pendingProposals.groups.first { $0.id == id }
-    }
-
     /// Whether the review centre has anything to show.
     var hasProposals: Bool { !proposals.isEmpty }
 
@@ -3654,56 +3644,19 @@ final class AppModel: ObservableObject {
     /// part-reviewed proposal under the same one.
     private var countedReviews: Set<String> = []
 
-    private func recordReview(of proposal: Proposal) {
+    func recordReview(of proposal: Proposal) {
         guard countedReviews.insert(proposal.id).inserted else { return }
         session?.recordReview(proposal.notePath)
     }
 
-    /// Accepts or rejects one hunk. Either way the proposal is rewritten to
-    /// hold only what is still undecided, so a half-reviewed proposal is a
-    /// smaller proposal rather than a lost one.
-    func decide(_ proposal: Proposal, hunk: Int, accept: Bool) {
-        guard let vaultRoot else { return }
-        recordReview(of: proposal)
-        let before = currentText(for: proposal)
-        do {
-            let outcome = try ProposalStore.settle(
-                proposal,
-                currentText: before,
-                accepted: accept ? [hunk] : [],
-                rejected: accept ? [] : [hunk],
-                in: vaultRoot
-            )
-            if accept { write(outcome.noteText, to: proposal.notePath) }
-            reviewing = outcome.remaining
-            refreshProposals()
-            status = accept
-                ? "Applied one change to \(proposal.noteName)"
-                : "Rejected one change to \(proposal.noteName)"
-        } catch {
-            status = "Could not update the proposal: \(error.localizedDescription)"
-        }
-    }
-
-    func acceptAll(_ proposal: Proposal) {
-        guard let vaultRoot else { return }
-        recordReview(of: proposal)
-        let before = currentText(for: proposal)
-        write(proposal.body, to: proposal.notePath)
-        ProposalStore.remove(proposal.id, in: vaultRoot)
-        reviewing = nil
-        refreshProposals()
-        let diff = proposal.diff(against: before)
-        status = "Applied \(diff.hunks.count) change(s) to \(proposal.noteName)"
-    }
-
-    /// Carries out a proposal that is not an edit.
+    /// Finds the file a delete or a move names and carries it out, the way
+    /// a person's delete and rename do.
     ///
-    /// A create is already an edit with no note behind it — the same write
-    /// path, which makes the folders it needs — so only delete and move are
-    /// here. Both are answered whole: there are no hunks in "remove this file".
-    func applyStructural(_ proposal: Proposal, confirmed: Bool = false) {
-        guard let vaultRoot else { return }
+    /// A create is already an edit with no note behind it, so only delete
+    /// and move come here; `applyStructural` settles the proposal when this
+    /// answers true.
+    func carryOut(_ proposal: Proposal, confirmed: Bool) -> Bool {
+        guard let vaultRoot else { return false }
         // The window's tree first, and a fresh scan when it has nothing to
         // say: a vault whose scan has not finished yet would otherwise look
         // like a vault the file had been taken out of.
@@ -3717,7 +3670,7 @@ final class AppModel: ObservableObject {
         }
         guard let item = found else {
             status = "\(proposal.notePath) is no longer in the vault"
-            return
+            return false
         }
 
         switch proposal.kind {
@@ -3728,108 +3681,48 @@ final class AppModel: ObservableObject {
             // Only settled if it actually went: `delete` refuses when another
             // window holds the file, and a proposal dropped after a refusal
             // would look like it had been applied.
-            guard !FileManager.default.fileExists(atPath: item.url.path) else { return }
+            return !FileManager.default.fileExists(atPath: item.url.path)
         case .move:
             guard let destination = proposal.destination else {
                 status = "That move names nowhere to go"
-                return
+                return false
             }
             guard !FileManager.default.fileExists(
                 atPath: vaultRoot.appendingPathComponent(destination).path
             ) else {
                 status = "\(destination) already exists"
-                return
+                return false
             }
-            guard performMove(item, to: destination) else { return }
+            return performMove(item, to: destination)
         case .edit, .create:
-            return
+            return false
         }
-
-        recordReview(of: proposal)
-        ProposalStore.remove(proposal.id, in: vaultRoot)
-        reviewing = nil
-        refreshProposals()
-    }
-
-    /// Accepts every proposal in a group, in an order that cannot trip over
-    /// itself: the edits first, then the moves and deletes.
-    ///
-    /// A move renames the file every edit in the group was written against, so
-    /// applying it first would leave the rest pointing at a path that is no
-    /// longer there. Doing the text first and the tree afterwards is the same
-    /// order a person would take by hand.
-    ///
-    /// Not atomic. A half-applied rename across twelve notes is worse than
-    /// either end, but refusing to apply eleven because the twelfth is stale
-    /// is worse still, and the existing rule already covers it: what is left
-    /// unanswered stays in the list as a smaller change.
-    func acceptGroup(_ group: ProposalGroup) {
-        // Asked once, before anything is applied. Cancelling here cancels the
-        // whole group rather than leaving its edits in and its deletes out,
-        // which is what a question asked halfway through would do.
-        guard confirmDeletes(in: group) else { return }
-        for proposal in group.proposals where !proposal.isStructural {
-            acceptAll(proposal)
-        }
-        for proposal in group.proposals where proposal.isStructural {
-            applyStructural(proposal, confirmed: true)
-        }
-        status = "Applied \(group.summary)"
     }
 
     /// One question for every file a group would delete.
     ///
     /// The per-file alert is right when a person picks a note and asks for it
     /// to go: it names the one thing they pointed at. Accepting a group is a
-    /// different gesture — the list was on screen and answered as a list — so
+    /// different gesture, the list was on screen and answered as a list, so
     /// repeating the question per note asks something already answered, and
     /// four identical alerts in a row is how a confirmation stops being read.
     ///
     /// It still asks, rather than trusting the review: this is the only place
     /// the files are named as a consequence rather than as a proposal, and it
     /// is the last point at which the whole thing can be called off.
-    private func confirmDeletes(in group: ProposalGroup) -> Bool {
-        let names = group.proposals
-            .filter { $0.kind == .delete }
-            .map { ($0.notePath as NSString).lastPathComponent }
-        guard !names.isEmpty else { return true }
-        guard names.count > 1 else {
-            return host.confirm(
-                title: "Delete \(names[0])?",
-                message: "It will be moved to the Trash.",
-                confirm: "Delete", destructive: true
-            )
-        }
-        // Listed, not just counted: "Delete 4 files?" is not something anyone
-        // can answer. Long lists are cut, since an alert that scrolls is worse
-        // than one that says how much it is not showing.
-        let listed = names.count <= 8
-            ? names.joined(separator: "\n")
-            : names.prefix(7).joined(separator: "\n") + "\nand \(names.count - 7) more"
+    func confirmDeletes(in group: ProposalGroup) -> Bool {
+        guard let question = ReviewQuestion.deletes(in: group) else { return true }
         return host.confirm(
-            title: "Delete \(names.count) files?",
-            message: "They will be moved to the Trash.\n\n\(listed)",
+            title: question.title, message: question.message,
             confirm: "Delete", destructive: true
         )
     }
 
-    func discardGroup(_ group: ProposalGroup) {
-        guard let vaultRoot else { return }
-        for proposal in group.proposals {
-            ProposalStore.remove(proposal.id, in: vaultRoot)
-        }
-        reviewing = nil
-        refreshProposals()
-        status = "Discarded \(group.summary)"
-    }
+    func reportReview(_ message: String, isProblem: Bool) { status = message }
 
-    func discard(_ proposal: Proposal) {
-        guard let vaultRoot else { return }
-        ProposalStore.remove(proposal.id, in: vaultRoot)
-        reviewing = nil
-        refreshProposals()
-        status = "Discarded \(proposal.agent)'s proposal for \(proposal.noteName)"
-    }
+    var proposalVaultRoot: URL? { vaultRoot }
+
+    func writeAccepted(_ text: String, to relativePath: String) { write(text, to: relativePath) }
 
     /// Writes an accepted change. Through the open buffer when it is the note
     /// on screen, so the edit joins the normal autosave and undo path instead

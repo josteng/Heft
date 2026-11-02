@@ -1,0 +1,161 @@
+import Foundation
+import HeftCore
+
+/// What reviewing an agent's proposals asks of an app, and the decisions made
+/// on top of it, so the Mac and iOS settle a proposal the same way.
+///
+/// An app supplies the few things that differ: where the note's text is
+/// right now (the Mac's open buffer, iOS's file once typing is saved), how an
+/// accepted text reaches the note, and how a file is deleted or moved. The
+/// rest, which hunks are kept, what is left as a smaller proposal, and in
+/// which order a group is applied, is the extension below.
+@MainActor
+protocol ProposalReviewing: AnyObject {
+    /// The vault the proposals are kept in, `.heft/proposals/` under it.
+    var proposalVaultRoot: URL? { get }
+    /// The proposal whose review is open.
+    var reviewing: Proposal? { get set }
+    /// Everything waiting, sorted the way the review list shows it.
+    var pendingProposals: ProposalStore.Pending { get }
+    /// The note a proposal is about, as it stands right now.
+    func currentText(for proposal: Proposal) -> String
+    /// Reads the proposals again after one was settled.
+    func refreshProposals()
+    /// Writes an accepted text, making the folders a new note needs.
+    func writeAccepted(_ text: String, to relativePath: String)
+    /// Tells the reader what a decision did, or, as a problem, why it could
+    /// not.
+    func reportReview(_ message: String, isProblem: Bool)
+    /// Counts a review as attention paid to the note.
+    func recordReview(of proposal: Proposal)
+    /// Carries out a delete or a move; true once the file has gone or moved.
+    func carryOut(_ proposal: Proposal, confirmed: Bool) -> Bool
+    /// One question for every file a group would delete; true to go ahead.
+    func confirmDeletes(in group: ProposalGroup) -> Bool
+}
+
+extension ProposalReviewing {
+    /// The group a proposal belongs to, if it belongs to one.
+    ///
+    /// One banner per note, ever: if the change is part of something larger,
+    /// the banner says so and points at the list rather than a second banner
+    /// appearing above it.
+    func group(of proposal: Proposal) -> ProposalGroup? {
+        guard let id = proposal.group?.id else { return nil }
+        return pendingProposals.groups.first { $0.id == id }
+    }
+
+    /// Accepts or rejects one hunk. Either way the proposal is rewritten to
+    /// hold only what is still undecided, so a half-reviewed proposal is a
+    /// smaller proposal rather than a lost one.
+    func decide(_ proposal: Proposal, hunk: Int, accept: Bool) {
+        guard let root = proposalVaultRoot else { return }
+        recordReview(of: proposal)
+        let before = currentText(for: proposal)
+        do {
+            let outcome = try ProposalStore.settle(
+                proposal,
+                currentText: before,
+                accepted: accept ? [hunk] : [],
+                rejected: accept ? [] : [hunk],
+                in: root
+            )
+            if accept { writeAccepted(outcome.noteText, to: proposal.notePath) }
+            reviewing = outcome.remaining
+            refreshProposals()
+            reportReview(accept
+                ? "Applied one change to \(proposal.noteName)"
+                : "Rejected one change to \(proposal.noteName)", isProblem: false)
+        } catch {
+            reportReview("Could not update the proposal: \(error.localizedDescription)", isProblem: true)
+        }
+    }
+
+    func acceptAll(_ proposal: Proposal) {
+        guard let root = proposalVaultRoot else { return }
+        recordReview(of: proposal)
+        let before = currentText(for: proposal)
+        writeAccepted(proposal.body, to: proposal.notePath)
+        ProposalStore.remove(proposal.id, in: root)
+        reviewing = nil
+        refreshProposals()
+        let diff = proposal.diff(against: before)
+        reportReview("Applied \(diff.hunks.count) change(s) to \(proposal.noteName)", isProblem: false)
+    }
+
+    /// Carries out a proposal that is not an edit.
+    ///
+    /// A create is already an edit with no note behind it, the same write
+    /// path, which makes the folders it needs, so only delete and move are
+    /// here. Both are answered whole: there are no hunks in "remove this
+    /// file". The proposal is settled only once the file really went: a
+    /// proposal dropped after a refusal would look like it had been applied.
+    func applyStructural(_ proposal: Proposal, confirmed: Bool = false) {
+        guard let root = proposalVaultRoot, proposal.kind == .delete || proposal.kind == .move,
+              carryOut(proposal, confirmed: confirmed)
+        else { return }
+        recordReview(of: proposal)
+        ProposalStore.remove(proposal.id, in: root)
+        reviewing = nil
+        refreshProposals()
+    }
+
+    /// Accepts every proposal in a group, in an order that cannot trip over
+    /// itself: the edits first, then the moves and deletes.
+    ///
+    /// A move renames the file every edit in the group was written against,
+    /// so applying it first would leave the rest pointing at a path that is
+    /// no longer there. Not atomic: refusing eleven changes because the
+    /// twelfth is stale is worse than a half-applied group, and what is left
+    /// unanswered stays in the list as a smaller change.
+    func acceptGroup(_ group: ProposalGroup) {
+        // Asked once, before anything is applied. Cancelling here cancels the
+        // whole group rather than leaving its edits in and its deletes out.
+        guard confirmDeletes(in: group) else { return }
+        for proposal in group.proposals where !proposal.isStructural {
+            acceptAll(proposal)
+        }
+        for proposal in group.proposals where proposal.isStructural {
+            applyStructural(proposal, confirmed: true)
+        }
+        reportReview("Applied \(group.summary)", isProblem: false)
+    }
+
+    func discardGroup(_ group: ProposalGroup) {
+        guard let root = proposalVaultRoot else { return }
+        for proposal in group.proposals {
+            ProposalStore.remove(proposal.id, in: root)
+        }
+        reviewing = nil
+        refreshProposals()
+        reportReview("Discarded \(group.summary)", isProblem: false)
+    }
+
+    func discard(_ proposal: Proposal) {
+        guard let root = proposalVaultRoot else { return }
+        ProposalStore.remove(proposal.id, in: root)
+        reviewing = nil
+        refreshProposals()
+        reportReview("Discarded \(proposal.agent)'s proposal for \(proposal.noteName)", isProblem: false)
+    }
+}
+
+enum ReviewQuestion {
+    /// The names a group would delete, for the one question asked before it.
+    /// Listed, not just counted: "Delete 4 files?" is not something anyone
+    /// can answer. Long lists are cut, since a question that scrolls is worse
+    /// than one that says how much it is not showing.
+    static func deletes(in group: ProposalGroup) -> (title: String, message: String)? {
+        let names = group.proposals
+            .filter { $0.kind == .delete }
+            .map { ($0.notePath as NSString).lastPathComponent }
+        guard !names.isEmpty else { return nil }
+        guard names.count > 1 else {
+            return ("Delete \(names[0])?", "It will be moved to the Trash.")
+        }
+        let listed = names.count <= 8
+            ? names.joined(separator: "\n")
+            : names.prefix(7).joined(separator: "\n") + "\nand \(names.count - 7) more"
+        return ("Delete \(names.count) files?", "They will be moved to the Trash.\n\n\(listed)")
+    }
+}
