@@ -77,6 +77,10 @@ struct LiveTextEditor: NSViewRepresentable {
     var listCommand: AppModel.PendingListCommand? = nil
     /// Changes when the model asks the editor to take the keyboard.
     var focusRequest: Int = 0
+    /// The document's top inset when something floats over its top, as an
+    /// agent's proposal banner does: the chrome's height plus the banner's.
+    /// Nil leaves it to AppKit, which accounts only for the title bar.
+    var topInset: CGFloat? = nil
     let context: RenderContext
     let onAttachment: (NSPasteboard) -> String?
     /// ⌘C with nothing selected. True when the host copied something.
@@ -203,9 +207,36 @@ struct LiveTextEditor: NSViewRepresentable {
         return scrollView
     }
 
+    /// Sets the document's top inset by hand while something floats over
+    /// it, and hands it back to AppKit after. The page keeps its place on
+    /// screen as the inset changes: the clip is moved by the difference,
+    /// so the text does not jump when a banner comes or goes.
+    private func applyTopInset(to scrollView: NSScrollView) {
+        guard let topInset else {
+            if !scrollView.automaticallyAdjustsContentInsets {
+                scrollView.automaticallyAdjustsContentInsets = true
+            }
+            return
+        }
+        let old = scrollView.contentInsets.top
+        guard scrollView.automaticallyAdjustsContentInsets || abs(old - topInset) > 0.5 else { return }
+        scrollView.automaticallyAdjustsContentInsets = false
+        var insets = scrollView.contentInsets
+        insets.top = topInset
+        scrollView.contentInsets = insets
+        // At the document's top, it stays there: the first line moves down
+        // below the banner rather than starting under it.
+        let clip = scrollView.contentView
+        if clip.bounds.origin.y <= -old + 0.5 {
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: -topInset))
+            scrollView.reflectScrolledClipView(clip)
+        }
+    }
+
     func updateNSView(_ scrollView: NSScrollView, context nsContext: Context) {
         guard let textView = scrollView.documentView as? HeftTextKit2View else { return }
         nsContext.coordinator.parent = self
+        applyTopInset(to: scrollView)
         textView.onAttachment = onAttachment
         textView.onCopyFile = onCopyFile
         textView.canCopyFile = canCopyFile

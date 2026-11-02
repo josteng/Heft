@@ -541,6 +541,12 @@ struct EditorPane: View {
     @State private var findDirection = 1
     @State private var findWholeWord = false
     @FocusState private var findFieldFocused: Bool
+    /// How tall the find bar and the proposal banner over the note's top
+    /// are together.
+    @State private var overTopHeight: CGFloat = 0
+
+    private var showsBanner: Bool { !model.proposalsForCurrentNote.isEmpty }
+    private var floatsOverTop: Bool { model.isFindPresented || showsBanner }
     @Environment(\.colorScheme) private var colorScheme
 
     private var context: RenderContext {
@@ -553,22 +559,6 @@ struct EditorPane: View {
         VStack(spacing: 0) {
             // No document header row: the note's name and folder are in the
             // window toolbar now.
-
-            if model.isFindPresented {
-                // The whole detail column deliberately starts at the window's
-                // top edge so document scrolling can pass beneath the toolbar.
-                // Fixed find chrome opts out locally, before its own layout,
-                // avoiding modifier-order and safe-area caching surprises.
-                Color.clear.frame(height: topChromeHeight)
-                findBar
-            }
-
-            if !model.proposalsForCurrentNote.isEmpty {
-                if !model.isFindPresented {
-                    Color.clear.frame(height: topChromeHeight)
-                }
-                ProposalBanner()
-            }
 
             // One surface, always. Source and preview modes were removed once
             // live mode could render everything they could: keeping them meant
@@ -584,6 +574,7 @@ struct EditorPane: View {
                 format: model.pendingFormat,
                 listCommand: model.pendingListCommand,
                 focusRequest: model.editorFocusRequest,
+                topInset: floatsOverTop ? topChromeHeight + overTopHeight : nil,
                 context: context,
                 onAttachment: handleAttachment,
                 onCopyFile: { model.copyCurrentNote() },
@@ -632,10 +623,43 @@ struct EditorPane: View {
             // window edge. HeftTextKit2View centers and width-limits only the
             // text container inside it.
             .frame(maxWidth: .infinity)
+            // The find bar and an agent's banner over the text rather than
+            // above it, as the toolbar is: in a stack above the editor they
+            // cut the line scrolled under them in half, along a strip of the
+            // window's own colour. The whole column starts at the window's
+            // top so the document can pass beneath the toolbar; these sit
+            // just under it, and the editor is inset by them.
+            .overlay(alignment: .top) {
+                if floatsOverTop {
+                    VStack(spacing: 0) {
+                        if model.isFindPresented { findBar }
+                        if showsBanner { ProposalBanner() }
+                    }
+                    // One strip of the toolbar's material, so a line in the
+                    // gaps around the banner's card is blurred as it is under
+                    // the toolbar, not drawn sharp between two bars.
+                    .background(.bar)
+                    .overlay(alignment: .bottom) { if showsBanner { Divider() } }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                        overTopHeight = $0
+                    }
+                    .padding(.top, topChromeHeight)
+                }
+            }
             .background(Color(nsColor: .textBackgroundColor))
 
             StatusBar(stats: model.stats)
         }
+        #if DEBUG
+        // `HEFT_SHOW_FIND=1` opens the find bar, for a screenshot of a
+        // window that is never made key and so takes no ⌘F. After the note
+        // has loaded, whose arrival closes the find bar.
+        .task {
+            guard ProcessInfo.processInfo.environment["HEFT_SHOW_FIND"] == "1" else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            model.showFind()
+        }
+        #endif
         .task(id: model.documentGeneration) {
             closeFind()
         }
@@ -692,7 +716,9 @@ struct EditorPane: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
-        .background(Color(nsColor: .windowBackgroundColor))
+        // The toolbar's material, as it now floats over the text the way
+        // the toolbar does.
+        .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
         .onAppear { findFieldFocused = true }
     }

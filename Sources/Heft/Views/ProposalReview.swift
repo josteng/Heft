@@ -12,6 +12,7 @@ struct ProposalBanner: View {
     var body: some View {
         ProposalBannerCard(
             items: model.proposalsForCurrentNote.map { ProposalBannerItem($0, in: model) },
+            floats: true,
             review: { model.beginReview(of: $0) },
             discard: { model.discard($0) }
         )
