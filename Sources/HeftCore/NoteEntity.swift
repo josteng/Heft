@@ -109,7 +109,9 @@ public struct NoteEntityQuery: EntityQuery, EntityStringQuery, Sendable {
 
     /// Where the vault is: the Mac's capture vault, unless the host says
     /// otherwise. The phone reaches its vault through a bookmark the Mac
-    /// has no idea of, and points this at it.
+    /// has no idea of, and points this at it. The Siri schema's queries ask
+    /// it too: reading the Mac's setting, they found no vault on the phone,
+    /// and a Spotlight result there opened nothing.
     nonisolated(unsafe) public static var vaultLocator: @Sendable () -> URL? = { CaptureVaultPreference.url }
 
     private var vault: URL? { Self.vaultLocator() }

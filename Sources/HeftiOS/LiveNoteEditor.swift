@@ -60,6 +60,10 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.onFormat = { [weak coordinator] tool in coordinator?.applyTool(tool) }
         view.onAttach = { [weak coordinator] source in coordinator?.startAttach(source) }
         view.onWidthClass = { [weak coordinator] in coordinator?.updateAccessory() }
+        view.onTextWidth = { [weak coordinator, weak view] in
+            guard let view else { return }
+            coordinator?.restyleIfWidthChanged(view)
+        }
         view.onAcceptSuggestion = { [weak coordinator] position in coordinator?.acceptSuggestion(position) }
         coordinator.fillShortcutsBar(of: view)
         view.isOnPicture = { [weak coordinator, weak view] point in
@@ -267,11 +271,42 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// The Mac editor's pass, without what touch has no use for: reveal
         /// what the caret is in, reuse the last parse where the edit could
         /// not have changed it, and rewrite only the lines that differ.
+        /// The text width the note was last styled at.
+        private var styledWidth: CGFloat?
+
+        /// A note loaded before its view had a size was styled, and laid
+        /// out, at no width at all. Given its size, TextKit kept the height
+        /// it guessed before laying anything out, a few lines' worth, and
+        /// the note could not scroll until a tap restyled it. So after a
+        /// layout pass: restyled at the real width if it was styled at
+        /// another, and the visible part laid out if nothing has been. On
+        /// the next pass, never inside UIKit's layout.
+        func restyleIfWidthChanged(_ textView: MobileTextView) {
+            guard textView.textContainer.size.width != styledWidth || Self.neverLaidOut(textView) else { return }
+            DispatchQueue.main.async { [weak self, weak textView] in
+                guard let self, let textView, textView.window != nil else { return }
+                if textView.textContainer.size.width != self.styledWidth {
+                    self.restyle(textView)
+                }
+                if Self.neverLaidOut(textView) {
+                    textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
+                }
+            }
+        }
+
+        /// Text that TextKit has laid none of: its usage bounds are still
+        /// empty, and the content size is its guess for an empty note.
+        private static func neverLaidOut(_ textView: UITextView) -> Bool {
+            guard !textView.text.isEmpty, let manager = textView.textLayoutManager else { return false }
+            return manager.usageBoundsForTextContainer.height == 0
+        }
+
         func restyle(_ textView: MobileTextView) {
             guard let renderContext else { return }
             // An input method's composition is abandoned if its attributes
             // are rewritten; the commit arrives as an edit and restyles then.
             if textView.markedTextRange != nil { return }
+            styledWidth = textView.textContainer.size.width
             let storage = textView.textStorage
             let source = textView.text as NSString
             let selection = textView.selectedRange
@@ -1590,6 +1625,9 @@ final class MobileTextView: UITextView {
     var onAcceptSuggestion: ((Int) -> Void)?
     /// Called when the window's width class changes, as entering Split View.
     var onWidthClass: (() -> Void)?
+    /// Called after a layout pass in a window, for the editor to check
+    /// the width it styled at.
+    var onTextWidth: (() -> Void)?
     private var watchingWidth = false
 
     override func didMoveToWindow() {
@@ -1671,6 +1709,7 @@ final class MobileTextView: UITextView {
         let insets = UIEdgeInsets(top: topInset, left: side, bottom: 160, right: side)
         if textContainerInset != insets { textContainerInset = insets }
         super.layoutSubviews()
+        if window != nil, textContainer.size.width > 0 { onTextWidth?() }
     }
 }
 

@@ -39,7 +39,7 @@ public struct SiriAccountQuery: EntityStringQuery {
     public init() {}
 
     public func entities(for identifiers: [String]) async throws -> [SiriAccountEntity] {
-        guard let vault = CaptureVaultPreference.url, identifiers.contains(vault.path) else { return [] }
+        guard let vault = NoteEntityQuery.vaultLocator(), identifiers.contains(vault.path) else { return [] }
         return [SiriAccountEntity(vault: vault)]
     }
 
@@ -50,7 +50,7 @@ public struct SiriAccountQuery: EntityStringQuery {
     }
 
     public func suggestedEntities() async throws -> [SiriAccountEntity] {
-        CaptureVaultPreference.url.map { [SiriAccountEntity(vault: $0)] } ?? []
+        NoteEntityQuery.vaultLocator().map { [SiriAccountEntity(vault: $0)] } ?? []
     }
 }
 
@@ -82,13 +82,13 @@ public struct SiriFolderQuery: EntityStringQuery {
     public init() {}
 
     public func entities(for identifiers: [String]) async throws -> [SiriFolderEntity] {
-        guard let vault = CaptureVaultPreference.url else { return [] }
+        guard let vault = NoteEntityQuery.vaultLocator() else { return [] }
         let known = Set(SiriSchemaVault.folders(in: vault))
         return identifiers.filter(known.contains).map { SiriFolderEntity(path: $0, vault: vault) }
     }
 
     public func entities(matching string: String) async throws -> [SiriFolderEntity] {
-        guard let vault = CaptureVaultPreference.url else { return [] }
+        guard let vault = NoteEntityQuery.vaultLocator() else { return [] }
         return SiriSchemaVault.folders(in: vault)
             .filter { $0.localizedCaseInsensitiveContains(string) }
             .prefix(12)
@@ -96,7 +96,7 @@ public struct SiriFolderQuery: EntityStringQuery {
     }
 
     public func suggestedEntities() async throws -> [SiriFolderEntity] {
-        guard let vault = CaptureVaultPreference.url else { return [] }
+        guard let vault = NoteEntityQuery.vaultLocator() else { return [] }
         return SiriSchemaVault.folders(in: vault).prefix(12).map {
             SiriFolderEntity(path: $0, vault: vault)
         }
@@ -230,7 +230,7 @@ public struct SiriNoteQuery: EntityStringQuery {
     public init() {}
 
     public func entities(for identifiers: [String]) async throws -> [SiriNoteEntity] {
-        guard let vault = CaptureVaultPreference.url else { return [] }
+        guard let vault = NoteEntityQuery.vaultLocator() else { return [] }
         let index = VaultIndex.open(vaultAt: vault)
         let byPath = Dictionary(
             index.notes.map { ($0.relativePath, $0) }, uniquingKeysWith: { first, _ in first }
@@ -239,7 +239,7 @@ public struct SiriNoteQuery: EntityStringQuery {
     }
 
     public func entities(matching string: String) async throws -> [SiriNoteEntity] {
-        guard let vault = CaptureVaultPreference.url else { return [] }
+        guard let vault = NoteEntityQuery.vaultLocator() else { return [] }
         let index = VaultIndex.open(vaultAt: vault)
         let daily = DailyNotes(vaultRoot: vault, settings: ObsidianSettings.load(vaultRoot: vault))
         return NoteMatching.notes(matching: string, in: index, limit: 12, daily: daily)
@@ -250,7 +250,7 @@ public struct SiriNoteQuery: EntityStringQuery {
     /// dozen notes off disk to offer them would be a dozen reads nobody asked
     /// for.
     public func suggestedEntities() async throws -> [SiriNoteEntity] {
-        guard let vault = CaptureVaultPreference.url else { return [] }
+        guard let vault = NoteEntityQuery.vaultLocator() else { return [] }
         let index = VaultIndex.open(vaultAt: vault)
         return FrecencyStore.notes(forVaultAt: vault.path)
             .ranked(

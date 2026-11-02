@@ -245,10 +245,13 @@ struct MobileRootView: View {
         quickCapture = nil
         if let day = vault.dailyDate(of: path) {
             showDay(day)
+            noteRequest.settled = true
         } else if usesSidebar {
             padDay = nil
             padSelection = .note(path)
+            noteRequest.settled = true
         } else {
+            // Settled by the stack, once the note is on it.
             tab = .recent
             handedOff = .note(path)
         }
@@ -337,8 +340,9 @@ struct MobileRootView: View {
             if step == 0 {
                 NoteOpenRequest.shared.path = path
             } else {
+                // Later ones as the intents ask: waiting for the note.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2 * Double(step)) {
-                    NoteOpenRequest.shared.path = path
+                    Task { await NoteOpenRequest.shared.open(path) }
                 }
             }
         }
@@ -363,6 +367,9 @@ struct MobileStack<Root: View>: View {
     var poppedBy = 0
     @ViewBuilder var root: Root
     @State private var path: [MobileRoute] = []
+    /// The note being read before it replaces the one on screen.
+    @State private var swapping: MobileRoute?
+    @Environment(MobileVault.self) private var vault
     /// A note on the root screen has the keyboard: capture is for getting a
     /// line in without a note open, so it gives the bar to undo and Done.
     @State private var typing = false
@@ -401,8 +408,35 @@ struct MobileStack<Root: View>: View {
         .onChange(of: incoming.wrappedValue, initial: true) { _, route in
             guard let route else { return }
             incoming.wrappedValue = nil
-            path = [route]
+            swap(to: route)
         }
+    }
+
+    /// A note replacing one on screen, from Spotlight or a widget, has no
+    /// push to cover its loading, and showed an empty screen until its
+    /// text was read. So it is read first and the screen swapped once it
+    /// is, or after half a second, so a note iCloud is still fetching does
+    /// not leave the tap looking ignored.
+    private func swap(to route: MobileRoute) {
+        guard !path.isEmpty, case .note(let note) = route else {
+            path = [route]
+            NoteOpenRequest.shared.settled = true
+            return
+        }
+        swapping = route
+        let document = NoteDocument(path: note)
+        let done = {
+            guard swapping == route else { return }
+            swapping = nil
+            NoteDocument.offer(document)
+            path = [route]
+            NoteOpenRequest.shared.settled = true
+        }
+        Task { @MainActor in
+            await document.load(in: vault)
+            done()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { done() }
     }
 }
 

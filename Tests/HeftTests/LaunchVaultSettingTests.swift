@@ -67,3 +67,28 @@ struct LaunchVaultSettingTests {
         }
     }
 }
+
+/// The phone has no capture-vault setting; it points the entity queries at
+/// its bookmark. The Siri schema's note has to be found there too, or a
+/// Spotlight result for it resolves to nothing and opens nothing.
+@Suite("The Siri note query follows the host's vault", .serialized)
+struct SiriNoteVaultTests {
+    @available(macOS 27.0, *)
+    @Test("A note is found in the vault the locator names")
+    func followsLocator() async throws {
+        let vault = FileManager.default.temporaryDirectory
+            .appendingPathComponent("siri-locator-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try "# Inbox\n".write(to: vault.appendingPathComponent("Inbox.md"), atomically: true, encoding: .utf8)
+
+        let previous = NoteEntityQuery.vaultLocator
+        NoteEntityQuery.vaultLocator = { vault }
+        defer { NoteEntityQuery.vaultLocator = previous }
+
+        let found = try await SiriNoteQuery().entities(for: ["Inbox.md"])
+        #expect(found.map(\.id) == ["Inbox.md"])
+        let named = try await SiriNoteQuery().entities(matching: "Inbox")
+        #expect(named.map(\.id).contains("Inbox.md"))
+    }
+}

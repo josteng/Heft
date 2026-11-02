@@ -58,6 +58,23 @@ final class NoteDocument {
         sync = NoteSync(path: path)
     }
 
+    /// A document read ahead of its screen, for that screen to take rather
+    /// than start empty. Held for one taker.
+    private static var offered: NoteDocument?
+
+    static func offer(_ document: NoteDocument) { offered = document }
+
+    /// The document offered for `path`, once, or a new one. Only its own
+    /// note takes it: SwiftUI makes other note views meanwhile, the one
+    /// being replaced among them.
+    static func take(_ path: String) -> NoteDocument {
+        if let document = offered, document.path == path {
+            offered = nil
+            return document
+        }
+        return NoteDocument(path: path)
+    }
+
     func load(in vault: MobileVault) async {
         let before = sync.revision
         await sync.load(in: vault)
@@ -252,7 +269,7 @@ struct NoteView: View {
 
     init(path: String, startsTyping: Bool = false) {
         self.path = path
-        let document = NoteDocument(path: path)
+        let document = NoteDocument.take(path)
         // Asked before the editor exists; it takes the keyboard on its first
         // update after the text has loaded.
         if startsTyping { document.focus() }
