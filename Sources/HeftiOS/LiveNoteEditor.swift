@@ -778,6 +778,9 @@ struct LiveNoteEditor: UIViewRepresentable {
             replace(mark, with: checked ? " " : "x", in: textView)
             textView.selectedRange = selection
             restyle(textView)
+            // A tick is the editor's most physical act; it answers as a
+            // switch does. The system's haptics setting silences it.
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
 
         // MARK: Keyboard bar

@@ -19,6 +19,18 @@ struct CalendarView: View {
     @State private var selected = Calendar.current.startOfDay(for: Date())
     @State private var document: NoteDocument?
     @State private var folded = false
+    /// Moves for each month the reader pages to, and for each day the
+    /// reader scrolls the strip past: the only things that click. A month
+    /// or a strip moved by folding, opening or Today plays nothing, since a
+    /// haptic the reader did not cause reads as noise (Apple: a "clear,
+    /// causal relationship between each haptic and the action that causes
+    /// it"). Folding has none either: it often follows the note's scrolling
+    /// rather than a gesture, and a click as it settled fired twice when a
+    /// fold was turned back midway.
+    @State private var pagedMonths = 0
+    @State private var scrolledDays = 0
+    /// Whether the reader's finger, or its flick, is moving the strip.
+    @State private var stripScrolling = false
     /// How far the grid sits off to the side: following a finger, or
     /// sliding out and back in as a page turns.
     @State private var slide: CGFloat = 0
@@ -207,6 +219,7 @@ struct CalendarView: View {
         }
         .contentShape(.rect)
         .simultaneousGesture(swipes)
+        .sensoryFeedback(.selection, trigger: pagedMonths)
         // Swiping is the only paging on screen; VoiceOver pages by adjusting.
         .accessibilityAdjustableAction { direction in
             switch direction {
@@ -278,6 +291,11 @@ struct CalendarView: View {
         .contentMargins(.horizontal, 16, for: .scrollContent)
         .scrollTargetBehavior(.viewAligned)
         .scrollPosition(id: $bandDay, anchor: .leading)
+        // A click per day the reader scrolls past, as a picker wheel gives;
+        // not for the strip moved by folding or Today.
+        .onScrollPhaseChange { _, phase in stripScrolling = phase.isScrolling }
+        .onChange(of: bandDay) { if stripScrolling { scrolledDays += 1 } }
+        .sensoryFeedback(.selection, trigger: scrolledDays)
         // A sideways scroll view takes all the height it is offered; this
         // one is exactly the folded week row it stands in for.
         .fixedSize(horizontal: false, vertical: true)
@@ -285,9 +303,10 @@ struct CalendarView: View {
     }
 
     /// Up and down page the month, as Calendar on iOS does: the weeks
-    /// follow the finger and a short flick turns the page. Folding is left
-    /// to the note's scrolling and to the month's name, and the folded strip
-    /// scrolls sideways by itself.
+    /// follow the finger and a short flick turns the page. Folded, a flick
+    /// down on the week opens the month again, the way pulling the note
+    /// down does; folding is left to the note's scrolling and to the
+    /// month's name, and the folded strip scrolls sideways by itself.
     private var swipes: some Gesture {
         DragGesture(minimumDistance: 15)
             .onChanged { drag in
@@ -297,7 +316,10 @@ struct CalendarView: View {
             .onEnded { drag in
                 swipedAt = Date()
                 let along = drag.predictedEndTranslation.height
-                if !collapsed, abs(drag.translation.height) > abs(drag.translation.width), abs(along) > 60 {
+                let vertical = abs(drag.translation.height) > abs(drag.translation.width)
+                if folded, vertical, along > 60 {
+                    unfold()
+                } else if !collapsed, vertical, abs(along) > 60 {
                     page(along < 0 ? 1 : -1)
                 } else {
                     withAnimation(.snappy) { slide = 0 }
@@ -308,6 +330,7 @@ struct CalendarView: View {
     /// Slides the weeks out the way the finger went and the next month in
     /// from the other side.
     private func page(_ direction: Int) {
+        pagedMonths += 1
         let distance: CGFloat = 220
         withAnimation(.easeIn(duration: 0.12)) {
             slide = -CGFloat(direction) * distance

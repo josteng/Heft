@@ -860,6 +860,7 @@ struct SearchPanel: View {
             }
             .frame(width: 620)
             .animation(.easeOut(duration: 0.22), value: model.scope)
+            .sensoryFeedback(.selection, trigger: model.scope)
             .frame(maxHeight: 560)
             .glassEffect(in: .rect(cornerRadius: 26))
             .padding(.top, 60)

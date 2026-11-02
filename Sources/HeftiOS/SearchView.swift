@@ -51,6 +51,9 @@ struct SearchView: View {
             if model.enterScope(byTyping: typed) { query = "" }
         }
         .onChange(of: request.generation) { takeRequest() }
+        // Narrowing to a scope, by typing its prefix or tapping its chip,
+        // clicks as the capture's switch does.
+        .sensoryFeedback(.selection, trigger: model.scope)
         .onChange(of: request.focusGeneration) { fieldFocused = true }
         .onAppear {
             // A scope asked for from elsewhere, a tag tapped in a note, is

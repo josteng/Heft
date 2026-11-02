@@ -529,6 +529,9 @@ struct NoteContent: View {
                 .overlay(alignment: .top) {
                     if document.conflict { conflictBanner }
                 }
+                // The one moment that needs the reader, who may be looking
+                // away: felt when the banner comes, not when it goes.
+                .sensoryFeedback(trigger: document.conflict) { _, now in now ? .warning : nil }
             } else if let failure = document.failure {
                 ContentUnavailableView("Can't Open Note", systemImage: "doc.questionmark",
                                        description: Text(failure))
