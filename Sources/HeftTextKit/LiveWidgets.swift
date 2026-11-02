@@ -137,10 +137,18 @@ enum ListGlyph {
     /// path and leave open windows showing the old colour.
     case checkbox(TaskState, accent: NSColor)
 
-    /// How wide the drawn box is. Named because the hit target is measured
-    /// from it: a click area and a drawn control that disagree are a control
-    /// that misses.
-    static let checkboxSide: CGFloat = 13
+    /// How wide the drawn circle is. Named because the hit target is
+    /// measured from it: a click area and a drawn control that disagree are a
+    /// control that misses. A finger needs more than a pointer, and at 13 the
+    /// phone's box was the size of a letter; Notes draws its circles about
+    /// this large.
+    static var checkboxSide: CGFloat {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone ? 20 : 18
+        #else
+        14
+        #endif
+    }
 }
 
 /// Widget placement for one restyle pass, keyed by the document offset of the
@@ -1723,43 +1731,47 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
 
         case .checkbox(let state, let accent):
             let side = ListGlyph.checkboxSide
-            let box = CGRect(
-                x: markerCentre - side / 2, y: centreY - side / 2,
-                width: side, height: side
-            )
-            let path = CGPath(roundedRect: box, cornerWidth: 3.5, cornerHeight: 3.5, transform: nil)
+            // Where the marker's `[ ]` would be, except that the phone's
+            // larger circle would then touch the text: held clear of it.
+            #if os(iOS)
+            let centreX = min(markerCentre, textLeft - side / 2 - 5)
+            #else
+            let centreX = markerCentre
+            #endif
+            let box = CGRect(x: centreX - side / 2, y: centreY - side / 2, width: side, height: side)
+            // A circle, as Notes and Reminders draw a task: open, a ring;
+            // done, filled in the accent with a tick.
             switch state {
             case .done:
                 context.setFillColor(accent.cgColor)
-                context.addPath(path)
-                context.fillPath()
+                context.fillEllipse(in: box)
                 context.setStrokeColor(NSColor.white.cgColor)
-                context.setLineWidth(1.8)
+                context.setLineWidth(side * 0.13)
                 context.setLineCap(.round)
                 context.setLineJoin(.round)
-                context.move(to: CGPoint(x: box.minX + 3.2, y: box.midY + 0.2))
-                context.addLine(to: CGPoint(x: box.minX + 5.4, y: box.maxY - 3.4))
-                context.addLine(to: CGPoint(x: box.maxX - 3.0, y: box.minY + 3.6))
+                context.move(to: CGPoint(x: box.minX + side * 0.28, y: box.minY + side * 0.52))
+                context.addLine(to: CGPoint(x: box.minX + side * 0.44, y: box.minY + side * 0.68))
+                context.addLine(to: CGPoint(x: box.minX + side * 0.73, y: box.minY + side * 0.34))
                 context.strokePath()
             case .unchecked:
+                let line = max(1.3, side * 0.075)
                 context.setStrokeColor(NSColor.tertiaryLabelColor.cgColor)
-                context.setLineWidth(1.3)
-                context.addPath(path)
-                context.strokePath()
+                context.setLineWidth(line)
+                context.strokeEllipse(in: box.insetBy(dx: line / 2, dy: line / 2))
             case .other(let marker):
-                // The character itself inside the box, which is what the
+                // The character itself inside the circle, which is what the
                 // conventions mean and what every theme that popularised them
                 // draws: `/` in progress, `-` abandoned, `?` uncertain. Drawing
                 // a tick or a blank instead would state something the author
                 // did not write.
+                let line = max(1.3, side * 0.075)
                 context.setStrokeColor(accent.cgColor)
-                context.setLineWidth(1.3)
-                context.addPath(path)
-                context.strokePath()
+                context.setLineWidth(line)
+                context.strokeEllipse(in: box.insetBy(dx: line / 2, dy: line / 2))
                 let glyph = NSAttributedString(
                     string: String(marker),
                     attributes: [
-                        .font: NSFont.systemFont(ofSize: side * 0.72, weight: .semibold),
+                        .font: NSFont.systemFont(ofSize: side * 0.62, weight: .semibold),
                         .foregroundColor: accent,
                     ]
                 )

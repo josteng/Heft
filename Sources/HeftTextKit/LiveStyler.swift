@@ -1159,7 +1159,13 @@ enum LiveStyler {
     static func listGlyphOffset(
         marker literal: String, kind: ListMarkerKind, font: NSFont
     ) -> CGFloat {
-        let marker = canonicalMarker(literal)
+        var marker = canonicalMarker(literal)
+        // Measured as an open box whatever is in it: `[x]` is wider than
+        // `[ ]` in the body font, and ticking a task moved its drawn box,
+        // and the click target with it, out from under the pointer.
+        if case .task = kind {
+            marker = marker.replacingOccurrences(of: #"\[[^\]]\]"#, with: "[ ]", options: .regularExpression)
+        }
         let fullWidth = markerWidth(marker, font: font)
         switch kind {
         case .bullet:

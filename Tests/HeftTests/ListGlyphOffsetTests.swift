@@ -49,6 +49,17 @@ struct ListGlyphOffsetTests {
         #expect(offset("-  [ ] ", .task(.unchecked)) == offset("- [ ] ", .task(.unchecked)))
     }
 
+    /// `[x]` is wider than `[ ]` in the proportional body font, and the box
+    /// was centred on whichever was written: ticking a task moved its drawn
+    /// box, and the click target with it, out from under the pointer.
+    @Test("Ticking a task does not move its box")
+    func tickingDoesNotMoveTheBox() {
+        let open = offset("- [ ] ", .task(.unchecked))
+        #expect(offset("- [x] ", .task(.done)) == open)
+        #expect(offset("- [X] ", .task(.done)) == open)
+        #expect(offset("- [/] ", .task(.other("/"))) == open)
+    }
+
     /// Measuring the marker is the point, so a canonical spelling that threw
     /// the marker away and answered from the kind alone would satisfy every
     /// test above: the three kinds read their token out of the `kind`, so they
