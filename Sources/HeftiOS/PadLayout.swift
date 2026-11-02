@@ -76,7 +76,13 @@ struct PadRootView: View {
         // On the note inside the pane's stack the note stopped scrolling
         // and the panel took no taps; on the pane's stack, in landscape,
         // hiding the sidebar left the note its old width.
-        .inspector(isPresented: $preferences.showsNotePanel) {
+        // Only beside a note: with none open it showed "No Note Open", and
+        // the button that hides it is in the note's own bar, so nothing
+        // could put it away.
+        .inspector(isPresented: Binding(
+            get: { preferences.showsNotePanel && panelNote != nil },
+            set: { if panelNote != nil { preferences.showsNotePanel = $0 } }
+        )) {
             notePanel.inspectorColumnWidth(min: 220, ideal: 280, max: 380)
         }
         .environment(\.mobilePush) { open($0) }

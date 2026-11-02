@@ -105,10 +105,9 @@ final class BrowsingPreferences {
         didSet { HeftDefaults.shared.set(start.rawValue, forKey: Self.startKey) }
     }
     /// Whether the iPad shows the panel beside a note; it stays from note
-    /// to note, and across launches, as the Mac's does in a window.
-    var showsNotePanel: Bool {
-        didSet { HeftDefaults.shared.set(showsNotePanel, forKey: Self.panelShownKey) }
-    }
+    /// to note while the app runs, but every launch starts with it closed:
+    /// remembered, it opened beside every note, wanted or not.
+    var showsNotePanel = false
     var notePanel: NotePanel {
         didSet { HeftDefaults.shared.set(notePanel.rawValue, forKey: Self.panelKey) }
     }
@@ -137,7 +136,6 @@ final class BrowsingPreferences {
     private static let orderKey = "dev.stenglein.Heft.iOS.recentOrder"
     private static let layoutKey = "dev.stenglein.Heft.iOS.recentLayout"
     private static let startKey = "dev.stenglein.Heft.iOS.start"
-    private static let panelShownKey = "dev.stenglein.Heft.iOS.notePanelShown"
     private static let panelKey = "dev.stenglein.Heft.iOS.notePanel"
     private static func pullKey(_ page: PullPage) -> String { "dev.stenglein.Heft.iOS.pull.\(page.rawValue)" }
     private static let captureStartKey = "dev.stenglein.Heft.iOS.captureStart"
@@ -148,7 +146,6 @@ final class BrowsingPreferences {
         recentOrder = RecentOrder(rawValue: defaults.string(forKey: Self.orderKey) ?? "") ?? .edited
         recentLayout = RecentLayout(rawValue: defaults.string(forKey: Self.layoutKey) ?? "") ?? .preview
         start = Start(rawValue: defaults.string(forKey: Self.startKey) ?? "") ?? .recent
-        showsNotePanel = defaults.bool(forKey: Self.panelShownKey)
         notePanel = NotePanel(rawValue: defaults.string(forKey: Self.panelKey) ?? "") ?? .outline
         pulls = Dictionary(uniqueKeysWithValues: PullPage.allCases.map {
             ($0, defaults.string(forKey: Self.pullKey($0)) ?? $0.standard)
