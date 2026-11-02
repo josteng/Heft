@@ -51,10 +51,11 @@ struct SearchView: View {
             if model.enterScope(byTyping: typed) { query = "" }
         }
         .onChange(of: request.generation) { takeRequest() }
+        .onChange(of: request.focusGeneration) { fieldFocused = true }
         .onAppear {
             // A scope asked for from elsewhere, a tag tapped in a note, is
             // a list to look through: the keyboard stays down for it.
-            if !takeRequest() { fieldFocused = true }
+            if !takeRequest(), BrowsingPreferences.shared.searchShowsKeyboard { fieldFocused = true }
             #if DEBUG
             if query.isEmpty, let preset = ProcessInfo.processInfo.environment["HEFT_IOS_QUERY"] {
                 query = preset
@@ -129,6 +130,11 @@ final class SearchRequest {
     /// also takes its stack back to the search itself.
     private(set) var generation = 0
     @ObservationIgnored private var pending: BarScope?
+    /// Moves when the tab is tapped while it shows, which asks for the
+    /// keyboard whatever Settings say about arriving.
+    private(set) var focusGeneration = 0
+
+    func focus() { focusGeneration += 1 }
 
     func open(_ scope: BarScope) {
         pending = scope

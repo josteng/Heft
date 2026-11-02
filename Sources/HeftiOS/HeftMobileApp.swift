@@ -285,7 +285,13 @@ struct MobileRootView: View {
     }
 
     private var tabs: some View {
-        TabView(selection: $tab) {
+        // A tap on the tab already showing sets it again, the one sign of
+        // it SwiftUI gives: on Search it asks for the keyboard, as tapping
+        // the system's search tab does.
+        TabView(selection: Binding(get: { tab }, set: { new in
+            if new == .search, tab == .search { SearchRequest.shared.focus() }
+            tab = new
+        })) {
             Tab("Recent", systemImage: "clock", value: .recent) {
                 MobileStack(incoming: $handedOff) { RecentView() }
             }

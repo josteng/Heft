@@ -61,12 +61,19 @@ final class BrowsingPreferences {
     var notePanel: NotePanel {
         didSet { HeftDefaults.shared.set(notePanel.rawValue, forKey: Self.panelKey) }
     }
+    /// Whether going to the phone's Search tab brings the keyboard up. Off
+    /// unless asked for: the list before typing is there to be tapped, and
+    /// a tap on the tab while already there brings the keyboard anyway.
+    var searchShowsKeyboard: Bool {
+        didSet { HeftDefaults.shared.set(searchShowsKeyboard, forKey: Self.searchKeyboardKey) }
+    }
 
     private static let orderKey = "dev.stenglein.Heft.iOS.recentOrder"
     private static let layoutKey = "dev.stenglein.Heft.iOS.recentLayout"
     private static let startKey = "dev.stenglein.Heft.iOS.start"
     private static let panelShownKey = "dev.stenglein.Heft.iOS.notePanelShown"
     private static let panelKey = "dev.stenglein.Heft.iOS.notePanel"
+    private static let searchKeyboardKey = "dev.stenglein.Heft.iOS.searchShowsKeyboard"
 
     private init() {
         let defaults = HeftDefaults.shared
@@ -75,5 +82,6 @@ final class BrowsingPreferences {
         start = Start(rawValue: defaults.string(forKey: Self.startKey) ?? "") ?? .recent
         showsNotePanel = defaults.bool(forKey: Self.panelShownKey)
         notePanel = NotePanel(rawValue: defaults.string(forKey: Self.panelKey) ?? "") ?? .outline
+        searchShowsKeyboard = defaults.object(forKey: Self.searchKeyboardKey) as? Bool ?? false
     }
 }

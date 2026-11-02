@@ -493,12 +493,27 @@ extension View {
 /// anything is typed, and each scope's order. This device's own, as on the
 /// Mac, which keeps its own.
 private struct SearchSettingsView: View {
-    @State private var list = StartList.current
+    @State private var list = StartList.current(in: HeftDefaults.shared, standard: .mobileStandard)
     @State private var orders = ScopeOrders.current
     @State private var confirmsReset = false
+    /// Edit reorders Search Everything's rows and nothing else on the page,
+    /// so it sits in that section's header rather than in the bar, where
+    /// it read as editing the whole page.
+    @State private var editMode = EditMode.inactive
+    @Bindable private var preferences = BrowsingPreferences.shared
 
     var body: some View {
         Form {
+            // The phone's tab only; the iPad's search is a panel opened to
+            // be typed into.
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                Section {
+                    Toggle("Show Keyboard", isOn: $preferences.searchShowsKeyboard)
+                } footer: {
+                    Text("Whether the keyboard comes up when you go to Search. "
+                        + "Tapping Search again while it shows always brings it up.")
+                }
+            }
             Section {
                 ForEach(Array(list.rows.enumerated()), id: \.element.id) { index, row in
                     StartRowEditor(row: row, fillsRest: list.fillsRest(row)) { list.rows[index] = $0 }
@@ -509,9 +524,17 @@ private struct SearchSettingsView: View {
                     list.rows.append(.init(.recent, [.notes], count: 5))
                 }
                 Button("Reset to Standard", role: .destructive) { confirmsReset = true }
-                    .disabled(list.matches(.standard))
+                    .disabled(list.matches(.mobileStandard))
             } header: {
-                Text("Search Everything")
+                HStack {
+                    Text("Search Everything")
+                    Spacer()
+                    Button(editMode.isEditing ? "Done" : "Edit") {
+                        withAnimation { editMode = editMode.isEditing ? .inactive : .active }
+                    }
+                    .font(.subheadline.weight(editMode.isEditing ? .semibold : .regular))
+                    .textCase(nil)
+                }
             } footer: {
                 Text("What it lists before anything is typed, from the top: recent, frequent or pinned, "
                     + "of whichever kinds you choose. Something an earlier row lists is not listed again. "
@@ -533,14 +556,14 @@ private struct SearchSettingsView: View {
         .syncBadge(synced: false)
         .navigationTitle("Search")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { EditButton() }
+        .environment(\.editMode, $editMode)
         .onChange(of: list) { list.save(in: HeftDefaults.shared) }
         .onChange(of: orders) { orders.save(in: HeftDefaults.shared) }
         .confirmationDialog("Reset Search Everything to the standard list?", isPresented: $confirmsReset,
                             titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { list = .standard }
+            Button("Reset", role: .destructive) { list = .mobileStandard }
         } message: {
-            Text("Your rows are replaced by pinned, recent notes, then what you use most, then every note.")
+            Text("Your rows are replaced by pinned, then what you use most, then every note.")
         }
     }
 }

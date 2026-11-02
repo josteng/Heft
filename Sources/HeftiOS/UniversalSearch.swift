@@ -245,7 +245,7 @@ final class SearchModel {
     /// of its kinds, by its order, and nothing a row above already listed;
     /// the last fills the rest. The Mac's ⌘T list, set in Settings ▸ Search.
     private func startSections(vault: MobileVault, commands: [MobileCommand]) -> [SearchSection] {
-        let list = StartList.current
+        let list = StartList.current(in: HeftDefaults.shared, standard: .mobileStandard)
         let uses = RecentUses.dates()
         var shown = Set<String>()
         var sections: [SearchSection] = []

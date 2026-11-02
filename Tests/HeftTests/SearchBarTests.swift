@@ -990,6 +990,20 @@ struct StartListTests {
         #expect(trailing.plan.map(\.limit) == [StartList.restLimit])
     }
 
+    @Test("The iOS standard leaves recent notes to the Recent tab")
+    func mobileStandard() throws {
+        let plan = StartList.mobileStandard.plan
+        #expect(plan.map(\.row.title) == ["Pinned", "Frequent", "Frequent notes"])
+        #expect(plan.map(\.limit) == [10, 12, StartList.restLimit])
+        let defaults = try suite()
+        #expect(StartList.current(in: defaults, standard: .mobileStandard).matches(.mobileStandard),
+                "nothing stored: the platform's own")
+        #expect(StartList.current(in: defaults).matches(.standard), "the Mac's is unchanged")
+        StartList.standard.save(in: defaults)
+        #expect(StartList.current(in: defaults, standard: .mobileStandard).matches(.standard),
+                "what was saved wins")
+    }
+
     @Test("A row's heading names its kind when it has one")
     func titles() {
         #expect(StartList.Row(.recent, [.folders], count: 3).title == "Recent folders")

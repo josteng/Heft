@@ -115,6 +115,14 @@ public struct StartList: Codable, Equatable, Sendable {
         Row(.frequent, [.notes], count: 10),
     ])
 
+    /// The iOS app's: no recent notes, which its own Recent list already
+    /// shows a tap away, so what is used most comes right after the pins.
+    public static let mobileStandard = StartList(rows: [
+        Row(.pinned, Set(Kind.allCases), count: 10),
+        Row(.frequent, Set(Kind.allCases), count: 12),
+        Row(.frequent, [.notes], count: 10),
+    ])
+
     public init(rows: [Row]) {
         self.rows = rows
     }
@@ -147,7 +155,9 @@ public struct StartList: Codable, Equatable, Sendable {
 
     public static var current: StartList { current(in: HeftDefaults.shared) }
 
-    public static func current(in defaults: UserDefaults) -> StartList {
+    /// What is stored, or `standard` when nothing is: the Mac's, unless a
+    /// platform with its own is asking.
+    public static func current(in defaults: UserDefaults, standard: StartList = standard) -> StartList {
         guard let data = defaults.data(forKey: defaultsKey),
               let stored = try? JSONDecoder().decode(Stored.self, from: data)
         else { return standard }
