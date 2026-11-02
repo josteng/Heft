@@ -49,28 +49,43 @@ struct MobileCommand: Identifiable {
     var terms = ""
     let run: () -> Void
 
+    /// Every command iOS has, without what runs it: the search's list and
+    /// the choices for pulling a list down both read this, so a command
+    /// added here is offered in both.
+    static let catalog: [(id: String, title: String, symbol: String, terms: String)] = [
+        ("newNote", "New Note", "square.and.pencil", "create add"),
+        ("newFolder", "New Folder", "folder.badge.plus", "create add directory"),
+        ("openToday", "Today's Daily Note", "calendar", "daily journal date"),
+        ("capture", "Capture", "text.badge.plus", "inbox quick add"),
+        ("showFiles", "Show Files", "folder", "tree browse sidebar"),
+        ("showRecent", "Show Recent", "clock", "history sidebar"),
+        ("showTags", "Show Tags", "number", "sidebar"),
+        ("settings", "Settings", "gearshape", "preferences appearance colours"),
+        ("refresh", "Refresh Vault", "arrow.clockwise", "rescan reload sync"),
+    ]
+
     /// What iOS can do from a search field, built over the window's actions.
     static func all(_ library: LibraryActions) -> [MobileCommand] {
-        [
-            MobileCommand(id: "newNote", title: "New Note", symbol: "square.and.pencil",
-                          terms: "create add", run: library.newNote),
-            MobileCommand(id: "newFolder", title: "New Folder", symbol: "folder.badge.plus",
-                          terms: "create add directory", run: library.newFolder),
-            MobileCommand(id: "openToday", title: "Today's Daily Note", symbol: "calendar",
-                          terms: "daily journal date", run: library.today),
-            MobileCommand(id: "capture", title: "Capture", symbol: "text.badge.plus",
-                          terms: "inbox quick add", run: library.capture),
-            MobileCommand(id: "showFiles", title: "Show Files", symbol: "folder",
-                          terms: "tree browse sidebar", run: { library.show(.files) }),
-            MobileCommand(id: "showRecent", title: "Show Recent", symbol: "clock",
-                          terms: "history sidebar", run: { library.show(.recent) }),
-            MobileCommand(id: "showTags", title: "Show Tags", symbol: "number",
-                          terms: "sidebar", run: { library.show(.tags) }),
-            MobileCommand(id: "settings", title: "Settings", symbol: "gearshape",
-                          terms: "preferences appearance colours", run: library.settings),
-            MobileCommand(id: "refresh", title: "Refresh Vault", symbol: "arrow.clockwise",
-                          terms: "rescan reload sync", run: library.refresh),
-        ]
+        catalog.map { entry in
+            MobileCommand(id: entry.id, title: entry.title, symbol: entry.symbol, terms: entry.terms,
+                          run: action(entry.id, library))
+        }
+    }
+
+    /// What the command with `id` does, over the window's actions.
+    static func action(_ id: String, _ library: LibraryActions) -> () -> Void {
+        switch id {
+        case "newNote": library.newNote
+        case "newFolder": library.newFolder
+        case "openToday": library.today
+        case "capture": library.capture
+        case "showFiles": { library.show(.files) }
+        case "showRecent": { library.show(.recent) }
+        case "showTags": { library.show(.tags) }
+        case "settings": library.settings
+        case "refresh": library.refresh
+        default: {}
+        }
     }
 }
 

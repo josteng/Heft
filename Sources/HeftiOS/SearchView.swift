@@ -27,6 +27,7 @@ struct SearchView: View {
                 itemAction: { action = $0 }
             )
         }
+        .pullDownAction(.search)
         .itemActionHost($action)
         .searchingText(query, model: model)
         .safeAreaBar(edge: .top) {

@@ -51,6 +51,42 @@ final class BrowsingPreferences {
         }
     }
 
+    /// The lists that pulling down past the top can act on.
+    enum PullPage: String, CaseIterable, Identifiable {
+        case recent, files, search
+        var id: Self { self }
+        var title: String {
+            switch self {
+            case .recent: "Recent"
+            case .files: "Files"
+            case .search: "Search"
+            }
+        }
+        /// What a list does when pulled, until chosen otherwise.
+        var standard: String {
+            switch self {
+            case .recent: "capture"
+            case .files: "newNote"
+            case .search: PullChoice.off
+            }
+        }
+        /// The command that would show the page it is pulled on, which as
+        /// a pull would do nothing.
+        var ownCommand: String? {
+            switch self {
+            case .recent: "showRecent"
+            case .files: "showFiles"
+            case .search: nil
+            }
+        }
+    }
+
+    /// The choices that are not commands.
+    enum PullChoice {
+        static let off = "off"
+        static let search = "search"
+    }
+
     /// What the iPad's panel beside a note shows, as the Mac's right sidebar.
     enum NotePanel: String, CaseIterable, Identifiable {
         case outline, backlinks
@@ -79,6 +115,18 @@ final class BrowsingPreferences {
     /// Whether going to the phone's Search tab brings the keyboard up. Off
     /// unless asked for: the list before typing is there to be tapped, and
     /// a tap on the tab while already there brings the keyboard anyway.
+    /// What pulling each list down does: a command's id, "search", or
+    /// "off". Stored per page.
+    var pulls: [PullPage: String] {
+        didSet {
+            for page in PullPage.allCases {
+                HeftDefaults.shared.set(pulls[page], forKey: Self.pullKey(page))
+            }
+        }
+    }
+
+    func pull(on page: PullPage) -> String { pulls[page] ?? page.standard }
+
     var captureStart: CaptureStart {
         didSet { HeftDefaults.shared.set(captureStart.rawValue, forKey: Self.captureStartKey) }
     }
@@ -91,6 +139,7 @@ final class BrowsingPreferences {
     private static let startKey = "dev.stenglein.Heft.iOS.start"
     private static let panelShownKey = "dev.stenglein.Heft.iOS.notePanelShown"
     private static let panelKey = "dev.stenglein.Heft.iOS.notePanel"
+    private static func pullKey(_ page: PullPage) -> String { "dev.stenglein.Heft.iOS.pull.\(page.rawValue)" }
     private static let captureStartKey = "dev.stenglein.Heft.iOS.captureStart"
     private static let searchKeyboardKey = "dev.stenglein.Heft.iOS.searchShowsKeyboard"
 
@@ -101,6 +150,9 @@ final class BrowsingPreferences {
         start = Start(rawValue: defaults.string(forKey: Self.startKey) ?? "") ?? .recent
         showsNotePanel = defaults.bool(forKey: Self.panelShownKey)
         notePanel = NotePanel(rawValue: defaults.string(forKey: Self.panelKey) ?? "") ?? .outline
+        pulls = Dictionary(uniqueKeysWithValues: PullPage.allCases.map {
+            ($0, defaults.string(forKey: Self.pullKey($0)) ?? $0.standard)
+        })
         captureStart = CaptureStart(rawValue: defaults.string(forKey: Self.captureStartKey) ?? "") ?? .lastUsed
         searchShowsKeyboard = defaults.object(forKey: Self.searchKeyboardKey) as? Bool ?? false
     }

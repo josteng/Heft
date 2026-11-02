@@ -316,6 +316,16 @@ final class MobileVault {
         return status != .current
     }
 
+    /// A rescan, awaited: for the refresh control, whose spinner stays
+    /// until the vault has been read again. A wait of a few seconds at most,
+    /// so a vault still downloading from iCloud does not hold it open.
+    func refreshed() async {
+        refresh()
+        for _ in 0..<100 where isScanning {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
     /// Not while a scan is running: at launch the app becomes active just
     /// after `init` has started one, and a second full scan of a cold vault
     /// doubled the wait for the first list.

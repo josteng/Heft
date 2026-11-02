@@ -25,6 +25,11 @@ struct FolderView: View {
                 // A folder's list has no section heading, as Recent's "Today",
                 // and began right under the large title.
                 .contentMargins(.top, 26, for: .scrollContent)
+                // In a folder, a new note or folder is made in it.
+                .pullDownAction(.files, overrides: [
+                    "newNote": { creating = NewNoteRequest(folder: path) },
+                    "newFolder": { creating = NewNoteRequest(folder: path, makesFolder: true) },
+                ])
                 .overlay {
                     if folder.children.isEmpty, !vault.isScanning {
                         ContentUnavailableView("Empty Folder", systemImage: "folder")
@@ -39,7 +44,6 @@ struct FolderView: View {
         .safeAreaInset(edge: .bottom) { if path.isEmpty { ScanStatus() } }
         .navigationTitle(path.isEmpty ? vault.name : (path as NSString).lastPathComponent)
         .toolbarRole(.browser)
-        .refreshable { vault.refresh() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: path) }

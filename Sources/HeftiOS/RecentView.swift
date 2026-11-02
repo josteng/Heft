@@ -17,6 +17,7 @@ struct RecentView: View {
             List {
                 RecentSections { action = $0 }
             }
+            .pullDownAction(.recent)
             #if DEBUG
             // Scrolled to a note at launch, to see the bar as it is mid-list.
             .task {
@@ -40,7 +41,6 @@ struct RecentView: View {
         // The browser role sets the bar's title on the left, so scrolled it
         // stays there rather than shrinking into the middle by the buttons.
         .toolbarRole(.browser)
-        .refreshable { vault.refresh() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NewNoteButton { creating = NewNoteRequest(folder: vault.newNoteFolder) }
