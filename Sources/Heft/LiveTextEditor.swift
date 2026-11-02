@@ -2646,17 +2646,17 @@ final class HeftTextKit2View: NSTextView {
     ///
     /// `NSTextView` decides the cursor itself as the pointer moves, and it
     /// wins: cursor rectangles do not override it, and neither does setting
-    /// `NSCursor` from anywhere it runs after. So the only place to answer is
-    /// after its own `mouseMoved`, which is what this is.
+    /// `NSCursor` from anywhere it runs after. So the answer is given here, in
+    /// its own `mouseMoved`: over a box instead of it, elsewhere by it.
     ///
     /// **Stateless, and that is the whole design.** An earlier version
     /// remembered whether the pointer was over a box and only acted on a
     /// change, writing `NSScrollView.documentCursor`. Mouse-moved events stop
     /// arriving during a click's tracking loop, so the remembered state was
     /// stranded and the hand stayed up over the entire note. Here every move
-    /// is answered from scratch, and `super` has already reset the cursor —
-    /// to the I-beam, or to the hand over a link — before this looks. Nothing
-    /// persists, so nothing can be left behind.
+    /// is answered from scratch: over a box with the hand, elsewhere by
+    /// `super` — the I-beam, or the hand over a link. Nothing persists, so
+    /// nothing can be left behind.
     ///
     /// It deliberately does **not** force the I-beam when the pointer is
     /// elsewhere: that is `super`'s answer to give, and overriding it would
@@ -2669,11 +2669,19 @@ final class HeftTextKit2View: NSTextView {
             NSCursor.arrow.set()
             return
         }
-        super.mouseMoved(with: event)
         let rects = pointerRects()
         let cursor = cursorOverride(at: point, among: rects)
-        cursor?.set()
         Self.traceCursor(point: point, rects: rects, over: cursor == .pointingHand)
+        // Over a box `super` is not asked at all: it put the I-beam up and
+        // this put the hand up after it, on every move, and each `set`
+        // reaches the screen at once, so a slow move near a box's edge
+        // showed the I-beam between them. Where nothing of Heft's own is
+        // under the pointer, `super` answers as before.
+        if let cursor {
+            cursor.set()
+        } else {
+            super.mouseMoved(with: event)
+        }
     }
 
     /// The other way AppKit sets the cursor, on crossing a tracking area's
@@ -2687,8 +2695,25 @@ final class HeftTextKit2View: NSTextView {
             NSCursor.arrow.set()
             return
         }
-        super.cursorUpdate(with: event)
-        if isOverFormatBar(point) { NSCursor.arrow.set() }
+        // Answered as a move is, and for the same reason without `super`
+        // over a box: it put the I-beam up there too, and the hand waited for
+        // the next move, a flicker under a still pointer.
+        if let cursor = cursorOverride(at: point, among: pointerRects()) {
+            cursor.set()
+        } else {
+            super.cursorUpdate(with: event)
+        }
+    }
+
+    /// The pointer's shape where it rests now, answered as `mouseMoved`
+    /// answers it. AppKit puts the I-beam back without a move, after a
+    /// click ticks a box and the note restyles, and the hand then waited
+    /// for the next move: a flicker over a box the pointer never left.
+    func refreshCursor() {
+        guard let window, window.isKeyWindow else { return }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard visibleRect.contains(point) else { return }
+        cursorOverride(at: point, among: pointerRects())?.set()
     }
 
     /// The completion menu is a subview too, and is a menu: the arrow, not
@@ -2808,8 +2833,15 @@ final class HeftTextKit2View: NSTextView {
     /// invalidate AppKit's cursor rectangles as well, which asked for a
     /// rebuild on every scroll notification for a mechanism that never won.
     func invalidatePointerRects() {
+        // Only a pointer that was on a target can have had its hand taken
+        // away; elsewhere the I-beam is right, and working the targets out
+        // again on every keystroke would cost the typing.
+        let wasOnTarget = heldPointerRect != nil
         cachedPointerRects = nil
         heldPointerRect = nil
+        if wasOnTarget {
+            DispatchQueue.main.async { [weak self] in self?.refreshCursor() }
+        }
     }
 
     override func mouseDown(with event: NSEvent) {

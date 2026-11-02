@@ -527,6 +527,24 @@ struct PointerCursorTests {
         #expect(view.hiddenMarkupPrefix(at: CGPoint(x: 30, y: y)) == nil)
     }
 
+
+    /// AppKit sets the cursor without a move too, through `cursorUpdate`, and
+    /// `NSTextView` answers that with the I-beam everywhere. Over a box the
+    /// hand then waited for the next move, and the pointer flickered.
+    @Test("A cursor update over a box puts the hand up")
+    func cursorUpdateKeepsTheHand() throws {
+        let view = editor("- [ ] one\n- [x] two\n")
+        for target in view.checkboxTargets() {
+            let centre = CGPoint(x: target.rect.midX, y: target.rect.midY)
+            let event = try #require(NSEvent.enterExitEvent(
+                with: .cursorUpdate, location: view.convert(centre, to: nil), modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+            ))
+            NSCursor.iBeam.set()
+            view.cursorUpdate(with: event)
+            #expect(NSCursor.current == .pointingHand)
+        }
+    }
 }
 
 /// A table's line is as tall as its grid and the inset every block gets, and
