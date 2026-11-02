@@ -679,6 +679,21 @@ struct PDFExportTests {
         // it is that they are invisible.
     }
 
+    /// AppKit draws a link in its own blue, underlined, over whatever the
+    /// styler coloured it, unless the view is told not to: the Appearance
+    /// preview showed every link that way, whatever link colour was chosen.
+    @Test("The on-screen preview draws links in the styler's colour")
+    func previewLinksKeepTheirColour() {
+        let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
+        let preview = PDFExport.renderView(
+            text: AppearancePreview.sample, context: context, width: 420,
+            onScreen: NSAppearance(named: .darkAqua)
+        )
+        #expect(preview.linkTextAttributes?.isEmpty == true)
+        let page = PDFExport.renderView(text: AppearancePreview.sample, context: context, width: 420)
+        #expect(page.linkTextAttributes?.isEmpty != true, "a PDF keeps its links as before")
+    }
+
     /// The two ways the export used to come out wrong, asserted where they are
     /// actually observable: on the view the PDF is printed from.
     @Test("The exported page is laid out inside the paper, with markup hidden")

@@ -12,14 +12,13 @@ struct AppearancePreview: NSViewRepresentable {
     @ObservedObject var appearance: AppearanceSettings
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Invented content, and a web link rather than a wikilink: with no vault
-    /// to resolve against, a wikilink would draw as a broken one.
+    /// Invented content, the iOS app's preview line for line, so the two
+    /// Settings show one sample. A web link rather than a wikilink: with no
+    /// vault to resolve against, a wikilink would draw as a broken one.
     static let sample = """
         # Weekend plans
-        Buy **fresh bread** and *maybe flowers* at the [market](https://example.com).
-        - [ ] Water the garden #home
-        ## Later
-        Check `todo.md` before leaving.
+        Buy **fresh bread** and *maybe flowers*.
+        See [Garden](https://example.com), #home and `todo.md`.
         """
 
     func makeNSView(context: Context) -> PreviewHost { PreviewHost() }

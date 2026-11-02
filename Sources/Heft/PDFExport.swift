@@ -287,6 +287,11 @@ enum PDFExport {
         view.isRichText = false
         view.drawsBackground = onScreen == nil
         view.backgroundColor = .white
+        // On screen the styler's own link colour, as the editor shows it:
+        // left at AppKit's default, the Appearance preview drew every link
+        // blue and underlined whatever colour was chosen. A PDF keeps its
+        // links as it always has.
+        if onScreen != nil { view.linkTextAttributes = [:] }
         // The frame is the printable width; the view's own `setFrameSize`
         // then puts a `viewInset` gutter on each side and the container tracks
         // what is left. Sizing the container by hand here would be overwritten
