@@ -440,28 +440,32 @@ private struct BrowsingSettingsView: View {
                 Text("What Heft shows when it opens. On an iPad it chooses the sidebar's list, "
                     + "or opens today's note beside it.")
             }
-            Section {
-                ForEach(BrowsingPreferences.PullPage.allCases) { page in
-                    Picker(page.title, selection: Binding(
-                        get: { preferences.pull(on: page) },
-                        set: { preferences.pulls[page] = $0 }
-                    )) {
-                        Text("Nothing").tag(BrowsingPreferences.PullChoice.off)
-                        // Not on Search itself, where it is already.
-                        if page != .search {
-                            Text("Search").tag(BrowsingPreferences.PullChoice.search)
-                        }
-                        Divider()
-                        ForEach(MobileCommand.catalog.filter { $0.id != page.ownCommand }, id: \.id) { command in
-                            Label(command.title, systemImage: command.symbol).tag(command.id)
+            // Not on an iPad, whose sidebar lists have no pull: offered there,
+            // the setting changed nothing anyone could see.
+            if UIDevice.current.userInterfaceIdiom != .pad {
+                Section {
+                    ForEach(BrowsingPreferences.PullPage.allCases) { page in
+                        Picker(page.title, selection: Binding(
+                            get: { preferences.pull(on: page) },
+                            set: { preferences.pulls[page] = $0 }
+                        )) {
+                            Text("Nothing").tag(BrowsingPreferences.PullChoice.off)
+                            // Not on Search itself, where it is already.
+                            if page != .search {
+                                Text("Search").tag(BrowsingPreferences.PullChoice.search)
+                            }
+                            Divider()
+                            ForEach(MobileCommand.catalog.filter { $0.id != page.ownCommand }, id: \.id) { command in
+                                Label(command.title, systemImage: command.symbol).tag(command.id)
+                            }
                         }
                     }
+                } header: {
+                    Text("Pull Down")
+                } footer: {
+                    Text("What pulling a list down past its top does. Refresh is also in the … menu. "
+                        + "In a folder, New Note and New Folder make it in that folder.")
                 }
-            } header: {
-                Text("Pull Down")
-            } footer: {
-                Text("What pulling a list down past its top does. Refresh is also in the … menu. "
-                    + "In a folder, New Note and New Folder make it in that folder.")
             }
             Section {
                 Picker("Ordered By", selection: $preferences.recentOrder) {
