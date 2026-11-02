@@ -180,13 +180,23 @@ struct LiveNoteEditor: UIViewRepresentable {
                 textView.selectedRange = NSRange(location: min(caret, (textView.text as NSString).length),
                                                  length: length)
                 // As the keyboard does: the delegate is asked first, which is
-                // where Return continues a list.
-                for character in environment["HEFT_IOS_TYPE"] ?? "" {
-                    let typed = character == "⏎" ? "\n" : String(character)
-                    if self.textView(textView, shouldChangeTextIn: textView.selectedRange,
-                                     replacementText: typed) {
-                        textView.insertText(typed)
+                // where Return continues a list. `HEFT_IOS_TYPE_AFTER=<s>`
+                // types once the keyboard has been up that long, as a reader
+                // does: a keyboard shown after the typing works its state out
+                // afresh, and hid a capital it would not have offered.
+                let type = {
+                    for character in environment["HEFT_IOS_TYPE"] ?? "" {
+                        let typed = character == "⏎" ? "\n" : String(character)
+                        if self.textView(textView, shouldChangeTextIn: textView.selectedRange,
+                                         replacementText: typed) {
+                            textView.insertText(typed)
+                        }
                     }
+                }
+                if let after = environment["HEFT_IOS_TYPE_AFTER"].flatMap(Double.init) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + after, execute: type)
+                } else {
+                    type()
                 }
                 // In one go, as a paste arrives.
                 if let pasted = environment["HEFT_IOS_PASTE"],
@@ -480,16 +490,47 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// stops it "correcting" a URL or a tag being typed, on again
         /// outside. Changed only on the way in or out, since applying it
         /// reloads the keyboard.
+        ///
+        /// Capitalizing works the same way. The keyboard starts a sentence at
+        /// a line's start but not after `- `, which reads to it as the middle
+        /// of one, and it misses a line the editor began itself, as Return
+        /// in a list does. Where a line's or an item's text starts it
+        /// capitalizes each word instead, which there means the first, and
+        /// the reload brings it up to date. A tokenizer that called the spot a
+        /// sentence's start was tried: UIKit's own selection depends on the
+        /// text view's tokenizer, and setting a caret stopped working.
         private func updateTextChecking() {
-            guard let textView, textView.isFirstResponder else { return }
+            // Not mid-composition: an input method's text is the keyboard's
+            // own until it commits.
+            guard let textView, textView.isFirstResponder, textView.markedTextRange == nil else { return }
             let caret = textView.selectedRange.location
             let probe = NSRange(location: max(0, caret - 1), length: caret > 0 ? 1 : 0)
             let inside = probe.length > 0 && SpellCheckScope.excludes(probe, in: spellExclusions)
-            guard inside != checkingOff else { return }
+            let itemStart = textView.selectedRange.length == 0 && Self.startsText(at: caret, in: textView.text)
+            guard inside != checkingOff || itemStart != atItemStart else { return }
             checkingOff = inside
+            atItemStart = itemStart
             textView.autocorrectionType = inside ? .no : .default
             textView.spellCheckingType = inside ? .no : .default
+            textView.autocapitalizationType = itemStart ? .words : .sentences
             textView.reloadInputViews()
+            // A keyboard already up keeps its shift and its view of the
+            // text through a reload, and missed a line the editor began
+            // itself: told the text changed, it reads both again.
+            textView.inputDelegate?.textWillChange(textView)
+            textView.inputDelegate?.textDidChange(textView)
+        }
+
+        private var atItemStart = false
+
+        /// Whether the caret is where a line's or a list item's text starts.
+        private static func startsText(at caret: Int, in text: String) -> Bool {
+            let text = text as NSString
+            guard caret <= text.length else { return false }
+            let line = text.lineRange(for: NSRange(location: caret, length: 0))
+            let start = min(line.location, caret)
+            let before = text.substring(with: NSRange(location: start, length: caret - start))
+            return before.isEmpty || ListContinuation.startsItem(before)
         }
 
         private func restyleSoon() {

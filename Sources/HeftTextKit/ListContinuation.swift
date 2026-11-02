@@ -38,6 +38,15 @@ enum ListContinuation {
         return (quote, false)
     }
 
+    /// Whether `beforeCaret`, a line up to the caret, is a list, task or
+    /// quote marker and nothing more: where an item's text starts, which
+    /// the iOS keyboard is told is a sentence's start, as a line's is.
+    static func startsItem(_ beforeCaret: String) -> Bool {
+        guard let marker = markdownContinuation(of: beforeCaret)?.marker else { return false }
+        // By length: a checked box comes back unchecked, `[x]` as `[ ]`.
+        return marker.count == beforeCaret.count
+    }
+
     /// Marker for the following list item. Bullets and tasks repeat, while an
     /// ordered marker advances and retains its indentation, delimiter and
     /// whitespace (`9. ` becomes `10. ` and `9) ` becomes `10) `).

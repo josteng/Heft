@@ -149,6 +149,16 @@ struct ListContinuationTests {
         (source as NSString).range(of: line).location
     }
 
+    @Test("An item's text starts right after its marker, and nowhere else")
+    func itemStart() {
+        for start in ["- ", "* ", "  - ", "\t- ", "- [ ] ", "- [x] ", "3. ", "> ", "> - "] {
+            #expect(ListContinuation.startsItem(start), "\(start.debugDescription)")
+        }
+        for not in ["", "-", "- a", "- [ ] a", "3.", "plain ", "> quoted "] {
+            #expect(!ListContinuation.startsItem(not), "\(not.debugDescription)")
+        }
+    }
+
     @Test("The second half of a hard-wrapped bullet keeps the bullet's indent")
     func continuationKeepsTheIndent() {
         // A paragraph style applies to a paragraph, and the hard break starts
