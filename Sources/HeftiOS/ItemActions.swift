@@ -15,6 +15,8 @@ struct ItemRef: Hashable {
 
 enum ItemAction: Identifiable {
     case rename(ItemRef), move(ItemRef), delete(ItemRef), duplicate(ItemRef)
+    /// A delete already confirmed, by a row that asked beside itself.
+    case deleteConfirmed(ItemRef)
     /// A new note, or folder, in `folder`: the menu's New Note Here.
     case create(inFolder: String, folder: Bool)
 
@@ -24,13 +26,15 @@ enum ItemAction: Identifiable {
         case .move(let item): "move:" + item.path
         case .delete(let item): "delete:" + item.path
         case .duplicate(let item): "duplicate:" + item.path
+        case .deleteConfirmed(let item): "deleteConfirmed:" + item.path
         case .create(let folder, let makesFolder): "create:\(makesFolder):" + folder
         }
     }
 
     var item: ItemRef {
         switch self {
-        case .rename(let item), .move(let item), .delete(let item), .duplicate(let item): item
+        case .rename(let item), .move(let item), .delete(let item), .duplicate(let item),
+             .deleteConfirmed(let item): item
         case .create(let folder, _): ItemRef(path: folder, isFolder: true)
         }
     }
@@ -68,16 +72,59 @@ private struct ItemRowActions: ViewModifier {
     let item: ItemRef
     let perform: (ItemAction) -> Void
     @Environment(MobileVault.self) private var vault
+    @State private var confirmingDelete = false
 
     func body(content: Content) -> some View {
         content
-            .contextMenu { ItemMenu(item: item, perform: perform) }
+            .contextMenu { ItemMenu(item: item, perform: row) }
             .swipeActions(edge: .trailing) {
                 // Not the destructive role: that removes the row before the
                 // confirmation has been answered.
-                Button("Delete", systemImage: "trash") { perform(.delete(item)) }
+                Button("Delete", systemImage: "trash") { row(.delete(item)) }
                     .tint(.red)
             }
+            // Asked here, on the row: iOS points a confirmation at the view
+            // it is attached to, and asked by the list's host it pointed at
+            // the middle of the list rather than the note being deleted. On
+            // a neutral carrier, so its button is not in the list's accent.
+            .background {
+                Color.clear
+                    .confirmationDialog(ItemDeleteQuestion.title(item), isPresented: $confirmingDelete,
+                                        titleVisibility: .visible) {
+                        Button("Delete", role: .destructive) { perform(.deleteConfirmed(item)) }
+                    } message: {
+                        Text(ItemDeleteQuestion.message(item, in: vault))
+                    }
+                    .tint(.primary)
+            }
+            #if DEBUG
+            // `HEFT_IOS_ROW_DELETE=<path>` asks that row's delete question,
+            // as its swipe does.
+            .task {
+                guard ProcessInfo.processInfo.environment["HEFT_IOS_ROW_DELETE"] == item.path else { return }
+                try? await Task.sleep(for: .seconds(1.5))
+                confirmingDelete = true
+            }
+            #endif
+    }
+
+    /// The row's own menu and swipe, with a delete asked about beside it.
+    private func row(_ action: ItemAction) {
+        if case .delete = action { confirmingDelete = true } else { perform(action) }
+    }
+}
+
+/// What a delete asks, by a row or by the screen a note is open in.
+enum ItemDeleteQuestion {
+    static func title(_ item: ItemRef) -> String { "Delete “\(item.name)”?" }
+
+    @MainActor
+    static func message(_ item: ItemRef, in vault: MobileVault) -> String {
+        if item.isFolder { return "Everything in it goes to the Trash too." }
+        let links = vault.index.backlinks(to: item.path).count
+        return links == 0
+            ? "It goes to the Trash."
+            : "It goes to the Trash. \(links) link\(links == 1 ? "" : "s") to it will no longer find it."
     }
 }
 
@@ -228,7 +275,7 @@ private struct ItemActionHost: ViewModifier {
                 current = action
                 switch action {
                 case .rename(let item): newName = item.name
-                case .duplicate: run(action)
+                case .duplicate, .deleteConfirmed: run(action)
                 #if DEBUG
                 case .delete where ProcessInfo.processInfo.environment["HEFT_IOS_NOTE_ACTION"] == "delete":
                     // The dialog's Delete, tapped for the launch hook. A
@@ -260,16 +307,12 @@ private struct ItemActionHost: ViewModifier {
     }
 
     private var deleteTitle: String {
-        "Delete “\(action?.item.name ?? "")”?"
+        action.map { ItemDeleteQuestion.title($0.item) } ?? ""
     }
 
     private var deleteMessage: String {
         guard let item = (action ?? current)?.item else { return "" }
-        if item.isFolder { return "Everything in it goes to the Trash too." }
-        let links = vault.index.backlinks(to: item.path).count
-        return links == 0
-            ? "It goes to the Trash."
-            : "It goes to the Trash. \(links) link\(links == 1 ? "" : "s") to it will no longer find it."
+        return ItemDeleteQuestion.message(item, in: vault)
     }
 
     private func run(_ action: ItemAction, into folder: String? = nil) {
@@ -282,7 +325,7 @@ private struct ItemActionHost: ViewModifier {
                     done(.moved(to: try vault.rename(item.path, to: name)))
                 case .move(let item):
                     done(.moved(to: try vault.move(item.path, into: folder ?? "")))
-                case .delete(let item):
+                case .delete(let item), .deleteConfirmed(let item):
                     try vault.delete(item.path)
                     done(.deleted)
                 case .duplicate(let item):
