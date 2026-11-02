@@ -520,8 +520,12 @@ struct NoteContent: View {
                 .ignoresSafeArea(.keyboard, edges: .bottom)
                 // Under the top bar too, which the text view insets itself
                 // from, so the note scrolls on behind the bar's glass rather
-                // than ending at its lower edge.
-                .ignoresSafeArea(.container, edges: underTopBar ? .top : [])
+                // than ending at its lower edge. And to the screen's foot:
+                // held above the home indicator, the note ended a band short
+                // of the bottom with nothing below it; the text view pads its
+                // scrolling by that band instead, so the last line still
+                // clears it.
+                .ignoresSafeArea(.container, edges: underTopBar ? [.top, .bottom] : .bottom)
                 .overlay(alignment: .top) {
                     if document.conflict { conflictBanner }
                 }
