@@ -17,13 +17,21 @@ final class CalendarSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(marksMissingToday, forKey: Self.missingTodayKey) }
     }
 
+    /// Whether the calendar shows one week rather than the month: the
+    /// sidebar's room back for the notes, with this week still in reach.
+    @Published var showsWeekOnly: Bool {
+        didSet { HeftDefaults.shared.set(showsWeekOnly, forKey: Self.weekOnlyKey) }
+    }
+
     private static let firstWeekdayKey = "dev.stenglein.Heft.calendar.firstWeekday"
+    private static let weekOnlyKey = "dev.stenglein.Heft.calendar.showsWeekOnly"
     private static let missingTodayKey = "dev.stenglein.Heft.calendar.marksMissingToday"
 
     private init() {
         let stored = HeftDefaults.shared.string(forKey: Self.firstWeekdayKey)
         firstWeekday = stored.flatMap(FirstWeekday.init(rawValue:)) ?? .system
         marksMissingToday = HeftDefaults.shared.object(forKey: Self.missingTodayKey) as? Bool ?? true
+        showsWeekOnly = HeftDefaults.shared.bool(forKey: Self.weekOnlyKey)
     }
 
     /// The calendar the month grid is laid out with.

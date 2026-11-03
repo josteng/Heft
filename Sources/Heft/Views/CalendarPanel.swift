@@ -24,15 +24,37 @@ struct CalendarPanel: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+        // Sideways turns the week or the month, as on the iPad, from a
+        // trackpad or a mouse that scrolls sideways; up and down on a
+        // trackpad open the month and fold it to its week.
+        .background(CalendarSwipes(page: page, open: { setWeekOnly(!$0) }))
     }
+
+    private var weekOnly: Bool { settings.showsWeekOnly }
 
     private var header: some View {
         HStack(spacing: 5) {
-            Text(MomentFormat.format(model.calendarMonth, pattern: "MMMM YYYY"))
-                .font(.system(size: 12, weight: .semibold))
-                .contentTransition(.numericText())
-                .lineLimit(1)
-                .padding(.leading, 6)
+            // The title folds the month to its week and opens it again, as
+            // on the iPad, with a disclosure chevron to say so: a pointer
+            // has no swipe to stumble on it by.
+            Button { setWeekOnly(!weekOnly) } label: {
+                HStack(spacing: 6) {
+                    Text(MomentFormat.format(model.calendarMonth, pattern: "MMMM YYYY"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                    // The paging arrows' size and ink, so the header holds
+                    // one kind of chevron rather than a small faint one.
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(weekOnly ? 0 : 90))
+                        .frame(width: 12)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(weekOnly ? "Show the whole month" : "Show only this week")
+            .padding(.leading, 6)
 
             if calendarWarning != nil {
                 Button { isWarningPresented.toggle() } label: {
@@ -73,20 +95,20 @@ struct CalendarPanel: View {
             // glyphs on the panel's own fill read as label text rather than as
             // something to click, and gave no sign of what the pointer had hit.
             HStack(spacing: 2) {
-                NavButton(help: "Previous month", action: { shiftMonth(-1) }) {
+                NavButton(help: weekOnly ? "Previous week" : "Previous month", action: { page(-1) }) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 10, weight: .semibold))
                         .frame(width: 18, height: 18)
                 }
 
-                NavButton(help: "Jump to this month", action: goToCurrentMonth) {
+                NavButton(help: weekOnly ? "Jump to this week" : "Jump to this month", action: goToCurrentMonth) {
                     Text("Today")
                         .font(.system(size: 10, weight: .semibold))
                         .frame(height: 18)
                         .padding(.horizontal, 6)
                 }
 
-                NavButton(help: "Next month", action: { shiftMonth(1) }) {
+                NavButton(help: weekOnly ? "Next week" : "Next month", action: { page(1) }) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .frame(width: 18, height: 18)
@@ -200,13 +222,21 @@ struct CalendarPanel: View {
         var id: Date { date }
     }
 
-    /// Always six weeks.
+    /// Always six weeks, or the one week holding `calendarMonth` while the
+    /// calendar shows a week only, every day of it drawn in full.
     ///
     /// Padding with blanks made the panel change height between a month that
     /// needs five rows and one that needs six, which moved the whole sidebar.
     /// Filling the edges with the neighbouring months' days instead, dimmed,
     /// keeps the height fixed and is what Obsidian and Calendar.app do.
     private var days: [CalendarDay] {
+        if weekOnly {
+            guard let week = calendar.dateInterval(of: .weekOfYear, for: model.calendarMonth) else { return [] }
+            return (0..<7).compactMap { offset in
+                calendar.date(byAdding: .day, value: offset, to: week.start)
+                    .map { CalendarDay(date: $0, isInMonth: true) }
+            }
+        }
         guard let interval = calendar.dateInterval(of: .month, for: model.calendarMonth) else { return [] }
         let first = interval.start
         let leading = WeekLayout.leadingDays(
@@ -254,9 +284,121 @@ struct CalendarPanel: View {
         return daily.relativePath(for: date).lowercased() == current.relativePath.lowercased()
     }
 
-    private func shiftMonth(_ delta: Int) {
-        guard let shifted = calendar.date(byAdding: .month, value: delta, to: model.calendarMonth) else { return }
+    /// A week back or on while only a week shows, a month otherwise.
+    private func page(_ delta: Int) {
+        guard let shifted = calendar.date(
+            byAdding: weekOnly ? .weekOfYear : .month, value: delta, to: model.calendarMonth
+        ) else { return }
         withAnimation(.snappy(duration: 0.18)) { model.calendarMonth = shifted }
+    }
+
+    /// Folding to a week lands on this week when this month is showing, so
+    /// the row that stays is today's rather than the month's first.
+    private func setWeekOnly(_ folded: Bool) {
+        guard folded != weekOnly else { return }
+        withAnimation(.snappy(duration: 0.2)) {
+            if folded, calendar.isDate(model.calendarMonth, equalTo: Date(), toGranularity: .month) {
+                model.calendarMonth = Date()
+            }
+            settings.showsWeekOnly = folded
+        }
+    }
+}
+
+/// Swipes over the calendar, read from its own scroll events.
+///
+/// SwiftUI has no scroll-wheel modifier on the Mac, so a local monitor takes
+/// the scroll events that land inside this view's frame. Each gesture acts
+/// once, past a threshold, and momentum after the fingers lift is ignored, so
+/// one swipe is one page. Directions follow the reader's scroll setting the
+/// way a scroll view does: what would scroll content to the right turns to
+/// the next page. A mouse wheel's up and down are left alone, as one tick
+/// too many would fold the month; its sideways scroll still pages.
+private struct CalendarSwipes: NSViewRepresentable {
+    let page: (Int) -> Void
+    /// True to open the month, false to fold it to its week.
+    let open: (Bool) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.view = view
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.page = page
+        context.coordinator.open = open
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) { coordinator.stop() }
+
+    func makeCoordinator() -> Coordinator { Coordinator(page: page, open: open) }
+
+    @MainActor
+    final class Coordinator {
+        weak var view: NSView?
+        var page: (Int) -> Void
+        var open: (Bool) -> Void
+        private var monitor: Any?
+        private var moved = CGSize.zero
+        private var acted = false
+        /// When a phaseless sideways scroll last paged, so a mouse's burst of
+        /// events turns one page rather than several.
+        private var lastWheelPage = Date.distantPast
+
+        private static let threshold: CGFloat = 30
+
+        init(page: @escaping (Int) -> Void, open: @escaping (Bool) -> Void) {
+            self.page = page
+            self.open = open
+        }
+
+        func start() {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, self.handle(event) else { return event }
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        /// True when the event was a swipe over the calendar and is used up.
+        private func handle(_ event: NSEvent) -> Bool {
+            guard let view, let window = view.window, event.window === window,
+                  view.bounds.contains(view.convert(event.locationInWindow, from: nil))
+            else { return false }
+            guard event.momentumPhase.isEmpty else { return true }
+            if event.phase.isEmpty {
+                // A mouse: only its sideways scroll pages.
+                guard abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY),
+                      abs(event.scrollingDeltaX) > 1,
+                      Date().timeIntervalSince(lastWheelPage) > 0.4
+                else { return false }
+                lastWheelPage = Date()
+                page(event.scrollingDeltaX < 0 ? 1 : -1)
+                return true
+            }
+            if event.phase.contains(.began) {
+                moved = .zero
+                acted = false
+            }
+            moved.width += event.scrollingDeltaX
+            moved.height += event.scrollingDeltaY
+            if !acted {
+                if abs(moved.width) > abs(moved.height), abs(moved.width) > Self.threshold {
+                    acted = true
+                    page(moved.width < 0 ? 1 : -1)
+                } else if abs(moved.height) > abs(moved.width), abs(moved.height) > Self.threshold {
+                    acted = true
+                    open(moved.height < 0)
+                }
+            }
+            return true
+        }
     }
 }
 
