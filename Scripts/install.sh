@@ -36,14 +36,29 @@ TARGET="$DESTINATION/Heft.app"
 BUILT_APP="$ROOT/.build/XcodeDerivedData/Build/Products/Release/Heft.app"
 
 # A running copy holds its bundle open, and replacing it underneath leaves the
-# process on a half-deleted app.
-if pgrep -x Heft >/dev/null; then
+# process on a half-deleted app. The installed copy by its path: asked by
+# name, AppleScript quit whichever app called Heft it found first, a test
+# build beside it, and the reader's copy kept running the old code, which the
+# launch below then only brought forward.
+INSTALLED_BINARY="$TARGET/Contents/MacOS/Heft"
+installed_running() { pgrep -f -x "$INSTALLED_BINARY.*" >/dev/null; }
+if installed_running; then
     echo "Quitting the running copy…"
-    osascript -e 'tell application "Heft" to quit' >/dev/null 2>&1 || pkill -x Heft || true
+    BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$TARGET/Contents/Info.plist" 2>/dev/null || echo dev.stenglein.Heft)
+    osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
     for _ in $(seq 1 20); do
-        pgrep -x Heft >/dev/null || break
+        installed_running || break
         sleep 0.25
     done
+    # Asked by bundle identifier, a debug build sharing it can still be the
+    # one that answers.
+    if installed_running; then
+        pkill -f -x "$INSTALLED_BINARY.*" || true
+        for _ in $(seq 1 20); do
+            installed_running || break
+            sleep 0.25
+        done
+    fi
 fi
 
 # And the capture extension, which the app does not own. `pluginkit` keeps it
