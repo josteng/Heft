@@ -655,7 +655,13 @@ struct EditorPane: View {
         // window that is never made key and so takes no ⌘F. After the note
         // has loaded, whose arrival closes the find bar.
         .task {
-            guard ProcessInfo.processInfo.environment["HEFT_SHOW_FIND"] == "1" else { return }
+            let environment = ProcessInfo.processInfo.environment
+            // `HEFT_SHOW_SETTINGS=<pane>` opens Settings on that pane, as
+            // unfocused as the window.
+            if let raw = environment["HEFT_SHOW_SETTINGS"], let pane = SettingsPane(rawValue: raw) {
+                model.showSettingsForCapture(pane)
+            }
+            guard environment["HEFT_SHOW_FIND"] == "1" else { return }
             try? await Task.sleep(for: .seconds(1.5))
             model.showFind()
         }

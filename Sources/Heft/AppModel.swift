@@ -648,6 +648,13 @@ final class AppModel: ObservableObject, ProposalReviewing {
         navigationIndex >= 0 && navigationIndex + 1 < navigationHistory.count
     }
 
+    #if DEBUG
+    /// Settings on a pane, without activating the app; see `showForCapture`.
+    func showSettingsForCapture(_ pane: SettingsPane) {
+        SettingsWindowController.shared.showForCapture(registry, pane: pane)
+    }
+    #endif
+
     func showFind() {
         isFindPresented = true
         findFocusGeneration += 1

@@ -579,7 +579,10 @@ struct AppearanceSettingsView: View {
         let chosen = appearance.swatches[slot]
         let isCustom = appearance[keyPath: custom] != nil
         LabeledContent {
-            HStack(spacing: 6) {
+            // 5 apart, not 6: with the well at its real width, 6 pushed the
+            // row past the width that keeps Link Color's controls beside
+            // its label rather than under it.
+            HStack(spacing: 5) {
                 if let defaultChip {
                     SwatchChip(
                         color: defaultChip.color,
@@ -613,7 +616,10 @@ struct AppearanceSettingsView: View {
                     supportsOpacity: false
                 )
                 .labelsHidden()
-                .frame(width: 36, height: 22)
+                // Its own size rather than a frame: macOS 27 draws the well
+                // as a wider capsule, which spilled past a 36pt frame onto
+                // Reset, since a frame does not clip a control.
+                .fixedSize()
                 .overlay(alignment: .bottom) {
                     if isCustom {
                         Text("Custom").font(.system(size: 8)).foregroundStyle(.secondary).offset(y: 10)
@@ -621,6 +627,7 @@ struct AppearanceSettingsView: View {
                 }
                 .help("Custom: exactly this color, whatever Colors says")
                 .padding(.leading, 4)
+                .padding(.trailing, 2)
                 Button("Reset") {
                     appearance[keyPath: custom] = nil
                     appearance.swatches[slot] = nil
@@ -779,12 +786,15 @@ private struct SwatchChip: View {
 
     var body: some View {
         Button(action: choose) {
+            // Ringed in its own colour with a clear gap, as System Settings
+            // marks the accent: a thin grey ring hard against the dot read
+            // as one blurred circle at this size, chosen or not.
             Circle()
                 .fill(Color(nsColor: color))
                 .frame(width: 14, height: 14)
                 .overlay(Circle().strokeBorder(.primary.opacity(0.15), lineWidth: 0.5))
-                .padding(2.5)
-                .overlay(Circle().strokeBorder(isChosen ? Color.primary.opacity(0.7) : .clear, lineWidth: 1.5))
+                .padding(3)
+                .overlay(Circle().strokeBorder(isChosen ? Color(nsColor: color) : .clear, lineWidth: 2))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

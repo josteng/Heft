@@ -68,6 +68,19 @@ final class SettingsWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
         tabs.clearInitialFocus()
     }
+
+    #if DEBUG
+    /// Opens on a pane without making the app active, for a screenshot
+    /// taken while someone else's app is in front: `show` activates, and
+    /// pulled the reader's typing into the test copy.
+    func showForCapture(_ registry: VaultRegistry, pane: SettingsPane) {
+        tabs.install(registry: registry)
+        if let index = SettingsPane.allCases.firstIndex(of: pane) {
+            tabs.selectedTabViewItemIndex = index
+        }
+        window?.orderFront(nil)
+    }
+    #endif
 }
 
 /// The panes, and what each is called.
