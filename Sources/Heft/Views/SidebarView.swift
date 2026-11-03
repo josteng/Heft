@@ -1688,8 +1688,11 @@ struct FileMenu: View {
                 NSWorkspace.shared.open(item.url)
             }
         }
+        // Not named: the menu is already about the row clicked, and a long
+        // name in the item stretched the whole menu to its width.
         if BarScope.asksAgent, !many {
-            MenuButton("Ask About \"\(item.name)\"", symbol: BarScope.ask.symbol) {
+            MenuButton(item.isMarkdown ? "Ask About This Note" : "Ask About This File",
+                       symbol: BarScope.ask.symbol) {
                 model.askAbout(item.url)
                 onOpened?()
             }
@@ -1741,6 +1744,16 @@ struct FileMenu: View {
         MenuButton("Reveal in Finder", symbol: "magnifyingglass") {
             model.revealInFinder(item.url)
         }
+        // The system's Share, as a note's menu has it on iOS: Mail,
+        // Messages, AirDrop and the rest, for the files themselves.
+        ShareLink(items: (many ? items : [item]).map(\.url)) {
+            Label {
+                Text(many ? "Share \(items.count) Items" : "Share")
+            } icon: {
+                Image(systemName: "square.and.arrow.up").symbolRenderingMode(.monochrome)
+            }
+        }
+        .tint(.primary)
         Divider()
         MenuButton(
             many ? "Move \(items.count) Items to Trash" : "Move to Trash",
@@ -1769,16 +1782,17 @@ struct FolderMenu: View {
     var showsPin = true
 
     var body: some View {
-        MenuButton("Focus This Window on \"\(item.name)\"", symbol: "scope") {
+        // Not named, as in `FileMenu`: the folder is the one clicked.
+        MenuButton("Focus Window on This Folder", symbol: "scope") {
             model.setScope(to: item)
             onLeave?()
         }
-        MenuButton("Open \"\(item.name)\" in New Window", symbol: "plus.rectangle.on.rectangle") {
+        MenuButton("Open in New Window", symbol: "plus.rectangle.on.rectangle") {
             openWindow(value: model.descriptor(scopePath: item.relativePath))
             onLeave?()
         }
         if BarScope.asksAgent {
-            MenuButton("Ask About \"\(item.name)\"", symbol: BarScope.ask.symbol) {
+            MenuButton("Ask About This Folder", symbol: BarScope.ask.symbol) {
                 model.askAbout(item.url)
                 onLeave?()
             }
