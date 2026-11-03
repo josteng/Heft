@@ -13,6 +13,10 @@ public struct MarkdownDecoration: Sendable, Equatable {
         /// of having typed it.
         case escapedCharacter
         case frontmatter
+        /// One line of the frontmatter, drawn in place as a row of the
+        /// properties table: the key in a column, the value beside it, the
+        /// fences and the `:` or `- ` hidden until the caret is on the line.
+        case propertyLine(PropertyLine)
         case comment
         case codeBlock(language: String?)
         case heading(level: Int)
@@ -171,6 +175,228 @@ public struct TableLayout: Sendable, Hashable {
 /// paints a callout's card across several paragraphs, so each one needs to know
 /// which of its corners to round.
 public enum QuoteEdge: Sendable, Equatable { case only, first, middle, last }
+
+/// One line of a note's frontmatter, as the properties table shows it.
+///
+/// Ranges are relative to the start of the line, so the line is the same
+/// value wherever an edit above it moves it.
+public struct PropertyLine: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable {
+        /// An opening or closing `---`.
+        case fence
+        /// `key: value`. `colon` is the colon and the spaces after it.
+        case entry(key: NSRange, colon: NSRange, value: NSRange)
+        /// `  - value`, an item of the list the key above it holds.
+        /// `marker` is the indent and the dash, with its space.
+        case item(marker: NSRange, value: NSRange)
+        /// Anything else: a comment, a blank line, a nested map's line.
+        case other
+    }
+
+    public let kind: Kind
+    /// The key this line belongs to: its own, or the list's it is an item of.
+    public let key: String
+    /// Where the line sits among the rows between the fences, for the card
+    /// drawn behind them; nil for a fence.
+    public let edge: QuoteEdge?
+    /// The longest key in the block, which sets how wide the key column is.
+    public let widestKey: String
+    /// A key holding a block list: its items, drawn on the key's own row
+    /// while the caret is out of the list.
+    public var items: [String] = []
+    /// The key's edge with its items folded onto its row.
+    public var foldedEdge: QuoteEdge?
+    /// An item of such a list, folded away while the caret is out of it.
+    public var folds = false
+    /// The opening fence, which stands as the table's heading.
+    public var opens = false
+    /// Where the line sits in its list, key line first, for the outline
+    /// drawn around a list being edited; nil outside a list.
+    public var listEdge: QuoteEdge?
+
+    /// Whether the values on this line are tags, drawn as pills.
+    public var isTags: Bool { ["tags", "tag"].contains(key.lowercased()) }
+
+    /// The `[` and `]` of an inline list, relative to the line, for hiding.
+    public static func brackets(of value: NSRange, in line: NSString) -> [NSRange] {
+        guard value.length >= 2,
+              line.substring(with: NSRange(location: value.location, length: 1)) == "[",
+              line.substring(with: NSRange(location: NSMaxRange(value) - 1, length: 1)) == "]"
+        else { return [] }
+        return [NSRange(location: value.location, length: 1), NSRange(location: NSMaxRange(value) - 1, length: 1)]
+    }
+
+    /// The rows of the frontmatter block at `block`, one decoration a line,
+    /// each carrying the markup it hides as its `syntax`.
+    static func decorations(in text: NSString, block: NSRange) -> [MarkdownDecoration] {
+        var lines: [NSRange] = []
+        var location = block.location
+        while location < NSMaxRange(block) {
+            let full = text.lineRange(for: NSRange(location: location, length: 0))
+            var content = NSRange(location: full.location, length: min(NSMaxRange(full), NSMaxRange(block)) - full.location)
+            while content.length > 0,
+                  ["\n", "\r"].contains(text.substring(with: NSRange(location: NSMaxRange(content) - 1, length: 1))) {
+                content.length -= 1
+            }
+            lines.append(content)
+            location = NSMaxRange(full)
+        }
+        guard lines.count >= 2 else { return [] }
+
+        enum Parsed { case fence, entry(NSRange, NSRange, NSRange, String), item(NSRange, NSRange), other }
+        var parsed: [Parsed] = []
+        var widest = ""
+        for (index, line) in lines.enumerated() {
+            let string = text.substring(with: line) as NSString
+            if index == 0 || index == lines.count - 1 {
+                parsed.append(.fence)
+                continue
+            }
+            let trimmed = (string as String).trimmingCharacters(in: .whitespaces)
+            let indented = string.length > 0 && [" ", "\t"].contains(string.substring(to: 1))
+            if !indented, !trimmed.hasPrefix("#"), !trimmed.hasPrefix("-"), !trimmed.isEmpty {
+                let colon = string.range(of: ":")
+                if colon.location != NSNotFound {
+                    let key = (string.substring(to: colon.location) as String)
+                        .trimmingCharacters(in: .whitespaces)
+                    var after = NSMaxRange(colon)
+                    while after < string.length, string.substring(with: NSRange(location: after, length: 1)) == " " {
+                        after += 1
+                    }
+                    var valueEnd = string.length
+                    while valueEnd > after,
+                          [" ", "\t"].contains(string.substring(with: NSRange(location: valueEnd - 1, length: 1))) {
+                        valueEnd -= 1
+                    }
+                    parsed.append(.entry(
+                        NSRange(location: 0, length: colon.location),
+                        NSRange(location: colon.location, length: after - colon.location),
+                        NSRange(location: after, length: valueEnd - after),
+                        key
+                    ))
+                    if key.count > widest.count { widest = key }
+                    continue
+                }
+                // A key still being typed, its colon not yet written.
+                let end = (string as String).trimmingCharacters(in: .whitespaces).utf16.count
+                parsed.append(.entry(
+                    NSRange(location: 0, length: end), NSRange(location: end, length: 0),
+                    NSRange(location: end, length: 0), trimmed
+                ))
+                continue
+            }
+            if trimmed == "-" || trimmed.hasPrefix("- ") {
+                let dash = string.range(of: "-")
+                var after = NSMaxRange(dash)
+                while after < string.length, string.substring(with: NSRange(location: after, length: 1)) == " " {
+                    after += 1
+                }
+                parsed.append(.item(
+                    NSRange(location: 0, length: after),
+                    NSRange(location: after, length: string.length - after)
+                ))
+                continue
+            }
+            parsed.append(.other)
+        }
+
+        // A key with an empty value and the `- ` items under it: one list,
+        // revealed together, folded onto the key's row otherwise.
+        var groups: [Int: (end: Int, items: [String])] = [:]
+        var index = 1
+        while index < lines.count - 1 {
+            // The key line's own text, if any, is the item being typed.
+            if case .entry = parsed[index] {
+                var end = index
+                var items: [String] = []
+                while end + 1 < lines.count - 1, case let .item(_, item) = parsed[end + 1] {
+                    end += 1
+                    items.append(text.substring(with: NSRange(location: lines[end].location + item.location, length: item.length)))
+                }
+                if end > index { groups[index] = (end, items) }
+                index = end + 1
+            } else {
+                index += 1
+            }
+        }
+        var groupOf: [Int: Int] = [:]
+        for (start, group) in groups { for line in start...group.end { groupOf[line] = start } }
+        // What the rows are once every list is folded: its items take no row.
+        let shown = (1..<max(lines.count - 1, 1)).filter { line in groupOf[line].map { $0 == line } ?? true }
+
+        let rows = lines.count - 2
+        var result: [MarkdownDecoration] = []
+        var key = ""
+        for (index, line) in lines.enumerated() {
+            let edge: QuoteEdge? = index == 0 || index == lines.count - 1 ? nil
+                : rows == 1 ? .only : index == 1 ? .first : index == lines.count - 2 ? .last : .middle
+            func absolute(_ range: NSRange) -> NSRange {
+                NSRange(location: line.location + range.location, length: range.length)
+            }
+            let kind: Kind
+            var syntax: [NSRange] = []
+            switch parsed[index] {
+            case .fence:
+                kind = .fence
+                syntax = [line]
+            case let .entry(keyRange, colon, value, name):
+                key = name
+                kind = .entry(key: keyRange, colon: colon, value: value)
+                syntax = [absolute(colon)]
+                    + brackets(of: value, in: text.substring(with: line) as NSString).map(absolute)
+            case let .item(marker, value):
+                kind = .item(marker: marker, value: value)
+                syntax = [absolute(marker)]
+            case .other:
+                kind = .other
+            }
+            // The whole line, its break included: a blank row is otherwise
+            // an empty range, which no restyle pass ever writes to.
+            let whole = NSRange(
+                location: line.location,
+                length: min(NSMaxRange(text.lineRange(for: NSRange(location: line.location, length: 0))), text.length)
+                    - line.location
+            )
+            var property = PropertyLine(kind: kind, key: key, edge: edge, widestKey: widest)
+            property.opens = index == 0
+            // `[a, b]` folds onto its row as a block list does.
+            if case let .entry(_, _, value) = kind {
+                let lineText = text.substring(with: line) as NSString
+                if !brackets(of: value, in: lineText).isEmpty {
+                    let inner = lineText.substring(with: NSRange(location: value.location + 1, length: value.length - 2))
+                    property.items = inner.components(separatedBy: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .map { $0.count >= 2 && ($0.hasPrefix("\"") && $0.hasSuffix("\"") || $0.hasPrefix("'") && $0.hasSuffix("'")) ? String($0.dropFirst().dropLast()) : $0 }
+                        .filter { !$0.isEmpty }
+                    property.foldedEdge = edge
+                }
+            }
+            var reveal: NSRange?
+            if let start = groupOf[index], let group = groups[start] {
+                let first = lines[start].location
+                let last = text.lineRange(for: NSRange(location: lines[group.end].location, length: 0))
+                reveal = NSRange(location: first, length: min(NSMaxRange(last), NSMaxRange(lines[group.end]) + 1, text.length) - first)
+                property.listEdge = start == index ? .first : index == group.end ? .last : .middle
+                if start == index {
+                    property.items = group.items
+                    if let position = shown.firstIndex(of: index) {
+                        property.foldedEdge = shown.count == 1 ? .only
+                            : position == 0 ? .first : position == shown.count - 1 ? .last : .middle
+                    }
+                } else {
+                    property.folds = true
+                }
+            }
+            result.append(MarkdownDecoration(
+                range: whole.length > 0 ? whole : line,
+                syntax: syntax,
+                revealRange: reveal,
+                style: .propertyLine(property)
+            ))
+        }
+        return result
+    }
+}
 
 /// A block construct written *inside* a quote, after its `>` markers.
 ///
@@ -365,6 +591,11 @@ public struct Reveal: Equatable, Sendable {
             return .cell(row: cursor.row, column: cursor.column)
         }
         if Self.revealsWithItsLine(decoration.style) {
+            // A list in the frontmatter opens as one, whichever of its lines
+            // the caret is on.
+            if case .propertyLine = decoration.style, let whole = decoration.revealRange {
+                return touchesLine(whole) ? .revealed : .hidden
+            }
             return touchesLine(decoration.range) ? .revealed : .hidden
         }
         return Self.touches(decoration.revealRange ?? decoration.range, selection)
@@ -384,7 +615,7 @@ public struct Reveal: Equatable, Sendable {
     /// dissolving into raw asterisks the moment it is clicked.
     public static func revealsWithItsLine(_ style: MarkdownDecoration.Style) -> Bool {
         switch style {
-        case .frontmatter, .comment, .codeBlock, .heading, .quoteLine,
+        case .frontmatter, .propertyLine, .comment, .codeBlock, .heading, .quoteLine,
              .table, .thematicBreak, .blockMath, .image, .agentGuideBoundary,
              // A definition *is* its line, and its `[^1]:` sits at the start
              // of it, where a caret arriving from the line above lands. A
@@ -497,6 +728,7 @@ public enum LiveDecorator {
 
         if let fm = firstMatch(#"\A---\r?\n[\s\S]*?\n---"#, text) {
             result.append(MarkdownDecoration(range: fm, style: .frontmatter))
+            result += PropertyLine.decorations(in: text, block: fm)
             protected.insert(fm)
         }
 

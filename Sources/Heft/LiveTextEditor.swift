@@ -71,6 +71,8 @@ struct LiveTextEditor: NSViewRepresentable {
     let findSelection: FindSelection?
     let insertion: EditorInsertion?
     var checklistToggle: Int = 0
+    /// Changes when the model asks for the properties form.
+    var propertiesRequest: Int = 0
     /// A format the palette asked for, which cannot be sent down the
     /// responder chain while the palette holds the keyboard.
     var format: AppModel.PendingFormat? = nil
@@ -252,6 +254,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.checksSpelling(typing.checksSpelling, grammar: typing.checksGrammar)
         textView.correctsSpelling = typing.correctsSpelling
         textView.completionIndex = context.index
+        textView.vaultRoot = context.vaultRoot
         textView.vimCaretColor = context.accentColor
         // What `{{title}}` in a custom replacement expands to.
         textView.noteTitle = context.current?.name ?? ""
@@ -310,6 +313,12 @@ struct LiveTextEditor: NSViewRepresentable {
             }
         }
 
+        if propertiesRequest != nsContext.coordinator.lastPropertiesRequest {
+            nsContext.coordinator.lastPropertiesRequest = propertiesRequest
+            // Zero is where a fresh editor starts, not a request.
+            if propertiesRequest > 0 { textView.editProperties() }
+        }
+
         if focusRequest != nsContext.coordinator.lastFocusRequest {
             nsContext.coordinator.lastFocusRequest = focusRequest
             nsContext.coordinator.takeKeyboard(textView)
@@ -335,9 +344,9 @@ struct LiveTextEditor: NSViewRepresentable {
         // disk. Without this an embed styled before the index arrived stays an
         // unresolved orange filename instead of becoming a picture.
         let fingerprint = "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.palette)/\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
+            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.propertiesAsText)/\(context.palette)/\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
             + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/\(context.headingColors)/"
-            + "\(context.imageGeneration)"
+            + "\(context.imageGeneration)/\(PropertyTypes.generation)"
         if nsContext.coordinator.indexFingerprint != fingerprint {
             nsContext.coordinator.indexFingerprint = fingerprint
             nsContext.coordinator.restyle(textView)
@@ -360,14 +369,14 @@ struct LiveTextEditor: NSViewRepresentable {
                     replaceKeepingPosition(with: text, in: textView, nsContext.coordinator)
                 } else {
                     nsContext.coordinator.load(text, into: textView)
-                    textView.setSelectedRange(NSRange(location: 0, length: 0))
+                    textView.setSelectedRange(NSRange(location: PropertyEditing.openingCaret(in: text), length: 0))
                     textView.resetVim()
                     textView.scrollToDocumentTop()
                 }
             } else if switchedNote {
                 // Two notes can hold the same text, and the buffer is then
                 // never replaced. The reader still moved.
-                textView.setSelectedRange(NSRange(location: 0, length: 0))
+                textView.setSelectedRange(NSRange(location: PropertyEditing.openingCaret(in: text), length: 0))
                 textView.resetVim()
                 textView.scrollToDocumentTop()
             }
@@ -441,6 +450,7 @@ struct LiveTextEditor: NSViewRepresentable {
         var lastFindGeneration = -1
         var lastInsertionGeneration = -1
         var lastChecklistToggle = 0
+        var lastPropertiesRequest = 0
         var lastFormat: AppModel.PendingFormat?
         var lastListCommand: AppModel.PendingListCommand?
         var pendingShift: (fromOldOffset: Int, delta: Int)? { restyler.pendingShift }
@@ -727,6 +737,13 @@ struct LiveTextEditor: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView,
                   textView.delegate === self
             else { return }
+            // A caret on a folded list item's hidden line goes to the list's
+            // key line, where the list is edited; on the hidden line it is
+            // invisible and typing there lands between the pills' lines.
+            if let view = textView as? HeftTextKit2View {
+                if view.liftCaretOffFoldedItem() { return }
+                view.noteListEditing()
+            }
             let selection = textView.selectedRange()
             let line = (textView.string as NSString).lineRange(for: selection)
             // Block markup reveals per line, inline spans per caret position,
@@ -1325,6 +1342,19 @@ final class HeftTextKit2View: NSTextView {
     var onVimSearch: ((VimHostAction) -> Void)?
     var onFirstResponderChange: ((Bool) -> Void)?
     var completionIndex = VaultIndex.empty
+    private var cachedPropertyCatalog: (catalog: PropertyCatalog, files: Int, at: Date)?
+    /// The vault's keys and values, counted at most every half minute rather
+    /// than on every key typed in the frontmatter: the index is handed over
+    /// anew on every update, so it has no identity to cache against.
+    var propertyCatalog: PropertyCatalog {
+        let files = completionIndex.allFiles.count
+        if let cached = cachedPropertyCatalog, cached.files == files, Date().timeIntervalSince(cached.at) < 30 {
+            return cached.catalog
+        }
+        let catalog = completionIndex.propertyCatalog
+        cachedPropertyCatalog = (catalog, files, Date())
+        return catalog
+    }
 
     /// The spans the spell checker may not mark, refreshed by every restyle.
     var spellExclusions: [NSRange] = [] {
@@ -1517,7 +1547,7 @@ final class HeftTextKit2View: NSTextView {
     /// What the open menu is completing. `[[`, `> [!` and `==` share the
     /// panel, and accepting a row has to re-detect the same one it was built
     /// from.
-    private enum CompletionKind { case wiki, linkPart, callout, highlight, tag, linkTitle }
+    private enum CompletionKind { case wiki, linkPart, callout, highlight, tag, property, linkTitle }
     /// The last note read for its headings, so typing after `#` does not
     /// read the file again on every key.
     private var linkPartSource: (url: URL, text: String)?
@@ -1558,6 +1588,8 @@ final class HeftTextKit2View: NSTextView {
     private var justLinkedAt: Int?
     private var completionQuery = ""
     private var vimEngine = VimEngine()
+    /// The Vim mode, for a test to read.
+    var vimMode: VimMode { vimEngine.mode }
     private var vimPreferredX: CGFloat?
     private var vimPendingRepeatKeys: [VimKey] = []
     private var vimInsertBaseline: (text: String, location: Int)?
@@ -1597,6 +1629,10 @@ final class HeftTextKit2View: NSTextView {
     /// against the table it landed on, and the caret inside a cell has to be
     /// placed from the same measurement the grid was drawn with.
     var liveLayout = LiveLayout()
+    /// Where the key line of the list being edited as pills starts.
+    var listKeyLineBeingEdited: Int?
+    /// The vault's folder, where `.obsidian/types.json` keeps property types.
+    var vaultRoot: URL?
     /// True while the caret is being drawn inside a table cell, in which case
     /// the native insertion point is switched off.
     var tableCaretIsActive = false
@@ -2908,6 +2944,12 @@ final class HeftTextKit2View: NSTextView {
         // on one line — so left to itself it puts every click in the table on
         // the same character.
         if handleTableClick(at: point, event: event) { return }
+        if event.clickCount == 1, removePropertyItem(at: point) { return }
+        if event.clickCount == 1, showPropertyTypeMenu(at: point) { return }
+        if event.clickCount == 1, propertyFootRect()?.contains(point) == true {
+            editProperties()
+            return
+        }
         let usesVimSelection = vimEnabled
             && vimEngine.mode != .insert
             && vimEngine.mode != .replace
@@ -3521,6 +3563,13 @@ final class HeftTextKit2View: NSTextView {
     /// escape hatch for the one time in a hundred that `->` really did mean
     /// `->`, and it is what Obsidian's Smart Typography does.
     override func deleteBackward(_ sender: Any?) {
+        // Backspace with nothing typed after a list's pills takes the last.
+        if let list = PropertyListContext.detect(in: string, selection: selectedRange()),
+           list.pending.length == 0, !list.items.isEmpty,
+           let edit = list.removing(at: list.items.count - 1, in: string) {
+            apply(edit, named: "Remove Item")
+            return
+        }
         guard let substitution = pendingSubstitution else {
             // Backspacing the opening half of a pair takes the closing half
             // with it, or every abandoned `(` leaves a `)` behind.
@@ -3568,6 +3617,7 @@ final class HeftTextKit2View: NSTextView {
             // press up out of the first body row lands on the delimiter row and
             // dissolves the whole table back into pipes.
             if handleTableVerticalMove(down: false) { return }
+            if movePropertyRow(down: false) { return }
             super.moveUp(sender)
             return
         }
@@ -3576,6 +3626,7 @@ final class HeftTextKit2View: NSTextView {
     override func moveDown(_ sender: Any?) {
         guard moveLinkCompletion(1) else {
             if handleTableVerticalMove(down: true) { return }
+            if movePropertyRow(down: true) { return }
             super.moveDown(sender)
             return
         }
@@ -3801,6 +3852,7 @@ final class HeftTextKit2View: NSTextView {
         // exit from here is cheaper than reasoning about which ones matter.
         defer { restyleNow() }
         if acceptLinkCompletion() { return }
+        if handlePropertyListReturn() { return }
         // Inside a table, Return means the row below. A literal newline there
         // splits the table in two, which is never what was meant.
         if handleTableReturn() { return }
@@ -3863,6 +3915,12 @@ final class HeftTextKit2View: NSTextView {
         // Indenting changes a bullet's shape, which is drawn, not styled.
         defer { restyleNow() }
         if acceptLinkCompletion() { return }
+        if let list = PropertyListContext.detect(in: string, selection: selectedRange()),
+           !(string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces).isEmpty {
+            apply(list.adding((string as NSString).substring(with: list.pending), in: string), named: "Add Item")
+            return
+        }
+        if moveToPropertyValue() { return }
         if handleTableTab(forward: true) { return }
         guard adjustListIndent(outdent: false) else {
             super.insertTab(sender)
@@ -3903,6 +3961,9 @@ final class HeftTextKit2View: NSTextView {
         } else if let tag = TagCompletionContext.detect(in: string, selection: selection) {
             completionKind = .tag
             query = tag.query
+        } else if let property = PropertyCompletionContext.detect(in: string, selection: selection) {
+            completionKind = .property
+            query = property.query
         } else if let session = linkTitleSession, session.link.isCurrent(in: string, caret: selection) {
             completionKind = .linkTitle
             query = ""
@@ -3916,7 +3977,19 @@ final class HeftTextKit2View: NSTextView {
             // finished — or for a tag on its first letter, since a `#` alone
             // may be a heading's. Starting later would make the menu appear
             // in the middle of a word someone is already typing.
-            let opening = completionKind == .tag ? query.count == 1 : query.isEmpty
+            // A property's key opens on its first letter, as a tag does, so
+            // a blank line in the frontmatter is not a menu; a value opens
+            // the moment its key is written, empty as it is.
+            let opening = switch completionKind {
+            case .tag: query.count == 1
+            case .property:
+                if case .value = PropertyCompletionContext.detect(in: string, selection: selection)?.part {
+                    query.count <= 1
+                } else {
+                    query.count == 1
+                }
+            default: query.isEmpty
+            }
             guard allowStart, opening else { return }
             completionIsActive = true
         }
@@ -3974,6 +4047,32 @@ final class HeftTextKit2View: NSTextView {
                     title: $0, detail: "\(completionIndex.noteCount(forTag: $0))",
                     symbol: "number", destination: $0
                 )
+            }
+        case .property:
+            guard let property = PropertyCompletionContext.detect(in: string, selection: selection) else {
+                dismissLinkCompletion()
+                return
+            }
+            let suggestions: [String]
+            // Tags are the vault's tags, wherever they were written.
+            if case .value(let key, let siblings) = property.part, ["tags", "tag"].contains(key.lowercased()) {
+                let taken = Set(siblings.map { $0.lowercased() })
+                suggestions = TagCompletionContext(query: property.query, queryRange: property.queryRange)
+                    .suggestions(from: completionIndex.allTags)
+                    .filter { !taken.contains($0.lowercased()) && $0.lowercased() != property.query.lowercased() }
+            } else {
+                suggestions = property.suggestions(from: propertyCatalog, in: string)
+            }
+            let isKey = property.part == .key
+            completionItems = suggestions.prefix(8).map {
+                WikiCompletionItem(
+                    title: $0, detail: "", symbol: isKey ? "list.bullet.rectangle" : "text.cursor",
+                    destination: $0
+                )
+            }
+            if completionItems.isEmpty {
+                dismissLinkCompletion()
+                return
             }
         case .linkTitle:
             guard let session = linkTitleSession else {
@@ -4060,6 +4159,15 @@ final class HeftTextKit2View: NSTextView {
             guard let context = TagCompletionContext.detect(in: string, selection: selectedRange())
             else { return false }
             edit = context.accepting(destination, in: string)
+        case .property:
+            // Picked for a list being edited as pills, it is a new pill.
+            if let list = PropertyListContext.detect(in: string, selection: selectedRange()) {
+                edit = list.adding(destination, in: string)
+                break
+            }
+            guard let context = PropertyCompletionContext.detect(in: string, selection: selectedRange())
+            else { return false }
+            edit = context.accepting(destination)
         case .linkTitle:
             guard let session = linkTitleSession,
                   session.link.isCurrent(in: string, caret: selectedRange())
@@ -4073,6 +4181,8 @@ final class HeftTextKit2View: NSTextView {
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
         setSelectedRange(edit.selection)
+        // A key written, its values are offered straight away.
+        if kind == .property { updateLinkCompletion(allowStart: true) }
         let text = string as NSString
         if kind == .wiki, !destination.contains("|"), edit.selection.length == 0, edit.selection.location >= 2,
            text.substring(with: NSRange(location: edit.selection.location - 2, length: 2)) == "]]" {
@@ -4369,5 +4479,319 @@ enum WritingToolsLog {
         } else {
             logger.log("\(name, privacy: .public) note=\(fingerprint(note), privacy: .public)")
         }
+    }
+}
+
+extension HeftTextKit2View {
+    /// Where the card's "Add property" line is drawn, under its last row.
+    func propertyFootRect() -> CGRect? {
+        guard let start = liveLayout.blocks.first(where: { _, widget in
+            if case .propertyRow(let row) = widget { return row.edge == .last || row.edge == .only }
+            return false
+        })?.key,
+            let manager = textLayoutManager, let content = manager.textContentManager,
+            let location = content.location(content.documentRange.location, offsetBy: start),
+            let fragment = manager.textLayoutFragment(for: location)
+        else { return nil }
+        let frame = fragment.layoutFragmentFrame
+        let label = NSAttributedString(string: PropertyChips.addLabel, attributes: [
+            .font: NSFont.systemFont(ofSize: Theme.bodySize - 1),
+        ]).size()
+        return CGRect(
+            x: frame.minX + textContainerInset.width,
+            y: frame.maxY + textContainerInset.height - PropertyChips.bottomMargin - PropertyChips.addRowHeight,
+            width: LiveStyler.propertyPadding + label.width + 8, height: PropertyChips.addRowHeight
+        )
+    }
+
+    /// ↑ and ↓ in the properties move a property at a time, as Obsidian's
+    /// do: past a folded list's hidden lines, to the end of the next value,
+    /// out of the table at its foot, and into it from the line under it.
+    func movePropertyRow(down: Bool) -> Bool {
+        let selection = selectedRange()
+        guard selection.length == 0, let block = PropertyEditing.blockRange(in: string) else { return false }
+        let rows = PropertyEditing.rows(in: string)
+        guard !rows.isEmpty else { return false }
+        let caret = selection.location
+        let target: Int
+        if let index = rows.firstIndex(where: { NSLocationInRange(caret, $0.range) }) {
+            if down {
+                target = index + 1 < rows.count ? rows[index + 1].valueEnd : NSMaxRange(block)
+            } else {
+                guard index > 0 else { return true }
+                target = rows[index - 1].valueEnd
+            }
+        } else if !down, (string as NSString).lineRange(for: NSRange(location: caret, length: 0)).location == NSMaxRange(block),
+                  let last = rows.last {
+            // Up from the line under the table goes to its last property,
+            // not onto the hidden closing fence.
+            target = last.valueEnd
+        } else {
+            return false
+        }
+        setSelectedRange(NSRange(location: target, length: 0))
+        scrollRangeToVisible(selectedRange())
+        return true
+    }
+
+    /// ⌘⌫ on a property deletes it, list and all, as in Obsidian; the last
+    /// one gone takes the fences with it.
+    override func deleteToBeginningOfLine(_ sender: Any?) {
+        let selection = selectedRange()
+        let rows = PropertyEditing.rows(in: string)
+        guard selection.length == 0,
+              let row = rows.first(where: { NSLocationInRange(selection.location, $0.range) }),
+              let block = PropertyEditing.blockRange(in: string)
+        else {
+            super.deleteToBeginningOfLine(sender)
+            return
+        }
+        let range = rows.count == 1 ? block : row.range
+        guard shouldChangeText(in: range, replacementString: "") else { return }
+        textStorage?.replaceCharacters(in: range, with: "")
+        didChangeText()
+        undoManager?.setActionName("Delete Property")
+        let remaining = PropertyEditing.rows(in: string)
+        let next = remaining.first(where: { $0.range.location >= range.location }) ?? remaining.last
+        setSelectedRange(NSRange(location: next?.valueEnd ?? min(range.location, (string as NSString).length), length: 0))
+    }
+
+    /// Moves a caret standing on a folded list item's line to the end of
+    /// the list's key line. True when it moved, and the move is the
+    /// selection change that matters.
+    func liftCaretOffFoldedItem() -> Bool {
+        let selection = selectedRange()
+        guard selection.length == 0, !AppearanceSettings.shared.showsPropertiesAsText,
+              let row = PropertyEditing.rows(in: string).first(where: {
+                  NSLocationInRange(selection.location, $0.range) && selection.location > $0.valueEnd
+              }),
+              PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0)) != nil
+        else { return false }
+        setSelectedRange(NSRange(location: row.valueEnd, length: 0))
+        return true
+    }
+
+    /// Leaving a list's key line with something typed there makes it the
+    /// list's last item, as Obsidian turns typed text into a pill when focus
+    /// leaves; left on the key line, it would be a value and a list at once.
+    /// Done after the selection change that left, and never mid-drag.
+    func noteListEditing() {
+        let caret = selectedRange()
+        let editing = PropertyListContext.detect(in: string, selection: caret)?.keyLine.location
+        if let start = listKeyLineBeingEdited, start != editing {
+            listKeyLineBeingEdited = editing
+            DispatchQueue.main.async { [weak self] in self?.commitTypedItem(onKeyLineAt: start) }
+            return
+        }
+        listKeyLineBeingEdited = editing
+    }
+
+    private func commitTypedItem(onKeyLineAt start: Int) {
+        if isTrackingMouse {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.commitTypedItem(onKeyLineAt: start)
+            }
+            return
+        }
+        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
+              let list = PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0))
+        else { return }
+        let typed = (string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces)
+        guard !typed.isEmpty else { return }
+        let edit = list.adding(typed, in: string)
+        var selection = selectedRange()
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+        didChangeText()
+        undoManager?.setActionName("Add Item")
+        // The caret stays where it went, moved along by the edit above it.
+        if selection.location >= NSMaxRange(edit.range) {
+            selection.location += (edit.replacement as NSString).length - edit.range.length
+        } else if selection.location > edit.range.location {
+            selection.location = edit.range.location
+        }
+        setSelectedRange(selection)
+    }
+
+    /// A click on a row's type icon offers the types, as Obsidian's does,
+    /// with the key's current one ticked.
+    func showPropertyTypeMenu(at point: CGPoint) -> Bool {
+        guard let manager = textLayoutManager, let content = manager.textContentManager else { return false }
+        for (start, widget) in liveLayout.blocks {
+            guard case .propertyRow(let row) = widget, row.symbol != nil,
+                  let location = content.location(content.documentRange.location, offsetBy: start),
+                  let fragment = manager.textLayoutFragment(for: location),
+                  let line = fragment.textLineFragments.first
+            else { continue }
+            let frame = fragment.layoutFragmentFrame
+            let x = frame.minX + textContainerInset.width - row.indent
+            let mid = frame.minY + textContainerInset.height + line.typographicBounds.midY
+            let icon = CGRect(x: x - 3, y: mid - 11, width: PropertyChips.symbolSide + 8, height: 22)
+            guard icon.contains(point) else { continue }
+            let text = string as NSString
+            let keyLine = text.substring(with: text.lineRange(for: NSRange(location: start, length: 0)))
+            guard let colon = keyLine.firstIndex(of: ":") else { return false }
+            let key = String(keyLine[..<colon]).trimmingCharacters(in: .whitespaces)
+            let current = PropertyTypes.type(of: key, in: PropertyTypes.types(in: vaultRoot))
+            let menu = NSMenu()
+            for type in PropertyType.pickable {
+                let item = NSMenuItem(title: type.title, action: #selector(pickPropertyType(_:)), keyEquivalent: "")
+                item.target = self
+                item.image = NSImage(systemSymbolName: type.symbol, accessibilityDescription: nil)
+                item.state = current == type ? .on : .off
+                item.representedObject = [key, type.rawValue]
+                menu.addItem(item)
+            }
+            menu.popUp(positioning: nil, at: NSPoint(x: icon.minX, y: icon.maxY + 2), in: self)
+            return true
+        }
+        return false
+    }
+
+    @objc private func pickPropertyType(_ item: NSMenuItem) {
+        guard let pair = item.representedObject as? [String], pair.count == 2,
+              let type = PropertyType(rawValue: pair[1]), let vaultRoot
+        else { return }
+        let key = pair[0]
+        do {
+            try PropertyTypes.set(type, for: key, in: vaultRoot)
+        } catch {
+            NSSound.beep()
+            return
+        }
+        // The value follows a change between a single value and a list.
+        if let edit = PropertyEditing.converting(key: key, toList: type.isList, in: string) {
+            apply(edit, named: "Change Property Type")
+        }
+        _ = PropertyTypes.types(in: vaultRoot)
+        onNeedsRestyle?()
+    }
+
+    /// One list edit, undoable under `name`, with the caret where it says.
+    func apply(_ edit: MarkdownEditing.Edit, named name: String) {
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+        didChangeText()
+        undoManager?.setActionName(name)
+        setSelectedRange(edit.selection)
+    }
+
+    /// Return on a list's key line: what was typed becomes its last item;
+    /// with nothing typed, a new property starts under the list.
+    func handlePropertyListReturn() -> Bool {
+        guard let list = PropertyListContext.detect(in: string, selection: selectedRange()) else { return false }
+        let typed = (string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces)
+        if !typed.isEmpty {
+            apply(list.adding(typed, in: string), named: "Add Item")
+        } else {
+            let end = list.items.last.map { NSMaxRange($0.line) } ?? NSMaxRange(list.keyLine)
+            apply(MarkdownEditing.Edit(
+                range: NSRange(location: end, length: 0), replacement: "\n",
+                selection: NSRange(location: end + 1, length: 0)
+            ), named: "Add Property")
+        }
+        return true
+    }
+
+    /// A click on a pill's ×, while its list is edited, removes that item.
+    func removePropertyItem(at point: CGPoint) -> Bool {
+        guard let manager = textLayoutManager, let content = manager.textContentManager else { return false }
+        for (start, widget) in liveLayout.blocks {
+            guard case .propertyRow(let row) = widget, let chips = row.chips, chips.removable,
+                  let location = content.location(content.documentRange.location, offsetBy: start),
+                  let fragment = manager.textLayoutFragment(for: location),
+                  let line = fragment.textLineFragments.first
+            else { continue }
+            let frame = fragment.layoutFragmentFrame
+            let origin = CGPoint(x: frame.minX + textContainerInset.width, y: frame.minY + textContainerInset.height)
+            let baseline = origin.y + line.typographicBounds.minY + line.glyphOrigin.y
+            for index in chips.labels.indices {
+                let rowBaseline = baseline + CGFloat(chips.rows[index]) * chips.rowPitch
+                let right = origin.x - row.indent + chips.column + chips.x[index] + chips.widths[index]
+                let cross = CGRect(
+                    x: right - PropertyChips.removeWidth - PropertyChips.padding + 2,
+                    y: rowBaseline - chips.font.ascender - 2,
+                    width: PropertyChips.removeWidth + PropertyChips.padding - 2,
+                    height: chips.font.ascender - chips.font.descender + 4
+                )
+                guard cross.contains(point) else { continue }
+                let caret = NSRange(location: PropertyEditing.rows(in: string)
+                    .first { $0.range.location == start }?.valueEnd ?? start, length: 0)
+                guard let list = PropertyListContext.detect(in: string, selection: caret),
+                      let edit = list.removing(at: index, in: string)
+                else { return false }
+                apply(edit, named: "Remove Item")
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Tab after a key typed in the frontmatter goes on to its value, as
+    /// Tab moves from a property's name to its value in Obsidian: it writes
+    /// the `: ` the table hides, and offers the key's values.
+    func moveToPropertyValue() -> Bool {
+        guard let context = PropertyCompletionContext.detect(in: string, selection: selectedRange()),
+              context.part == .key
+        else { return false }
+        let range = NSRange(location: NSMaxRange(context.queryRange), length: 0)
+        guard shouldChangeText(in: range, replacementString: ": ") else { return true }
+        textStorage?.replaceCharacters(in: range, with: ": ")
+        didChangeText()
+        setSelectedRange(NSRange(location: range.location + 2, length: 0))
+        updateLinkCompletion(allowStart: true)
+        return true
+    }
+
+    /// Add Property: the caret on a new line at the end of the note's
+    /// frontmatter, which is made first when the note has none, ready for a
+    /// key to be typed and completed.
+    func editProperties() {
+        let text = string as NSString
+        let insertion: (location: Int, text: String, caret: Int)
+        if let block = PropertyEditing.blockRange(in: string) {
+            // Before the closing fence's line.
+            let closing = text.lineRange(for: NSRange(location: max(NSMaxRange(block) - 1, 0), length: 0))
+            let newline = text.substring(with: closing).hasSuffix("\r\n") ? "\r\n" : "\n"
+            insertion = (closing.location, newline, closing.location)
+        } else {
+            insertion = (0, "---\n\n---\n", 4)
+        }
+        let range = NSRange(location: insertion.location, length: 0)
+        guard shouldChangeText(in: range, replacementString: insertion.text) else { return }
+        textStorage?.replaceCharacters(in: range, with: insertion.text)
+        didChangeText()
+        undoManager?.setActionName("Add Property")
+        window?.makeFirstResponder(self)
+        setSelectedRange(NSRange(location: insertion.caret, length: 0))
+        // In Insert mode, as `o` opens a line: a Normal-mode cursor on the
+        // new row would read the key typed into it as commands.
+        if vimEnabled, vimEngine.mode != .insert {
+            vimEngine.reset(mode: .insert)
+            vimPreferredX = nil
+            vimPendingRepeatKeys = []
+            vimInsertBaseline = (string, selectedRange().location)
+            VimSettings.shared.report(mode: .insert)
+            updateVimCursor()
+        }
+        scrollRangeToVisible(selectedRange())
+        #if DEBUG
+        // `HEFT_TYPE=<text>` types it after Add Property, key by key through
+        // `insertText` as typing goes, for a screenshot of the menu.
+        if let typed = ProcessInfo.processInfo.environment["HEFT_TYPE"] {
+            for (index, character) in typed.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 + Double(index) * 0.15) { [weak self] in
+                    guard let self else { return }
+                    if character == "\t" {
+                        self.doCommand(by: #selector(NSResponder.insertTab(_:)))
+                    } else if character == "\n" {
+                        self.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+                    } else {
+                        self.insertText(String(character), replacementRange: self.selectedRange())
+                    }
+                }
+            }
+        }
+        #endif
     }
 }

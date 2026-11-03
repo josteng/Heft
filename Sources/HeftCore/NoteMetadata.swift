@@ -1,7 +1,7 @@
 import Foundation
 
 /// One key/value pair from a note's YAML frontmatter, in file order.
-public struct NoteProperty: Equatable, Sendable, Identifiable {
+public struct NoteProperty: Equatable, Sendable, Identifiable, Codable {
     public let key: String
     public let value: PropertyValue
     public var id: String { key }
@@ -12,7 +12,7 @@ public struct NoteProperty: Equatable, Sendable, Identifiable {
     }
 }
 
-public enum PropertyValue: Equatable, Sendable {
+public enum PropertyValue: Equatable, Sendable, Codable {
     case text(String)
     case list([String])
 

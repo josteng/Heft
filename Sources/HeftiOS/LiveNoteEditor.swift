@@ -1857,14 +1857,15 @@ extension LiveNoteEditor.Coordinator: UIPencilInteractionDelegate, UIScribbleInt
     }
 
     /// Not where the text under the Pencil is drawn rather than shown: a
-    /// picture, a table, display maths, an embedded note, the properties or
-    /// a rule. Writing there went into the hidden source.
+    /// picture, a table, display maths, an embedded note or a rule. Writing
+    /// there went into the hidden source. The properties are their own text,
+    /// and take writing as any line does.
     func scribbleInteraction(_ interaction: UIScribbleInteraction, shouldBeginAt location: CGPoint) -> Bool {
         guard let textView, let line = lineStart(at: location, in: textView),
               let block = layout.blocks[line]
         else { return true }
         switch block {
-        case .image, .table, .blockMath, .embed, .properties, .thematicBreak, .agentGuide: return false
+        case .image, .table, .blockMath, .embed, .thematicBreak, .agentGuide: return false
         default: return true
         }
     }

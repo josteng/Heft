@@ -80,6 +80,9 @@ struct ParsedNote: Codable, Sendable {
     let excerpt: String
     /// The note's `aliases`, which `[[` finds it by as well as by its name.
     let aliases: [String]
+    /// Its frontmatter, so typing a property is offered the keys and values
+    /// the vault already uses.
+    let properties: [NoteProperty]
 
     /// Whether the note would contribute the same links, tags and attachment
     /// mentions as `other`, whatever the file's date says. Most saves are
@@ -87,7 +90,7 @@ struct ParsedNote: Codable, Sendable {
     /// out for the same reason, since it changes on every prose save.
     func sameContent(as other: ParsedNote) -> Bool {
         mentions == other.mentions && tags == other.tags && attachmentNames == other.attachmentNames
-            && aliases == other.aliases
+            && aliases == other.aliases && properties == other.properties
     }
 
     static func parse(_ text: String, fingerprint: FileFingerprint?) -> ParsedNote {
@@ -107,7 +110,8 @@ struct ParsedNote: Codable, Sendable {
             tags: NoteTags.all(in: text),
             attachmentNames: AttachmentNames.mentioned(in: text),
             excerpt: NoteText.excerpt(text),
-            aliases: NoteAliases.all(in: text)
+            aliases: NoteAliases.all(in: text),
+            properties: NoteText.splitFrontmatter(text).frontmatter.map(Frontmatter.parse) ?? []
         )
     }
 
@@ -117,7 +121,8 @@ struct ParsedNote: Codable, Sendable {
     /// the fingerprint.
     static func unreadable(fingerprint: FileFingerprint?) -> ParsedNote {
         ParsedNote(
-            fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [], excerpt: "", aliases: []
+            fingerprint: fingerprint, mentions: [], tags: [], attachmentNames: [], excerpt: "", aliases: [],
+            properties: []
         )
     }
 }
@@ -493,6 +498,12 @@ public final class VaultIndex: @unchecked Sendable {
         matching query: String, forEmbed: Bool, limit: Int = 8
     ) -> [NoteRef] {
         linkMatches(matching: query, forEmbed: forEmbed, limit: limit).map(\.ref)
+    }
+
+    /// Every key the vault's notes use and the values given to each, for
+    /// property completion. Counted from the parse the index already holds.
+    public var propertyCatalog: PropertyCatalog {
+        PropertyCatalog(properties: parsed.values.map(\.properties))
     }
 
     /// The aliases `ref` declares in its frontmatter.

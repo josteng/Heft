@@ -16,8 +16,8 @@ selecting across hidden markup copies real source. Nothing is ever rewritten
 to make it render.
 
 Anything no text attribute can express (tables, LaTeX, image embeds, note
-transclusions, frontmatter properties, quote and callout cards, list bullets,
-checkboxes, heading rules, thematic breaks) is collapsed and then painted by
+transclusions, quote and callout cards, list bullets, checkboxes, heading
+rules, thematic breaks) is collapsed and then painted by
 the `NSTextLayoutFragment` subclass in `LiveWidgets.swift`. That
 subclassability is the reason the editor is on TextKit 2 rather than 1.
 
@@ -128,6 +128,40 @@ including drag-selection, which is confined to the cell it started in.
 Shift-Tab, Return and the arrows perform. Row operations splice a single
 line; column operations rewrite the table into canonical `| a | b |` form,
 because hand-aligned padding no longer lines up once a column has been added.
+
+## Properties are edited in place
+
+The frontmatter is not drawn as a card over collapsed YAML: each of its lines
+is a `PropertyLine` decoration, styled in place as a row of Obsidian's
+properties table: the opening fence drawn as a "Properties" heading, a type
+icon, the key in a column, the value beside it, and "Add property" under the
+last row. The fences, the `:` and the `- ` are its `syntax`. The colon stays
+hidden on the edited row too, as Obsidian never shows it; Tab after a key
+writes it. The value column is a kern on the key's last character. The row
+under the caret is outlined, its key cell shaded. A drawn card, and a popover
+form over it, were tried first; both turned the frontmatter into something
+other than the text it is.
+
+A list is one unit, edited as its pills. A key and the `- ` items under it
+share a `revealRange`; the items' lines are always flattened and drawn as
+pills on the key's row, which is the only way a value spread over several
+lines can read as one row without rewriting the file. The key line itself
+holds the item being typed: Return, Tab or a picked completion turns it into
+a new last `- item` line, Backspace on nothing typed removes the last, and
+leaving the line with something typed commits it, or the file would hold a
+value and a list at once. `PropertyListContext` makes each of those one
+replacement. `[a, b]` folds the same way but is edited as text. The View
+menu's Properties as Text turns all of it off and shows the YAML.
+
+A key's type is Obsidian's, read from `.obsidian/types.json` and written
+there by the picker on the row's icon, so the two apps agree; the file is
+edited in place, its other entries untouched. A key with no type gets its
+icon guessed from the value.
+
+Every row's decoration covers its whole line, newline included: a blank row
+is otherwise an empty range, which no incremental pass writes to. A note
+opens with the caret past its frontmatter, or the opening fence is the
+caret's line and shows.
 
 ## Restyling only what changed
 

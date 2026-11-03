@@ -171,12 +171,12 @@ final class LiveRestyler {
     /// Everything a pass depends on that is not the document itself.
     private static func styleKey(context: RenderContext, width: CGFloat) -> String {
         "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.palette)/"
+            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.propertiesAsText)/\(context.palette)/"
             + "\(context.strictLineBreaks)/\(width)/"
             + "\(context.appearance?.name.rawValue ?? "")/"
             + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
             + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/"
-            + "\(context.headingColors)/\(context.imageGeneration)"
+            + "\(context.headingColors)/\(context.imageGeneration)/\(PropertyTypes.generation)"
     }
 
     static func invalidate(_ range: NSRange, in manager: NSTextLayoutManager) {

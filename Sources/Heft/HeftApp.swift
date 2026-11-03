@@ -357,6 +357,7 @@ struct HeftCommands: Commands {
                 .keyboardShortcut(.revealInSidebar)
                 .disabled(noNote || behindBar || !general.sidebarLayout.visible.contains(.files))
             Toggle("Colorful Formatting", isOn: $appearance.colorfulFormattingEnabled)
+            Toggle("Properties as Text", isOn: $appearance.showsPropertiesAsText)
             Toggle("Show Right Sidebar", isOn: binding(\.isInspectorVisible))
                 .keyboardShortcut(.toggleBacklinks)
                 .disabled(behindBar)

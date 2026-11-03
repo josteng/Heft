@@ -40,8 +40,67 @@ enum BlockWidget {
     case quote(QuoteLine, indent: CGFloat, isRevealed: Bool, bullet: LeadingBullet? = nil)
     /// Another note's content, transcluded by `![[Note]]`.
     case embed(EmbeddedNote, lead: BlockLead = BlockLead())
-    /// YAML frontmatter, drawn as a key/value table.
-    case properties(PropertiesCard)
+    /// One row of the frontmatter's properties table: its slice of the
+    /// card behind the rows. The text is the line's own, styled in place.
+    case propertyRow(PropertyRow)
+    /// The opening fence, drawn as the table's "Properties" heading.
+    case propertyHeading
+}
+
+/// One row of the frontmatter's properties table, as drawn around its text.
+struct PropertyRow {
+    /// Where the row sits among the rows, for the "Add property" line under
+    /// the last.
+    let edge: QuoteEdge
+    /// How far the row's text starts in from the table's left edge, which
+    /// is where the fragment's origin is.
+    let indent: CGFloat
+    var chips: PropertyChips?
+    /// The type icon before the key.
+    var symbol: String?
+    /// The row's slice of the outline around what is being edited: one row,
+    /// or every line of an open list. Nil off the caret.
+    var focus: QuoteEdge?
+    /// Where the value column starts, from the left edge.
+    var column: CGFloat = 0
+    /// Draws "Empty" where an edited row has no value yet.
+    var showsEmpty = false
+}
+
+/// A frontmatter list's items, drawn on its key's row while the caret is out
+/// of the list: pills for tags, quiet capsules for anything else. Laid out at
+/// style time, where the width is known; `x` is from the value column, `row`
+/// counts the lines they wrap onto.
+struct PropertyChips {
+    let labels: [NSAttributedString]
+    let x: [CGFloat]
+    let widths: [CGFloat]
+    let rows: [Int]
+    /// Where the value column starts, from the card's edge.
+    let column: CGFloat
+    let rowPitch: CGFloat
+    let font: NSFont
+    /// The tag colour for tags; nil draws neutral capsules.
+    let tint: NSColor?
+    /// Each pill carries an × that removes it, while the list is edited.
+    var removable = false
+
+    static let padding: CGFloat = 7
+    static let gap: CGFloat = 5
+    /// What a pill's × adds to its width.
+    static let removeWidth: CGFloat = 14
+    /// Room kept after the pills for the item being typed.
+    static let inputRoom: CGFloat = 120
+    /// The "Add property" line under the last row, centred a row's pitch
+    /// below it.
+    static let addRowHeight: CGFloat = 34
+    static let addLabel = "Add property"
+    /// Space under the "Add property" line, before the note's text.
+    static let bottomMargin: CGFloat = 10
+    static let headingHeight: CGFloat = 26
+    static let symbolSide: CGFloat = 13
+    /// Room above and below each row, for the outline of an edited one.
+    static let rowInset: CGFloat = 5
 }
 
 /// A bullet, numeral or checkbox belonging to a list whose line is drawn by
@@ -76,29 +135,6 @@ struct BlockLead {
 struct LeadingQuote {
     let line: QuoteLine
     let isRevealed: Bool
-}
-
-/// A note's frontmatter, measured as a two-column table.
-///
-/// Drawn rather than styled in place because the useful shape of `tags: [a, b]`
-/// is a row of values under a label, and no run of text attributes turns YAML
-/// into that. Putting the caret anywhere in the block brings the real YAML
-/// back, so it stays editable as the text it actually is.
-struct PropertiesCard {
-    struct Row {
-        let key: NSAttributedString
-        let values: [NSAttributedString]
-        /// True for `tags`, whose values are drawn as pills.
-        let isTagRow: Bool
-    }
-
-    let rows: [Row]
-    let keyColumnWidth: CGFloat
-    let size: CGSize
-
-    static let rowHeight: CGFloat = 24
-    static let padding = CGSize(width: 12, height: 9)
-    static let gutter: CGFloat = 12
 }
 
 /// A transcluded note, already styled and measured so drawing is a straight
@@ -723,48 +759,6 @@ enum EmbedRenderer {
     static let titleHeight: CGFloat = 18
 }
 
-/// Lays a note's frontmatter out as a properties table.
-enum PropertiesRenderer {
-
-    static func card(yaml: String, maxWidth: CGFloat, fontSize: CGFloat) -> PropertiesCard? {
-        let properties = Frontmatter.parse(yaml)
-        guard !properties.isEmpty else { return nil }
-
-        let keyFont = NSFont.systemFont(ofSize: fontSize - 1)
-        let valueFont = NSFont.systemFont(ofSize: fontSize)
-
-        var rows: [PropertiesCard.Row] = []
-        var keyWidth: CGFloat = 0
-
-        for property in properties {
-            let key = NSAttributedString(string: property.key, attributes: [
-                .font: keyFont,
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ])
-            keyWidth = max(keyWidth, ceil(key.size().width))
-
-            let isTagRow = ["tags", "tag"].contains(property.key.lowercased())
-            let items = property.value.items
-            let values = (items.isEmpty ? [property.value.display] : items).map { value in
-                NSAttributedString(string: value, attributes: [
-                    .font: valueFont,
-                    .foregroundColor: isTagRow ? NSColor.systemPurple : NSColor.labelColor,
-                ])
-            }
-            rows.append(PropertiesCard.Row(key: key, values: values, isTagRow: isTagRow))
-        }
-
-        // Cap the key column so one long key cannot squeeze every value out.
-        keyWidth = min(keyWidth, maxWidth * 0.3)
-        let height = CGFloat(rows.count) * PropertiesCard.rowHeight
-            + PropertiesCard.padding.height * 2
-        return PropertiesCard(
-            rows: rows,
-            keyColumnWidth: keyWidth,
-            size: CGSize(width: maxWidth, height: height)
-        )
-    }
-}
 
 /// Renders one table cell's markdown source to an attributed string.
 enum CellText {
@@ -905,7 +899,6 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         case .image(_, let size, _): size
         case .table(let grid): grid.contentSize
         case .embed(let embed, _): embed.size
-        case .properties(let card): card.size
         default: nil
         }
     }
@@ -970,6 +963,15 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             } else if lead.bullet != nil {
                 bounds = bounds.union(CGRect(x: -44, y: 0, width: 44, height: bounds.height))
             }
+        case .propertyHeading:
+            bounds = bounds.union(CGRect(x: 0, y: 0, width: containerWidth, height: max(bounds.height, PropertyChips.headingHeight)))
+        case .propertyRow(let row):
+            // The whole frame: the outline and the "Add property" line reach
+            // past the line of text the fragment would otherwise claim.
+            bounds = bounds.union(CGRect(
+                x: -row.indent - 6, y: -1, width: containerWidth + 12,
+                height: max(bounds.height, layoutFragmentFrame.height) + 2
+            ))
         case .quote(_, let indent, _, _):
             // The card and the bars are painted in the gutter the paragraph's
             // head indent opened up, which is to the left of every glyph.
@@ -1013,6 +1015,16 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         if case .codeBlock(let edge, let language) = widget {
             drawCodeBlockBackground(edge: edge, language: language, at: point, in: context)
         }
+        if case .propertyHeading = widget {
+            drawPropertyHeading(at: point)
+        }
+        if case .propertyRow(let row) = widget {
+            if let focus = row.focus { drawPropertyFocus(row, focus: focus, at: point, in: context) }
+            if let symbol = row.symbol { drawPropertySymbol(symbol, indent: row.indent, at: point, in: context) }
+            if let chips = row.chips { draw(chips, indent: row.indent, at: point, in: context) }
+            if row.showsEmpty { drawPropertyEmpty(row, at: point) }
+            if row.edge == .last || row.edge == .only { drawAddProperty(indent: row.indent, at: point, in: context) }
+        }
         if case .quote(let quote, let indent, let isRevealed, _) = widget {
             drawQuoteBackground(
                 quote, indent: indent, isRevealed: isRevealed, at: point, in: context
@@ -1042,9 +1054,6 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         case .embed(let embed, let lead):
             drawBesideBlock(lead.bullet, height: embed.size.height, at: point, in: context)
             draw(embed, at: point, in: context)
-            return
-        case .properties(let card):
-            draw(card, at: point, in: context)
             return
         default:
             break
@@ -1146,6 +1155,132 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     /// layout fragment covers. Continuity comes from the rounded rectangle
     /// being oversized past the edges this line does not own and then clipped
     /// back to it, which is the same trick the code-block background uses.
+    private func drawPropertyHeading(at point: CGPoint) {
+        let font = NSFont.systemFont(ofSize: Theme.bodySize - 1, weight: .semibold)
+        let height = font.ascender - font.descender
+        NSAttributedString(string: "Properties", attributes: [
+            .font: font, .foregroundColor: NSColor.labelColor,
+        ]).draw(at: CGPoint(x: point.x, y: point.y + (layoutFragmentFrame.height - height) / 2))
+    }
+
+    /// The rounded outline around the row being edited, its key cell shaded,
+    /// as Obsidian marks the property in focus. Each line paints its slice,
+    /// so an open list is one outline.
+    private func drawPropertyFocus(_ row: PropertyRow, focus: QuoteEdge, at point: CGPoint, in context: CGContext) {
+        let left = point.x - row.indent - 6
+        guard let first = textLineFragments.first, let last = textLineFragments.last else { return }
+        // Centred on the row's text, an even margin above and below it, not
+        // on the fragment, whose line spacing sits under the text. A list's
+        // inner ends run to the fragment's edge to meet the next line's.
+        let margin = PropertyChips.rowInset
+        let font = NSFont.systemFont(ofSize: Theme.bodySize - 1)
+        let firstBaseline = point.y + first.typographicBounds.minY + first.glyphOrigin.y
+        var lastBaseline = point.y + last.typographicBounds.minY + last.glyphOrigin.y
+        if let chips = row.chips, let rows = chips.rows.max() {
+            lastBaseline = firstBaseline + CGFloat(rows) * chips.rowPitch
+        }
+        // Centred where the eye centres a line, between its capitals' tops
+        // and its baseline; the ascender sits well above the capitals.
+        let half = (font.ascender - font.descender) / 2
+        let textTop = firstBaseline - font.capHeight / 2 - half
+        let textBottom = lastBaseline - font.capHeight / 2 + half
+        let top = focus == .first || focus == .only ? textTop - margin : point.y
+        let bottom = focus == .last || focus == .only ? textBottom + margin : point.y + layoutFragmentFrame.height
+        let rect = CGRect(x: left, y: top, width: containerWidth + 6, height: bottom - top)
+        let radius: CGFloat = 6
+        // Pushed past the ends the outline continues through, so only the
+        // ends it really has are rounded and stroked.
+        let opensAbove = focus == .middle || focus == .last
+        let opensBelow = focus == .middle || focus == .first
+        let outline = CGRect(
+            x: rect.minX, y: rect.minY - (opensAbove ? radius + 2 : 0), width: rect.width,
+            height: rect.height + (opensAbove ? radius + 2 : 0) + (opensBelow ? radius + 2 : 0)
+        )
+        let path = CGPath(
+            roundedRect: outline.insetBy(dx: 0.5, dy: 0.5), cornerWidth: radius, cornerHeight: radius, transform: nil
+        )
+        // The key cell, shaded inside the outline's rounding.
+        context.saveGState()
+        context.clip(to: rect)
+        context.addPath(path)
+        context.clip()
+        context.setFillColor(NSColor.quaternarySystemFill.cgColor)
+        context.fill(CGRect(x: left, y: rect.minY, width: row.column + 4, height: rect.height))
+        context.restoreGState()
+        // The outline, this line's slice of it.
+        context.saveGState()
+        context.clip(to: rect)
+        context.setStrokeColor(NSColor.tertiaryLabelColor.cgColor)
+        context.setLineWidth(1)
+        context.addPath(path)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private func drawPropertyEmpty(_ row: PropertyRow, at point: CGPoint) {
+        guard let line = textLineFragments.first else { return }
+        let font = NSFont.systemFont(ofSize: Theme.bodySize - 1)
+        let baseline = point.y + line.typographicBounds.minY + line.glyphOrigin.y
+        NSAttributedString(string: "Empty", attributes: [
+            .font: font, .foregroundColor: NSColor.tertiaryLabelColor,
+        ]).draw(at: CGPoint(x: point.x - row.indent + row.column, y: baseline - font.ascender))
+    }
+
+    /// A row's type icon, in the column left of its key, centred on its
+    /// first line. `indent` is where the fragment's origin is from the
+    /// table's left edge.
+    private func drawPropertySymbol(_ name: String, indent: CGFloat, at point: CGPoint, in context: CGContext) {
+        guard let line = textLineFragments.first,
+              let image = Self.tintedSymbol(name, side: PropertyChips.symbolSide, tint: .tertiaryLabelColor)
+        else { return }
+        let side = PropertyChips.symbolSide
+        let mid = point.y + line.typographicBounds.minY + line.typographicBounds.height / 2
+        image.draw(in: CGRect(x: point.x - indent + 1, y: mid - side / 2, width: side, height: side))
+    }
+
+    /// "Add property" a row below the last, its plus in the icon column.
+    private func drawAddProperty(indent: CGFloat, at point: CGPoint, in context: CGContext) {
+        let font = NSFont.systemFont(ofSize: Theme.bodySize - 1)
+        let top = point.y + paintedBackgroundHeight - PropertyChips.bottomMargin - PropertyChips.addRowHeight
+        let mid = top + PropertyChips.addRowHeight / 2
+        let left = point.x - indent
+        if let plus = Self.tintedSymbol("plus", side: PropertyChips.symbolSide, tint: .secondaryLabelColor) {
+            let side = PropertyChips.symbolSide
+            plus.draw(in: CGRect(x: left + 1, y: mid - side / 2, width: side, height: side))
+        }
+        NSAttributedString(string: PropertyChips.addLabel, attributes: [
+            .font: font, .foregroundColor: NSColor.secondaryLabelColor,
+        ]).draw(at: CGPoint(x: left + LiveStyler.propertyPadding, y: mid - (font.ascender - font.descender) / 2))
+    }
+
+    private func draw(_ chips: PropertyChips, indent: CGFloat, at point: CGPoint, in context: CGContext) {
+        guard let line = textLineFragments.first else { return }
+        let left = point.x - indent + chips.column
+        let baseline = point.y + line.typographicBounds.minY + line.glyphOrigin.y
+        let inset: CGFloat = 1.5
+        for index in chips.labels.indices {
+            let rowBaseline = baseline + CGFloat(chips.rows[index]) * chips.rowPitch
+            let rect = CGRect(
+                x: left + chips.x[index], y: rowBaseline - chips.font.ascender - inset,
+                width: chips.widths[index], height: chips.font.ascender - chips.font.descender + inset * 2
+            )
+            context.setFillColor(
+                (chips.tint?.withAlphaComponent(Theme.tagBackgroundOpacity) ?? NSColor.quaternaryLabelColor).cgColor
+            )
+            context.addPath(CGPath(
+                roundedRect: rect, cornerWidth: rect.height / 2, cornerHeight: rect.height / 2, transform: nil
+            ))
+            context.fillPath()
+            chips.labels[index].draw(at: CGPoint(x: rect.minX + PropertyChips.padding, y: rowBaseline - chips.font.ascender))
+            if chips.removable,
+               let cross = Self.tintedSymbol("xmark", side: 9, tint: chips.tint ?? .secondaryLabelColor) {
+                cross.draw(in: CGRect(
+                    x: rect.maxX - PropertyChips.padding - 9, y: rect.midY - 4.5, width: 9, height: 9
+                ))
+            }
+        }
+    }
+
     private func drawQuoteBackground(
         _ quote: QuoteLine, indent: CGFloat, isRevealed: Bool,
         at point: CGPoint, in context: CGContext
@@ -1437,43 +1572,6 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         context.clip()
         paint(image, in: rect, context: context)
         context.restoreGState()
-    }
-
-    private func draw(_ card: PropertiesCard, at point: CGPoint, in context: CGContext) {
-        let frame = CGRect(
-            origin: CGPoint(x: point.x, y: point.y + Self.blockInset), size: card.size
-        )
-        // A separator underneath rather than a box around: properties are the
-        // note's header, and a card would make them look like content.
-        context.setStrokeColor(NSColor.separatorColor.cgColor)
-        context.setLineWidth(1)
-        context.move(to: CGPoint(x: frame.minX, y: (frame.maxY).rounded() + 0.5))
-        context.addLine(to: CGPoint(x: frame.maxX, y: (frame.maxY).rounded() + 0.5))
-        context.strokePath()
-
-        let padding = PropertiesCard.padding
-        withAppKitContext(context) {
-            for (index, row) in card.rows.enumerated() {
-                let y = frame.minY + padding.height + CGFloat(index) * PropertiesCard.rowHeight
-                row.key.draw(at: CGPoint(x: frame.minX + padding.width, y: y + 3))
-
-                var x = frame.minX + padding.width + card.keyColumnWidth + PropertiesCard.gutter
-                for value in row.values {
-                    let width = ceil(value.size().width)
-                    guard x + width < frame.maxX - padding.width else { break }
-                    if row.isTagRow {
-                        let pill = CGRect(x: x - 6, y: y + 1, width: width + 12, height: 18)
-                        context.setFillColor(NSColor.systemPurple.withAlphaComponent(0.14).cgColor)
-                        context.addPath(CGPath(
-                            roundedRect: pill, cornerWidth: 5, cornerHeight: 5, transform: nil
-                        ))
-                        context.fillPath()
-                    }
-                    value.draw(at: CGPoint(x: x, y: y + 2))
-                    x += width + (row.isTagRow ? 20 : 10)
-                }
-            }
-        }
     }
 
     private func draw(_ embed: EmbeddedNote, at point: CGPoint, in context: CGContext) {

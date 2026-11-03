@@ -613,6 +613,7 @@ final class AppModel: ObservableObject, ProposalReviewing {
     /// its search field and stops. Every other command that touches the text
     /// goes through the model for the same reason.
     @Published private(set) var pendingChecklistToggle = 0
+    @Published private(set) var pendingPropertiesRequest = 0
     /// The inline format the editor has been asked to toggle over its
     /// selection, and which request it is, for the reason above: a command
     /// run from the palette cannot reach the text view down the responder
@@ -2588,6 +2589,7 @@ final class AppModel: ObservableObject, ProposalReviewing {
             colorfulFormatting: appearance.colorfulFormattingEnabled,
             headingFont: appearance.headingFont,
             headingBars: appearance.headingColor == .levelColors,
+            propertiesAsText: appearance.showsPropertiesAsText,
             palette: appearance.palette,
             accentColor: ink(appearance.accentColor),
             linkColor: ink(appearance.linkColor),
@@ -2770,6 +2772,8 @@ final class AppModel: ObservableObject, ProposalReviewing {
     private var formatGeneration = 0
 
     func toggleChecklist() { pendingChecklistToggle += 1 }
+    /// Opens the open note's properties form.
+    func editProperties() { pendingPropertiesRequest += 1 }
 
     func barDidDismiss() {
         guard let action = pendingAfterPalette else { return }

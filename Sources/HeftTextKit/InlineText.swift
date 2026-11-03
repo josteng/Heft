@@ -21,6 +21,8 @@ struct RenderContext {
     var headingFont: AppearancePreferences.HeadingFont = .system
     /// A bar in the level's colour beside each heading.
     var headingBars: Bool = false
+    /// The frontmatter as plain YAML instead of the properties table.
+    var propertiesAsText: Bool = false
     /// Decides code's fill, highlights and callouts; the colours below are
     /// already resolved through it.
     var palette: AppearancePreferences.ColorPalette = .vivid

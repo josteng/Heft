@@ -667,8 +667,11 @@ enum HeftMain {
             case .table(let grid):
                 "table \(size(grid.size)) rows \(grid.rowHeights.count) cols \(grid.columnWidths.count)"
                     + describeActiveCell(of: grid)
-            case .properties(let card):
-                "properties \(card.rows.count) rows \(size(card.size))"
+            case .propertyHeading:
+                "properties heading"
+            case .propertyRow(let row):
+                "property row \(row.edge)" + (row.chips.map { " chips \($0.labels.count)" } ?? "")
+                    + (row.focus.map { " focus \($0)" } ?? "")
             case .embed(let embed, let lead):
                 "embed \"\(embed.title)\" \(size(embed.size))"
                     + (embed.isTruncated ? " truncated" : "")

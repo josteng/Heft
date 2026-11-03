@@ -571,6 +571,7 @@ struct EditorPane: View {
                 findSelection: findSelection,
                 insertion: model.pendingInsertion,
                 checklistToggle: model.pendingChecklistToggle,
+                propertiesRequest: model.pendingPropertiesRequest,
                 format: model.pendingFormat,
                 listCommand: model.pendingListCommand,
                 focusRequest: model.editorFocusRequest,
@@ -660,6 +661,11 @@ struct EditorPane: View {
             // unfocused as the window.
             if let raw = environment["HEFT_SHOW_SETTINGS"], let pane = SettingsPane(rawValue: raw) {
                 model.showSettingsForCapture(pane)
+            }
+            // `HEFT_EDIT_PROPERTIES=1` opens the properties form.
+            if environment["HEFT_EDIT_PROPERTIES"] == "1" {
+                try? await Task.sleep(for: .seconds(1.5))
+                model.editProperties()
             }
             guard environment["HEFT_SHOW_FIND"] == "1" else { return }
             try? await Task.sleep(for: .seconds(1.5))

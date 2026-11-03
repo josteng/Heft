@@ -164,13 +164,15 @@ enum LiveStyler {
             style(
                 decoration, in: sink, base: baseFont, body: body,
                 context: context, layout: &layout, drawsWidgets: drawsWidgets,
-                revealed: reveal.reveals(decoration)
+                revealed: reveal.reveals(decoration), contentWidth: contentWidth
             )
         }
 
         // Second pass so collapsing always wins over the styling above.
         for decoration in decorations {
             guard !reveal.reveals(decoration), writes(decoration.range) else { continue }
+            // Shown as text, the frontmatter hides nothing.
+            if context.propertiesAsText, case .propertyLine = decoration.style { continue }
             sink.writes = true
             for range in decoration.syntax where range.length > 0 && NSMaxRange(range) <= storage.length {
                 collapse(range, in: sink)
@@ -386,16 +388,6 @@ enum LiveStyler {
         let lineStart = text.lineRange(for: NSRange(location: range.location, length: 0)).location
 
         switch decoration.style {
-        case .frontmatter:
-            // The fences are markup; only what is between them is properties.
-            let inner = text.substring(with: range)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "-\n"))
-            guard let card = PropertiesRenderer.card(
-                yaml: inner, maxWidth: contentWidth, fontSize: base.pointSize - 1
-            ) else { return }
-            hideWhole(range, in: storage, text: text, reserving: card.size.height)
-            layout.blocks[lineStart] = .properties(card)
-
         case .table(let table):
             // The caret does not dissolve a table back into pipes: the grid is
             // drawn either way and one cell shows its source instead.
@@ -644,7 +636,8 @@ enum LiveStyler {
         context: RenderContext,
         layout: inout LiveLayout,
         drawsWidgets: Bool,
-        revealed: Bool
+        revealed: Bool,
+        contentWidth: CGFloat = Theme.contentMaxWidth
     ) {
         let range = decoration.range
         guard range.location >= 0, NSMaxRange(range) <= storage.length else { return }
@@ -657,11 +650,22 @@ enum LiveStyler {
         case .escapedCharacter:
             break
 
+        // Its lines style themselves, as rows of the properties table.
         case .frontmatter:
-            storage.addAttributes([
-                .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),
-                .foregroundColor: NSColor.tertiaryLabelColor,
-            ], range: range)
+            break
+
+        case .propertyLine(let line):
+            if context.propertiesAsText {
+                // The YAML as written, every character of it.
+                storage.addAttributes([
+                    .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                ], range: range)
+            } else {
+                styleProperty(line, range: range, in: storage, base: base, context: context,
+                              layout: &layout, drawsWidgets: drawsWidgets, revealed: revealed,
+                              contentWidth: contentWidth)
+            }
 
         case .comment:
             storage.addAttributes([
@@ -1128,6 +1132,271 @@ enum LiveStyler {
 
         case .thematicBreak, .agentGuideBoundary:
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: range)
+        }
+    }
+
+    /// Room for a row's type icon, left of its key: the key starts here.
+    static let propertyPadding: CGFloat = 24
+
+    /// The symbol before a key, from what its value looks like, as Obsidian
+    /// marks a property's type: tags, aliases, a list, a number, a date, a
+    /// checkbox, or text.
+    static func propertySymbol(key: String, value: String, isList: Bool) -> String {
+        switch key.lowercased() {
+        case "tags", "tag": return "tag"
+        case "aliases", "alias": return "arrow.turn.up.right"
+        default: break
+        }
+        if isList { return "list.bullet" }
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        if ["true", "false"].contains(trimmed.lowercased()) { return "checkmark.square" }
+        if !trimmed.isEmpty, Double(trimmed) != nil { return "number" }
+        if trimmed.range(of: #"^\d{4}-\d{2}-\d{2}"#, options: .regularExpression) != nil { return "calendar" }
+        return "text.alignleft"
+    }
+
+    /// One frontmatter line as a row of the properties table, styled in
+    /// place as Obsidian lays its properties out: a "Properties" heading,
+    /// then per row a type icon, the key muted in a column of its own, the
+    /// value at full contrast beside it, a list's items as pills, and an
+    /// "Add property" line under the last row. The `:` and `- ` are
+    /// collapsed while the caret is elsewhere, and on the caret's line shown
+    /// faintly without moving the value: the gap the column needs is a kern,
+    /// on the key's last character while the colon is hidden and on the
+    /// colon's last while it shows.
+    private static func styleProperty(
+        _ line: PropertyLine, range: NSRange, in storage: StyleSink, base: NSFont,
+        context: RenderContext, layout: inout LiveLayout, drawsWidgets: Bool, revealed: Bool,
+        contentWidth: CGFloat
+    ) {
+        let text = storage.storage.string as NSString
+        let paragraphRange = text.lineRange(for: NSRange(location: range.location, length: 0))
+        let size = base.pointSize - 1
+        let font = NSFont.systemFont(ofSize: size)
+        func width(_ string: String, _ font: NSFont) -> CGFloat {
+            ceil(NSAttributedString(string: string, attributes: [.font: font]).size().width)
+        }
+        func absolute(_ part: NSRange) -> NSRange {
+            NSRange(location: range.location + part.location, length: part.length)
+        }
+        func flatten() {
+            let flat = NSMutableParagraphStyle()
+            flat.maximumLineHeight = 0.01
+            flat.minimumLineHeight = 0.01
+            storage.addAttribute(.paragraphStyle, value: flat, range: paragraphRange)
+        }
+        let padding = propertyPadding
+        let column = min(max(width(line.widestKey, font) + 24, 120), 220)
+
+        // An item of a list folded onto its key's row: no row of its own.
+        // Folded whether or not the caret is in the list: a list is edited
+        // as its pills, on its key's row, as Obsidian edits one.
+        if line.folds, drawsWidgets {
+            collapse(range, in: storage)
+            flatten()
+            return
+        }
+        let blockList = line.listEdge != nil
+        let folded = drawsWidgets && !line.items.isEmpty && (blockList || !revealed)
+        let editingList = revealed && blockList && drawsWidgets
+        var keyEnd: (range: NSRange, width: CGFloat)?
+        guard let edge = folded ? (line.foldedEdge ?? line.edge) : line.edge else {
+            // A fence: plain `---` on the caret's line. Otherwise the closing
+            // one is gone and the opening one is the table's heading.
+            if revealed || !drawsWidgets {
+                storage.addAttributes([
+                    .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ], range: range)
+            } else if line.opens {
+                collapse(range, in: storage)
+                let heading = NSMutableParagraphStyle()
+                heading.minimumLineHeight = PropertyChips.headingHeight
+                heading.maximumLineHeight = PropertyChips.headingHeight
+                storage.addAttribute(.paragraphStyle, value: heading, range: paragraphRange)
+                layout.blocks[paragraphRange.location] = .propertyHeading
+            } else {
+                flatten()
+            }
+            return
+        }
+
+        storage.addAttributes([.font: font, .foregroundColor: NSColor.labelColor], range: range)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = Theme.lineSpacing
+        paragraph.firstLineHeadIndent = padding
+        paragraph.headIndent = padding + column
+        let isLast = edge == .last || edge == .only
+        // A little room above and below every row, inside its fragment, so
+        // the outline around an edited row clears the rows beside it. An
+        // open list's lines sit together inside one outline.
+        let inList = false
+        paragraph.paragraphSpacingBefore = inList && line.listEdge != .first ? 0 : PropertyChips.rowInset
+        // The last row carries the "Add property" line under it.
+        paragraph.paragraphSpacing = isLast
+            ? (drawsWidgets ? PropertyChips.addRowHeight + PropertyChips.bottomMargin : Theme.quoteBlockPadding)
+            : (inList && line.listEdge != .last ? 0 : PropertyChips.rowInset)
+        paragraph.minimumLineHeight = ceil(font.ascender - font.descender + font.leading)
+
+        var values: [NSRange] = []
+        var symbol: String?
+        switch line.kind {
+        case .fence:
+            break
+        case let .entry(key, colon, value):
+            let keyRange = absolute(key)
+            let colonRange = absolute(colon)
+            storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: keyRange)
+            storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: colonRange)
+            let keyWidth = width(text.substring(with: keyRange), font)
+            keyEnd = (keyRange, keyWidth)
+            // The colon stays hidden on the row being edited too, as
+            // Obsidian never shows it; a key still being typed has none yet,
+            // and no gap, so the caret stays at its end.
+            if revealed, colonRange.length > 0 { collapse(colonRange, in: storage) }
+            if keyRange.length > 0, colonRange.length > 0 || !revealed {
+                storage.addAttribute(.kern, value: max(column - keyWidth, 4), range: NSRange(location: NSMaxRange(keyRange) - 1, length: 1))
+            }
+            let valueRange = absolute(value)
+            let lineText = text.substring(with: range) as NSString
+            // The type Obsidian keeps for the key, where it has one; else what
+            // the value looks like.
+            symbol = PropertyTypes.type(of: line.key, in: PropertyTypes.types(in: context.vaultRoot))?.symbol
+                ?? propertySymbol(
+                    key: line.key, value: text.substring(with: valueRange),
+                    isList: !line.items.isEmpty || line.listEdge != nil
+                )
+            let brackets = PropertyLine.brackets(of: value, in: lineText)
+            if line.listEdge != nil {
+                // A block list's key line holds the item being typed, plain
+                // text until Return makes it a pill.
+                values = []
+            } else if brackets.isEmpty {
+                values = [valueRange]
+            } else {
+                // The items of `[a, b]`, each its own value.
+                let inner = NSRange(location: value.location + 1, length: value.length - 2)
+                var start = inner.location
+                for index in inner.location...NSMaxRange(inner) {
+                    let atEnd = index == NSMaxRange(inner)
+                    guard atEnd || lineText.substring(with: NSRange(location: index, length: 1)) == "," else { continue }
+                    var item = NSRange(location: start, length: index - start)
+                    while item.length > 0, lineText.substring(with: NSRange(location: item.location, length: 1)) == " " {
+                        item.location += 1
+                        item.length -= 1
+                    }
+                    if item.length > 0 { values.append(absolute(item)) }
+                    start = index + 1
+                }
+                for bracket in brackets {
+                    storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: absolute(bracket))
+                }
+            }
+        case let .item(marker, value):
+            let markerRange = absolute(marker)
+            storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: markerRange)
+            let markerWidth = revealed ? width(text.substring(with: markerRange), font) : 0
+            paragraph.firstLineHeadIndent = max(padding, padding + column - markerWidth)
+            // An open list is being edited: its items are text, the pill
+            // would reach over the dash beside them.
+            values = revealed ? [] : [absolute(value)]
+        case .other:
+            storage.addAttributes([
+                .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ], range: range)
+            // A blank row is where a key is about to be typed.
+            let blank = text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            paragraph.firstLineHeadIndent = blank ? padding : padding + column
+        }
+        storage.addAttribute(.paragraphStyle, value: paragraph, range: paragraphRange)
+
+        if line.isTags, drawsWidgets {
+            for value in values where value.length > 0 {
+                let ink = CTLineGetImageBounds(CTLineCreateWithAttributedString(
+                    NSAttributedString(string: text.substring(with: value), attributes: [.font: font])
+                ), nil)
+                layout.inlineTags[paragraphRange.location, default: []].append(
+                    (value, context.tagColor, font, ink)
+                )
+            }
+        }
+        var chips: PropertyChips?
+        if folded {
+            // An inline list's own text gives way to its chips; a block
+            // list's key line holds the item being typed, which stays.
+            if case let .entry(_, _, value) = line.kind, value.length > 0, !blockList {
+                collapse(absolute(value), in: storage)
+                layout.inlineTags[paragraphRange.location] = nil
+            }
+            let available = max(contentWidth - padding - column, 80)
+            let rowPitch = ceil(font.ascender - font.descender + font.leading) + Theme.lineSpacing
+            var labels: [NSAttributedString] = []
+            var xs: [CGFloat] = []
+            var widths: [CGFloat] = []
+            var rows: [Int] = []
+            var x: CGFloat = 0
+            var row = 0
+            let extra = editingList ? PropertyChips.removeWidth : 0
+            // Editing, the item being typed goes after the pills; when they
+            // leave it too little room they start on the row below instead.
+            if editingList {
+                let total = line.items.reduce(CGFloat(0)) { sum, item in
+                    sum + ceil(NSAttributedString(string: item, attributes: [.font: font]).size().width)
+                        + PropertyChips.padding * 2 + extra + PropertyChips.gap
+                }
+                if total > available - PropertyChips.inputRoom { row = 1 }
+            }
+            for item in line.items {
+                let label = NSAttributedString(string: item, attributes: [
+                    .font: font, .foregroundColor: NSColor.labelColor,
+                ])
+                let width = ceil(label.size().width) + PropertyChips.padding * 2 + extra
+                if x > 0, x + width > available {
+                    row += 1
+                    x = 0
+                }
+                labels.append(label)
+                xs.append(x)
+                widths.append(width)
+                rows.append(row)
+                x += width + PropertyChips.gap
+            }
+            chips = PropertyChips(
+                labels: labels, x: xs, widths: widths, rows: rows, column: padding + column,
+                rowPitch: rowPitch, font: font, tint: line.isTags ? context.tagColor : nil,
+                removable: editingList
+            )
+            // The typed item's place: after the pills on the first row, or
+            // at the start of it when they moved below.
+            if editingList, let keyEnd {
+                let onFirstRow = zip(rows, zip(xs, widths)).filter { $0.0 == 0 }
+                let offset = onFirstRow.last.map { $0.1.0 + $0.1.1 + PropertyChips.gap } ?? 0
+                storage.addAttribute(
+                    .kern, value: max(column - keyEnd.width, 4) + offset,
+                    range: NSRange(location: NSMaxRange(keyEnd.range) - 1, length: 1)
+                )
+            }
+            paragraph.minimumLineHeight = max(paragraph.minimumLineHeight, rowPitch * CGFloat(row + 1) - Theme.lineSpacing)
+            storage.addAttribute(.paragraphStyle, value: paragraph, range: paragraphRange)
+        }
+        if drawsWidgets {
+            var row = PropertyRow(edge: edge, indent: paragraph.firstLineHeadIndent, chips: chips, symbol: symbol)
+            row.column = padding + column
+            if revealed {
+                row.focus = .only
+                switch line.kind {
+                case let .entry(_, _, value):
+                    row.showsEmpty = value.length == 0 && line.listEdge == nil
+                case .other:
+                    let blank = text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    row.showsEmpty = blank
+                    if blank { row.symbol = "text.alignleft" }
+                default:
+                    break
+                }
+            }
+            layout.blocks[paragraphRange.location] = .propertyRow(row)
         }
     }
 

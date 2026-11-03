@@ -49,7 +49,7 @@ public final class IndexCache: @unchecked Sendable {
     /// Bumped when what a note parses to changes shape, or what the same
     /// text parses to changes, so an older file is ignored rather than
     /// decoded into something wrong or kept for a note that never changes.
-    static let version = 4
+    static let version = 5
 
     /// A vault nothing has opened for this long is swept on the next write.
     public static let retention: TimeInterval = 30 * 24 * 60 * 60

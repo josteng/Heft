@@ -85,6 +85,15 @@ final class AppearanceSettings: ObservableObject {
         }
     }
 
+    /// The frontmatter as the YAML it is, rather than drawn as a table.
+    /// Obsidian's "source" display of properties.
+    @Published var showsPropertiesAsText: Bool {
+        didSet {
+            HeftDefaults.shared.set(showsPropertiesAsText, forKey: Self.propertiesAsTextKey)
+            AppearanceSync.changed()
+        }
+    }
+
     /// How the built-in colours and swatches are drawn. A colour picked with
     /// Custom is shown exactly, whichever this is.
     @Published var palette: AppearancePreferences.ColorPalette {
@@ -226,6 +235,7 @@ final class AppearanceSettings: ObservableObject {
     private static let boldKey = "dev.stenglein.Heft.appearance.boldColor"
     private static let italicKey = "dev.stenglein.Heft.appearance.italicColor"
     private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
+    private static let propertiesAsTextKey = "dev.stenglein.Heft.propertiesAsText"
     private static let headingFontKey = "dev.stenglein.Heft.appearance.headingFont"
     private static let paletteKey = "dev.stenglein.Heft.appearance.palette"
     private static let swatchesKey = "dev.stenglein.Heft.appearance.swatches"
@@ -250,6 +260,7 @@ final class AppearanceSettings: ObservableObject {
             ? launchedBefore
             : HeftDefaults.shared.bool(forKey: Self.colorfulFormattingKey)
         colorfulFormattingEnabled = colorful
+        showsPropertiesAsText = HeftDefaults.shared.bool(forKey: Self.propertiesAsTextKey)
         palette = HeftDefaults.shared.string(forKey: Self.paletteKey)
             .flatMap(AppearancePreferences.ColorPalette.init(rawValue:)) ?? (launchedBefore ? .vivid : .muted)
         swatches = (HeftDefaults.shared.dictionary(forKey: Self.swatchesKey) as? [String: String] ?? [:])

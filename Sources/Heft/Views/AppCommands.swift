@@ -362,6 +362,22 @@ struct AppCommand: Identifiable {
             action: { $0.insertTable() }
         ),
         Self(
+            id: "addProperty",
+            title: "Add property",
+            symbol: "list.bullet.rectangle",
+            searchTerms: "properties frontmatter yaml metadata add key value field",
+            enabled: { $0.current != nil },
+            action: { $0.editProperties() }
+        ),
+        Self(
+            id: "togglePropertiesAsText",
+            title: "Show properties as text",
+            symbol: "curlybraces",
+            searchTerms: "properties frontmatter yaml source raw text table toggle view",
+            enabled: { _ in true },
+            action: { _ in AppearanceSettings.shared.showsPropertiesAsText.toggle() }
+        ),
+        Self(
             id: "insertCallout",
             title: "Insert callout",
             symbol: "quote.bubble",
