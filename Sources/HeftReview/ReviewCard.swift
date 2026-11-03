@@ -28,6 +28,9 @@ struct ReviewCard: View {
     let discard: (Proposal) -> Void
     let acceptGroup: (ProposalGroup) -> Void
     let discardGroup: (ProposalGroup) -> Void
+    /// How far the card below is laid over this one's foot, as the calendar
+    /// is when both show: room kept under the last row for it.
+    var tuckedUnder: CGFloat = 0
     @State private var isExpanded = true
     @State private var openGroups: Set<String> = []
     @State private var rowsHeight: CGFloat = 0
@@ -43,21 +46,25 @@ struct ReviewCard: View {
         if !pending.isEmpty {
             VStack(spacing: 0) {
                 header
-                if isExpanded {
-                    ScrollView {
-                        rows
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
-                                rowsHeight = $0
-                            }
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .onScrollGeometryChange(for: Bool.self) { geometry in
-                        geometry.contentOffset.y <= 1 - geometry.contentInsets.top
-                    } action: { _, top in
-                        rowsAtTop = top
-                    }
-                    .frame(height: min(rowsHeight, Self.tallest))
+                // Always there, folded to no height rather than removed:
+                // removed, the rows faded on their own while the card's
+                // height jumped, and the text seemed to settle into place.
+                ScrollView {
+                    rows
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                            rowsHeight = $0
+                        }
                 }
+                .scrollBounceBehavior(.basedOnSize)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y <= 1 - geometry.contentInsets.top
+                } action: { _, top in
+                    rowsAtTop = top
+                }
+                .frame(height: isExpanded ? min(rowsHeight, Self.tallest) : 0, alignment: .top)
+                .clipped()
+                .allowsHitTesting(isExpanded)
+                .accessibilityHidden(!isExpanded)
             }
             #if os(iOS)
             // A sheet's gesture, anywhere on the panel: down folds the rows
@@ -69,29 +76,16 @@ struct ReviewCard: View {
                 let y = drag.translation.height
                 guard abs(y) > abs(drag.translation.width) * 1.5, abs(y) > 30 else { return }
                 if y > 0, isExpanded, rowsAtTop {
-                    withAnimation(.snappy) { isExpanded = false }
+                    withAnimation(ReviewStyle.fold) { isExpanded = false }
                 } else if y < 0, !isExpanded {
-                    withAnimation(.snappy) { isExpanded = true }
+                    withAnimation(ReviewStyle.fold) { isExpanded = true }
                 }
             })
             #endif
-            // Docked, as a sheet's edge is: the sidebar's full width, its
-            // top rounded, ending on the calendar or the sidebar's foot,
-            // and laid over the list's foot as a bottom inset, so the list
-            // scrolls on behind it. Inset as a card, or stacked under the
-            // list, a strip of sidebar showed above it like a border.
-            .background {
-                ZStack {
-                    Self.shape.fill(ReviewStyle.panelBase)
-                    Self.shape.fill(.tint.opacity(ReviewStyle.panelTint))
-                }
-                .shadow(color: .black.opacity(0.10), radius: 6, y: -1)
-                .ignoresSafeArea(edges: .bottom)
-            }
+            .padding(.bottom, tuckedUnder)
+            .dockedCard(tint: ReviewStyle.panelTint)
         }
     }
-
-    private static let shape = UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12)
 
     private var rows: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -113,7 +107,7 @@ struct ReviewCard: View {
 
     private var header: some View {
         Button {
-            withAnimation(.snappy) { isExpanded.toggle() }
+            withAnimation(ReviewStyle.fold) { isExpanded.toggle() }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
@@ -126,17 +120,16 @@ struct ReviewCard: View {
                     .font(ReviewStyle.cardCount)
                     .foregroundStyle(Color.secondary)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(ReviewStyle.cardChevron)
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                FoldChevron(isOpen: isExpanded)
             }
             .padding(.horizontal, 12)
             // More above than below: the last row ends its own padding and
             // the list's above the panel's foot, and the header, as tight
             // to the rounded top as it is to the rows, read as crowded.
-            .padding(.top, ReviewStyle.cardHeaderPadding + 4)
-            .padding(.bottom, ReviewStyle.cardHeaderPadding)
+            // Even when folded; open, the rows' own padding under the last
+            // one is matched by 4 more above the header.
+            .padding(.top, ReviewStyle.cardHeaderPadding + (isExpanded ? 4 : 2))
+            .padding(.bottom, ReviewStyle.cardHeaderPadding + (isExpanded ? 0 : 2))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -209,3 +202,53 @@ struct ReviewCard: View {
         }
     }
 }
+
+/// The chevron at the right of a docked card's header, down while the card
+/// is open and right while it is folded: the review panel's, and the
+/// calendar's below it, so the stack folds one way.
+struct FoldChevron: View {
+    let isOpen: Bool
+
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(ReviewStyle.cardChevron)
+            .foregroundStyle(.tertiary)
+            .rotationEffect(.degrees(isOpen ? 90 : 0))
+    }
+}
+
+extension View {
+    /// A card docked at the sidebar's foot, as a sheet's edge is: the full
+    /// width, its top rounded, and opaque, so a list
+    /// passing behind it is hidden. The review panel and the calendar stack
+    /// as two of them. Inset with a margin instead, a strip of sidebar showed
+    /// around a card like a border.
+    ///
+    /// A card with no accent of its own, as the calendar, is lifted off the
+    /// base by a little grey instead: on the plain base it read darker than
+    /// the tinted card above it, a hole in the stack rather than a card.
+    func dockedCard(tint: Double = 0) -> some View {
+        background {
+            let shape = UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12)
+            ZStack {
+                shape.fill(ReviewStyle.panelBase)
+                if tint > 0 {
+                    shape.fill(.tint.opacity(tint))
+                } else {
+                    shape.fill(Color.primary.opacity(ReviewStyle.cardLift))
+                }
+            }
+            // A whisper of a shadow: the earlier one read as plastic beside
+            // the flat sidebar, and none at all left the stack's edges soft.
+            .shadow(color: .black.opacity(0.05), radius: 3, y: -0.5)
+            .ignoresSafeArea(edges: .bottom)
+        }
+    }
+}
+
+/// How far the calendar's card is laid over the review panel's foot, which
+/// shows the two as a stack: its corner radius.
+enum DockedCardStack {
+    static let overlap: CGFloat = 12
+}
+

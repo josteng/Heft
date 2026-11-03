@@ -44,6 +44,8 @@ enum ReviewStyle {
     static let panelTint = 0.22
     /// Under the tint, so the list passing behind the panel is hidden.
     static let panelBase = AnyShapeStyle(.background)
+    /// The grey a card without an accent is lifted by.
+    static let cardLift = 0.07
     #else
     static let titleSymbol = Font.headline
     static let title = Font.headline
@@ -74,6 +76,7 @@ enum ReviewStyle {
     /// Opaque: in the iPad's glass sidebar `.background` is translucent,
     /// and the rows passing behind the panel showed through it.
     static let panelBase = AnyShapeStyle(Color(uiColor: .systemBackground))
+    static let cardLift = 0.03
     #endif
 
     /// Where the other changes of a group are listed.
@@ -94,6 +97,10 @@ enum ReviewStyle {
         AnyShapeStyle(.tint)
         #endif
     }
+
+    /// How a docked card folds and opens: smooth, with no spring, the same
+    /// for the review panel and the calendar below it.
+    static let fold = Animation.smooth(duration: 0.3)
 
     /// The symbol a proposal of each kind is listed with.
     static func symbol(for kind: Proposal.Kind) -> String {

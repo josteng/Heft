@@ -136,19 +136,22 @@ struct SidebarView: View {
                 case .files: if filter.isEmpty { treeList } else { filteredList }
                 }
             }
-            // At the foot, under whichever list is showing and above the
-            // calendar: what waits for an answer belongs to no one list,
-            // and `ReviewCard` says why the top was wrong. An inset of the
-            // list, so the list scrolls on behind it and its last rows can
-            // still come up above it. The iPad's sidebar does the same.
-            .safeAreaInset(edge: .bottom, spacing: 0) { ReviewCenter() }
-
-            if model.isCalendarVisible {
+            // The review panel and the calendar at the foot, two docked
+            // cards with the calendar laid over the panel's foot: what waits
+            // for an answer belongs to no one list, and `ReviewCard` says why
+            // the top was wrong. An inset of the list, so the list scrolls on
+            // behind the stack and its last rows can still come up above it.
+            // The iPad's sidebar does the same.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                let stacked = model.isCalendarVisible && !model.pendingProposals.isEmpty
                 VStack(spacing: 0) {
-                    Divider()
-                    CalendarPanel()
+                    ReviewCenter(tuckedUnder: stacked ? DockedCardStack.overlap : 0)
+                    if model.isCalendarVisible {
+                        CalendarPanel()
+                            .padding(.top, stacked ? -DockedCardStack.overlap : 0)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.snappy(duration: 0.24), value: model.isCalendarVisible)

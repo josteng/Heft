@@ -189,15 +189,22 @@ struct PadRootView: View {
             // Rows move to their new places as notes change, as on the phone.
             .animation(.snappy, value: vault.recent.map(\.path))
             .refreshable { vault.refresh() }
-            // At the foot, under every list and above the month, as on the
-            // Mac: it belongs to no one list. An inset of the list, so the
-            // list scrolls on behind it.
-            .safeAreaInset(edge: .bottom, spacing: 0) { PadReviewCard() }
-            ScanStatus()
-            if showsCalendar {
-                Divider()
-                PadMonth(chosen: day, expanded: $calendarExpanded, perform: { action = $0 }) { pick($0) }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            // The review panel and the month at the foot, two docked cards
+            // with the month laid over the panel's foot, as on the Mac: what
+            // waits belongs to no one list. An inset of the list, so the list
+            // scrolls on behind the stack.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                let stacked = showsCalendar && !vault.review.pendingProposals.isEmpty
+                VStack(spacing: 0) {
+                    ScanStatus()
+                    PadReviewCard(tuckedUnder: stacked ? DockedCardStack.overlap : 0)
+                    if showsCalendar {
+                        PadMonth(chosen: day, expanded: $calendarExpanded, perform: { action = $0 }) { pick($0) }
+                            .dockedCard()
+                            .padding(.top, stacked ? -DockedCardStack.overlap : 0)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
             }
         }
         .sheet(item: $settings) { SettingsView(page: $0.page) }
@@ -375,7 +382,9 @@ struct PadRootView: View {
         }
         if environment["HEFT_IOS_QUERY"] != nil { showsSearch = true }
         if environment["HEFT_IOS_PAD_MONTH"] != nil { calendarExpanded = true }
-        if environment["HEFT_IOS_PAD_NO_CALENDAR"] != nil { showsCalendar = false }
+        // Scene storage keeps it, so a run that hid it says so to the next:
+        // `1` hides the calendar and `0` shows it again.
+        if let hidden = environment["HEFT_IOS_PAD_NO_CALENDAR"] { showsCalendar = hidden == "0" }
         // `HEFT_IOS_PAD_STEPS=A.md,B.md,back` opens notes and goes back or
         // forward, a step a second, as a reader clicking through would.
         if let steps = environment["HEFT_IOS_PAD_STEPS"]?.split(separator: ",") {
@@ -528,38 +537,59 @@ private struct PadMonth: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            HStack {
-                Button {
-                    withAnimation(.smooth(duration: 0.3)) { expanded.toggle() }
-                } label: {
-                    // The title folds and opens, as on the phone, with no
-                    // arrow of its own beside the paging ones.
-                    Text(anchor.formatted(.dateTime.month(.wide).year()))
-                        .font(.headline)
-                        .contentTransition(.numericText(value: anchor.timeIntervalSinceReferenceDate))
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint(expanded ? "Folds the month to one week" : "Shows the whole month")
+            HStack(spacing: 12) {
+                Text(anchor.formatted(.dateTime.month(.wide).year()))
+                    .font(.headline)
+                    .contentTransition(.numericText(value: anchor.timeIntervalSinceReferenceDate))
                 Spacer()
-                Group {
-                    Button(expanded ? "Previous Month" : "Previous Week", systemImage: "chevron.left") { page(-1) }
-                    // Today between the arrows, always there so nothing
-                    // moves: in the accent when it would go somewhere,
-                    // dimmed when today is chosen and in view.
-                    Button("Today", systemImage: "circle.fill") {
+                // Today beside the fold chevron, only once the reader has
+                // paged away: beside the month it moved with the month's
+                // width. A small grey capsule, quiet, with a finger's
+                // target around it. No arrows:
+                // swipes page, and small chevrons beside the fold chevron
+                // read as more of it while being too small to hit.
+                if !todayInView {
+                    Button {
                         withAnimation(.snappy) { anchor = Date() }
                         pick(Date())
+                    } label: {
+                        Text("Today")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(.quaternary, in: .capsule)
+                            .frame(minHeight: 44)
+                            .contentShape(.rect)
                     }
-                    .font(.system(size: 9))
-                    .foregroundStyle(showsToday ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.tint))
-                    .disabled(showsToday)
-                    Button(expanded ? "Next Month" : "Next Week", systemImage: "chevron.right") { page(1) }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .tint(.primary)
-                .hoverEffect(.highlight)
+                FoldChevron(isOpen: expanded)
+                    .frame(width: 24)
             }
+            .frame(minHeight: 44)
+            // The whole row folds and opens, as the review panel's header
+            // does, the chevron at its end saying so; Today keeps its own
+            // tap, as a button inside the row takes it first. Up and down
+            // on it open and fold too, since up and down on an open month's
+            // days turn the month.
+            .contentShape(.rect)
+            .onTapGesture { withAnimation(ReviewStyle.fold) { expanded.toggle() } }
+            .highPriorityGesture(DragGesture(minimumDistance: 16).onEnded { drag in
+                let y = drag.translation.height
+                guard abs(y) > abs(drag.translation.width), abs(y) > 20, (y < 0) != expanded else { return }
+                withAnimation(ReviewStyle.fold) { expanded = y < 0 }
+            })
+            .accessibilityElement(children: .contain)
+            .accessibilityAction(named: expanded ? "Fold to One Week" : "Show the Whole Month") {
+                withAnimation(ReviewStyle.fold) { expanded.toggle() }
+            }
+            // Paging for VoiceOver, which has no swipe of its own here.
+            .accessibilityAdjustableAction { direction in
+                page(direction == .increment ? 1 : -1)
+            }
+            .animation(.snappy, value: todayInView)
             let symbols = weekdaySymbols
             HStack(spacing: 0) {
                 ForEach(symbols.indices, id: \.self) { index in
@@ -569,35 +599,48 @@ private struct PadMonth: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            // The days slide in from the side the reader swiped toward, a
-            // page at a time; folding and opening only grow and shrink.
-            VStack(spacing: 6) {
-                ForEach(weeks, id: \.first) { week in
-                    HStack(spacing: 0) {
-                        ForEach(week, id: \.self) { date in cell(date) }
+            // The days slide in the way the reader swiped, a page at a
+            // time: up and down for a month, sideways for a week.
+            // Clipped by a container around them: clipped on the days
+            // themselves, the clip moved with them and a month slid up out
+            // of the card over the panel above.
+            ZStack {
+                VStack(spacing: 6) {
+                    ForEach(weeks, id: \.first) { week in
+                        HStack(spacing: 0) {
+                            ForEach(week, id: \.self) { date in cell(date) }
+                        }
                     }
                 }
+                .id(pageTurns)
+                .transition(.push(from: expanded
+                    ? (lastStep > 0 ? .bottom : .top)
+                    : (lastStep > 0 ? .trailing : .leading)))
             }
-            .id(pageTurns)
-            .transition(.push(from: lastStep > 0 ? .trailing : .leading))
             .clipped()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
         .contentShape(.rect)
-        // At the sidebar's foot it is a panel: sideways turns the week or
-        // the month, up opens the month above the week, down folds it back.
-        // Up and down used to page as well, which left nothing to open it
-        // with but a tap on the title.
+        // As Apple's calendars page: a month scrolls up and down, the way
+        // the phone's calendar here does, and a folded week swipes sideways
+        // as the week strip over a day does. A folded week, whose up is
+        // free, opens on a swipe up; an open month folds from its header.
         .gesture(DragGesture(minimumDistance: 20).onEnded { drag in
             let x = drag.translation.width, y = drag.translation.height
-            if abs(x) > abs(y), abs(x) > 30 {
+            if expanded, abs(y) > abs(x), abs(y) > 30 {
+                page(y < 0 ? 1 : -1)
+            } else if !expanded, abs(x) > abs(y), abs(x) > 30 {
                 page(x < 0 ? 1 : -1)
-            } else if abs(y) > 30, (y < 0) != expanded {
-                withAnimation(.smooth(duration: 0.3)) { expanded = y < 0 }
+            } else if !expanded, y < -30, abs(y) > abs(x) {
+                // A folded week has up free: up anywhere opens the month.
+                withAnimation(ReviewStyle.fold) { expanded = true }
             }
         })
-        .onChange(of: chosen) { _, chosen in
+        // From the start too: a day picked while the month was hidden
+        // opened it on today's month instead of the day's.
+        .onChange(of: chosen, initial: true) { _, chosen in
             guard let chosen else { return }
             withAnimation(.snappy) { anchor = chosen }
         }
@@ -640,14 +683,11 @@ private struct PadMonth: View {
         }
     }
 
-    /// Today chosen and in view, when Today has nothing to do.
-    private var showsToday: Bool {
-        let today = Date()
-        let chosenToday = chosen.map { calendar.isDateInToday($0) } ?? false
-        let inView = expanded
-            ? calendar.isDate(anchor, equalTo: today, toGranularity: .month)
-            : calendar.isDate(anchor, equalTo: today, toGranularity: .weekOfYear)
-        return chosenToday && inView
+    /// Whether today's week, or month when open, is showing: Today is
+    /// offered only once the reader has paged away, since the day itself is
+    /// there to tap otherwise.
+    private var todayInView: Bool {
+        calendar.isDate(anchor, equalTo: Date(), toGranularity: expanded ? .month : .weekOfYear)
     }
 
     /// The week's day letters in the order this locale starts its week.
@@ -667,8 +707,10 @@ private struct PadMonth: View {
             guard let interval = calendar.dateInterval(of: .month, for: anchor),
                   var start = calendar.dateInterval(of: .weekOfYear, for: interval.start)?.start
             else { return [] }
+            // Always six, as the Mac's: a month of five rows made the card,
+            // and the list above it, jump at every turn.
             var weeks: [[Date]] = []
-            while start < interval.end {
+            for _ in 0..<6 {
                 weeks.append(week(from: start))
                 guard let next = calendar.date(byAdding: .day, value: 7, to: start) else { break }
                 start = next

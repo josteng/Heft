@@ -5,22 +5,32 @@ import SwiftUI
 /// vault up for agents in the same slot.
 struct ReviewCenter: View {
     @EnvironmentObject private var model: AppModel
+    /// How far the calendar's card is laid over the panel's foot.
+    var tuckedUnder: CGFloat = 0
 
     var body: some View {
         // A proposal in a vault with no guide means an agent is already at
         // work here without instructions, which is the case the setup
         // exists for; the offer is gone for good after Set Up or Not Now.
-        // Above the review panel, which docks on the calendar.
-        if model.shouldOfferAgentSetup {
-            AgentSetupOffer()
+        // The top card of the stack at the sidebar's foot, the review panel
+        // laid over its foot as the calendar is over the panel's.
+        let offers = model.shouldOfferAgentSetup
+        let stacked = offers && !model.pendingProposals.isEmpty
+        VStack(spacing: 0) {
+            if offers {
+                AgentSetupOffer()
+                    .padding(.bottom, stacked ? DockedCardStack.overlap : (model.pendingProposals.isEmpty ? tuckedUnder : 0))
+            }
+            ReviewCard(
+                pending: model.pendingProposals,
+                review: { model.review($0) },
+                discard: { model.discard($0) },
+                acceptGroup: { model.acceptGroup($0) },
+                discardGroup: { model.discardGroup($0) },
+                tuckedUnder: tuckedUnder
+            )
+            .padding(.top, stacked ? -DockedCardStack.overlap : 0)
         }
-        ReviewCard(
-            pending: model.pendingProposals,
-            review: { model.review($0) },
-            discard: { model.discard($0) },
-            acceptGroup: { model.acceptGroup($0) },
-            discardGroup: { model.discardGroup($0) }
-        )
     }
 }
 
@@ -78,13 +88,13 @@ struct AgentSetupOffer: View {
             .padding(.top, 2)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The same card as the review list above it, for the same reason.
-        .background(accent.opacity(0.08), in: .rect(cornerRadius: 8))
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        // Docked as the review panel is, the top card of the stack at the
+        // sidebar's foot: floating with a translucent fill, the list's rows
+        // showed through it.
+        .dockedCard(tint: ReviewStyle.panelTint)
     }
 
     private var help: some View {

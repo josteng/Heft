@@ -101,6 +101,8 @@ struct ReviewSection: View {
 /// The Mac's review card at the foot of the iPad's sidebar, shared, over
 /// the iOS review. Accepting a group that deletes files asks once first.
 struct PadReviewCard: View {
+    /// How far the month's card is laid over the panel's foot.
+    var tuckedUnder: CGFloat = 0
     @Environment(MobileVault.self) private var vault
     @State private var confirming: ProposalGroup?
 
@@ -111,7 +113,8 @@ struct PadReviewCard: View {
             review: { proposal in Task { await review.begin(proposal) } },
             discard: { review.discard($0) },
             acceptGroup: accept,
-            discardGroup: { review.discardGroup($0) }
+            discardGroup: { review.discardGroup($0) },
+            tuckedUnder: tuckedUnder
         )
         .confirmationDialog(
             confirming.flatMap(ReviewQuestion.deletes(in:))?.title ?? "",
