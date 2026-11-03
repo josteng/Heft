@@ -349,8 +349,12 @@ extension ProposalReviewSheet {
     private func hunks(_ diff: NoteDiff) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                ForEach(diff.hunks) { hunk in
-                    HunkCard(hunk: hunk) { accept in decide(hunk.id, accept) }
+                ForEach(Self.keyed(diff.hunks), id: \.key) { item in
+                    HunkCard(hunk: item.hunk) { accept in answer(item.hunk, accept) }
+                        .transition(.asymmetric(
+                            insertion: .identity,
+                            removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
+                        ))
                 }
             }
             .padding(16)
@@ -364,8 +368,9 @@ extension ProposalReviewSheet {
     /// text in the lines; a full swipe decides, a partial one shows the
     /// button.
     private func hunks(_ diff: NoteDiff) -> some View {
-        List(diff.hunks) { hunk in
-            HunkCard(hunk: hunk) { accept in decide(hunk.id, accept) }
+        List(Self.keyed(diff.hunks), id: \.key) { item in
+            let hunk = item.hunk
+            HunkCard(hunk: hunk) { accept in answer(hunk, accept) }
                 .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
@@ -392,9 +397,30 @@ extension ProposalReviewSheet {
     /// press already is.
     private func swiped(_ hunk: NoteDiff.Hunk, accept: Bool) {
         swipes += 1
-        decide(hunk.id, accept)
+        answer(hunk, accept)
     }
     #endif
+
+    /// A decision, animated: the card answered shrinks out and the rest
+    /// close up, rather than the list redrawing at once.
+    private func answer(_ hunk: NoteDiff.Hunk, _ accept: Bool) {
+        withAnimation(.smooth(duration: 0.3)) { decide(hunk.id, accept) }
+    }
+
+    /// The hunks, each named by what it changes. Their ids are positions,
+    /// re-derived after every decision, so the answered one's id passed to
+    /// the next and the list could only snap; named by their lines, the
+    /// answered card leaves and the others keep their place. Twins are told
+    /// apart by how many came before.
+    static func keyed(_ hunks: [NoteDiff.Hunk]) -> [(key: String, hunk: NoteDiff.Hunk)] {
+        var seen: [String: Int] = [:]
+        return hunks.map { hunk in
+            let content = (hunk.removed + ["\u{1}"] + hunk.added).joined(separator: "\n")
+            let count = seen[content, default: 0]
+            seen[content] = count + 1
+            return ("\(count)\u{2}\(content)", hunk)
+        }
+    }
 }
 
 /// What a proposal is and who made it, over its review.

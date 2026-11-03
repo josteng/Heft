@@ -101,6 +101,8 @@ struct ReviewCard: View {
             ForEach(pending.edits) { row($0, depth: 0) }
             ForEach(pending.structural) { row($0, depth: 0) }
         }
+        // A proposal answered leaves the list, and the rest close up.
+        .animation(ReviewStyle.fold, value: pending)
         .padding(.horizontal, 6)
         .padding(.bottom, 6)
     }
