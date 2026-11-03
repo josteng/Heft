@@ -110,10 +110,16 @@ public struct DailyNotes: Sendable {
     /// the vault. `daily-notes.json` is a file in the vault, synced and
     /// edited by hand, and `"folder": "../outside"` made every daily note
     /// a write beside the vault rather than in it.
+    ///
+    /// Compared as written, `.` and `..` folded and nothing asked of the
+    /// disk. `standardizedFileURL` drops a leading `/private` only from a
+    /// path that exists, so on iOS, where a vault is `/private/var/…`, the
+    /// vault lost it and a note not yet written kept it, and every new
+    /// daily note read as outside the vault.
     public func checkedURL(for date: Date) throws -> URL {
         let target = url(for: date)
-        let root = vaultRoot.standardizedFileURL.path
-        guard target.standardizedFileURL.path.hasPrefix(root + "/") else {
+        let root = vaultRoot.standardized.path
+        guard target.standardized.path.hasPrefix(root + "/") else {
             throw DailyNoteCaptureError.outsideVault(relativePath(for: date))
         }
         return target
