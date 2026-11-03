@@ -421,6 +421,9 @@ private struct CalendarSwipes: NSViewRepresentable {
             if !acted, abs(moved.width) > Self.threshold, abs(moved.width) > abs(moved.height) {
                 acted = true
                 page(moved.width < 0 ? 1 : -1)
+                // Felt as the page turns, the fingers still down, as the
+                // phone's calendar ticks; a wheel has nothing to play it on.
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
             }
             return true
         }
