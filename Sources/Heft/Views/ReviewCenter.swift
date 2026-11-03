@@ -18,8 +18,9 @@ struct ReviewCenter: View {
         let stacked = offers && !model.pendingProposals.isEmpty
         VStack(spacing: 0) {
             if offers {
-                AgentSetupOffer()
-                    .padding(.bottom, stacked ? DockedCardStack.overlap : (model.pendingProposals.isEmpty ? tuckedUnder : 0))
+                AgentSetupOffer(
+                    tuckedUnder: stacked ? DockedCardStack.overlap : (model.pendingProposals.isEmpty ? tuckedUnder : 0)
+                )
             }
             ReviewCard(
                 pending: model.pendingProposals,
@@ -38,6 +39,10 @@ struct ReviewCenter: View {
 /// shown once per vault in the review centre's slot. Not Now is remembered
 /// for the vault; the General pane can switch the offer off altogether.
 struct AgentSetupOffer: View {
+    /// How far the card below is laid over this one's foot: padded inside
+    /// the fill, so the card's corners show this card behind them rather
+    /// than the sidebar.
+    var tuckedUnder: CGFloat = 0
     @EnvironmentObject private var model: AppModel
     @Environment(\.appAccent) private var accent
     @State private var isHelpPresented = false
@@ -89,7 +94,7 @@ struct AgentSetupOffer: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.bottom, 8 + tuckedUnder)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Docked as the review panel is, the top card of the stack at the
         // sidebar's foot: floating with a translucent fill, the list's rows
