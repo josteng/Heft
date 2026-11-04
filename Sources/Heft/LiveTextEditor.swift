@@ -2171,6 +2171,7 @@ final class HeftTextKit2View: NSTextView {
 
     func updateVimCursor() {
         repositionCompletion()
+        enterValueFromHiddenPlace()
         // A list being edited draws its typed item after its last pill, and
         // the caret there with it: TextKit's own would stand on the key's
         // line, where the text really is.
@@ -3111,6 +3112,12 @@ final class HeftTextKit2View: NSTextView {
             _ = liftCaretOffFoldedItem()
             noteListEditing()
             if vimEnabled { updateVimCursor() }
+            // Its suggestions, at once, as Obsidian opens a value's on focus;
+            // only typing opened them, so a click showed them or not by what
+            // happened before it. Not in Normal mode, where keys are commands.
+            if !vimEnabled || vimEngine.mode == .insert || vimEngine.mode == .replace {
+                updateLinkCompletion(allowStart: true)
+            }
             onTrackingEnded?()
             return
         }
@@ -4354,6 +4361,32 @@ final class HeftTextKit2View: NSTextView {
             items: completionItems, selected: completionSelection, hint: hint,
             below: anchor, in: self
         )
+    }
+
+    /// Where Vim's Normal-mode block last stood, and the mode before this.
+    private var lastNormalCursor: Int?
+    private var previousVimMode: VimMode?
+
+    /// Insert mode entered from a block standing on a value's hidden place,
+    /// an empty value's or a list's input, starts in the value. That place
+    /// is the colon or the space after it, and `i` inserts before it, which
+    /// put the caret at the key's end and the typing in the key.
+    private func enterValueFromHiddenPlace() {
+        guard vimEnabled else { return }
+        let mode = vimEngine.mode
+        defer {
+            previousVimMode = mode
+            if mode == .normal { lastNormalCursor = selectedRange().location }
+        }
+        guard mode == .insert, previousVimMode == .normal, let block = lastNormalCursor,
+              selectedRange().length == 0, !propertiesShownAsText,
+              let gap = PropertyEditing.colonGap(in: string, at: block),
+              let row = PropertyEditing.rows(in: string).first(where: { block >= $0.range.location && block <= $0.valueEnd }),
+              block >= gap.keyEnd, block < max(gap.valueStart, gap.keyEnd + 1)
+                || (block == row.valueEnd - 1 && gap.valueStart == row.valueEnd)
+        else { return }
+        let target = row.valueEnd
+        if selectedRange().location != target { setSelectedRange(NSRange(location: target, length: 0)) }
     }
 
     /// Where the open menu was last put.

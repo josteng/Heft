@@ -629,5 +629,64 @@ extension PropertyRealClickTests {
         // Not the old band, which held the whole ascender and sat high.
         #expect(band.minY > 100 - font.ascender - 1.5)
     }
+
+    private func press(_ key: String, in h: Harness) throws {
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: h.window.windowNumber, context: nil, characters: key,
+            charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0
+        ))
+        h.view.keyDown(with: event)
+    }
+
+    @Test("In Normal mode, i on a list's place or an empty value types into the value, not the key")
+    func insertWithI() async throws {
+        // A list: the typed item after its pills.
+        let list = try await harness(.normal)
+        _ = try await click(list, line: 28, at: \.column, plus: 200)
+        try press("i", in: list)
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(list.view.listInputCaretRect() != nil, "the caret is the list's, drawn after its pills")
+        for character in "zz" { list.view.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(list.view.string.contains("tags: zz\n") || list.view.string.contains("tags:zz\n"), "\(list.view.string.debugDescription)")
+        #expect(!list.view.string.contains("tagszz"))
+
+        // An empty value.
+        let empty = try await harness(.normal)
+        _ = try await click(empty, line: 21, at: \.column, plus: 40)
+        try press("i", in: empty)
+        try await Task.sleep(for: .milliseconds(40))
+        let caret = try #require(empty.drawnCaretX())
+        let row = try #require(empty.row(21))
+        #expect(abs(caret - row.column) < 8, "drawn at the value column: \(caret), column \(row.column)")
+        empty.view.insertText("x", replacementRange: NSRange(location: NSNotFound, length: 0))
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(line(empty, at: 21) == "Empty: x\n", "\(empty.view.string.debugDescription)")
+    }
+
+    @Test("A click into a list's input or an empty value opens its suggestions, every time", arguments: [Mode.plain, Mode.insert])
+    func clickOpensSuggestions(mode: Mode) async throws {
+        let h = try await harness(mode)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("heft-open-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "---\nEmpty: kept\n---\nSome #thesis note.\n".write(to: root.appendingPathComponent("N.md"), atomically: true, encoding: .utf8)
+        h.view.completionIndex = VaultIndex.build(root: VaultScanner.scan(root: root))
+        func start(of key: String) -> Int { (h.view.string as NSString).range(of: "\n" + key).location + 1 }
+        for _ in 0..<2 {
+            _ = try await click(h, line: start(of: "tags:"), at: \.column, plus: 200)
+            #expect(h.view.visibleCompletions.contains("thesis"), "tags: \(h.view.visibleCompletions)")
+            _ = try await click(h, line: start(of: "Empty:"), at: \.column, plus: 40)
+            #expect(h.view.visibleCompletions == ["kept"], "empty value: \(h.view.visibleCompletions)")
+        }
+    }
+
+    @Test("In Normal mode a click opens no menu: its keys are commands")
+    func normalClickNoMenu() async throws {
+        let h = try await harness(.normal)
+        _ = try await click(h, line: 28, at: \.column, plus: 200)
+        #expect(h.view.visibleCompletions.isEmpty)
+    }
 }
 
