@@ -748,6 +748,7 @@ struct LiveTextEditor: NSViewRepresentable {
             // the rest of the click a drag from the old place, a selection
             // Vim took for Visual mode. The click settles after it ends.
             if let view = textView as? HeftTextKit2View, !view.isTrackingMouse {
+                if view.keepCaretOffFences() { return }
                 view.unfoldPropertiesIfEntered()
                 view.returnToPropertyTableIfLeft()
                 if view.keepCaretOutOfColonGap() { return }
@@ -1727,6 +1728,8 @@ final class HeftTextKit2View: NSTextView {
     /// The blank row Add property just made, where the menu of keys opens
     /// before anything is typed, as Obsidian's does.
     var keyMenuRow: Int?
+    /// Where the caret was before, for which way it came onto a fence.
+    var lastFenceCaret: Int?
     /// The key line given a space after its colon while its empty value is
     /// edited, to take back if it is left empty.
     var spacedValueLine: Int?
@@ -3118,8 +3121,14 @@ final class HeftTextKit2View: NSTextView {
         // on one line — so left to itself it puts every click in the table on
         // the same character.
         if handleTableClick(at: point, event: event) { return }
-        if event.clickCount == 1, let hit = propertyTargets().first(where: { $0.rect.contains(point) }) {
-            perform(hit.target, from: hit.rect)
+        // A double click on the heading is two taps, fold and open, and
+        // must not reach the text, where it put the caret on the hidden
+        // fence. A pill's x keeps to single clicks, or one double click
+        // would take two items.
+        if let hit = propertyTargets().first(where: { $0.rect.contains(point) }) {
+            if event.clickCount == 1 || hit.target == .fold || hit.target == .source {
+                perform(hit.target, from: hit.rect)
+            }
             return
         }
         let usesVimSelection = vimEnabled
@@ -3162,6 +3171,7 @@ final class HeftTextKit2View: NSTextView {
         // it settles changes nothing: a list's or an empty value's place
         // made ready, and what the caret left tidied, wherever it went.
         if selectedRange().length == 0 {
+            _ = keepCaretOffFences()
             _ = liftCaretOffFoldedItem()
             noteListEditing()
             returnToPropertyTableIfLeft()
@@ -4917,6 +4927,44 @@ extension HeftTextKit2View {
         // The View menu's setting shows every note's as YAML; this button
         // is for one note, so it is not offered against that.
         propertiesSourceButton.isHidden = !over || AppearanceSettings.shared.showsPropertiesAsText
+    }
+
+    /// The fences are not rows while the table is shown: the opening one is
+    /// the heading, the closing one takes no room. A caret arriving on one,
+    /// as `gg` or `k` puts it, goes to the first property from the opening
+    /// fence, and from the closing one to the last property when it came
+    /// from below, to the text after it when it came from above.
+    func keepCaretOffFences() -> Bool {
+        let selection = selectedRange()
+        defer { lastFenceCaret = selectedRange().location }
+        guard selection.length == 0, !propertiesShownAsText,
+              let block = PropertyEditing.blockRange(in: string)
+        else { return false }
+        let text = string as NSString
+        let opening = text.lineRange(for: NSRange(location: 0, length: 0))
+        let closing = text.lineRange(for: NSRange(location: NSMaxRange(block) - 1, length: 0))
+        let rows = PropertyEditing.rows(in: string)
+        let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
+        let target: Int
+        if NSLocationInRange(selection.location, opening) || (selection.location == 0 && opening.length == 0) {
+            guard let first = rows.first else { target = NSMaxRange(block); return move(to: target) }
+            target = first.range.location
+        } else if NSLocationInRange(selection.location, closing) {
+            if let last = rows.last, (lastFenceCaret ?? 0) > selection.location {
+                target = normal ? max(last.valueEnd - 1, last.range.location) : last.valueEnd
+            } else {
+                target = min(NSMaxRange(block), text.length)
+            }
+        } else {
+            return false
+        }
+        return move(to: target)
+
+        func move(to target: Int) -> Bool {
+            guard target != selection.location else { return false }
+            setSelectedRange(NSRange(location: target, length: 0))
+            return true
+        }
     }
 
     /// A caret arriving in folded properties, by key, opens them: on a

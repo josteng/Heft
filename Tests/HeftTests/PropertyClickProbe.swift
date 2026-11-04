@@ -140,16 +140,16 @@ struct PropertyRealClickTests {
         }
 
         /// A full click at `point`, in view coordinates; returns the caret.
-        func click(_ point: CGPoint) -> NSRange {
+        func click(_ point: CGPoint, count: Int = 1) -> NSRange {
             let inWindow = view.convert(point, to: nil)
             let up = NSEvent.mouseEvent(
                 with: .leftMouseUp, location: inWindow, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: count, pressure: 0
             )!
             window.release = up
             let down = NSEvent.mouseEvent(
                 with: .leftMouseDown, location: inWindow, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1
             )!
             view.mouseDown(with: down)
             // What the selection-change path settles once the click is over.
@@ -791,6 +791,54 @@ extension PropertyRealClickTests {
         let body = (h.view.string as NSString).range(of: "Body").location
         let place = try #require(h.view.rect(forSelection: NSRange(location: body + 1, length: 1)))
         #expect(try rightClickMenu(h, at: CGPoint(x: place.midX, y: place.midY))?.items.first?.title != "Property type")
+    }
+
+    @Test("The caret never stands on a fence while the table is shown", arguments: Mode.allCases)
+    func offFences(mode: Mode) async throws {
+        let h = try await harness(mode)
+        // Onto the opening fence, as gg or k from the first row puts it.
+        h.view.setSelectedRange(NSRange(location: 1, length: 0))
+        try await Task.sleep(for: .milliseconds(40))
+        let first = try #require(PropertyEditing.rows(in: h.view.string).first)
+        #expect(NSLocationInRange(h.view.selectedRange().location, first.range), "on the first property: \(h.view.selectedRange().location)")
+        // Onto the closing fence from the body below: the last property.
+        let block = try #require(PropertyEditing.blockRange(in: h.view.string))
+        let body = NSMaxRange(block) + 2
+        h.view.setSelectedRange(NSRange(location: body, length: 0))
+        try await Task.sleep(for: .milliseconds(40))
+        h.view.setSelectedRange(NSRange(location: NSMaxRange(block) - 2, length: 0))
+        try await Task.sleep(for: .milliseconds(40))
+        let last = try #require(PropertyEditing.rows(in: h.view.string).last)
+        #expect(NSLocationInRange(h.view.selectedRange().location, NSRange(location: last.range.location, length: last.valueEnd - last.range.location + 1)),
+                "on the last property: \(h.view.selectedRange().location)")
+        // Shown as YAML, a fence is text like any other.
+        HeftTextKit2View.sourcePropertyNotes.insert(h.view.noteIdentity)
+        defer { HeftTextKit2View.sourcePropertyNotes.remove(h.view.noteIdentity) }
+        h.view.setSelectedRange(NSRange(location: 1, length: 0))
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(h.view.selectedRange().location == 1)
+    }
+
+    @Test("Tapping Properties twice quickly folds and opens it, and the caret never lands on its fence", arguments: Mode.allCases)
+    func doubleTapHeading(mode: Mode) async throws {
+        let h = try await harness(mode)
+        h.view.noteIdentity = "double-\(mode).md"
+        HeftTextKit2View.foldedPropertyNotes.remove(h.view.noteIdentity)
+        let rects = try #require(h.view.propertiesHeadingRect())
+        let point = CGPoint(x: rects.heading.midX, y: rects.heading.midY)
+        _ = h.click(point, count: 1)
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(h.view.propertiesFolded)
+        _ = h.click(point, count: 2)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(!h.view.propertiesFolded)
+        let opening = (h.view.string as NSString).lineRange(for: NSRange(location: 0, length: 0))
+        #expect(!NSLocationInRange(h.view.selectedRange().location, opening), "caret on the fence: \(h.view.selectedRange().location)")
+        // On the heading's line but past its word, where a click is the
+        // text's: still not on the fence once the click is over.
+        _ = h.click(CGPoint(x: rects.heading.maxX + 200, y: rects.heading.midY))
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(!NSLocationInRange(h.view.selectedRange().location, opening), "caret on the fence after a click beside the heading")
     }
 }
 
