@@ -69,6 +69,23 @@ enum WikiCompletionMetrics {
 
     static func height(rows: Int) -> CGFloat { padding * 2 + CGFloat(rows) * rowHeight }
 
+    /// A menu of short words, tags, property keys and values, callouts,
+    /// only as wide as its longest row needs, within the usual width: at
+    /// the width a note's name and folder need, a tag's row was mostly air.
+    static let narrowest: CGFloat = 170
+    static func width(fitting items: [WikiCompletionItem]) -> CGFloat {
+        let title = NSFont.systemFont(ofSize: 13, weight: .medium)
+        let detail = NSFont.systemFont(ofSize: 11)
+        let widest = items.map { item -> CGFloat in
+            let titleWidth = NSAttributedString(string: item.title, attributes: [.font: title]).size().width
+            let detailWidth = item.detail.isEmpty ? 0
+                : 12 + NSAttributedString(string: item.detail, attributes: [.font: detail]).size().width
+            // The list's inset, the row's, the symbol and its gap.
+            return padding * 2 + 9 * 2 + 16 + 9 + titleWidth + detailWidth + 6
+        }.max() ?? narrowest
+        return min(max(ceil(widest), narrowest), width)
+    }
+
     /// A view with no window or scroll view can report an unbounded height,
     /// and that must not trap on the way to an `Int`.
     static func rows(fitting height: CGFloat) -> Int {
@@ -100,6 +117,8 @@ struct WikiCompletionList: View {
     /// What the keys do besides choosing, under the rows: the link menu
     /// says `|` and `#` go on inside the link, which nothing else would.
     var hint: String?
+    /// The menu's width: the usual one, or a short-word menu's own.
+    var width: CGFloat = WikiCompletionMetrics.width
     let pick: (Int) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -160,7 +179,7 @@ struct WikiCompletionList: View {
                     }
                 }
                 .padding(WikiCompletionMetrics.padding)
-                .frame(width: WikiCompletionMetrics.width)
+                .frame(width: width)
                 .clipShape(shape)
                 .glassEffect(.regular, in: shape)
                 // Opening fades in; closing is immediate, because it follows

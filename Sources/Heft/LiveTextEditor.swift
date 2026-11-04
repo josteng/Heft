@@ -4359,8 +4359,16 @@ final class HeftTextKit2View: NSTextView {
         completionAnchorShown = anchor
         panel.show(
             items: completionItems, selected: completionSelection, hint: hint,
-            below: anchor, in: self
+            below: anchor, in: self, fitsItems: completionFitsItems
         )
+    }
+
+    /// Whether the open menu is one of short words, sized to them.
+    private var completionFitsItems: Bool {
+        switch completionKind {
+        case .tag, .property, .callout, .highlight: true
+        case .wiki, .linkPart, .linkTitle: false
+        }
     }
 
     /// Where Vim's Normal-mode block last stood, and the mode before this.
@@ -4391,6 +4399,9 @@ final class HeftTextKit2View: NSTextView {
 
     /// Where the open menu was last put.
     private var completionAnchorShown: NSRect?
+    /// How wide the open menu is, for a test.
+    var completionWidthForTesting: CGFloat? { completionIsActive ? completionPanel?.frame.width : nil }
+    var completionContentWidthForTesting: CGFloat? { completionIsActive ? completionPanel?.contentWidthForTesting : nil }
     /// Where the open menu is, for a test.
     var completionAnchorForTesting: NSRect? { completionIsActive ? completionAnchorShown : nil }
 
@@ -4405,7 +4416,7 @@ final class HeftTextKit2View: NSTextView {
         completionAnchorShown = anchor
         panel.show(
             items: completionItems, selected: completionSelection, hint: completionHint,
-            below: anchor, in: self
+            below: anchor, in: self, fitsItems: completionFitsItems
         )
     }
 

@@ -9,6 +9,9 @@ final class WikiCompletionPanel: NSView {
     var onPick: ((Int) -> Void)?
 
     private let host: CompletionHostingView
+    /// How wide the list inside lays itself out, for a test: it must be the
+    /// panel's own width, or the rows spill out of it.
+    var contentWidthForTesting: CGFloat { host.fittingSize.width }
     /// The menu as drawn, in this view's coordinates. The frame is taller.
     private(set) var listRect: NSRect = .zero
     /// The most rows shown since the menu opened. The frame keeps that height
@@ -42,10 +45,10 @@ final class WikiCompletionPanel: NSView {
 
     func show(
         items: [WikiCompletionItem], selected: Int, hint: String? = nil,
-        below anchor: NSRect, in textView: NSTextView
+        below anchor: NSRect, in textView: NSTextView, fitsItems: Bool = false
     ) {
         let extra = hint == nil ? 0 : WikiCompletionMetrics.hintHeight
-        let width = WikiCompletionMetrics.width
+        let width = fitsItems ? WikiCompletionMetrics.width(fitting: items) : WikiCompletionMetrics.width
         let visible = Self.unobscured(textView).insetBy(dx: 6, dy: 6)
         let gap: CGFloat = 5
         let below = visible.maxY - (anchor.maxY + gap)
@@ -70,7 +73,7 @@ final class WikiCompletionPanel: NSView {
 
         host.rootView = Self.list(
             rows: WikiCompletionList.rows(for: items), selected: selected, visibleRows: shown,
-            growsUp: growsUp, hint: hint, pick: { [weak self] index in self?.onPick?(index) }
+            growsUp: growsUp, hint: hint, width: width, pick: { [weak self] index in self?.onPick?(index) }
         )
         needsLayout = true
     }
@@ -98,14 +101,14 @@ final class WikiCompletionPanel: NSView {
 
     private static func list(
         rows: [WikiCompletionList.Row], selected: Int, visibleRows: Int, growsUp: Bool,
-        hint: String?, pick: @escaping (Int) -> Void
+        hint: String?, width: CGFloat = WikiCompletionMetrics.width, pick: @escaping (Int) -> Void
     ) -> WikiCompletionList {
         // Read straight from the settings: `.tint()` does not reach a view
         // painting its own highlight, and the list is rebuilt on every show,
         // so a changed accent is picked up without observing anything.
         WikiCompletionList(
             rows: rows, selected: selected, visibleRows: visibleRows, growsUp: growsUp,
-            accent: Color(nsColor: AppearanceSettings.shared.accentColor), hint: hint, pick: pick
+            accent: Color(nsColor: AppearanceSettings.shared.accentColor), hint: hint, width: width, pick: pick
         )
     }
 }

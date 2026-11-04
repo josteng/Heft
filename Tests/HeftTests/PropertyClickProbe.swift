@@ -688,5 +688,40 @@ extension PropertyRealClickTests {
         _ = try await click(h, line: 28, at: \.column, plus: 200)
         #expect(h.view.visibleCompletions.isEmpty)
     }
+
+    @Test("A menu of tags is as wide as its tags need, in the properties and the text; a link's keeps its width")
+    func menuWidths() async throws {
+        let h = try await harness(.plain)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("heft-width-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "Some #thesis and #theory notes.\n".write(to: root.appendingPathComponent("Long Note Name Here.md"), atomically: true, encoding: .utf8)
+        h.view.completionIndex = VaultIndex.build(root: VaultScanner.scan(root: root))
+        _ = try await click(h, line: 28, at: \.column, plus: 200)
+        let properties = try #require(h.view.completionWidthForTesting, "the tags menu is open")
+        #expect(properties < WikiCompletionMetrics.width)
+        // The list inside is laid out at the panel's width, not the usual one.
+        let content = try #require(h.view.completionContentWidthForTesting)
+        #expect(abs(content - properties) < 1, "list \(content), panel \(properties)")
+        #expect(properties >= WikiCompletionMetrics.narrowest)
+
+        // In the text, after `#`.
+        let body = (h.view.string as NSString).range(of: "Body text.").location + 10
+        h.view.setSelectedRange(NSRange(location: body, length: 0))
+        try await Task.sleep(for: .milliseconds(30))
+        for character in " #th" { h.view.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        try await Task.sleep(for: .milliseconds(60))
+        let text = try #require(h.view.completionWidthForTesting, "the # menu is open: \(h.view.visibleCompletions)")
+        #expect(text < WikiCompletionMetrics.width)
+        let fitted = WikiCompletionMetrics.width(fitting: [
+            WikiCompletionItem(title: "thesis", detail: "1", symbol: "number", destination: "thesis"),
+        ])
+        #expect(text >= fitted - 1, "wide enough for its rows")
+
+        // A link's menu, for names and folders, keeps the usual width.
+        for character in " [[" { h.view.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(h.view.completionWidthForTesting == WikiCompletionMetrics.width)
+    }
 }
 
