@@ -213,6 +213,9 @@ public struct PropertyLine: Sendable, Equatable {
     /// Where the line sits in its list, key line first, for the outline
     /// drawn around a list being edited; nil outside a list.
     public var listEdge: QuoteEdge?
+    /// A key the block holds twice, which YAML does not allow: Obsidian then
+    /// reads none of the note's properties.
+    public var isDuplicate = false
 
     /// Whether the values on this line are tags, drawn as pills.
     public var isTags: Bool { ["tags", "tag"].contains(key.lowercased()) }
@@ -324,6 +327,11 @@ public struct PropertyLine: Sendable, Equatable {
         // What the rows are once every list is folded: its items take no row.
         let shown = (1..<max(lines.count - 1, 1)).filter { line in groupOf[line].map { $0 == line } ?? true }
 
+        var keyCounts: [String: Int] = [:]
+        for entry in parsed {
+            if case let .entry(_, colon, _, name) = entry, colon.length > 0 { keyCounts[name, default: 0] += 1 }
+        }
+
         let rows = lines.count - 2
         var result: [MarkdownDecoration] = []
         var key = ""
@@ -342,8 +350,9 @@ public struct PropertyLine: Sendable, Equatable {
             case let .entry(keyRange, colon, value, name):
                 key = name
                 kind = .entry(key: keyRange, colon: colon, value: value)
-                syntax = [absolute(colon)]
-                    + brackets(of: value, in: text.substring(with: line) as NSString).map(absolute)
+                // The colon is hidden by the styler, which hangs the column's
+                // gap on it; collapsed as syntax, its kern would be cleared.
+                syntax = brackets(of: value, in: text.substring(with: line) as NSString).map(absolute)
             case let .item(marker, value):
                 kind = .item(marker: marker, value: value)
                 syntax = [absolute(marker)]
@@ -359,6 +368,9 @@ public struct PropertyLine: Sendable, Equatable {
             )
             var property = PropertyLine(kind: kind, key: key, edge: edge, widestKey: widest)
             property.opens = index == 0
+            if case let .entry(_, colon, _, name) = parsed[index], colon.length > 0 {
+                property.isDuplicate = (keyCounts[name] ?? 0) > 1
+            }
             // `[a, b]` folds onto its row as a block list does.
             if case let .entry(_, _, value) = kind {
                 let lineText = text.substring(with: line) as NSString
@@ -568,7 +580,13 @@ public struct Reveal: Equatable, Sendable {
     }
 
     public func reveals(_ decoration: MarkdownDecoration) -> Bool {
-        state(of: decoration) == .revealed
+        switch state(of: decoration) {
+        case .revealed: true
+        // A property row being edited is revealed, whichever column has
+        // the caret.
+        case .cell: if case .propertyLine = decoration.style { true } else { false }
+        case .hidden: false
+        }
     }
 
     /// How `decoration` is styled under this reveal.
@@ -593,8 +611,20 @@ public struct Reveal: Equatable, Sendable {
         if Self.revealsWithItsLine(decoration.style) {
             // A list in the frontmatter opens as one, whichever of its lines
             // the caret is on.
-            if case .propertyLine = decoration.style, let whole = decoration.revealRange {
-                return touchesLine(whole) ? .revealed : .hidden
+            if case .propertyLine(let line) = decoration.style {
+                guard touchesLine(decoration.revealRange ?? decoration.range) else { return .hidden }
+                // Which column the caret is in, so the row is restyled when it
+                // crosses from key to value: column 0 the key, 1 the value.
+                guard selection.length == 0 else { return .revealed }
+                switch line.kind {
+                case let .entry(_, colon, _) where colon.length > 0:
+                    let keyEnd = decoration.range.location + colon.location
+                    return .cell(row: 0, column: selection.location <= keyEnd ? 0 : 1)
+                case .entry, .other:
+                    return .cell(row: 0, column: 0)
+                default:
+                    return .revealed
+                }
             }
             return touchesLine(decoration.range) ? .revealed : .hidden
         }

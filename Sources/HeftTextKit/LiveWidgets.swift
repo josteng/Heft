@@ -65,6 +65,10 @@ struct PropertyRow {
     var column: CGFloat = 0
     /// Draws "Empty" where an edited row has no value yet.
     var showsEmpty = false
+    /// Whether the caret is in the key, whose cell is then the one shaded.
+    var focusInKey = false
+    /// The key is in the block twice: its icon a warning, in red.
+    var warns = false
 }
 
 /// A frontmatter list's items, drawn on its key's row while the caret is out
@@ -93,7 +97,7 @@ struct PropertyChips {
     static let inputRoom: CGFloat = 120
     /// The "Add property" line under the last row, centred a row's pitch
     /// below it.
-    static let addRowHeight: CGFloat = 34
+    static let addRowHeight: CGFloat = 38
     static let addLabel = "Add property"
     /// Space under the "Add property" line, before the note's text.
     static let bottomMargin: CGFloat = 10
@@ -1020,7 +1024,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         }
         if case .propertyRow(let row) = widget {
             if let focus = row.focus { drawPropertyFocus(row, focus: focus, at: point, in: context) }
-            if let symbol = row.symbol { drawPropertySymbol(symbol, indent: row.indent, at: point, in: context) }
+            if let symbol = row.symbol {
+                drawPropertySymbol(row.warns ? "exclamationmark.triangle" : symbol, tint: row.warns ? .systemRed : .tertiaryLabelColor,
+                                   indent: row.indent, at: point, in: context)
+            }
             if let chips = row.chips { draw(chips, indent: row.indent, at: point, in: context) }
             if row.showsEmpty { drawPropertyEmpty(row, at: point) }
             if row.edge == .last || row.edge == .only { drawAddProperty(indent: row.indent, at: point, in: context) }
@@ -1163,8 +1170,8 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         ]).draw(at: CGPoint(x: point.x, y: point.y + (layoutFragmentFrame.height - height) / 2))
     }
 
-    /// The rounded outline around the row being edited, its key cell shaded,
-    /// as Obsidian marks the property in focus. Each line paints its slice,
+    /// The rounded outline around the row being edited, its value cell
+    /// shaded, as Obsidian marks the property in focus. Each line paints its slice,
     /// so an open list is one outline.
     private func drawPropertyFocus(_ row: PropertyRow, focus: QuoteEdge, at point: CGPoint, in context: CGContext) {
         let left = point.x - row.indent - 6
@@ -1199,13 +1206,17 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         let path = CGPath(
             roundedRect: outline.insetBy(dx: 0.5, dy: 0.5), cornerWidth: radius, cornerHeight: radius, transform: nil
         )
-        // The key cell, shaded inside the outline's rounding.
+        // The cell the caret is in, shaded inside the outline's rounding:
+        // the key's stops short of the value, the value's reaches the end.
         context.saveGState()
         context.clip(to: rect)
         context.addPath(path)
         context.clip()
         context.setFillColor(NSColor.quaternarySystemFill.cgColor)
-        context.fill(CGRect(x: left, y: rect.minY, width: row.column + 4, height: rect.height))
+        let cell = row.focusInKey
+            ? CGRect(x: left, y: rect.minY, width: row.column - 4, height: rect.height)
+            : CGRect(x: left + row.column - 2, y: rect.minY, width: rect.maxX - left - row.column + 2, height: rect.height)
+        context.fill(cell)
         context.restoreGState()
         // The outline, this line's slice of it.
         context.saveGState()
@@ -1229,9 +1240,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
     /// A row's type icon, in the column left of its key, centred on its
     /// first line. `indent` is where the fragment's origin is from the
     /// table's left edge.
-    private func drawPropertySymbol(_ name: String, indent: CGFloat, at point: CGPoint, in context: CGContext) {
+    private func drawPropertySymbol(_ name: String, tint: NSColor, indent: CGFloat, at point: CGPoint, in context: CGContext) {
         guard let line = textLineFragments.first,
-              let image = Self.tintedSymbol(name, side: PropertyChips.symbolSide, tint: .tertiaryLabelColor)
+              let image = Self.tintedSymbol(name, side: PropertyChips.symbolSide, tint: tint)
         else { return }
         let side = PropertyChips.symbolSide
         let mid = point.y + line.typographicBounds.minY + line.typographicBounds.height / 2

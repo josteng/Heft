@@ -115,6 +115,22 @@ public enum PropertyEditing {
         return nil
     }
 
+    /// The hidden `: ` between a property's key and its value, on the key
+    /// line holding `location`: where the key's text ends and the value's
+    /// begins. Nil off a key line, or on one with no colon yet.
+    public static func colonGap(in source: String, at location: Int) -> (keyEnd: Int, valueStart: Int)? {
+        let text = source as NSString
+        guard let row = rows(in: source).first(where: {
+            location >= $0.range.location && location <= $0.valueEnd
+        }) else { return nil }
+        let keyLine = NSRange(location: row.range.location, length: row.valueEnd - row.range.location)
+        let colon = text.range(of: ":", options: [], range: keyLine)
+        guard colon.location != NSNotFound else { return nil }
+        var valueStart = NSMaxRange(colon)
+        while valueStart < row.valueEnd, text.character(at: valueStart) == 32 { valueStart += 1 }
+        return (colon.location, valueStart)
+    }
+
     /// The note's keys, in file order.
     public static func keys(in source: String) -> [String] {
         NoteText.splitFrontmatter(source).frontmatter.map(Frontmatter.parse)?.map(\.key) ?? []

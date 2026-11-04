@@ -137,7 +137,15 @@ properties table: the opening fence drawn as a "Properties" heading, a type
 icon, the key in a column, the value beside it, and "Add property" under the
 last row. The fences, the `:` and the `- ` are its `syntax`. The colon stays
 hidden on the edited row too, as Obsidian never shows it; Tab after a key
-writes it. The value column is a kern on the key's last character. The row
+writes it. The value column is a kern on the colon itself, which the styler
+collapses rather than as `syntax`, whose collapse clears kerns. TextKit 2
+draws the caret wrong right after a kerned character, and a kern on a line's
+last character takes no effect, so the caret only ever stands at the key's
+end or after the space that follows the colon: an empty value, or a list's
+input after its pills, is given that space while the caret is there and
+loses it when left empty. `PropertyRealClickTests` clicks through
+`mouseDown` for real and measures where the caret is drawn; a click is
+settled after it ends, never while it is tracked. The row
 under the caret is outlined, its key cell shaded. A drawn card, and a popover
 form over it, were tried first; both turned the frontmatter into something
 other than the text it is.

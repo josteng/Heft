@@ -149,6 +149,14 @@ enum LiveStyler {
         layout.revealableSpans = decorations
             .filter { !Reveal.revealsWithItsLine($0.style) }
             .map { $0.revealRange ?? $0.range }
+        // A property's key counts as well: crossing from it to the value stays
+        // on the line, and the shaded cell moves with the caret.
+        layout.revealableSpans += decorations.compactMap { decoration -> NSRange? in
+            guard case .propertyLine(let line) = decoration.style,
+                  case let .entry(key, colon, _) = line.kind, colon.length > 0
+            else { return nil }
+            return NSRange(location: decoration.range.location + key.location, length: colon.location - key.location)
+        }
         // A table's cells count too. Moving from one column to the next stays
         // on the same line, so the line test alone would miss it and the caret
         // would keep drawing itself into the cell it had left.
@@ -159,12 +167,21 @@ enum LiveStyler {
             }
         }
 
+        // A selection over several lines is a selection, not a row being
+        // edited: the properties it crosses get no outline.
+        let selection = reveal.selection
+        let selectsLines = selection.location != NSNotFound && selection.length > 0
+            && NSMaxRange(selection) <= text.length
+            && text.substring(with: selection).contains("\n")
         for decoration in decorations where writes(decoration.range) {
             sink.writes = true
+            var focusInKey = false
+            if case .cell(_, let column) = reveal.state(of: decoration) { focusInKey = column == 0 }
             style(
                 decoration, in: sink, base: baseFont, body: body,
                 context: context, layout: &layout, drawsWidgets: drawsWidgets,
-                revealed: reveal.reveals(decoration), contentWidth: contentWidth
+                revealed: reveal.reveals(decoration), contentWidth: contentWidth,
+                selectsLines: selectsLines, focusInKey: focusInKey
             )
         }
 
@@ -637,7 +654,9 @@ enum LiveStyler {
         layout: inout LiveLayout,
         drawsWidgets: Bool,
         revealed: Bool,
-        contentWidth: CGFloat = Theme.contentMaxWidth
+        contentWidth: CGFloat = Theme.contentMaxWidth,
+        selectsLines: Bool = false,
+        focusInKey: Bool = false
     ) {
         let range = decoration.range
         guard range.location >= 0, NSMaxRange(range) <= storage.length else { return }
@@ -664,7 +683,7 @@ enum LiveStyler {
             } else {
                 styleProperty(line, range: range, in: storage, base: base, context: context,
                               layout: &layout, drawsWidgets: drawsWidgets, revealed: revealed,
-                              contentWidth: contentWidth)
+                              contentWidth: contentWidth, selectsLines: selectsLines, focusInKey: focusInKey)
             }
 
         case .comment:
@@ -1167,7 +1186,7 @@ enum LiveStyler {
     private static func styleProperty(
         _ line: PropertyLine, range: NSRange, in storage: StyleSink, base: NSFont,
         context: RenderContext, layout: inout LiveLayout, drawsWidgets: Bool, revealed: Bool,
-        contentWidth: CGFloat
+        contentWidth: CGFloat, selectsLines: Bool = false, focusInKey: Bool = false
     ) {
         let text = storage.storage.string as NSString
         let paragraphRange = text.lineRange(for: NSRange(location: range.location, length: 0))
@@ -1199,7 +1218,7 @@ enum LiveStyler {
         let blockList = line.listEdge != nil
         let folded = drawsWidgets && !line.items.isEmpty && (blockList || !revealed)
         let editingList = revealed && blockList && drawsWidgets
-        var keyEnd: (range: NSRange, width: CGFloat)?
+        var keyEnd: (range: NSRange, width: CGFloat, colon: NSRange)?
         guard let edge = folded ? (line.foldedEdge ?? line.edge) : line.edge else {
             // A fence: plain `---` on the caret's line. Otherwise the closing
             // one is gone and the opening one is the table's heading.
@@ -1246,16 +1265,20 @@ enum LiveStyler {
         case let .entry(key, colon, value):
             let keyRange = absolute(key)
             let colonRange = absolute(colon)
-            storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: keyRange)
+            storage.addAttribute(.foregroundColor, value: line.isDuplicate ? NSColor.systemRed : NSColor.secondaryLabelColor, range: keyRange)
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: colonRange)
             let keyWidth = width(text.substring(with: keyRange), font)
-            keyEnd = (keyRange, keyWidth)
+            keyEnd = (keyRange, keyWidth, colonRange)
             // The colon stays hidden on the row being edited too, as
             // Obsidian never shows it; a key still being typed has none yet,
             // and no gap, so the caret stays at its end.
-            if revealed, colonRange.length > 0 { collapse(colonRange, in: storage) }
-            if keyRange.length > 0, colonRange.length > 0 || !revealed {
-                storage.addAttribute(.kern, value: max(column - keyWidth, 4), range: NSRange(location: NSMaxRange(keyRange) - 1, length: 1))
+            // The colon is collapsed here rather than as `syntax`, on every
+            // row, and carries the column's gap as a kern: on the key's last
+            // letter instead, the gap belonged to the key, and a caret placed
+            // after the key stood at the value while typing went to the key.
+            if colonRange.length > 0 {
+                collapse(colonRange, in: storage)
+                storage.addAttribute(.kern, value: max(column - keyWidth, 4), range: NSRange(location: colonRange.location, length: 1))
             }
             let valueRange = absolute(value)
             let lineText = text.substring(with: range) as NSString
@@ -1301,18 +1324,23 @@ enum LiveStyler {
             // would reach over the dash beside them.
             values = revealed ? [] : [absolute(value)]
         case .other:
-            storage.addAttributes([
-                .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),
-                .foregroundColor: NSColor.tertiaryLabelColor,
-            ], range: range)
-            // A blank row is where a key is about to be typed.
+            // A blank row is where a key is about to be typed: in the row's
+            // own font, or its caret stands small and high and the line
+            // jumps when the first letter turns it into a key.
             let blank = text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if !blank {
+                storage.addAttributes([
+                    .font: NSFont.monospacedSystemFont(ofSize: base.pointSize - 2, weight: .regular),
+                    .foregroundColor: NSColor.tertiaryLabelColor,
+                ], range: range)
+            }
             paragraph.firstLineHeadIndent = blank ? padding : padding + column
         }
         storage.addAttribute(.paragraphStyle, value: paragraph, range: paragraphRange)
 
         if line.isTags, drawsWidgets {
             for value in values where value.length > 0 {
+                storage.addAttribute(.foregroundColor, value: context.tagColor, range: value)
                 let ink = CTLineGetImageBounds(CTLineCreateWithAttributedString(
                     NSAttributedString(string: text.substring(with: value), attributes: [.font: font])
                 ), nil)
@@ -1337,7 +1365,8 @@ enum LiveStyler {
             var rows: [Int] = []
             var x: CGFloat = 0
             var row = 0
-            let extra = editingList ? PropertyChips.removeWidth : 0
+            // Every pill carries its ×, as Obsidian's do.
+            let extra = PropertyChips.removeWidth
             // Editing, the item being typed goes after the pills; when they
             // leave it too little room they start on the row below instead.
             if editingList {
@@ -1347,9 +1376,12 @@ enum LiveStyler {
                 }
                 if total > available - PropertyChips.inputRoom { row = 1 }
             }
+            // Tags read as the body's tags do, in the tag colour, without
+            // the `#` a property's tags never carry.
+            let ink = line.isTags ? context.tagColor : NSColor.labelColor
             for item in line.items {
                 let label = NSAttributedString(string: item, attributes: [
-                    .font: font, .foregroundColor: NSColor.labelColor,
+                    .font: font, .foregroundColor: ink,
                 ])
                 let width = ceil(label.size().width) + PropertyChips.padding * 2 + extra
                 if x > 0, x + width > available {
@@ -1365,26 +1397,30 @@ enum LiveStyler {
             chips = PropertyChips(
                 labels: labels, x: xs, widths: widths, rows: rows, column: padding + column,
                 rowPitch: rowPitch, font: font, tint: line.isTags ? context.tagColor : nil,
-                removable: editingList
+                removable: true
             )
             // The typed item's place: after the pills on the first row, or
             // at the start of it when they moved below.
             if editingList, let keyEnd {
                 let onFirstRow = zip(rows, zip(xs, widths)).filter { $0.0 == 0 }
                 let offset = onFirstRow.last.map { $0.1.0 + $0.1.1 + PropertyChips.gap } ?? 0
-                storage.addAttribute(
-                    .kern, value: max(column - keyEnd.width, 4) + offset,
-                    range: NSRange(location: NSMaxRange(keyEnd.range) - 1, length: 1)
-                )
+                if keyEnd.colon.length > 0 {
+                    storage.addAttribute(
+                        .kern, value: max(column - keyEnd.width, 4) + offset,
+                        range: NSRange(location: keyEnd.colon.location, length: 1)
+                    )
+                }
             }
             paragraph.minimumLineHeight = max(paragraph.minimumLineHeight, rowPitch * CGFloat(row + 1) - Theme.lineSpacing)
             storage.addAttribute(.paragraphStyle, value: paragraph, range: paragraphRange)
         }
         if drawsWidgets {
             var row = PropertyRow(edge: edge, indent: paragraph.firstLineHeadIndent, chips: chips, symbol: symbol)
+            row.warns = line.isDuplicate
             row.column = padding + column
-            if revealed {
+            if revealed, !selectsLines {
                 row.focus = .only
+                row.focusInKey = focusInKey
                 switch line.kind {
                 case let .entry(_, _, value):
                     row.showsEmpty = value.length == 0 && line.listEdge == nil

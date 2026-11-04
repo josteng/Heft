@@ -18,7 +18,9 @@ public struct PropertyCompletionContext: Equatable, Sendable {
     /// What is being typed at `selection`, or nil. Only with nothing after
     /// the caret on its line, so completing never leaves a tail behind, and
     /// only between the fences.
-    public static func detect(in source: String, selection: NSRange) -> Self? {
+    /// `emptyKey` lets a blank row count as a key with nothing typed yet,
+    /// for the menu Add property opens straight away.
+    public static func detect(in source: String, selection: NSRange, emptyKey: Bool = false) -> Self? {
         guard selection.length == 0, let block = PropertyEditing.blockRange(in: source) else { return nil }
         let text = source as NSString
         let caret = selection.location
@@ -76,6 +78,9 @@ public struct PropertyCompletionContext: Equatable, Sendable {
                 part: .value(key: key, siblings: siblings), query: rest,
                 queryRange: NSRange(location: caret - length, length: length)
             )
+        }
+        if trimmed.isEmpty, emptyKey {
+            return Self(part: .key, query: "", queryRange: NSRange(location: caret, length: 0))
         }
         guard !trimmed.isEmpty, !typed.contains(" ") else { return nil }
         let length = (typed as NSString).length
