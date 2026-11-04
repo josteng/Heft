@@ -221,6 +221,29 @@ struct PropertyTableTests {
         #expect(storage.attribute(.foregroundColor, at: 4, effectiveRange: nil) as? NSColor == .systemRed)
     }
 
+    @Test("A value not of its key's type, a tag with a space, a retired key: red, with a warning")
+    func typeWarnings() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent("heft-warn-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: vault) }
+        try PropertyTypes.set(.number, for: "Rating", in: vault)
+        let source = "---\nRating: four\nCount: 4\ntags:\n  - a b\nalias: x\n---\n"
+        let storage = NSTextStorage(string: source)
+        let layout = LiveStyler.apply(
+            to: storage, reveal: .none,
+            context: RenderContext(index: .empty, current: nil, vaultRoot: vault), contentWidth: 600
+        )
+        func warns(_ start: Int) -> Bool? {
+            if case .propertyRow(let row)? = layout.blocks[start] { return row.warns }
+            return nil
+        }
+        #expect(warns(4) == true)
+        #expect(warns(17) == false)
+        // A broken tag is marked on its pill; the row itself stays calm.
+        #expect(warns(26) == false)
+        if case .propertyRow(let tags)? = layout.blocks[26] { #expect(tags.chips?.invalid == [0]) }
+        #expect(warns(40) == true)
+    }
+
     @Test("A selection over several rows outlines none of them")
     func selectionOutlinesNone() {
         let source = "---\nA: 1\nB: 2\n---\n"

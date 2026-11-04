@@ -171,7 +171,7 @@ final class LiveRestyler {
     /// Everything a pass depends on that is not the document itself.
     private static func styleKey(context: RenderContext, width: CGFloat) -> String {
         "\(context.index.allFiles.count)/\(context.current?.relativePath ?? "")/"
-            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.propertiesAsText)/\(context.palette)/"
+            + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.propertiesAsText)/\(context.propertiesFolded)/\(context.palette)/"
             + "\(context.strictLineBreaks)/\(width)/"
             + "\(context.appearance?.name.rawValue ?? "")/"
             + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"

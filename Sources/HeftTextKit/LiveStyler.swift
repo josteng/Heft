@@ -1207,6 +1207,13 @@ enum LiveStyler {
         let padding = propertyPadding
         let column = min(max(width(line.widestKey, font) + 24, 120), 220)
 
+        // The table folded to its heading: every row but the heading takes
+        // no room, and nothing is drawn for it.
+        if context.propertiesFolded, drawsWidgets, !line.opens {
+            collapse(range, in: storage)
+            flatten()
+            return
+        }
         // An item of a list folded onto its key's row: no row of its own.
         // Folded whether or not the caret is in the list: a list is edited
         // as its pills, on its key's row, as Obsidian edits one.
@@ -1219,6 +1226,7 @@ enum LiveStyler {
         let folded = drawsWidgets && !line.items.isEmpty && (blockList || !revealed)
         let editingList = revealed && blockList && drawsWidgets
         var keyEnd: (range: NSRange, width: CGFloat, colon: NSRange)?
+        var issue: String?
         guard let edge = folded ? (line.foldedEdge ?? line.edge) : line.edge else {
             // A fence: plain `---` on the caret's line. Otherwise the closing
             // one is gone and the opening one is the table's heading.
@@ -1265,7 +1273,17 @@ enum LiveStyler {
         case let .entry(key, colon, value):
             let keyRange = absolute(key)
             let colonRange = absolute(colon)
-            storage.addAttribute(.foregroundColor, value: line.isDuplicate ? NSColor.systemRed : NSColor.secondaryLabelColor, range: keyRange)
+            if case let .entry(_, colon, value) = line.kind, colon.length > 0 {
+                let valueText = text.substring(with: absolute(value))
+                issue = PropertyRules.issue(
+                    key: line.key, value: line.listEdge != nil ? "" : valueText,
+                    items: line.listEdge != nil ? line.items : [],
+                    type: PropertyTypes.type(of: line.key, in: PropertyTypes.types(in: context.vaultRoot))
+                )
+                // A broken tag is marked on its own pill, not the whole row.
+                if line.isTags, !line.items.isEmpty { issue = nil }
+            }
+            storage.addAttribute(.foregroundColor, value: line.isDuplicate || issue != nil ? NSColor.systemRed : NSColor.secondaryLabelColor, range: keyRange)
             storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: colonRange)
             let keyWidth = width(text.substring(with: keyRange), font)
             keyEnd = (keyRange, keyWidth, colonRange)
@@ -1379,9 +1397,13 @@ enum LiveStyler {
             // Tags read as the body's tags do, in the tag colour, without
             // the `#` a property's tags never carry.
             let ink = line.isTags ? context.tagColor : NSColor.labelColor
-            for item in line.items {
+            var invalid: Set<Int> = []
+            for (position, item) in line.items.enumerated() {
+                // A tag with a space is not one: that pill is the red one.
+                let broken = line.isTags && item.contains(" ")
+                if broken { invalid.insert(position) }
                 let label = NSAttributedString(string: item, attributes: [
-                    .font: font, .foregroundColor: ink,
+                    .font: font, .foregroundColor: broken ? NSColor.systemRed : ink,
                 ])
                 let width = ceil(label.size().width) + PropertyChips.padding * 2 + extra
                 if x > 0, x + width > available {
@@ -1397,7 +1419,7 @@ enum LiveStyler {
             chips = PropertyChips(
                 labels: labels, x: xs, widths: widths, rows: rows, column: padding + column,
                 rowPitch: rowPitch, font: font, tint: line.isTags ? context.tagColor : nil,
-                removable: true
+                removable: true, invalid: invalid
             )
             // The typed item's place: after the pills on the first row, or
             // at the start of it when they moved below.
@@ -1411,12 +1433,16 @@ enum LiveStyler {
                     )
                 }
             }
-            paragraph.minimumLineHeight = max(paragraph.minimumLineHeight, rowPitch * CGFloat(row + 1) - Theme.lineSpacing)
+            // Pills wrapped onto more lines get the room below the row's
+            // line, not a taller line: AppKit sets a line's text at the
+            // bottom of its height, which put the key and icon low and the
+            // pills over the next row.
+            paragraph.paragraphSpacing += rowPitch * CGFloat(row)
             storage.addAttribute(.paragraphStyle, value: paragraph, range: paragraphRange)
         }
         if drawsWidgets {
             var row = PropertyRow(edge: edge, indent: paragraph.firstLineHeadIndent, chips: chips, symbol: symbol)
-            row.warns = line.isDuplicate
+            row.warns = line.isDuplicate || issue != nil
             row.column = padding + column
             if revealed, !selectsLines {
                 row.focus = .only

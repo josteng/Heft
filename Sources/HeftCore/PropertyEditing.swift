@@ -287,15 +287,31 @@ public struct PropertyListContext: Equatable, Sendable {
 
     /// `item` as the list's last line, the typed text gone from the key
     /// line, the caret back where the next one is typed.
+    /// What typing `text` adds: for `tags`, its tags, split at spaces and
+    /// without their `#`, as Obsidian's tag field takes them; for anything
+    /// else, the text as one item.
+    public func items(from text: String) -> [String] {
+        ["tags", "tag"].contains(key.lowercased())
+            ? PropertyRules.tags(from: text)
+            : [text.trimmingCharacters(in: .whitespaces)].filter { !$0.isEmpty }
+    }
+
+    /// `item` as the list's last line, the typed text gone from the key
+    /// line, the caret back where the next one is typed; tags split first.
     public func adding(_ item: String, in source: String) -> MarkdownEditing.Edit {
+        adding(items: items(from: item), in: source)
+    }
+
+    /// Each of `added` as a line at the list's end, in order.
+    public func adding(items added: [String], in source: String) -> MarkdownEditing.Edit {
         let text = source as NSString
         let colonEnd = keyLine.location + (text.substring(with: keyLine).firstIndex(of: ":").map {
             (String(text.substring(with: keyLine)[...$0]) as NSString).length
         } ?? keyLine.length)
         let end = items.last.map { NSMaxRange($0.line) } ?? NSMaxRange(keyLine)
         let between = NSRange(location: NSMaxRange(keyLine), length: end - NSMaxRange(keyLine))
-        let value = item.trimmingCharacters(in: .whitespaces)
-        let replacement = text.substring(with: between) + newline(in: text) + indent + "- " + PropertyEditing.scalar(value)
+        let lines = added.map { newline(in: text) + indent + "- " + PropertyEditing.scalar($0) }.joined()
+        let replacement = text.substring(with: between) + lines
         return MarkdownEditing.Edit(
             range: NSRange(location: colonEnd, length: end - colonEnd),
             replacement: replacement,
@@ -313,5 +329,105 @@ public struct PropertyListContext: Equatable, Sendable {
             range: range, replacement: "",
             selection: NSRange(location: NSMaxRange(keyLine), length: 0)
         )
+    }
+}
+
+/// What Obsidian documents a property must be, checked: the fixes that keep
+/// the block YAML at all, made when the caret leaves a row, and the
+/// mismatches Obsidian only warns of, said on the row.
+public enum PropertyRules {
+
+    /// A row put right where the file would otherwise stop being YAML, or
+    /// read as something else: a key gets its colon, a colon its space, a
+    /// link its quotes (`[[Note]]` bare is a list in a list). Nil when the
+    /// row is fine.
+    public static func tidying(_ row: PropertyEditing.Row, in source: String) -> MarkdownEditing.Edit? {
+        let text = source as NSString
+        let original = text.substring(with: row.range)
+        var lines = original.components(separatedBy: "\n")
+        guard var head = lines.first else { return nil }
+        let cr = head.hasSuffix("\r")
+        if cr { head.removeLast() }
+        let trimmed = head.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, head.first != " ", head.first != "\t", !trimmed.hasPrefix("#"), !trimmed.hasPrefix("-")
+        else { return nil }
+
+        if let colon = head.firstIndex(of: ":") {
+            let key = String(head[..<colon])
+            let rest = String(head[head.index(after: colon)...])
+            let value = rest.trimmingCharacters(in: .whitespaces)
+            let fixedValue = quotedLink(value)
+            // An empty value is left as written; a value gets its space and
+            // its quotes.
+            if !value.isEmpty, rest.first != " " || fixedValue != value {
+                head = key + ": " + fixedValue
+            }
+        } else {
+            head += ":"
+        }
+        lines[0] = head + (cr ? "\r" : "")
+        for index in lines.indices.dropFirst() {
+            let line = lines[index]
+            let lead = line.prefix { $0 == " " || $0 == "\t" }
+            let rest = line.dropFirst(lead.count)
+            guard rest.hasPrefix("- ") else { continue }
+            let tail = rest.hasSuffix("\r")
+            var item = String(rest.dropFirst(2))
+            if tail { item.removeLast() }
+            let quoted = quotedLink(item.trimmingCharacters(in: .whitespaces))
+            if quoted != item.trimmingCharacters(in: .whitespaces) {
+                lines[index] = lead + "- " + quoted + (tail ? "\r" : "")
+            }
+        }
+        let fixed = lines.joined(separator: "\n")
+        guard fixed != original else { return nil }
+        return MarkdownEditing.Edit(range: row.range, replacement: fixed, selection: NSRange(location: row.range.location, length: 0))
+    }
+
+    /// A bare `[[link]]` quoted, as Obsidian asks; anything else as it is.
+    static func quotedLink(_ value: String) -> String {
+        guard value.hasPrefix("[["), value.hasSuffix("]]") else { return value }
+        return PropertyEditing.scalar(value)
+    }
+
+    /// The items a typed tag stands for: split at spaces, its `#` dropped,
+    /// as Obsidian's tag field does, where a space ends a tag.
+    public static func tags(from typed: String) -> [String] {
+        typed.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "," })
+            .map { String($0).drop { $0 == "#" } }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    /// What Obsidian would warn of on a row, in words, or nil: a value not
+    /// of its key's type, a tag holding a space, a key Obsidian retired.
+    public static func issue(key: String, value: String, items: [String], type: PropertyType?) -> String? {
+        let retired = ["tag": "tags", "alias": "aliases", "cssclass": "cssclasses"]
+        if let replacement = retired[key.lowercased()] {
+            return "Obsidian reads \u{201C}\(replacement)\u{201D}, not \u{201C}\(key)\u{201D}, since version 1.9"
+        }
+        let value = value.trimmingCharacters(in: .whitespaces)
+        if key.lowercased() == "tags" || type == .tags {
+            let all = items + (value.isEmpty ? [] : [value])
+            if all.contains(where: { $0.contains(" ") }) { return "A tag can\u{2019}t hold a space" }
+            return nil
+        }
+        guard !value.isEmpty, let type else { return nil }
+        let unquoted = value.count >= 2 && (value.hasPrefix("\"") && value.hasSuffix("\"") || value.hasPrefix("'") && value.hasSuffix("'"))
+            ? String(value.dropFirst().dropLast()) : value
+        switch type {
+        case .number:
+            return Double(unquoted) == nil ? "\u{201C}\(key)\u{201D} is a number, and this isn\u{2019}t one" : nil
+        case .checkbox:
+            return ["true", "false"].contains(unquoted.lowercased()) ? nil : "\u{201C}\(key)\u{201D} is a checkbox: true or false"
+        case .date:
+            return unquoted.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) == nil
+                ? "\u{201C}\(key)\u{201D} is a date, written YYYY-MM-DD" : nil
+        case .datetime:
+            return unquoted.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$"#, options: .regularExpression) == nil
+                ? "\u{201C}\(key)\u{201D} is a date and time, written YYYY-MM-DDTHH:MM:SS" : nil
+        default:
+            return nil
+        }
     }
 }

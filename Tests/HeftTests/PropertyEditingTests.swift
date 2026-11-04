@@ -76,7 +76,8 @@ struct PropertyListEditingTests {
         #expect(edit?.selection == NSRange(location: 9, length: 0))
         let empty = "---\ntags:\n---\n"
         let first = PropertyListContext.detect(in: empty, selection: NSRange(location: 9, length: 0))
-        #expect(applied(first?.adding("a b", in: empty), to: empty) == "---\ntags:\n  - a b\n---\n")
+        // Tags split at spaces, as a tag cannot hold one.
+        #expect(applied(first?.adding("a b", in: empty), to: empty) == "---\ntags:\n  - a\n  - b\n---\n")
         let quoted = PropertyListContext.detect(in: note, selection: NSRange(location: 9, length: 0))
         let added = applied(quoted?.adding("[[Note]]", in: note), to: note)
         #expect(added.contains("  - \"[[Note]]\"\n"))
@@ -142,5 +143,55 @@ struct PropertyTypeTests {
             == "---\nGenre: a, b\nX: 1\n---\n")
         #expect(PropertyEditing.converting(key: "X", toList: false, in: list) == nil)
         #expect(PropertyEditing.converting(key: "Missing", toList: true, in: list) == nil)
+    }
+}
+
+/// What Obsidian documents a property must be.
+@Suite("Property rules")
+struct PropertyRuleTests {
+    private func tidied(_ source: String) -> String {
+        var result = source
+        for row in PropertyEditing.rows(in: source).reversed() {
+            if let edit = PropertyRules.tidying(row, in: result) {
+                result = (result as NSString).replacingCharacters(in: edit.range, with: edit.replacement)
+            }
+        }
+        return result
+    }
+
+    @Test("Left alone, a row is made YAML: colon, space, quoted links")
+    func tidying() {
+        #expect(tidied("---\nkey\n---\n") == "---\nkey:\n---\n")
+        #expect(tidied("---\nkey:value\n---\n") == "---\nkey: value\n---\n")
+        #expect(tidied("---\nup: [[Note]]\n---\n") == "---\nup: \"[[Note]]\"\n---\n")
+        #expect(tidied("---\nup:\n  - [[A]]\n  - b\n---\n") == "---\nup:\n  - \"[[A]]\"\n  - b\n---\n")
+        // Already fine: untouched, byte for byte.
+        for fine in ["---\nk: v\n---\n", "---\nk:\n---\n", "---\nk: \"[[A]]\"\n---\n", "---\nk: [a, b]\n---\n", "---\n# c\nk: v\n---\n"] {
+            #expect(tidied(fine) == fine)
+        }
+    }
+
+    @Test("A typed tag loses its # and splits at spaces, as Obsidian's tag field does")
+    func tags() {
+        #expect(PropertyRules.tags(from: "#work") == ["work"])
+        #expect(PropertyRules.tags(from: "a b, c") == ["a", "b", "c"])
+        #expect(PropertyRules.tags(from: "  ") == [])
+    }
+
+    @Test("What Obsidian warns of is said; what it accepts is not")
+    func issues() {
+        #expect(PropertyRules.issue(key: "Rating", value: "four", items: [], type: .number) != nil)
+        #expect(PropertyRules.issue(key: "Rating", value: "4.5", items: [], type: .number) == nil)
+        #expect(PropertyRules.issue(key: "Done", value: "yes", items: [], type: .checkbox) != nil)
+        #expect(PropertyRules.issue(key: "Done", value: "false", items: [], type: .checkbox) == nil)
+        #expect(PropertyRules.issue(key: "Read", value: "03.11.2026", items: [], type: .date) != nil)
+        #expect(PropertyRules.issue(key: "Read", value: "2026-11-03", items: [], type: .date) == nil)
+        #expect(PropertyRules.issue(key: "At", value: "2026-11-03T10:30:00", items: [], type: .datetime) == nil)
+        #expect(PropertyRules.issue(key: "At", value: "2026-11-03 10:30", items: [], type: .datetime) != nil)
+        #expect(PropertyRules.issue(key: "tags", value: "", items: ["a b"], type: nil) != nil)
+        #expect(PropertyRules.issue(key: "tags", value: "", items: ["ab"], type: nil) == nil)
+        #expect(PropertyRules.issue(key: "alias", value: "x", items: [], type: nil) != nil)
+        #expect(PropertyRules.issue(key: "Rating", value: "", items: [], type: .number) == nil)
+        #expect(PropertyRules.issue(key: "Note", value: "anything", items: [], type: nil) == nil)
     }
 }

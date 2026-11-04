@@ -255,6 +255,7 @@ struct LiveTextEditor: NSViewRepresentable {
         textView.correctsSpelling = typing.correctsSpelling
         textView.completionIndex = context.index
         textView.vaultRoot = context.vaultRoot
+        textView.noteIdentity = documentIdentity
         textView.vimCaretColor = context.accentColor
         // What `{{title}}` in a custom replacement expands to.
         textView.noteTitle = context.current?.name ?? ""
@@ -747,6 +748,8 @@ struct LiveTextEditor: NSViewRepresentable {
             // the rest of the click a drag from the old place, a selection
             // Vim took for Visual mode. The click settles after it ends.
             if let view = textView as? HeftTextKit2View, !view.isTrackingMouse {
+                view.unfoldPropertiesIfEntered()
+                view.returnToPropertyTableIfLeft()
                 if view.keepCaretOutOfColonGap() { return }
                 if view.liftCaretOffFoldedItem() { return }
                 view.noteListEditing()
@@ -1012,6 +1015,8 @@ struct LiveTextEditor: NSViewRepresentable {
             // resolving `labelColor` against whatever is current.
             var context = parent.context
             context.appearance = textView.effectiveAppearance
+            context.propertiesFolded = (textView as? HeftTextKit2View)?.propertiesFolded ?? false
+            if (textView as? HeftTextKit2View)?.propertiesShownAsText == true { context.propertiesAsText = true }
 
             let relayout: LiveRestyler.Relayout
             switch restyler.restyle(
@@ -1662,6 +1667,40 @@ final class HeftTextKit2View: NSTextView {
     var liveLayout = LiveLayout()
     /// Where the key line of the list being edited as pills starts.
     var listKeyLineBeingEdited: Int?
+    /// The note on screen, whose properties may be folded.
+    var noteIdentity = ""
+    /// The notes whose properties are folded to their heading, for this run
+    /// of the app.
+    nonisolated(unsafe) static var foldedPropertyNotes: Set<String> = []
+    var propertiesFolded: Bool { Self.foldedPropertyNotes.contains(noteIdentity) }
+    /// The notes whose properties are shown as their YAML, for this run of
+    /// the app, beside the View menu's setting for every note.
+    nonisolated(unsafe) static var sourcePropertyNotes: Set<String> = []
+    var propertiesShownAsText: Bool {
+        AppearanceSettings.shared.showsPropertiesAsText || Self.sourcePropertyNotes.contains(noteIdentity)
+    }
+    /// The button beside the arrow that shows this note's properties as
+    /// YAML, and the table again; there on hover, as the arrow is.
+    lazy var propertiesSourceButton: NSImageView = {
+        let button = NSImageView()
+        button.imageScaling = .scaleProportionallyDown
+        button.contentTintColor = .tertiaryLabelColor
+        button.image = NSImage(systemSymbolName: "curlybraces", accessibilityDescription: "Show as YAML")?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        button.isHidden = true
+        addSubview(button)
+        return button
+    }()
+    /// The arrow beside "Properties", shown while the pointer is on the
+    /// heading, as Obsidian's is.
+    lazy var propertiesFoldButton: NSImageView = {
+        let arrow = NSImageView()
+        arrow.imageScaling = .scaleProportionallyDown
+        arrow.contentTintColor = .tertiaryLabelColor
+        arrow.isHidden = true
+        addSubview(arrow)
+        return arrow
+    }()
     /// Where the blank property row the caret is on starts.
     var blankRowBeingEdited: Int?
     /// Where the caret was before this selection change, for which way it
@@ -2809,6 +2848,8 @@ final class HeftTextKit2View: NSTextView {
             NSCursor.arrow.set()
             return
         }
+        updatePropertiesFoldButton(hovering: point)
+        updatePropertyToolTip(at: point)
         let rects = pointerRects()
         let cursor = cursorOverride(at: point, among: rects)
         Self.traceCursor(point: point, rects: rects, over: cursor == .pointingHand)
@@ -3057,6 +3098,7 @@ final class HeftTextKit2View: NSTextView {
         if selectedRange().length == 0 {
             _ = liftCaretOffFoldedItem()
             noteListEditing()
+            returnToPropertyTableIfLeft()
         }
         if let hiddenPrefix {
             let caret = selectedRange()
@@ -3523,6 +3565,15 @@ final class HeftTextKit2View: NSTextView {
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         var insertString = insertString
         var inserted = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
+        // A space typed after a tag ends it, as in Obsidian's tag field: a
+        // tag cannot hold one.
+        if inserted == " ", !hasMarkedText(),
+           let list = PropertyListContext.detect(in: string, selection: selectedRange()),
+           ["tags", "tag"].contains(list.key.lowercased()),
+           !(string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces).isEmpty {
+            apply(list.adding((string as NSString).substring(with: list.pending), in: string), named: "Add Tag")
+            return
+        }
         // Typed into the hidden `: ` between a key and its value, it is the
         // value's: it goes in where the value starts, after the space YAML
         // needs, rather than between the colon and that space.
@@ -3678,7 +3729,7 @@ final class HeftTextKit2View: NSTextView {
     /// colon. Nil anywhere else.
     func propertyValueInsertion(for text: String) -> MarkdownEditing.Edit? {
         let selection = selectedRange()
-        guard selection.length == 0, !text.contains("\n"), !AppearanceSettings.shared.showsPropertiesAsText,
+        guard selection.length == 0, !text.contains("\n"), !propertiesShownAsText,
               let gap = PropertyEditing.colonGap(in: string, at: selection.location),
               selection.location > gap.keyEnd, selection.location <= gap.valueStart
         else { return nil }
@@ -3700,7 +3751,7 @@ final class HeftTextKit2View: NSTextView {
     /// cannot be merged by a key either.
     func deletionCrossesColonGap(forward: Bool) -> Bool {
         let selection = selectedRange()
-        guard selection.length == 0, !AppearanceSettings.shared.showsPropertiesAsText,
+        guard selection.length == 0, !propertiesShownAsText,
               let gap = PropertyEditing.colonGap(in: string, at: selection.location)
         else { return false }
         return forward
@@ -4651,21 +4702,147 @@ enum WritingToolsLog {
 }
 
 extension HeftTextKit2View {
+    /// Where the "Properties" heading is drawn, and the arrow beside it.
+    func propertiesHeadingRect() -> (heading: CGRect, arrow: CGRect, source: CGRect)? {
+        // The heading, or shown as YAML, the opening fence's line.
+        guard PropertyEditing.blockRange(in: string) != nil,
+              propertiesShownAsText || { if case .propertyHeading? = liveLayout.blocks[0] { true } else { false } }(),
+              let manager = textLayoutManager, let content = manager.textContentManager,
+              let fragment = manager.textLayoutFragment(for: content.documentRange.location),
+              let line = fragment.textLineFragments.first
+        else { return nil }
+        let frame = fragment.layoutFragmentFrame
+        let x = frame.minX + textContainerInset.width
+        let y = frame.minY + textContainerInset.height
+        let height = propertiesShownAsText ? line.typographicBounds.height : frame.height
+        let heading = CGRect(x: x, y: y, width: 90, height: height)
+        let arrow = CGRect(x: x - 20, y: y + (height - 14) / 2, width: 14, height: 14)
+        // Just after the heading's word, or the fence's, at its middle.
+        let word = propertiesShownAsText ? "---" : "Properties"
+        let font = propertiesShownAsText
+            ? NSFont.monospacedSystemFont(ofSize: Theme.bodySize - 2, weight: .regular)
+            : NSFont.systemFont(ofSize: Theme.bodySize - 1, weight: .semibold)
+        let width = ceil(NSAttributedString(string: word, attributes: [.font: font]).size().width)
+        let source = CGRect(x: x + width + 8, y: y + (height - 14) / 2, width: 16, height: 14)
+        return (heading, arrow, source)
+    }
+
+    /// The arrow shows while the pointer is on the heading or the arrow,
+    /// pointing down while the table is open and right while it is folded.
+    func updatePropertiesFoldButton(hovering point: CGPoint) {
+        guard let rects = propertiesHeadingRect() else {
+            propertiesFoldButton.isHidden = true
+            return
+        }
+        let over = rects.heading.union(rects.arrow).union(rects.source).insetBy(dx: -4, dy: -2).contains(point)
+        propertiesFoldButton.frame = rects.arrow
+        propertiesFoldButton.image = NSImage(
+            systemSymbolName: propertiesFolded ? "chevron.right" : "chevron.down", accessibilityDescription: nil
+        )?.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        // No folding YAML: the arrow is the table's.
+        propertiesFoldButton.isHidden = !over || propertiesShownAsText
+        propertiesSourceButton.frame = rects.source
+        propertiesSourceButton.contentTintColor = propertiesShownAsText ? .controlAccentColor : .tertiaryLabelColor
+        // The View menu's setting shows every note's as YAML; this button
+        // is for one note, so it is not offered against that.
+        propertiesSourceButton.isHidden = !over || AppearanceSettings.shared.showsPropertiesAsText
+    }
+
+    /// A caret arriving in folded properties, by key, opens them: on a
+    /// folded row it would stand invisible.
+    /// A note's properties shown as YAML go back to the table once the
+    /// caret leaves them, as markup goes back once the caret leaves its line.
+    func returnToPropertyTableIfLeft() {
+        guard Self.sourcePropertyNotes.contains(noteIdentity), let block = PropertyEditing.blockRange(in: string) else { return }
+        let caret = selectedRange()
+        guard caret.length == 0, caret.location >= NSMaxRange(block) else { return }
+        togglePropertiesSource()
+    }
+
+    func unfoldPropertiesIfEntered() {
+        guard propertiesFolded, let block = PropertyEditing.blockRange(in: string),
+              selectedRange().location < NSMaxRange(block), selectedRange().location > 0
+        else { return }
+        togglePropertiesFold()
+    }
+
+    /// Over a red warning icon, the reason as a tooltip, as Obsidian shows
+    /// its warnings; nothing anywhere else.
+    func updatePropertyToolTip(at point: CGPoint) {
+        var tip: String?
+        if let hit = propertyTargets().first(where: { $0.rect.contains(point) }), case .typeMenu(let start) = hit.target,
+           case .propertyRow(let row)? = liveLayout.blocks[start], row.warns {
+            tip = propertyWarning(forLineAt: start)
+        }
+        if toolTip != tip { toolTip = tip }
+    }
+
+    /// Why a row is red, in words.
+    func propertyWarning(forLineAt start: Int) -> String? {
+        let text = string as NSString
+        let keyLine = text.substring(with: text.lineRange(for: NSRange(location: start, length: 0)))
+        guard let colon = keyLine.firstIndex(of: ":") else { return nil }
+        let key = String(keyLine[..<colon]).trimmingCharacters(in: .whitespaces)
+        return PropertyEditing.keys(in: string).filter({ $0 == key }).count > 1
+            ? "\u{201C}\(key)\u{201D} is there twice, so Obsidian can\u{2019}t read these properties"
+            : propertyIssue(forLineAt: start)
+    }
+
+    /// This note's properties as YAML, or the table again.
+    func togglePropertiesSource() {
+        if Self.sourcePropertyNotes.contains(noteIdentity) {
+            Self.sourcePropertyNotes.remove(noteIdentity)
+        } else {
+            Self.sourcePropertyNotes.insert(noteIdentity)
+            // Into the YAML, at the end of its first line, since leaving it
+            // is what brings the table back.
+            if let first = PropertyEditing.rows(in: string).first {
+                window?.makeFirstResponder(self)
+                setSelectedRange(NSRange(location: first.valueEnd, length: 0))
+            }
+        }
+        cachedPointerRects = nil
+        onNeedsRestyle?()
+        if let rects = propertiesHeadingRect() {
+            updatePropertiesFoldButton(hovering: CGPoint(x: rects.source.midX, y: rects.source.midY))
+        }
+    }
+
+    /// Folds the properties to their heading, or opens them again.
+    func togglePropertiesFold() {
+        if propertiesFolded { Self.foldedPropertyNotes.remove(noteIdentity) }
+        else { Self.foldedPropertyNotes.insert(noteIdentity) }
+        onNeedsRestyle?()
+        if let rects = propertiesHeadingRect() {
+            updatePropertiesFoldButton(hovering: CGPoint(x: rects.arrow.midX, y: rects.arrow.midY))
+        }
+    }
+
     /// What can be clicked in the properties table besides its text: a
     /// row's type icon, each pill's ×, and "Add property" under the last
     /// row. One list for both the click and the pointing hand, so the hand
     /// shows exactly where a click does something.
     enum PropertyTarget: Equatable {
+        case fold
+        case source
         case typeMenu(lineStart: Int)
         case removeItem(lineStart: Int, index: Int)
         case addProperty
     }
 
     func propertyTargets() -> [(rect: CGRect, target: PropertyTarget)] {
-        guard !AppearanceSettings.shared.showsPropertiesAsText,
-              let manager = textLayoutManager, let content = manager.textContentManager
-        else { return [] }
         var targets: [(CGRect, PropertyTarget)] = []
+        if let rects = propertiesHeadingRect(), !AppearanceSettings.shared.showsPropertiesAsText {
+            targets.append((rects.source.insetBy(dx: -3, dy: -3), .source))
+        }
+        guard !propertiesShownAsText,
+              let manager = textLayoutManager, let content = manager.textContentManager
+        else { return targets }
+        // The arrow and the heading both fold, as Obsidian's heading does.
+        if let rects = propertiesHeadingRect() {
+            targets.append((rects.arrow.insetBy(dx: -3, dy: -3).union(rects.heading), .fold))
+        }
+        if propertiesFolded { return targets }
         for (start, widget) in liveLayout.blocks {
             guard case .propertyRow(let row) = widget,
                   let location = content.location(content.documentRange.location, offsetBy: start),
@@ -4709,6 +4886,10 @@ extension HeftTextKit2View {
     /// What a click on a property target does.
     func perform(_ target: PropertyTarget, from rect: CGRect) {
         switch target {
+        case .fold:
+            togglePropertiesFold()
+        case .source:
+            togglePropertiesSource()
         case .addProperty:
             editProperties()
         case .typeMenu(let start):
@@ -4813,7 +4994,7 @@ extension HeftTextKit2View {
     /// selection change that matters.
     func liftCaretOffFoldedItem() -> Bool {
         let selection = selectedRange()
-        guard selection.length == 0, !AppearanceSettings.shared.showsPropertiesAsText,
+        guard selection.length == 0, !propertiesShownAsText,
               let row = PropertyEditing.rows(in: string).first(where: {
                   NSLocationInRange(selection.location, $0.range) && selection.location > $0.valueEnd
               }),
@@ -4848,28 +5029,24 @@ extension HeftTextKit2View {
         let caret = selectedRange()
         let rows = PropertyEditing.rows(in: string)
         let here = rows.first { caret.location >= $0.range.location && caret.location <= $0.valueEnd }
-        let bare = here.flatMap { isKeyWithoutColon($0) ? $0.range.location : nil }
         if let start = bareKeyLine, start != here?.range.location {
-            DispatchQueue.main.async { [weak self] in self?.giveColon(toLineAt: start) }
+            DispatchQueue.main.async { [weak self] in self?.tidyRow(at: start) }
         }
-        bareKeyLine = bare
+        bareKeyLine = here?.range.location
     }
 
-    private func giveColon(toLineAt start: Int) {
+    /// The row at `start` made YAML once the caret has left it: a key's
+    /// colon, a colon's space, a link's quotes (`PropertyRules`).
+    private func tidyRow(at start: Int) {
         if isTrackingMouse {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.giveColon(toLineAt: start) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.tidyRow(at: start) }
             return
         }
         guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
-              isKeyWithoutColon(row)
+              !(selectedRange().location >= row.range.location && selectedRange().location <= row.valueEnd),
+              let edit = PropertyRules.tidying(row, in: string)
         else { return }
-        var selection = selectedRange()
-        let range = NSRange(location: row.valueEnd, length: 0)
-        guard shouldChangeText(in: range, replacementString: ":") else { return }
-        textStorage?.replaceCharacters(in: range, with: ":")
-        didChangeText()
-        if selection.location >= row.valueEnd { selection.location += 1 }
-        setSelectedRange(selection)
+        applyKeepingCaret(edit, named: "Tidy Property")
     }
 
     /// An empty value, or a list's place for the next item, the caret is
@@ -4879,7 +5056,7 @@ extension HeftTextKit2View {
     /// colon the caret was drawn back against the key.
     private func noteEmptyValue() {
         let caret = selectedRange()
-        guard caret.length == 0, !AppearanceSettings.shared.showsPropertiesAsText else { return }
+        guard caret.length == 0, !propertiesShownAsText else { return }
         let here = emptyValueLine(at: caret.location)
         if let start = spacedValueLine, start != here?.lineStart {
             spacedValueLine = nil
@@ -5018,9 +5195,10 @@ extension HeftTextKit2View {
         let key = String(keyLine[..<colon]).trimmingCharacters(in: .whitespaces)
         let current = PropertyTypes.type(of: key, in: PropertyTypes.types(in: vaultRoot))
         let menu = NSMenu()
-        // A key written twice is why its icon is a warning: said first.
-        if PropertyEditing.keys(in: string).filter({ $0 == key }).count > 1 {
-            let warning = NSMenuItem(title: "\u{201C}\(key)\u{201D} is there twice, so Obsidian can\u{2019}t read these properties", action: nil, keyEquivalent: "")
+        // Why the icon is a warning, when it is one: said first.
+        let message = propertyWarning(forLineAt: start)
+        if let message {
+            let warning = NSMenuItem(title: message, action: nil, keyEquivalent: "")
             warning.isEnabled = false
             menu.addItem(warning)
             menu.addItem(.separator())
@@ -5034,6 +5212,18 @@ extension HeftTextKit2View {
             menu.addItem(item)
         }
         menu.popUp(positioning: nil, at: NSPoint(x: icon.minX, y: icon.maxY + 2), in: self)
+    }
+
+    /// What Obsidian would warn of on the row at `start`.
+    func propertyIssue(forLineAt start: Int) -> String? {
+        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
+              let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd)
+        else { return nil }
+        let text = string as NSString
+        let key = text.substring(with: NSRange(location: start, length: gap.keyEnd - start)).trimmingCharacters(in: .whitespaces)
+        let value = text.substring(with: NSRange(location: gap.valueStart, length: row.valueEnd - gap.valueStart))
+        let items = PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0))?.items.map(\.value) ?? []
+        return PropertyRules.issue(key: key, value: value, items: items, type: PropertyTypes.type(of: key, in: PropertyTypes.types(in: vaultRoot)))
     }
 
     @objc private func pickPropertyType(_ item: NSMenuItem) {
@@ -5063,7 +5253,7 @@ extension HeftTextKit2View {
     func keepCaretOutOfColonGap() -> Bool {
         let selection = selectedRange()
         defer { lastCaretLocation = selectedRange().location }
-        guard selection.length == 0, !AppearanceSettings.shared.showsPropertiesAsText,
+        guard selection.length == 0, !propertiesShownAsText,
               let gap = PropertyEditing.colonGap(in: string, at: selection.location)
         else { return false }
         let caret = selection.location
@@ -5106,7 +5296,7 @@ extension HeftTextKit2View {
     /// becomes a block list first, so it edits as pills too, which Obsidian
     /// does to one edited in its properties as well.
     func settlePropertyClick(onLineAt lineStart: Int, inValue: Bool) {
-        guard selectedRange().length == 0, !AppearanceSettings.shared.showsPropertiesAsText,
+        guard selectedRange().length == 0, !propertiesShownAsText,
               let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == lineStart })
         else { return }
         let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
@@ -5177,7 +5367,7 @@ extension HeftTextKit2View {
     /// Whether the value of the property row at `lineStart` has no text a
     /// click could land in: a list, an empty value, no colon yet.
     func valueHasNoText(onLineAt lineStart: Int) -> Bool {
-        guard !AppearanceSettings.shared.showsPropertiesAsText,
+        guard !propertiesShownAsText,
               let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == lineStart })
         else { return false }
         guard let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd) else { return isKeyWithoutColon(row) }
@@ -5259,12 +5449,8 @@ extension HeftTextKit2View {
         // What earlier editing left, tidied now rather than a moment later,
         // when it would shift the new row from under the caret and close
         // its menu: a key still without its colon gets one.
-        for row in PropertyEditing.rows(in: string).reversed() where isKeyWithoutColon(row) {
-            let at = NSRange(location: row.valueEnd, length: 0)
-            if shouldChangeText(in: at, replacementString: ":") {
-                textStorage?.replaceCharacters(in: at, with: ":")
-                didChangeText()
-            }
+        for row in PropertyEditing.rows(in: string).reversed() {
+            if let edit = PropertyRules.tidying(row, in: string) { applyKeepingCaret(edit, named: "Tidy Property") }
         }
         bareKeyLine = nil
         // An empty row already waiting is the new property's: the caret goes

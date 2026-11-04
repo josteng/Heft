@@ -23,6 +23,8 @@ struct RenderContext {
     var headingBars: Bool = false
     /// The frontmatter as plain YAML instead of the properties table.
     var propertiesAsText: Bool = false
+    /// The properties table folded to its heading.
+    var propertiesFolded: Bool = false
     /// Decides code's fill, highlights and callouts; the colours below are
     /// already resolved through it.
     var palette: AppearancePreferences.ColorPalette = .vivid

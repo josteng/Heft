@@ -161,6 +161,14 @@ value and a list at once. `PropertyListContext` makes each of those one
 replacement. `[a, b]` folds the same way but is edited as text. The View
 menu's Properties as Text turns all of it off and shows the YAML.
 
+`PropertyRules` holds what Obsidian documents a property must be. What
+would stop the block being YAML is fixed when the caret leaves the row (a
+key's colon, a colon's space, a bare `[[link]]` quoted) and never under the
+caret, where it would move what is being typed; a space in `tags` ends the
+tag and a `#` is dropped, as Obsidian's tag field does. What Obsidian only
+warns of (a key written twice, a value not of its key's type, a tag with a
+space, a retired key) turns the row red, and its icon's menu says why.
+
 A key's type is Obsidian's, read from `.obsidian/types.json` and written
 there by the picker on the row's icon, so the two apps agree; the file is
 edited in place, its other entries untouched. A key with no type gets its

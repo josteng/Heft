@@ -86,8 +86,11 @@ struct PropertyChips {
     let font: NSFont
     /// The tag colour for tags; nil draws neutral capsules.
     let tint: NSColor?
-    /// Each pill carries an × that removes it, while the list is edited.
+    /// Each pill carries an × that removes it.
     var removable = false
+    /// The items Obsidian would not take as they are, drawn red: a tag
+    /// holding a space.
+    var invalid: Set<Int> = []
 
     static let padding: CGFloat = 7
     static let gap: CGFloat = 5
@@ -1275,8 +1278,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
                 x: left + chips.x[index], y: rowBaseline - chips.font.ascender - inset,
                 width: chips.widths[index], height: chips.font.ascender - chips.font.descender + inset * 2
             )
+            let tint = chips.invalid.contains(index) ? NSColor.systemRed : chips.tint
             context.setFillColor(
-                (chips.tint?.withAlphaComponent(Theme.tagBackgroundOpacity) ?? NSColor.quaternaryLabelColor).cgColor
+                (tint?.withAlphaComponent(Theme.tagBackgroundOpacity) ?? NSColor.quaternaryLabelColor).cgColor
             )
             context.addPath(CGPath(
                 roundedRect: rect, cornerWidth: rect.height / 2, cornerHeight: rect.height / 2, transform: nil

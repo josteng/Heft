@@ -46,7 +46,7 @@ struct PropertyRealClickTests {
         let window: ClickWindow
         let coordinator: LiveTextEditor.Coordinator
 
-        init(vim: Bool, note: String = PropertyRealClickTests.note) {
+        init(vim: Bool, note: String = PropertyRealClickTests.note, width: CGFloat = 700) {
             _ = NSApplication.shared
             let context = RenderContext(index: .empty, current: nil, vaultRoot: nil)
             let editor = LiveTextEditor(
@@ -57,9 +57,9 @@ struct PropertyRealClickTests {
             coordinator = LiveTextEditor.Coordinator(editor)
             view = HeftTextKit2View(usingTextLayoutManager: true)
             view.isVerticallyResizable = true
-            view.frame = NSRect(x: 0, y: 0, width: 700, height: 600)
+            view.frame = NSRect(x: 0, y: 0, width: width, height: 600)
             view.textContainerInset = NSSize(width: 28, height: 28)
-            view.textContainer?.size = NSSize(width: 644, height: CGFloat.greatestFiniteMagnitude)
+            view.textContainer?.size = NSSize(width: width - 56, height: CGFloat.greatestFiniteMagnitude)
             view.textLayoutManager?.delegate = coordinator
             view.delegate = coordinator
             view.string = note
@@ -378,6 +378,134 @@ extension PropertyRealClickTests {
         try await addProperty(h)
         #expect(h.view.string == once, "\(h.view.string.debugDescription)")
         #expect(!h.view.visibleCompletions.isEmpty)
+    }
+
+    @Test("In tags a space ends the tag, and a # is dropped", arguments: Mode.allCases)
+    func tagSpace(mode: Mode) async throws {
+        let h = try await harness(mode)
+        _ = try await click(h, line: 28, at: \.column, plus: 200)
+        try await type("#deep work", in: h, mode: mode)
+        #expect(h.view.string.contains("  - x\n  - deep\n"), "\(h.view.string.debugDescription)")
+        _ = try await click(h, line: 4, at: \.column, plus: 12)
+        #expect(h.view.string.contains("  - deep\n  - work\n"), "\(h.view.string.debugDescription)")
+    }
+
+    private static let looseNote = "---\nAuthor: Jane Doe\nup:[[Note]]\n---\nBody text.\n"
+
+    @Test("A row left is made YAML: its colon's space, its link quoted", arguments: Mode.allCases)
+    func tidyOnLeave(mode: Mode) async throws {
+        let h = try await harness(mode, note: Self.looseNote)
+        _ = try await click(h, line: 21, at: \.textX, plus: 4)
+        _ = try await click(h, line: 4, at: \.column, plus: 12)
+        #expect(line(h, at: 21) == "up: \"[[Note]]\"\n", "\(h.view.string.debugDescription)")
+    }
+
+    private func rowCount(_ h: Harness) -> Int {
+        h.view.liveLayout.blocks.values.filter { if case .propertyRow = $0 { return true } else { return false } }.count
+    }
+
+    @Test("The arrow beside Properties shows on hover; a click folds the table to its heading and opens it again", arguments: Mode.allCases)
+    func fold(mode: Mode) async throws {
+        let h = try await harness(mode)
+        h.view.noteIdentity = "fold-\(mode).md"
+        HeftTextKit2View.foldedPropertyNotes.remove(h.view.noteIdentity)
+        let rects = try #require(h.view.propertiesHeadingRect())
+        h.view.updatePropertiesFoldButton(hovering: CGPoint(x: rects.heading.midX, y: rects.heading.midY))
+        #expect(!h.view.propertiesFoldButton.isHidden)
+        h.view.updatePropertiesFoldButton(hovering: CGPoint(x: rects.heading.midX, y: rects.heading.maxY + 120))
+        #expect(h.view.propertiesFoldButton.isHidden)
+
+        let open = rowCount(h)
+        #expect(open > 0)
+        _ = h.click(CGPoint(x: rects.arrow.midX, y: rects.arrow.midY))
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(h.view.propertiesFolded)
+        #expect(rowCount(h) == 0)
+        #expect(h.view.string == Self.note, "folding writes nothing")
+
+        // Up from the body into the folded table opens it.
+        h.view.moveUp(nil)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(!h.view.propertiesFolded)
+        #expect(rowCount(h) == open)
+    }
+
+    @Test("Pills wrapped in a narrow window stay under their key's line and above the next row")
+    func wrappedPills() async throws {
+        let note = "---\naliases:\n  - ama\n  - asf\n  - asfd asfd sdf sadf sdf asdf\n  - one more\nMamba: asf\n---\nBody text.\n"
+        let h = Harness(vim: false, note: note, width: 420)
+        try await Task.sleep(for: .milliseconds(30))
+        guard case .propertyRow(let row)? = h.view.liveLayout.blocks[4], let chips = row.chips else {
+            Issue.record("no aliases row")
+            return
+        }
+        #expect((chips.rows.max() ?? 0) >= 1, "the pills wrap at this width")
+        let aliases = try #require(h.row(4))
+        let next = try #require(h.row((note as NSString).range(of: "Mamba").location))
+        let manager = try #require(h.view.textLayoutManager)
+        let content = try #require(manager.textContentManager)
+        let start = try #require(content.location(content.documentRange.location, offsetBy: 4))
+        let fragment = try #require(manager.textLayoutFragment(for: start))
+        let line = try #require(fragment.textLineFragments.first)
+        // The key's line at the top of its row, not pushed to its bottom.
+        #expect(line.typographicBounds.minY < 12, "key line at \(line.typographicBounds.minY)")
+        // The last row of pills ends above the next property.
+        let baseline = aliases.frame.minY + line.typographicBounds.minY + line.glyphOrigin.y
+        let pillsBottom = baseline + CGFloat(chips.rows.max() ?? 0) * chips.rowPitch - chips.font.descender
+        #expect(pillsBottom <= next.frame.minY + 2, "pills end at \(pillsBottom), next row starts at \(next.frame.minY)")
+    }
+
+    @Test("Shown as YAML, the properties go back to the table once the caret leaves them")
+    func sourceReturns() async throws {
+        let h = try await harness(.plain)
+        h.view.noteIdentity = "source-return.md"
+        HeftTextKit2View.sourcePropertyNotes.remove(h.view.noteIdentity)
+        let source = try #require(h.view.propertyTargets().first { $0.target == .source })
+        _ = h.click(CGPoint(x: source.rect.midX, y: source.rect.midY))
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(h.view.propertiesShownAsText)
+        let body = (h.view.string as NSString).range(of: "Body").location
+        let place = try #require(h.view.rect(forSelection: NSRange(location: body + 2, length: 1)))
+        _ = h.click(CGPoint(x: place.midX, y: place.midY))
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(!h.view.propertiesShownAsText)
+    }
+
+    @Test("The source button shows this note's properties as YAML, and the table again", arguments: Mode.allCases)
+    func sourceToggle(mode: Mode) async throws {
+        let h = try await harness(mode)
+        h.view.noteIdentity = "source-\(mode).md"
+        HeftTextKit2View.sourcePropertyNotes.remove(h.view.noteIdentity)
+        let source = try #require(h.view.propertyTargets().first { $0.target == .source })
+        _ = h.click(CGPoint(x: source.rect.midX, y: source.rect.midY))
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(h.view.propertiesShownAsText)
+        #expect(rowCount(h) == 0)
+        #expect(h.view.string == Self.note, "showing the YAML writes nothing")
+        // Back from the YAML, by the same button on the fence's line.
+        let back = try #require(h.view.propertyTargets().first { $0.target == .source })
+        _ = h.click(CGPoint(x: back.rect.midX, y: back.rect.midY))
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(!h.view.propertiesShownAsText)
+        #expect(rowCount(h) > 0)
+    }
+
+    private static let brokenNote = "---\ntags:\n  - fine\n  - not fine\nN: 1\nN: 2\n---\nBody text.\n"
+
+    @Test("A broken tag is red on its own pill; a red row's icon tells why on hover")
+    func brokenAndTip() async throws {
+        let h = try await harness(.plain, note: Self.brokenNote)
+        guard case .propertyRow(let tags)? = h.view.liveLayout.blocks[4] else {
+            Issue.record("no tags row")
+            return
+        }
+        #expect(tags.chips?.invalid == [1])
+        #expect(!tags.warns)
+        let icon = try #require(h.view.propertyTargets().first { $0.target == .typeMenu(lineStart: 32) })
+        h.view.updatePropertyToolTip(at: CGPoint(x: icon.rect.midX, y: icon.rect.midY))
+        #expect(h.view.toolTip?.contains("twice") == true)
+        h.view.updatePropertyToolTip(at: CGPoint(x: icon.rect.midX + 300, y: icon.rect.midY))
+        #expect(h.view.toolTip == nil)
     }
 }
 
