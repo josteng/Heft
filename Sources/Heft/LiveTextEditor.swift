@@ -5409,12 +5409,19 @@ extension HeftTextKit2View {
         let lineStart = text.lineRange(for: NSRange(location: caret, length: 0)).location
         let keyTarget = normal ? max(gap.keyEnd - 1, lineStart) : gap.keyEnd
         let hasValue = gap.valueStart < lineEnd(of: caret)
+        // In Normal mode the last hidden character before an empty value or
+        // a list's input is that value's place, not a gap to leave.
+        if normal, !hasValue, caret == gap.valueStart - 1 { return false }
         // An empty value's place in Normal mode is the last hidden
         // character before it, drawn as a block at the value column.
         let valueTarget = hasValue || !normal ? gap.valueStart : gap.valueStart - 1
         let toValue: Bool
         if let clicked = clickedPropertyColumn, clicked.line == lineStart {
             toValue = clicked.inValue
+        } else if normal, previousVimMode == .insert || previousVimMode == .replace {
+            // Esc steps one character back, as Vim's does: from a value's
+            // start that is into the gap, and it is still the value's.
+            toValue = true
         } else {
             toValue = (lastCaretLocation ?? caret) < caret
         }

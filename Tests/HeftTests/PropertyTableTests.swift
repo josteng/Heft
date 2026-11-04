@@ -582,6 +582,17 @@ struct PropertyCaretTests {
         #expect(empty.selectedRange().location == 10)
     }
 
+    @Test("In Normal mode an empty value's place holds, whichever way the block came to it")
+    func normalValuePlaceHolds() {
+        let empty = view("---\nRating: \n---\n", caret: 12)
+        empty.vimEnabled = true
+        empty.resetVim()
+        empty.setSelectedRange(NSRange(location: 11, length: 0))
+        empty.lastCaretLocation = 20
+        #expect(!empty.keepCaretOutOfColonGap())
+        #expect(empty.selectedRange().location == 11)
+    }
+
     @Test("Typing in the gap goes into the value, with the space YAML needs")
     func typingInTheGap() {
         let bare = view("---\nRating:\n---\n", caret: 11)

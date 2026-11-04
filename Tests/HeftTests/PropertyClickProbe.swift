@@ -723,5 +723,42 @@ extension PropertyRealClickTests {
         try await Task.sleep(for: .milliseconds(60))
         #expect(h.view.completionWidthForTesting == WikiCompletionMetrics.width)
     }
+
+    private func escape(_ h: Harness) throws {
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: h.window.windowNumber, context: nil, characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53
+        ))
+        h.view.keyDown(with: event)
+    }
+
+    @Test("Esc in a value stays in the value: a list's place, an empty one, and a value's first letter")
+    func escapeStaysInValue() async throws {
+        // A list's input, then Esc.
+        let list = try await harness(.insert)
+        _ = try await click(list, line: 28, at: \.column, plus: 200)
+        try escape(list)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(list.view.vimMode == .normal)
+        #expect(list.view.listInputCaretRect() != nil, "block at the list's input, caret \(list.view.selectedRange().location)")
+
+        // An empty value.
+        let empty = try await harness(.insert)
+        _ = try await click(empty, line: 21, at: \.column, plus: 40)
+        try escape(empty)
+        try await Task.sleep(for: .milliseconds(60))
+        let row = try #require(empty.row(21))
+        let block = try #require(empty.drawnCaretX())
+        #expect(abs(block - row.column) < 8, "block at the value column: \(block), column \(row.column)")
+
+        // A value's first letter, Esc from in front of it.
+        let value = try await harness(.insert)
+        value.view.setSelectedRange(NSRange(location: 12, length: 0))
+        try await Task.sleep(for: .milliseconds(40))
+        try escape(value)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(value.view.selectedRange().location == 12, "on the J of Jane, not the key: \(value.view.selectedRange().location)")
+    }
 }
 
