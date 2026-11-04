@@ -1666,8 +1666,8 @@ final class HeftTextKit2View: NSTextView {
     /// against the table it landed on, and the caret inside a cell has to be
     /// placed from the same measurement the grid was drawn with.
     var liveLayout = LiveLayout()
-    /// Where the key line of the list being edited as pills starts.
-    var listKeyLineBeingEdited: Int?
+    /// Which property rows the caret was last on, so leaving one tidies it.
+    var propertyLeaving = PropertyLeaving()
     /// Where Cut, Copy and Paste of a property go: the general pasteboard,
     /// or a test's own, which must never be the reader's.
     var propertyPasteboard: NSPasteboard = .general
@@ -1721,7 +1721,10 @@ final class HeftTextKit2View: NSTextView {
         return arrow
     }()
     /// Where the blank property row the caret is on starts.
-    var blankRowBeingEdited: Int?
+    var blankRowBeingEdited: Int? {
+        get { propertyLeaving.blankRow }
+        set { propertyLeaving.blankRow = newValue }
+    }
     /// Where the caret was before this selection change, for which way it
     /// was going when it reaches the hidden gap between key and value.
     var lastCaretLocation: Int?
@@ -1732,9 +1735,15 @@ final class HeftTextKit2View: NSTextView {
     var lastFenceCaret: Int?
     /// The key line given a space after its colon while its empty value is
     /// edited, to take back if it is left empty.
-    var spacedValueLine: Int?
+    var spacedValueLine: Int? {
+        get { propertyLeaving.spacedValueLine }
+        set { propertyLeaving.spacedValueLine = newValue }
+    }
     /// A key line holding only its key, to be given its colon when left.
-    var bareKeyLine: Int?
+    var bareKeyLine: Int? {
+        get { propertyLeaving.bareKeyLine }
+        set { propertyLeaving.bareKeyLine = newValue }
+    }
     /// Which of a property row's two columns a click is landing in, while
     /// it does.
     var clickedPropertyColumn: (line: Int, inValue: Bool)?
@@ -2244,7 +2253,7 @@ final class HeftTextKit2View: NSTextView {
         // An empty property value's place: the hidden space after the colon,
         // drawn as an ordinary block at the value column, where `a` types.
         if let gap = PropertyEditing.colonGap(in: source as String, at: location),
-           location == gap.valueStart - 1, gap.valueStart == lineEnd(of: location),
+           location == gap.valueStart - 1, gap.valueStart == PropertySurface.lineEnd(of: location, in: string),
            let caret = caretRect(at: gap.valueStart) {
             // Where the insertion point at the value's place is drawn, which
             // on a list is after its pills: from the line fragment, as
@@ -3644,10 +3653,8 @@ final class HeftTextKit2View: NSTextView {
         // A space typed after a tag ends it, as in Obsidian's tag field: a
         // tag cannot hold one.
         if inserted == " ", !hasMarkedText(),
-           let list = PropertyListContext.detect(in: string, selection: selectedRange()),
-           ["tags", "tag"].contains(list.key.lowercased()),
-           !(string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces).isEmpty {
-            apply(list.adding((string as NSString).substring(with: list.pending), in: string), named: "Add Tag")
+           let edit = PropertySurface.tagEndedBySpace(selection: selectedRange(), in: string) {
+            apply(edit, named: "Add Tag")
             return
         }
         // Typed into the hidden `: ` between a key and its value, it is the
@@ -3804,35 +3811,15 @@ final class HeftTextKit2View: NSTextView {
     /// property's hidden gap: the value's start, with a space after a bare
     /// colon. Nil anywhere else.
     func propertyValueInsertion(for text: String) -> MarkdownEditing.Edit? {
-        let selection = selectedRange()
-        guard selection.length == 0, !text.contains("\n"), !propertiesShownAsText,
-              let gap = PropertyEditing.colonGap(in: string, at: selection.location),
-              selection.location > gap.keyEnd, selection.location <= gap.valueStart
-        else { return nil }
-        let source = string as NSString
-        let spaced = gap.valueStart > gap.keyEnd + 1
-        // At the value's start with its space in place there is nothing to
-        // correct: the ordinary path types it.
-        guard selection.location < gap.valueStart || !spaced else { return nil }
-        let replacement = (spaced ? "" : " ") + text
-        _ = source
-        return MarkdownEditing.Edit(
-            range: NSRange(location: gap.valueStart, length: 0), replacement: replacement,
-            selection: NSRange(location: gap.valueStart + (replacement as NSString).length, length: 0)
-        )
+        guard !propertiesShownAsText else { return nil }
+        return PropertySurface.valueInsertion(of: text, selection: selectedRange(), in: string)
     }
 
     /// Whether deleting from the caret would eat into a property's hidden
     /// `: `, which would run the value into the key. Obsidian's two fields
     /// cannot be merged by a key either.
     func deletionCrossesColonGap(forward: Bool) -> Bool {
-        let selection = selectedRange()
-        guard selection.length == 0, !propertiesShownAsText,
-              let gap = PropertyEditing.colonGap(in: string, at: selection.location)
-        else { return false }
-        return forward
-            ? selection.location >= gap.keyEnd && selection.location < gap.valueStart
-            : selection.location > gap.keyEnd && selection.location <= gap.valueStart
+        !propertiesShownAsText && PropertySurface.deletionCrossesColonGap(selection: selectedRange(), forward: forward, in: string)
     }
 
     override func deleteForward(_ sender: Any?) {
@@ -3845,9 +3832,7 @@ final class HeftTextKit2View: NSTextView {
             return
         }
         // Backspace with nothing typed after a list's pills takes the last.
-        if let list = PropertyListContext.detect(in: string, selection: selectedRange()),
-           list.pending.length == 0, !list.items.isEmpty,
-           let edit = list.removing(at: list.items.count - 1, in: string) {
+        if let edit = PropertySurface.backspaceRemovingItem(selection: selectedRange(), in: string) {
             apply(edit, named: "Remove Item")
             return
         }
@@ -4196,9 +4181,8 @@ final class HeftTextKit2View: NSTextView {
         // Indenting changes a bullet's shape, which is drawn, not styled.
         defer { restyleNow() }
         if acceptLinkCompletion() { return }
-        if let list = PropertyListContext.detect(in: string, selection: selectedRange()),
-           !(string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces).isEmpty {
-            apply(list.adding((string as NSString).substring(with: list.pending), in: string), named: "Add Item")
+        if let edit = PropertySurface.itemAddedByTab(selection: selectedRange(), in: string) {
+            apply(edit, named: "Add Item")
             return
         }
         if moveToPropertyValue() { return }
@@ -4841,71 +4825,19 @@ extension HeftTextKit2View {
     /// Where the caret of a list being edited stands: after the typed item
     /// drawn after the last pill. Nil unless the caret is at a list's input.
     func listInputCaretRect() -> CGRect? {
-        let selection = selectedRange()
-        guard selection.length == 0, !propertiesShownAsText,
-              let row = PropertyEditing.rows(in: string).first(where: {
-                  selection.location >= $0.range.location && selection.location <= $0.valueEnd
-              }),
-              selection.location >= row.valueEnd - 1,
-              case .propertyRow(let drawn)? = liveLayout.blocks[row.range.location],
-              let chips = drawn.chips, let input = chips.input,
-              let manager = textLayoutManager, let content = manager.textContentManager,
-              let location = content.location(content.documentRange.location, offsetBy: row.range.location),
-              let fragment = manager.textLayoutFragment(for: location),
-              let line = fragment.textLineFragments.first
-        else { return nil }
+        guard !propertiesShownAsText else { return nil }
         let normal = vimEnabled && (vimEngine.mode == .normal || vimEngine.mode == .operatorPending)
-        // Normal mode stands on the typed item's last letter, or the empty
-        // input's place; Insert after it.
-        guard selection.location == row.valueEnd || (normal && selection.location == row.valueEnd - 1) else { return nil }
-        let frame = fragment.layoutFragmentFrame
-        let origin = CGPoint(x: frame.minX + textContainerInset.width, y: frame.minY + textContainerInset.height)
-        let baseline = origin.y + line.typographicBounds.minY + line.glyphOrigin.y + CGFloat(input.row) * chips.rowPitch
-        var typedWidth = ceil(input.label.size().width)
-        if normal, input.label.length > 0 {
-            let last = input.label.attributedSubstring(from: NSRange(location: input.label.length - 1, length: 1))
-            typedWidth -= ceil(last.size().width)
-        }
-        let x = origin.x - drawn.indent + chips.column + input.x + typedWidth
-        return CGRect(x: x, y: baseline - chips.font.ascender, width: 2, height: chips.font.ascender - chips.font.descender)
+        return PropertyGeometry.listCaret(
+            in: string, selection: selectedRange(), layout: liveLayout, manager: textLayoutManager,
+            origin: CGPoint(x: textContainerInset.width, y: textContainerInset.height), normal: normal
+        )
     }
 
     /// Where the "Properties" heading is drawn, and the arrow beside it.
     func propertiesHeadingRect() -> (heading: CGRect, arrow: CGRect, source: CGRect)? {
-        // The heading, or shown as YAML, the opening fence's line.
-        guard PropertyEditing.blockRange(in: string) != nil,
-              propertiesShownAsText || { if case .propertyHeading? = liveLayout.blocks[0] { true } else { false } }(),
-              let manager = textLayoutManager, let content = manager.textContentManager,
-              let fragment = manager.textLayoutFragment(for: content.documentRange.location),
-              let line = fragment.textLineFragments.first
-        else { return nil }
-        let frame = fragment.layoutFragmentFrame
-        let x = frame.minX + textContainerInset.width
-        let y = frame.minY + textContainerInset.height
-        let height = propertiesShownAsText ? line.typographicBounds.height : frame.height
-        let heading = CGRect(x: x, y: y, width: 90, height: height)
-        // Centred on the word's capitals, where the eye centres a word, not
-        // on its line box, whose middle sits above them. The heading is
-        // drawn with its glyph box centred in the line.
-        let word = propertiesShownAsText ? "---" : "Properties"
-        let font = propertiesShownAsText
-            ? NSFont.monospacedSystemFont(ofSize: Theme.bodySize - 2, weight: .regular)
-            : NSFont.systemFont(ofSize: Theme.bodySize - 1, weight: .semibold)
-        let glyphTop: CGFloat
-        if propertiesShownAsText {
-            glyphTop = y + line.typographicBounds.minY + line.glyphOrigin.y - font.ascender
-        } else {
-            glyphTop = y + (height - (font.ascender - font.descender)) / 2
-        }
-        let middle = glyphTop + font.ascender - font.capHeight / 2
-        let arrow = CGRect(x: x - 20, y: middle - 7, width: 14, height: 14)
-        // Just after the heading's word, or the fence's, at the same middle.
-        let width = ceil(NSAttributedString(string: word, attributes: [.font: font]).size().width)
-        // A point lower than the capitals' middle: the braces reach above
-        // the capitals and below the baseline, and centred exactly they
-        // read as sitting high.
-        let source = CGRect(x: x + width + 8, y: middle - 6, width: 16, height: 14)
-        return (heading, arrow, source)
+        PropertyGeometry.heading(
+            in: string, layout: liveLayout, manager: textLayoutManager, origin: CGPoint(x: textContainerInset.width, y: textContainerInset.height), asText: propertiesShownAsText
+        ).map { ($0.heading, $0.arrow, $0.source) }
     }
 
     /// The arrow shows while the pointer is on the heading or the arrow,
@@ -4937,34 +4869,13 @@ extension HeftTextKit2View {
     func keepCaretOffFences() -> Bool {
         let selection = selectedRange()
         defer { lastFenceCaret = selectedRange().location }
-        guard selection.length == 0, !propertiesShownAsText,
-              let block = PropertyEditing.blockRange(in: string)
-        else { return false }
-        let text = string as NSString
-        let opening = text.lineRange(for: NSRange(location: 0, length: 0))
-        let closing = text.lineRange(for: NSRange(location: NSMaxRange(block) - 1, length: 0))
-        let rows = PropertyEditing.rows(in: string)
+        guard selection.length == 0, !propertiesShownAsText else { return false }
         let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
-        let target: Int
-        if NSLocationInRange(selection.location, opening) || (selection.location == 0 && opening.length == 0) {
-            guard let first = rows.first else { target = NSMaxRange(block); return move(to: target) }
-            target = first.range.location
-        } else if NSLocationInRange(selection.location, closing) {
-            if let last = rows.last, (lastFenceCaret ?? 0) > selection.location {
-                target = normal ? max(last.valueEnd - 1, last.range.location) : last.valueEnd
-            } else {
-                target = min(NSMaxRange(block), text.length)
-            }
-        } else {
-            return false
-        }
-        return move(to: target)
-
-        func move(to target: Int) -> Bool {
-            guard target != selection.location else { return false }
-            setSelectedRange(NSRange(location: target, length: 0))
-            return true
-        }
+        guard let target = PropertySurface.caretOffFences(
+            in: string, caret: selection.location, previous: lastFenceCaret, normal: normal
+        ) else { return false }
+        setSelectedRange(NSRange(location: target, length: 0))
+        return true
     }
 
     /// A caret arriving in folded properties, by key, opens them: on a
@@ -4998,13 +4909,7 @@ extension HeftTextKit2View {
 
     /// Why a row is red, in words.
     func propertyWarning(forLineAt start: Int) -> String? {
-        let text = string as NSString
-        let keyLine = text.substring(with: text.lineRange(for: NSRange(location: start, length: 0)))
-        guard let colon = keyLine.firstIndex(of: ":") else { return nil }
-        let key = String(keyLine[..<colon]).trimmingCharacters(in: .whitespaces)
-        return PropertyEditing.keys(in: string).filter({ $0 == key }).count > 1
-            ? "\u{201C}\(key)\u{201D} is there twice, so Obsidian can\u{2019}t read these properties"
-            : propertyIssue(forLineAt: start)
+        PropertySurface.warning(forLineAt: start, in: string, types: PropertyTypes.types(in: vaultRoot))
     }
 
     /// This note's properties as YAML, or the table again.
@@ -5041,65 +4946,14 @@ extension HeftTextKit2View {
     /// row's type icon, each pill's ×, and "Add property" under the last
     /// row. One list for both the click and the pointing hand, so the hand
     /// shows exactly where a click does something.
-    enum PropertyTarget: Equatable {
-        case fold
-        case source
-        case typeMenu(lineStart: Int)
-        case removeItem(lineStart: Int, index: Int)
-        case addProperty
-    }
+    typealias PropertyTarget = PropertyGeometry.Target
 
     func propertyTargets() -> [(rect: CGRect, target: PropertyTarget)] {
-        var targets: [(CGRect, PropertyTarget)] = []
-        if let rects = propertiesHeadingRect(), !AppearanceSettings.shared.showsPropertiesAsText {
-            targets.append((rects.source.insetBy(dx: -3, dy: -3), .source))
-        }
-        guard !propertiesShownAsText,
-              let manager = textLayoutManager, let content = manager.textContentManager
-        else { return targets }
-        // The arrow and the heading both fold, as Obsidian's heading does.
-        if let rects = propertiesHeadingRect() {
-            targets.append((rects.arrow.insetBy(dx: -3, dy: -3).union(rects.heading), .fold))
-        }
-        if propertiesFolded { return targets }
-        for (start, widget) in liveLayout.blocks {
-            guard case .propertyRow(let row) = widget,
-                  let location = content.location(content.documentRange.location, offsetBy: start),
-                  let fragment = manager.textLayoutFragment(for: location),
-                  let line = fragment.textLineFragments.first
-            else { continue }
-            let frame = fragment.layoutFragmentFrame
-            let origin = CGPoint(x: frame.minX + textContainerInset.width, y: frame.minY + textContainerInset.height)
-            let left = origin.x - row.indent
-            let mid = origin.y + line.typographicBounds.midY
-            if row.symbol != nil {
-                targets.append((CGRect(x: left - 3, y: mid - 11, width: PropertyChips.symbolSide + 8, height: 22), .typeMenu(lineStart: start)))
-            }
-            if let chips = row.chips, chips.removable {
-                let baseline = origin.y + line.typographicBounds.minY + line.glyphOrigin.y
-                for index in chips.labels.indices {
-                    let rowBaseline = baseline + CGFloat(chips.rows[index]) * chips.rowPitch
-                    let right = left + chips.column + chips.x[index] + chips.widths[index]
-                    targets.append((CGRect(
-                        x: right - PropertyChips.removeWidth - PropertyChips.padding + 2,
-                        y: rowBaseline - chips.font.ascender - 2,
-                        width: PropertyChips.removeWidth + PropertyChips.padding - 2,
-                        height: chips.font.ascender - chips.font.descender + 4
-                    ), .removeItem(lineStart: start, index: index)))
-                }
-            }
-            if row.edge == .last || row.edge == .only {
-                let label = NSAttributedString(string: PropertyChips.addLabel, attributes: [
-                    .font: NSFont.systemFont(ofSize: Theme.bodySize - 1),
-                ]).size()
-                targets.append((CGRect(
-                    x: left - 3,
-                    y: frame.maxY + textContainerInset.height - PropertyChips.bottomMargin - PropertyChips.addRowHeight,
-                    width: LiveStyler.propertyPadding + label.width + 8, height: PropertyChips.addRowHeight
-                ), .addProperty))
-            }
-        }
-        return targets
+        PropertyGeometry.targets(
+            in: string, layout: liveLayout, manager: textLayoutManager, origin: CGPoint(x: textContainerInset.width, y: textContainerInset.height),
+            asText: propertiesShownAsText, folded: propertiesFolded,
+            offersSource: !AppearanceSettings.shared.showsPropertiesAsText
+        )
     }
 
     /// What a click on a property target does.
@@ -5121,38 +4975,19 @@ extension HeftTextKit2View {
     /// The item at `index` of the list on the key line at `start` removed,
     /// an inline `[a, b]` list made a block list first, as it is when edited.
     func removeItem(at index: Int, fromListAt start: Int) {
-        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }) else { return }
-        let text = string as NSString
-        let line = text.substring(with: NSRange(location: start, length: row.valueEnd - start))
-        // Both edits leave the caret where it was, moved along by them: the
-        // × is a button, not a place to type.
-        if line.contains("["), let colon = line.firstIndex(of: ":"),
-           let edit = PropertyEditing.converting(
-               key: String(line[..<colon]).trimmingCharacters(in: .whitespaces), toList: true, in: string
-           ) {
-            applyKeepingCaret(edit, named: "Edit List")
+        for step in PropertySurface.removingItem(at: index, fromListAt: start, in: string) {
+            applyKeepingCaret(step.edit, named: step.name)
         }
-        guard let listRow = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
-              let list = PropertyListContext.detect(in: string, selection: NSRange(location: listRow.valueEnd, length: 0)),
-              let edit = list.removing(at: index, in: string)
-        else { return }
-        applyKeepingCaret(edit, named: "Remove Item")
     }
 
     /// An edit that leaves the caret where it was, moved along by it.
     func applyKeepingCaret(_ edit: MarkdownEditing.Edit, named name: String) {
-        var selection = selectedRange()
+        let caret = selectedRange().location
         guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
         undoManager?.setActionName(name)
-        let delta = (edit.replacement as NSString).length - edit.range.length
-        if selection.location >= NSMaxRange(edit.range) {
-            selection.location += delta
-        } else if selection.location > edit.range.location {
-            selection.location = edit.range.location
-        }
-        setSelectedRange(NSRange(location: max(0, selection.location), length: 0))
+        setSelectedRange(NSRange(location: PropertySurface.caret(caret, keptThrough: edit), length: 0))
     }
 
 
@@ -5161,26 +4996,9 @@ extension HeftTextKit2View {
     /// out of the table at its foot, and into it from the line under it.
     func movePropertyRow(down: Bool) -> Bool {
         let selection = selectedRange()
-        guard selection.length == 0, let block = PropertyEditing.blockRange(in: string) else { return false }
-        let rows = PropertyEditing.rows(in: string)
-        guard !rows.isEmpty else { return false }
-        let caret = selection.location
-        let target: Int
-        if let index = rows.firstIndex(where: { NSLocationInRange(caret, $0.range) }) {
-            if down {
-                target = index + 1 < rows.count ? rows[index + 1].valueEnd : NSMaxRange(block)
-            } else {
-                guard index > 0 else { return true }
-                target = rows[index - 1].valueEnd
-            }
-        } else if !down, (string as NSString).lineRange(for: NSRange(location: caret, length: 0)).location == NSMaxRange(block),
-                  let last = rows.last {
-            // Up from the line under the table goes to its last property,
-            // not onto the hidden closing fence.
-            target = last.valueEnd
-        } else {
-            return false
-        }
+        guard selection.length == 0,
+              let target = PropertySurface.rowMove(in: string, caret: selection.location, down: down)
+        else { return false }
         setSelectedRange(NSRange(location: target, length: 0))
         scrollRangeToVisible(selectedRange())
         return true
@@ -5190,22 +5008,13 @@ extension HeftTextKit2View {
     /// one gone takes the fences with it.
     override func deleteToBeginningOfLine(_ sender: Any?) {
         let selection = selectedRange()
-        let rows = PropertyEditing.rows(in: string)
         guard selection.length == 0,
-              let row = rows.first(where: { NSLocationInRange(selection.location, $0.range) }),
-              let block = PropertyEditing.blockRange(in: string)
+              let edit = PropertySurface.deletingProperty(at: selection.location, in: string)
         else {
             super.deleteToBeginningOfLine(sender)
             return
         }
-        let range = rows.count == 1 ? block : row.range
-        guard shouldChangeText(in: range, replacementString: "") else { return }
-        textStorage?.replaceCharacters(in: range, with: "")
-        didChangeText()
-        undoManager?.setActionName("Delete Property")
-        let remaining = PropertyEditing.rows(in: string)
-        let next = remaining.first(where: { $0.range.location >= range.location }) ?? remaining.last
-        setSelectedRange(NSRange(location: next?.valueEnd ?? min(range.location, (string as NSString).length), length: 0))
+        apply(edit, named: "Delete Property")
     }
 
     /// Moves a caret standing on a folded list item's line to the end of
@@ -5214,195 +5023,67 @@ extension HeftTextKit2View {
     func liftCaretOffFoldedItem() -> Bool {
         let selection = selectedRange()
         guard selection.length == 0, !propertiesShownAsText,
-              let row = PropertyEditing.rows(in: string).first(where: {
-                  NSLocationInRange(selection.location, $0.range) && selection.location > $0.valueEnd
-              }),
-              PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0)) != nil
+              let target = PropertySurface.caretOffFoldedItem(in: string, caret: selection.location)
         else { return false }
-        setSelectedRange(NSRange(location: row.valueEnd, length: 0))
+        setSelectedRange(NSRange(location: target, length: 0))
         return true
     }
 
-    /// Leaving a list's key line with something typed there makes it the
-    /// list's last item, as Obsidian turns typed text into a pill when focus
-    /// leaves; left on the key line, it would be a value and a list at once.
+    /// What leaving a property row does, as Obsidian does when focus
+    /// leaves a field: a blank row goes, an empty value loses the space it
+    /// was given (and one arrived in gets it), a key gets its colon, and an
+    /// item typed after a list's pills becomes one (`PropertyLeaving`).
     /// Done after the selection change that left, and never mid-drag.
     func noteListEditing() {
-        noteBlankRow()
-        noteEmptyValue()
-        noteKeyWithoutColon()
-        let caret = selectedRange()
-        let editing = PropertyListContext.detect(in: string, selection: caret)?.keyLine.location
-        if let start = listKeyLineBeingEdited, start != editing {
-            listKeyLineBeingEdited = editing
-            DispatchQueue.main.async { [weak self] in self?.commitTypedItem(onKeyLineAt: start) }
-            return
-        }
-        listKeyLineBeingEdited = editing
-    }
-
-    /// A key the caret leaves without its colon gets one: a line holding a
-    /// bare word is not YAML, and Obsidian then reads none of the note's
-    /// properties at all.
-    private func noteKeyWithoutColon() {
-        let caret = selectedRange()
-        let rows = PropertyEditing.rows(in: string)
-        let here = rows.first { caret.location >= $0.range.location && caret.location <= $0.valueEnd }
-        if let start = bareKeyLine, start != here?.range.location {
-            DispatchQueue.main.async { [weak self] in self?.tidyRow(at: start) }
-        }
-        bareKeyLine = here?.range.location
-    }
-
-    /// The row at `start` made YAML once the caret has left it: a key's
-    /// colon, a colon's space, a link's quotes (`PropertyRules`).
-    private func tidyRow(at start: Int) {
-        if isTrackingMouse {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.tidyRow(at: start) }
-            return
-        }
-        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
-              !(selectedRange().location >= row.range.location && selectedRange().location <= row.valueEnd),
-              let edit = PropertyRules.tidying(row, in: string)
-        else { return }
-        applyKeepingCaret(edit, named: "Tidy Property")
-    }
-
-    /// An empty value, or a list's place for the next item, the caret is
-    /// in gets a space after its colon while it is there, and loses it when
-    /// left still empty. The column's gap is a kern on the colon, and a kern
-    /// on a line's last character takes no effect: with nothing after the
-    /// colon the caret was drawn back against the key.
-    private func noteEmptyValue() {
-        let caret = selectedRange()
-        guard caret.length == 0, !propertiesShownAsText else { return }
-        let here = emptyValueLine(at: caret.location)
-        if let start = spacedValueLine, start != here?.lineStart {
-            spacedValueLine = nil
-            DispatchQueue.main.async { [weak self] in self?.unspaceValue(onLineAt: start) }
-        }
-        guard let here, !here.spaced, !isTrackingMouse else { return }
-        DispatchQueue.main.async { [weak self] in self?.spaceValue(onLineAt: here.lineStart) }
-    }
-
-    /// The key line at `location` whose value is empty, or holds only what
-    /// a list is being given, with the caret at its end.
-    private func emptyValueLine(at location: Int) -> (lineStart: Int, spaced: Bool)? {
-        // At the value's place only: the line's end, or in Normal mode the
-        // last character before it. Not at the key's end, which is the key's.
         let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
-        guard let row = PropertyEditing.rows(in: string).first(where: {
-            location <= $0.valueEnd && location >= $0.range.location
-        }),
-              let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd),
-              gap.valueStart == row.valueEnd,
-              location == row.valueEnd || (normal && location == row.valueEnd - 1 && location >= gap.keyEnd)
-        else { return nil }
-        return (row.range.location, gap.valueStart > gap.keyEnd + 1)
+        let actions = propertyLeaving.caretMoved(
+            to: selectedRange(), in: string, normal: normal, canSpace: !isTrackingMouse, asText: propertiesShownAsText
+        )
+        for action in actions {
+            if case .removeBlankRow = action { keyMenuRow = nil }
+            DispatchQueue.main.async { [weak self] in self?.carryOut(action) }
+        }
     }
 
-    private func spaceValue(onLineAt start: Int) {
-        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
-              let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd),
-              gap.valueStart == gap.keyEnd + 1, gap.valueStart == row.valueEnd,
-              selectedRange().location == row.valueEnd || selectedRange().location == gap.keyEnd
-        else { return }
-        let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
-        let at = gap.valueStart
-        guard shouldChangeText(in: NSRange(location: at, length: 0), replacementString: " ") else { return }
-        textStorage?.replaceCharacters(in: NSRange(location: at, length: 0), with: " ")
-        didChangeText()
-        spacedValueLine = start
-        // Insert: after the space, where typing goes. Normal: on it, the
-        // empty value's place.
-        setSelectedRange(NSRange(location: normal ? at : at + 1, length: 0))
-    }
-
-    private func unspaceValue(onLineAt start: Int) {
-        if isTrackingMouse {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.unspaceValue(onLineAt: start) }
+    /// One of the things leaving a row asks for, against the text as it is
+    /// now; held back while a click is tracked, when an edit would turn the
+    /// rest of the click into a drag.
+    private func carryOut(_ action: PropertyLeaving.Action) {
+        // A space is only asked for once no click is tracked.
+        if isTrackingMouse, !{ if case .spaceValue = action { true } else { false } }() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.carryOut(action) }
             return
         }
-        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
-              let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd),
-              gap.valueStart == row.valueEnd, gap.valueStart > gap.keyEnd + 1
-        else { return }
-        let range = NSRange(location: gap.keyEnd + 1, length: gap.valueStart - gap.keyEnd - 1)
-        var selection = selectedRange()
-        guard shouldChangeText(in: range, replacementString: "") else { return }
-        textStorage?.replaceCharacters(in: range, with: "")
-        didChangeText()
-        if selection.location >= NSMaxRange(range) { selection.location -= range.length }
-        setSelectedRange(selection)
-    }
-
-    /// A blank property row the caret leaves is removed, as Obsidian drops
-    /// a new property left without a name; the last row gone takes the
-    /// fences with it, as ⌘⌫ does.
-    private func noteBlankRow() {
         let caret = selectedRange()
-        let rows = PropertyEditing.rows(in: string)
-        let text = string as NSString
-        let onBlank = rows.first {
-            NSLocationInRange(caret.location, $0.range) || caret.location == $0.valueEnd
-        }.flatMap { row in
-            text.substring(with: row.range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? row.range.location : nil
+        switch action {
+        case .removeBlankRow(let start):
+            guard let range = PropertySurface.removingBlankRow(at: start, caret: caret.location, in: string) else { return }
+            applyKeepingCaret(MarkdownEditing.Edit(range: range, replacement: "", selection: caret), named: "Remove Empty Property")
+        case .unspaceValue(let start):
+            guard let range = PropertySurface.unspacingValue(onLineAt: start, in: string),
+                  shouldChangeText(in: range, replacementString: "")
+            else { return }
+            textStorage?.replaceCharacters(in: range, with: "")
+            didChangeText()
+            var selection = caret
+            if selection.location >= NSMaxRange(range) { selection.location -= range.length }
+            setSelectedRange(selection)
+        case .spaceValue(let start):
+            let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
+            guard let edit = PropertySurface.spacingValue(onLineAt: start, caret: caret.location, normal: normal, in: string),
+                  shouldChangeText(in: edit.range, replacementString: edit.replacement)
+            else { return }
+            textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+            didChangeText()
+            spacedValueLine = start
+            setSelectedRange(edit.selection)
+        case .tidyRow(let start):
+            guard let edit = PropertySurface.tidyingRow(at: start, caret: caret.location, in: string) else { return }
+            applyKeepingCaret(edit, named: "Tidy Property")
+        case .commitItem(let start):
+            guard let edit = PropertySurface.committingTypedItem(onKeyLineAt: start, in: string) else { return }
+            applyKeepingCaret(edit, named: "Add Item")
         }
-        if let start = blankRowBeingEdited, start != onBlank, caret.length == 0 {
-            keyMenuRow = nil
-            DispatchQueue.main.async { [weak self] in self?.removeBlankRow(at: start) }
-        }
-        blankRowBeingEdited = onBlank
-    }
-
-    private func removeBlankRow(at start: Int) {
-        if isTrackingMouse {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.removeBlankRow(at: start) }
-            return
-        }
-        let rows = PropertyEditing.rows(in: string)
-        let text = string as NSString
-        guard let row = rows.first(where: { $0.range.location == start }),
-              text.substring(with: row.range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !NSLocationInRange(selectedRange().location, row.range),
-              let block = PropertyEditing.blockRange(in: string)
-        else { return }
-        let range = rows.count == 1 ? block : row.range
-        var selection = selectedRange()
-        guard shouldChangeText(in: range, replacementString: "") else { return }
-        textStorage?.replaceCharacters(in: range, with: "")
-        didChangeText()
-        undoManager?.setActionName("Remove Empty Property")
-        if selection.location >= NSMaxRange(range) { selection.location -= range.length }
-        else if selection.location > range.location { selection.location = range.location }
-        setSelectedRange(selection)
-    }
-
-    private func commitTypedItem(onKeyLineAt start: Int) {
-        if isTrackingMouse {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.commitTypedItem(onKeyLineAt: start)
-            }
-            return
-        }
-        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
-              let list = PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0))
-        else { return }
-        let typed = (string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces)
-        guard !typed.isEmpty else { return }
-        let edit = list.adding(typed, in: string)
-        var selection = selectedRange()
-        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
-        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
-        didChangeText()
-        undoManager?.setActionName("Add Item")
-        // The caret stays where it went, moved along by the edit above it.
-        if selection.location >= NSMaxRange(edit.range) {
-            selection.location += (edit.replacement as NSString).length - edit.range.length
-        } else if selection.location > edit.range.location {
-            selection.location = edit.range.location
-        }
-        setSelectedRange(selection)
     }
 
     /// The types a key can be given, offered at its icon, as Obsidian's
@@ -5415,10 +5096,7 @@ extension HeftTextKit2View {
     /// A property's menu at its icon, as Obsidian's: why it is red if it
     /// is, its type, Cut, Copy and Paste for the property whole, and Remove.
     func propertyMenu(forLineAt start: Int) -> NSMenu? {
-        let text = string as NSString
-        let keyLine = text.substring(with: text.lineRange(for: NSRange(location: start, length: 0)))
-        guard let colon = keyLine.firstIndex(of: ":") else { return nil }
-        let key = String(keyLine[..<colon]).trimmingCharacters(in: .whitespaces)
+        guard let key = PropertySurface.key(onLineAt: start, in: string) else { return nil }
         let current = PropertyTypes.type(of: key, in: PropertyTypes.types(in: vaultRoot))
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -5470,24 +5148,13 @@ extension HeftTextKit2View {
 
     /// The property at `start`, key line and items, as its lines.
     func propertyText(atLineAt start: Int) -> (range: NSRange, text: String)? {
-        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }) else { return nil }
-        return (row.range, (string as NSString).substring(with: row.range))
+        PropertySurface.propertyText(atLineAt: start, in: string)
     }
 
     /// Lines from the pasteboard that are properties: each a key line or a
     /// list item under one, so pasting them keeps the block YAML.
     func propertiesOnPasteboard() -> String? {
-        guard var text = propertyPasteboard.string(forType: .string), !text.isEmpty else { return nil }
-        if !text.hasSuffix("\n") { text += "\n" }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        guard let first = lines.first, first.first != " ", first.first != "-",
-              lines.allSatisfy({ line in
-                  let trimmed = line.trimmingCharacters(in: .whitespaces)
-                  return trimmed.hasPrefix("- ") || trimmed == "-"
-                      || (line.first != " " && line.first != "\t" && line.contains(":") && !trimmed.hasPrefix("#"))
-              })
-        else { return nil }
-        return text
+        propertyPasteboard.string(forType: .string).flatMap(PropertySurface.pastableProperties)
     }
 
     @objc func copyProperty(_ item: NSMenuItem) {
@@ -5503,13 +5170,10 @@ extension HeftTextKit2View {
     }
 
     @objc func pasteProperties(_ item: NSMenuItem) {
-        guard let start = item.representedObject as? Int, let property = propertyText(atLineAt: start),
-              let pasted = propertiesOnPasteboard()
+        guard let start = item.representedObject as? Int, let text = propertyPasteboard.string(forType: .string),
+              let edit = PropertySurface.pasting(text, afterLineAt: start, in: string)
         else { return }
-        let at = NSMaxRange(property.range)
-        applyKeepingCaret(MarkdownEditing.Edit(
-            range: NSRange(location: at, length: 0), replacement: pasted, selection: NSRange(location: at, length: 0)
-        ), named: "Paste Properties")
+        applyKeepingCaret(edit, named: "Paste Properties")
     }
 
     /// The property at the item's row removed, list and all, as ⌘⌫ does on
@@ -5520,25 +5184,13 @@ extension HeftTextKit2View {
     }
 
     func removeProperty(atLineAt start: Int) {
-        let rows = PropertyEditing.rows(in: string)
-        guard let row = rows.first(where: { $0.range.location == start }),
-              let block = PropertyEditing.blockRange(in: string)
-        else { return }
-        applyKeepingCaret(MarkdownEditing.Edit(
-            range: rows.count == 1 ? block : row.range, replacement: "", selection: NSRange(location: start, length: 0)
-        ), named: "Remove Property")
+        guard let edit = PropertySurface.removingProperty(atLineAt: start, in: string) else { return }
+        applyKeepingCaret(edit, named: "Remove Property")
     }
 
     /// What Obsidian would warn of on the row at `start`.
     func propertyIssue(forLineAt start: Int) -> String? {
-        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }),
-              let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd)
-        else { return nil }
-        let text = string as NSString
-        let key = text.substring(with: NSRange(location: start, length: gap.keyEnd - start)).trimmingCharacters(in: .whitespaces)
-        let value = text.substring(with: NSRange(location: gap.valueStart, length: row.valueEnd - gap.valueStart))
-        let items = PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0))?.items.map(\.value) ?? []
-        return PropertyRules.issue(key: key, value: value, items: items, type: PropertyTypes.type(of: key, in: PropertyTypes.types(in: vaultRoot)))
+        PropertySurface.issue(forLineAt: start, in: string, types: PropertyTypes.types(in: vaultRoot))
     }
 
     @objc private func pickPropertyType(_ item: NSMenuItem) {
@@ -5568,48 +5220,17 @@ extension HeftTextKit2View {
     func keepCaretOutOfColonGap() -> Bool {
         let selection = selectedRange()
         defer { lastCaretLocation = selectedRange().location }
-        guard selection.length == 0, !propertiesShownAsText,
-              let gap = PropertyEditing.colonGap(in: string, at: selection.location)
-        else { return false }
-        let caret = selection.location
+        guard selection.length == 0, !propertiesShownAsText else { return false }
         let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
-        // A Normal-mode cursor stands on a character, and the colon is one.
-        let first = normal ? gap.keyEnd : gap.keyEnd + 1
-        guard caret >= first, caret < gap.valueStart || (normal && caret == gap.valueStart && gap.valueStart == lineEnd(of: caret)) else {
-            return false
-        }
-        let text = string as NSString
-        let lineStart = text.lineRange(for: NSRange(location: caret, length: 0)).location
-        let keyTarget = normal ? max(gap.keyEnd - 1, lineStart) : gap.keyEnd
-        let hasValue = gap.valueStart < lineEnd(of: caret)
-        // In Normal mode the last hidden character before an empty value or
-        // a list's input is that value's place, not a gap to leave.
-        if normal, !hasValue, caret == gap.valueStart - 1 { return false }
-        // An empty value's place in Normal mode is the last hidden
-        // character before it, drawn as a block at the value column.
-        let valueTarget = hasValue || !normal ? gap.valueStart : gap.valueStart - 1
-        let toValue: Bool
-        if let clicked = clickedPropertyColumn, clicked.line == lineStart {
-            toValue = clicked.inValue
-        } else if normal, previousVimMode == .insert || previousVimMode == .replace {
-            // Esc steps one character back, as Vim's does: from a value's
-            // start that is into the gap, and it is still the value's.
-            toValue = true
-        } else {
-            toValue = (lastCaretLocation ?? caret) < caret
-        }
-        let target = toValue ? valueTarget : keyTarget
-        guard target != caret else { return false }
+        guard let target = PropertySurface.caretOutOfColonGap(
+            in: string, caret: selection.location, previous: lastCaretLocation, clicked: clickedPropertyColumn,
+            leavingInsert: previousVimMode == .insert || previousVimMode == .replace, normal: normal
+        ) else { return false }
         setSelectedRange(NSRange(location: target, length: 0))
         return true
     }
 
-    private func lineEnd(of location: Int) -> Int {
-        let text = string as NSString
-        var line = text.lineRange(for: NSRange(location: location, length: 0))
-        while line.length > 0, [10, 13].contains(text.character(at: NSMaxRange(line) - 1)) { line.length -= 1 }
-        return NSMaxRange(line)
-    }
+
 
     /// Where a click on a property row leaves the caret, once the click is
     /// over: in the key column, at most the key's end; in a value, where it
@@ -5618,95 +5239,40 @@ extension HeftTextKit2View {
     /// becomes a block list first, so it edits as pills too, which Obsidian
     /// does to one edited in its properties as well.
     func settlePropertyClick(onLineAt lineStart: Int, inValue: Bool) {
-        guard selectedRange().length == 0, !propertiesShownAsText,
-              let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == lineStart })
-        else { return }
+        guard selectedRange().length == 0, !propertiesShownAsText else { return }
         let normal = vimEnabled && vimEngine.mode != .insert && vimEngine.mode != .replace
-        // A key not yet given its colon: its value column clicked, it gets
-        // one, with the space after it, and the caret goes there.
-        guard let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd) else {
-            guard inValue, isKeyWithoutColon(row) else { return }
-            let end = row.valueEnd
-            apply(MarkdownEditing.Edit(
-                range: NSRange(location: end, length: 0), replacement: ": ",
-                selection: NSRange(location: normal ? end + 1 : end + 2, length: 0)
-            ), named: "Edit Property")
-            spacedValueLine = lineStart
-            return
+        guard let settled = PropertySurface.settlingTap(
+            onLineAt: lineStart, inValue: inValue, caret: selectedRange().location, normal: normal, in: string
+        ) else { return }
+        for step in settled.edits {
+            guard shouldChangeText(in: step.edit.range, replacementString: step.edit.replacement) else { return }
+            textStorage?.replaceCharacters(in: step.edit.range, with: step.edit.replacement)
+            didChangeText()
+            if let name = step.name { undoManager?.setActionName(name) }
         }
-        let text = string as NSString
-        let lineStartIndex = row.range.location
-        let target: Int
-        if !inValue {
-            let caret = selectedRange().location
-            let keyEnd = normal ? max(gap.keyEnd - 1, lineStartIndex) : gap.keyEnd
-            target = caret > keyEnd ? keyEnd : caret
-        } else {
-            let value = text.substring(with: NSRange(location: gap.valueStart, length: row.valueEnd - gap.valueStart))
-            if value.hasPrefix("["), value.hasSuffix("]") {
-                let line = text.substring(with: NSRange(location: lineStartIndex, length: gap.keyEnd - lineStartIndex))
-                guard let edit = PropertyEditing.converting(key: line.trimmingCharacters(in: .whitespaces), toList: true, in: string)
-                else { return }
-                apply(edit, named: "Edit List")
-                // A block list now, settled as one.
-                settlePropertyClick(onLineAt: lineStart, inValue: true)
-                return
-            } else if PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0)) != nil
-                        || gap.valueStart >= row.valueEnd {
-                // A list's input or an empty value: the space after the colon
-                // first, now, or the caret is drawn against the key until it
-                // comes. Then the place after it, or in Normal mode on it.
-                var end = row.valueEnd
-                if gap.valueStart == gap.keyEnd + 1, gap.valueStart == row.valueEnd {
-                    let at = NSRange(location: gap.valueStart, length: 0)
-                    if shouldChangeText(in: at, replacementString: " ") {
-                        textStorage?.replaceCharacters(in: at, with: " ")
-                        didChangeText()
-                        spacedValueLine = lineStartIndex
-                        end += 1
-                    }
-                }
-                let pending = PropertyListContext.detect(in: string, selection: NSRange(location: end, length: 0))
-                    .map { $0.pending.length > 0 } ?? false
-                target = normal && !pending ? end - 1 : (normal ? end - 1 : end)
-            } else {
-                let caret = selectedRange().location
-                target = max(min(caret, row.valueEnd - (normal ? 1 : 0)), gap.valueStart)
-            }
-        }
-        if target != selectedRange().location { setSelectedRange(NSRange(location: target, length: 0)) }
+        if let spaced = settled.spacedLine { spacedValueLine = spaced }
+        if settled.caret != selectedRange().location { setSelectedRange(NSRange(location: settled.caret, length: 0)) }
     }
 
     /// A row holding only a key, its colon not yet typed.
     func isKeyWithoutColon(_ row: PropertyEditing.Row) -> Bool {
-        let text = string as NSString
-        let line = text.substring(with: NSRange(location: row.range.location, length: row.valueEnd - row.range.location))
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        return !trimmed.isEmpty && !line.contains(":") && line.first != " " && line.first != "\t"
-            && !trimmed.hasPrefix("#") && !trimmed.hasPrefix("-")
+        PropertySurface.isKeyWithoutColon(row, in: string)
     }
 
     /// Whether the value of the property row at `lineStart` has no text a
     /// click could land in: a list, an empty value, no colon yet.
     func valueHasNoText(onLineAt lineStart: Int) -> Bool {
-        guard !propertiesShownAsText,
-              let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == lineStart })
-        else { return false }
-        guard let gap = PropertyEditing.colonGap(in: string, at: row.valueEnd) else { return isKeyWithoutColon(row) }
-        let value = (string as NSString).substring(with: NSRange(location: gap.valueStart, length: row.valueEnd - gap.valueStart))
-        return value.isEmpty || value.hasPrefix("[")
-            || PropertyListContext.detect(in: string, selection: NSRange(location: row.valueEnd, length: 0)) != nil
+        !propertiesShownAsText && PropertySurface.valueHasNoText(onLineAt: lineStart, in: string)
     }
 
     /// Whether `point` is on a property row, and in its value column.
     func propertyColumn(at point: CGPoint) -> (line: Int, inValue: Bool)? {
-        guard let manager = textLayoutManager, let content = manager.textContentManager else { return nil }
-        let inContainer = CGPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
-        guard let fragment = manager.textLayoutFragment(for: inContainer) else { return nil }
-        let start = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
-        guard case .propertyRow(let row)? = liveLayout.blocks[start] else { return nil }
-        let column = fragment.layoutFragmentFrame.minX + textContainerInset.width - row.indent + row.column
-        return (start, point.x >= column - 4)
+        PropertyGeometry.column(
+            at: CGPoint(x: point.x - textContainerOrigin.x + textContainerInset.width,
+                        y: point.y - textContainerOrigin.y + textContainerInset.height),
+            layout: liveLayout, manager: textLayoutManager,
+            origin: CGPoint(x: textContainerInset.width, y: textContainerInset.height)
+        )
     }
 
     /// One list edit, undoable under `name`, with the caret where it says.
@@ -5721,17 +5287,8 @@ extension HeftTextKit2View {
     /// Return on a list's key line: what was typed becomes its last item;
     /// with nothing typed, a new property starts under the list.
     func handlePropertyListReturn() -> Bool {
-        guard let list = PropertyListContext.detect(in: string, selection: selectedRange()) else { return false }
-        let typed = (string as NSString).substring(with: list.pending).trimmingCharacters(in: .whitespaces)
-        if !typed.isEmpty {
-            apply(list.adding(typed, in: string), named: "Add Item")
-        } else {
-            let end = list.items.last.map { NSMaxRange($0.line) } ?? NSMaxRange(list.keyLine)
-            apply(MarkdownEditing.Edit(
-                range: NSRange(location: end, length: 0), replacement: "\n",
-                selection: NSRange(location: end + 1, length: 0)
-            ), named: "Add Property")
-        }
+        guard let step = PropertySurface.listReturn(selection: selectedRange(), in: string) else { return false }
+        apply(step.edit, named: step.name)
         return true
     }
 
@@ -5752,14 +5309,11 @@ extension HeftTextKit2View {
     /// Tab moves from a property's name to its value in Obsidian: it writes
     /// the `: ` the table hides, and offers the key's values.
     func moveToPropertyValue() -> Bool {
-        guard let context = PropertyCompletionContext.detect(in: string, selection: selectedRange()),
-              context.part == .key
-        else { return false }
-        let range = NSRange(location: NSMaxRange(context.queryRange), length: 0)
-        guard shouldChangeText(in: range, replacementString: ": ") else { return true }
-        textStorage?.replaceCharacters(in: range, with: ": ")
+        guard let edit = PropertySurface.movingToValue(selection: selectedRange(), in: string) else { return false }
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return true }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
-        setSelectedRange(NSRange(location: range.location + 2, length: 0))
+        setSelectedRange(edit.selection)
         updateLinkCompletion(allowStart: true)
         return true
     }
@@ -5771,43 +5325,29 @@ extension HeftTextKit2View {
         // What earlier editing left, tidied now rather than a moment later,
         // when it would shift the new row from under the caret and close
         // its menu: a key still without its colon gets one.
-        for row in PropertyEditing.rows(in: string).reversed() {
-            if let edit = PropertyRules.tidying(row, in: string) { applyKeepingCaret(edit, named: "Tidy Property") }
-        }
+        for edit in PropertySurface.tidyingAll(in: string) { applyKeepingCaret(edit, named: "Tidy Property") }
         bareKeyLine = nil
         // An empty row already waiting is the new property's: the caret goes
         // to it rather than another being made and that one taken away.
-        let text = string as NSString
-        if let blank = PropertyEditing.rows(in: string).last(where: {
-            text.substring(with: $0.range).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }) {
+        let adding = PropertySurface.addingProperty(in: string)
+        guard let edit = adding.edit else {
             window?.makeFirstResponder(self)
-            setSelectedRange(NSRange(location: blank.range.location, length: 0))
+            setSelectedRange(NSRange(location: adding.caret, length: 0))
             enterInsertForNewProperty()
-            keyMenuRow = blank.range.location
-            blankRowBeingEdited = blank.range.location
+            keyMenuRow = adding.caret
+            blankRowBeingEdited = adding.caret
             updateLinkCompletion(allowStart: true)
             return
         }
-        let insertion: (location: Int, text: String, caret: Int)
-        if let block = PropertyEditing.blockRange(in: string) {
-            // Before the closing fence's line.
-            let closing = text.lineRange(for: NSRange(location: max(NSMaxRange(block) - 1, 0), length: 0))
-            let newline = text.substring(with: closing).hasSuffix("\r\n") ? "\r\n" : "\n"
-            insertion = (closing.location, newline, closing.location)
-        } else {
-            insertion = (0, "---\n\n---\n", 4)
-        }
-        let range = NSRange(location: insertion.location, length: 0)
-        guard shouldChangeText(in: range, replacementString: insertion.text) else { return }
-        textStorage?.replaceCharacters(in: range, with: insertion.text)
+        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
         undoManager?.setActionName("Add Property")
         window?.makeFirstResponder(self)
-        setSelectedRange(NSRange(location: insertion.caret, length: 0))
+        setSelectedRange(NSRange(location: adding.caret, length: 0))
         enterInsertForNewProperty()
         scrollRangeToVisible(selectedRange())
-        keyMenuRow = insertion.caret
+        keyMenuRow = adding.caret
         updateLinkCompletion(allowStart: true)
         #if DEBUG
         // `HEFT_TYPE=<text>` types it after Add Property, key by key through
