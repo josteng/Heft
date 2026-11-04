@@ -149,6 +149,10 @@ instead of setting `window.userActivity`, which Siri's pointer uses.
   the iPad's note it froze the note and the panel; on the note pane's
   stack, in landscape, hiding the sidebar left the note its old width.
   The panel learns the open note from `PanelNoteKey`.
+- The appearance makes its dynamic colours afresh on every read, and
+  `UIColor` compares those by identity: compare them resolved, light and
+  dark, or every SwiftUI update restyles the note, which closes any menu
+  that just opened over it.
 - Restyle after a caret move or focus on the next run-loop pass, never
   inside the delegate callback: rewriting attributes while UIKit places a
   tap's caret makes it drop the tap, and the caret lands at the end.

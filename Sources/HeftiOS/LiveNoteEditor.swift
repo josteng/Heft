@@ -256,9 +256,21 @@ struct LiveNoteEditor: UIViewRepresentable {
                 && a.colorfulFormatting == b.colorfulFormatting
                 && a.headingFont == b.headingFont && a.headingBars == b.headingBars
                 && a.palette == b.palette
-                && [a.accentColor, a.linkColor, a.tagColor, a.codeColor, a.boldColor, a.italicColor]
-                    == [b.accentColor, b.linkColor, b.tagColor, b.codeColor, b.boldColor, b.italicColor]
-                && a.headingColors == b.headingColors
+                && sameColors([a.accentColor, a.linkColor, a.tagColor, a.codeColor, a.boldColor, a.italicColor]
+                    + a.headingColors,
+                    [b.accentColor, b.linkColor, b.tagColor, b.codeColor, b.boldColor, b.italicColor]
+                    + b.headingColors)
+        }
+
+        /// Colours as drawn, in light and dark. The appearance makes its
+        /// dynamic colours afresh each time it is read, and those compare by
+        /// identity: every SwiftUI update of the note restyled it whole,
+        /// which also closed a property's menu the moment it opened.
+        private static func sameColors(_ a: [UIColor], _ b: [UIColor]) -> Bool {
+            let styles = [UITraitCollection(userInterfaceStyle: .light), UITraitCollection(userInterfaceStyle: .dark)]
+            return a.count == b.count && zip(a, b).allSatisfy { left, right in
+                left == right || styles.allSatisfy { left.resolvedColor(with: $0) == right.resolvedColor(with: $0) }
+            }
         }
 
         /// Replaces the text, keeping the caret beside the text it was in:
