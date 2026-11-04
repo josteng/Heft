@@ -760,5 +760,37 @@ extension PropertyRealClickTests {
         try await Task.sleep(for: .milliseconds(60))
         #expect(value.view.selectedRange().location == 12, "on the J of Jane, not the key: \(value.view.selectedRange().location)")
     }
+
+    /// The menu a right-click puts up, caught rather than popped; or the
+    /// text's, from `menu(for:)`, when it puts up none of its own.
+    private func rightClickMenu(_ h: Harness, at point: CGPoint) throws -> NSMenu? {
+        let event = try #require(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: h.view.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+            windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+        ))
+        var shown: NSMenu?
+        h.view.presentPropertyMenu = { menu, _ in shown = menu }
+        // What `rightMouseDown` does first; never the rest of it, which pops
+        // AppKit's own menu, a real one on the screen.
+        if h.view.showPropertyMenu(for: event) { return shown }
+        return h.view.menu(for: event)
+    }
+
+    @Test("A right-click on a property row puts up its own menu, nothing of AppKit's added; with text selected, the text's")
+    func rightClick() async throws {
+        let h = try await harness(.plain)
+        let row = try #require(h.row(4))
+        let onRow = try rightClickMenu(h, at: CGPoint(x: row.column + 12, y: row.frame.minY + 14))
+        #expect(onRow?.items.map { $0.isSeparatorItem ? "-" : ($0.attributedTitle?.string ?? $0.title) }
+            == ["Property type", "Cut Property", "Copy Property", "Paste Property", "-", "Remove"])
+        h.view.setSelectedRange(NSRange(location: 12, length: 4))
+        let selected = try rightClickMenu(h, at: CGPoint(x: row.column + 12, y: row.frame.minY + 14))
+        #expect(selected?.items.first?.title != "Property type")
+        // In the body, the text's menu as ever.
+        h.view.setSelectedRange(NSRange(location: 0, length: 0))
+        let body = (h.view.string as NSString).range(of: "Body").location
+        let place = try #require(h.view.rect(forSelection: NSRange(location: body + 1, length: 1)))
+        #expect(try rightClickMenu(h, at: CGPoint(x: place.midX, y: place.midY))?.items.first?.title != "Property type")
+    }
 }
 

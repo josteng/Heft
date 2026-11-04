@@ -1667,6 +1667,15 @@ final class HeftTextKit2View: NSTextView {
     var liveLayout = LiveLayout()
     /// Where the key line of the list being edited as pills starts.
     var listKeyLineBeingEdited: Int?
+    /// Where Cut, Copy and Paste of a property go: the general pasteboard,
+    /// or a test's own, which must never be the reader's.
+    var propertyPasteboard: NSPasteboard = .general
+    /// How a property's menu is put up: popped at the point, or for a test,
+    /// caught, as a popped menu holds the run loop until it closes.
+    lazy var presentPropertyMenu: (NSMenu, CGPoint) -> Void = { [weak self] menu, point in
+        guard let self else { return }
+        menu.popUp(positioning: nil, at: point, in: self)
+    }
     /// The note on screen, whose properties may be folded.
     var noteIdentity = ""
     /// The notes whose properties are folded to their heading, for this run
@@ -3056,7 +3065,27 @@ final class HeftTextKit2View: NSTextView {
         }
     }
 
+    /// A property row's own menu, as its icon gives: with nothing selected,
+    /// a right-click there asks what to do with the property; a selection in
+    /// it is text being worked on, and keeps the text's menu. Shown here
+    /// rather than handed back from `menu(for:)`, where AppKit adds AutoFill
+    /// and Insert from iPhone to any menu a text view returns.
+    func showPropertyMenu(for event: NSEvent) -> Bool {
+        let point = convert(event.locationInWindow, from: nil)
+        guard selectedRange().length == 0, let row = propertyColumn(at: point),
+              let menu = propertyMenu(forLineAt: row.line)
+        else { return false }
+        presentPropertyMenu(menu, point)
+        return true
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if showPropertyMenu(for: event) { return }
+        super.rightMouseDown(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control), showPropertyMenu(for: event) { return }
         onEditorClaimed?()
         vimPreferredX = nil
         dismissLinkCompletion()
@@ -5331,29 +5360,125 @@ extension HeftTextKit2View {
     /// The types a key can be given, offered at its icon, as Obsidian's
     /// are, with its current one ticked.
     func showPropertyTypeMenu(forLineAt start: Int, below icon: CGRect) {
+        guard let menu = propertyMenu(forLineAt: start) else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: icon.minX, y: icon.maxY + 2), in: self)
+    }
+
+    /// A property's menu at its icon, as Obsidian's: why it is red if it
+    /// is, its type, Cut, Copy and Paste for the property whole, and Remove.
+    func propertyMenu(forLineAt start: Int) -> NSMenu? {
         let text = string as NSString
         let keyLine = text.substring(with: text.lineRange(for: NSRange(location: start, length: 0)))
-        guard let colon = keyLine.firstIndex(of: ":") else { return }
+        guard let colon = keyLine.firstIndex(of: ":") else { return nil }
         let key = String(keyLine[..<colon]).trimmingCharacters(in: .whitespaces)
         let current = PropertyTypes.type(of: key, in: PropertyTypes.types(in: vaultRoot))
         let menu = NSMenu()
+        menu.autoenablesItems = false
         // Why the icon is a warning, when it is one: said first.
-        let message = propertyWarning(forLineAt: start)
-        if let message {
+        if let message = propertyWarning(forLineAt: start) {
             let warning = NSMenuItem(title: message, action: nil, keyEquivalent: "")
             warning.isEnabled = false
             menu.addItem(warning)
             menu.addItem(.separator())
         }
+        let types = NSMenu()
         for type in PropertyType.pickable {
             let item = NSMenuItem(title: type.title, action: #selector(pickPropertyType(_:)), keyEquivalent: "")
             item.target = self
             item.image = NSImage(systemSymbolName: type.symbol, accessibilityDescription: nil)
             item.state = current == type ? .on : .off
             item.representedObject = [key, type.rawValue]
-            menu.addItem(item)
+            types.addItem(item)
         }
-        menu.popUp(positioning: nil, at: NSPoint(x: icon.minX, y: icon.maxY + 2), in: self)
+        let typeItem = NSMenuItem(title: "Property type", action: nil, keyEquivalent: "")
+        typeItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
+        typeItem.submenu = types
+        menu.addItem(typeItem)
+
+        func action(_ title: String, _ symbol: String, _ selector: Selector, enabled: Bool = true) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+            item.target = self
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.representedObject = start
+            item.isEnabled = enabled
+            return item
+        }
+        // Named for what they take, the property whole, so they are not
+        // read as the text's own Cut, Copy and Paste.
+        menu.addItem(action("Cut Property", "scissors", #selector(cutProperty(_:))))
+        menu.addItem(action("Copy Property", "doc.on.doc", #selector(copyProperty(_:))))
+        menu.addItem(action("Paste Property", "doc.on.clipboard", #selector(pasteProperties(_:)),
+                            enabled: propertiesOnPasteboard() != nil))
+        menu.addItem(.separator())
+        let remove = action("Remove", "trash", #selector(removeProperty(_:)))
+        remove.attributedTitle = NSAttributedString(string: "Remove", attributes: [
+            .foregroundColor: NSColor.systemRed, .font: NSFont.menuFont(ofSize: 0),
+        ])
+        remove.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(paletteColors: [.systemRed]))
+        menu.addItem(remove)
+        return menu
+    }
+
+    /// The property at `start`, key line and items, as its lines.
+    func propertyText(atLineAt start: Int) -> (range: NSRange, text: String)? {
+        guard let row = PropertyEditing.rows(in: string).first(where: { $0.range.location == start }) else { return nil }
+        return (row.range, (string as NSString).substring(with: row.range))
+    }
+
+    /// Lines from the pasteboard that are properties: each a key line or a
+    /// list item under one, so pasting them keeps the block YAML.
+    func propertiesOnPasteboard() -> String? {
+        guard var text = propertyPasteboard.string(forType: .string), !text.isEmpty else { return nil }
+        if !text.hasSuffix("\n") { text += "\n" }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        guard let first = lines.first, first.first != " ", first.first != "-",
+              lines.allSatisfy({ line in
+                  let trimmed = line.trimmingCharacters(in: .whitespaces)
+                  return trimmed.hasPrefix("- ") || trimmed == "-"
+                      || (line.first != " " && line.first != "\t" && line.contains(":") && !trimmed.hasPrefix("#"))
+              })
+        else { return nil }
+        return text
+    }
+
+    @objc func copyProperty(_ item: NSMenuItem) {
+        guard let start = item.representedObject as? Int, let property = propertyText(atLineAt: start) else { return }
+        propertyPasteboard.clearContents()
+        propertyPasteboard.setString(property.text, forType: .string)
+    }
+
+    @objc func cutProperty(_ item: NSMenuItem) {
+        copyProperty(item)
+        removeProperty(item)
+        undoManager?.setActionName("Cut Property")
+    }
+
+    @objc func pasteProperties(_ item: NSMenuItem) {
+        guard let start = item.representedObject as? Int, let property = propertyText(atLineAt: start),
+              let pasted = propertiesOnPasteboard()
+        else { return }
+        let at = NSMaxRange(property.range)
+        applyKeepingCaret(MarkdownEditing.Edit(
+            range: NSRange(location: at, length: 0), replacement: pasted, selection: NSRange(location: at, length: 0)
+        ), named: "Paste Properties")
+    }
+
+    /// The property at the item's row removed, list and all, as ⌘⌫ does on
+    /// it; the last one takes the fences with it.
+    @objc func removeProperty(_ item: NSMenuItem) {
+        guard let start = item.representedObject as? Int else { return }
+        removeProperty(atLineAt: start)
+    }
+
+    func removeProperty(atLineAt start: Int) {
+        let rows = PropertyEditing.rows(in: string)
+        guard let row = rows.first(where: { $0.range.location == start }),
+              let block = PropertyEditing.blockRange(in: string)
+        else { return }
+        applyKeepingCaret(MarkdownEditing.Edit(
+            range: rows.count == 1 ? block : row.range, replacement: "", selection: NSRange(location: start, length: 0)
+        ), named: "Remove Property")
     }
 
     /// What Obsidian would warn of on the row at `start`.

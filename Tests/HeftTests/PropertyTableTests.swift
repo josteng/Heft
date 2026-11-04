@@ -691,3 +691,68 @@ struct PropertyClickTests {
         #expect(aliases.selectedRange().location == 45)
     }
 }
+
+/// A property's menu, as Obsidian's: type, Cut, Copy, Paste, Remove.
+@MainActor
+@Suite("Property menu")
+struct PropertyMenuTests {
+    private let note = "---\nA: 1\ntags:\n  - x\nB: 2\n---\nBody"
+
+    private func view() -> HeftTextKit2View {
+        let view = HeftTextKit2View(usingTextLayoutManager: true)
+        view.isEditable = true
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        view.string = note
+        // Never the reader's clipboard.
+        view.propertyPasteboard = NSPasteboard(name: NSPasteboard.Name("heft-test-\(UUID().uuidString)"))
+        view.setSelectedRange(NSRange(location: 31, length: 0))
+        return view
+    }
+
+    private func item(_ menu: NSMenu, _ title: String) -> NSMenuItem? {
+        menu.items.first { $0.title == title || $0.attributedTitle?.string == title }
+    }
+
+    private func item(_ editor: HeftTextKit2View, line: Int, _ title: String) throws -> NSMenuItem {
+        let menu = try #require(editor.propertyMenu(forLineAt: line))
+        return try #require(item(menu, title))
+    }
+
+    @Test("The menu holds the type, Cut, Copy, Paste and a red Remove")
+    func items() throws {
+        let editor = view()
+        let menu = try #require(editor.propertyMenu(forLineAt: 9))
+        let titles = menu.items.map { $0.isSeparatorItem ? "-" : ($0.attributedTitle?.string ?? $0.title) }
+        #expect(titles == ["Property type", "Cut Property", "Copy Property", "Paste Property", "-", "Remove"])
+        #expect(item(menu, "Property type")?.submenu?.items.map(\.title) == PropertyType.pickable.map(\.title))
+        let red = item(menu, "Remove")?.attributedTitle?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        #expect(red == .systemRed)
+        // Nothing that is a property on the clipboard, nothing to paste.
+        editor.propertyPasteboard.clearContents()
+        editor.propertyPasteboard.setString("just words", forType: .string)
+        #expect(try item(editor, line: 9, "Paste Property").isEnabled == false)
+    }
+
+    @Test("Copy takes a property whole; Paste puts it after a row; Cut and Remove take it out")
+    func actions() throws {
+        let editor = view()
+        let menu = try #require(editor.propertyMenu(forLineAt: 9))
+        let copy = try #require(item(menu, "Copy Property"))
+        editor.copyProperty(copy)
+        #expect(editor.propertyPasteboard.string(forType: .string) == "tags:\n  - x\n")
+
+        let paste = try item(editor, line: 21, "Paste Property")
+        #expect(paste.isEnabled)
+        editor.pasteProperties(paste)
+        #expect(editor.string == "---\nA: 1\ntags:\n  - x\nB: 2\ntags:\n  - x\n---\nBody")
+
+        let cut = try item(editor, line: 4, "Cut Property")
+        editor.cutProperty(cut)
+        #expect(editor.propertyPasteboard.string(forType: .string) == "A: 1\n")
+        #expect(editor.string == "---\ntags:\n  - x\nB: 2\ntags:\n  - x\n---\nBody")
+
+        let remove = try item(editor, line: 4, "Remove")
+        editor.removeProperty(remove)
+        #expect(editor.string == "---\nB: 2\ntags:\n  - x\n---\nBody")
+    }
+}
