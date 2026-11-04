@@ -1691,6 +1691,15 @@ final class HeftTextKit2View: NSTextView {
         addSubview(button)
         return button
     }()
+    /// The caret drawn after a list's typed item, while the list is edited.
+    lazy var listCaretView: NSView = {
+        let caret = NSView()
+        caret.wantsLayer = true
+        caret.isHidden = true
+        addSubview(caret)
+        return caret
+    }()
+
     /// The arrow beside "Properties", shown while the pointer is on the
     /// heading, as Obsidian's is.
     lazy var propertiesFoldButton: NSImageView = {
@@ -2161,6 +2170,27 @@ final class HeftTextKit2View: NSTextView {
     }
 
     func updateVimCursor() {
+        repositionCompletion()
+        // A list being edited draws its typed item after its last pill, and
+        // the caret there with it: TextKit's own would stand on the key's
+        // line, where the text really is.
+        let listCaret = listInputCaretRect()
+        listCaretView.isHidden = true
+        if let listCaret, window?.firstResponder === self {
+            if !insertionPointColor.isEqual(NSColor.clear) { insertionPointColor = .clear }
+            let normal = vimEnabled && (vimEngine.mode == .normal || vimEngine.mode == .operatorPending)
+            if normal {
+                vimBlockCursor.frame = NSRect(x: listCaret.minX, y: listCaret.minY, width: Theme.bodySize * 0.55, height: listCaret.height).integral
+                vimBlockCursor.layer?.backgroundColor = vimCaretColor.withAlphaComponent(0.52).cgColor
+                vimBlockCursor.isHidden = false
+            } else {
+                vimBlockCursor.isHidden = true
+                listCaretView.frame = listCaret
+                listCaretView.layer?.backgroundColor = vimCaretColor.cgColor
+                listCaretView.isHidden = false
+            }
+            return
+        }
         let showsBlock = vimEnabled
             && (vimEngine.mode == .normal || vimEngine.mode == .operatorPending)
             && selectedRange().length == 0
@@ -4319,8 +4349,29 @@ final class HeftTextKit2View: NSTextView {
             && WikiCompletionContext.detect(in: string, selection: selection)?.isEmbed == false
             ? "Type | to change the link\u{2019}s text, # to link a heading" : nil
         completionHint = hint
+        completionAnchorShown = anchor
         panel.show(
             items: completionItems, selected: completionSelection, hint: hint,
+            below: anchor, in: self
+        )
+    }
+
+    /// Where the open menu was last put.
+    private var completionAnchorShown: NSRect?
+    /// Where the open menu is, for a test.
+    var completionAnchorForTesting: NSRect? { completionIsActive ? completionAnchorShown : nil }
+
+    /// Moves the open menu to where its anchor is now. A list's typed item is
+    /// drawn from the layout a restyle makes, which lands after the edit that
+    /// moved it, a pill removed or a line undone; the menu followed only at
+    /// the next key. Asked after every restyle, as the caret is.
+    func repositionCompletion() {
+        guard completionIsActive, let panel = completionPanel, !completionItems.isEmpty,
+              let anchor = completionAnchor(), anchor != completionAnchorShown
+        else { return }
+        completionAnchorShown = anchor
+        panel.show(
+            items: completionItems, selected: completionSelection, hint: completionHint,
             below: anchor, in: self
         )
     }
@@ -4518,6 +4569,8 @@ final class HeftTextKit2View: NSTextView {
     }
 
     private func completionAnchor() -> NSRect? {
+        // A list's typed item is drawn after its pills: the menu goes there.
+        if let listCaret = listInputCaretRect() { return listCaret }
         let caret = selectedRange().location
         let length = (string as NSString).length
         guard length > 0 else { return nil }
@@ -4702,6 +4755,38 @@ enum WritingToolsLog {
 }
 
 extension HeftTextKit2View {
+    /// Where the caret of a list being edited stands: after the typed item
+    /// drawn after the last pill. Nil unless the caret is at a list's input.
+    func listInputCaretRect() -> CGRect? {
+        let selection = selectedRange()
+        guard selection.length == 0, !propertiesShownAsText,
+              let row = PropertyEditing.rows(in: string).first(where: {
+                  selection.location >= $0.range.location && selection.location <= $0.valueEnd
+              }),
+              selection.location >= row.valueEnd - 1,
+              case .propertyRow(let drawn)? = liveLayout.blocks[row.range.location],
+              let chips = drawn.chips, let input = chips.input,
+              let manager = textLayoutManager, let content = manager.textContentManager,
+              let location = content.location(content.documentRange.location, offsetBy: row.range.location),
+              let fragment = manager.textLayoutFragment(for: location),
+              let line = fragment.textLineFragments.first
+        else { return nil }
+        let normal = vimEnabled && (vimEngine.mode == .normal || vimEngine.mode == .operatorPending)
+        // Normal mode stands on the typed item's last letter, or the empty
+        // input's place; Insert after it.
+        guard selection.location == row.valueEnd || (normal && selection.location == row.valueEnd - 1) else { return nil }
+        let frame = fragment.layoutFragmentFrame
+        let origin = CGPoint(x: frame.minX + textContainerInset.width, y: frame.minY + textContainerInset.height)
+        let baseline = origin.y + line.typographicBounds.minY + line.glyphOrigin.y + CGFloat(input.row) * chips.rowPitch
+        var typedWidth = ceil(input.label.size().width)
+        if normal, input.label.length > 0 {
+            let last = input.label.attributedSubstring(from: NSRange(location: input.label.length - 1, length: 1))
+            typedWidth -= ceil(last.size().width)
+        }
+        let x = origin.x - drawn.indent + chips.column + input.x + typedWidth
+        return CGRect(x: x, y: baseline - chips.font.ascender, width: 2, height: chips.font.ascender - chips.font.descender)
+    }
+
     /// Where the "Properties" heading is drawn, and the arrow beside it.
     func propertiesHeadingRect() -> (heading: CGRect, arrow: CGRect, source: CGRect)? {
         // The heading, or shown as YAML, the opening fence's line.
@@ -4716,14 +4801,27 @@ extension HeftTextKit2View {
         let y = frame.minY + textContainerInset.height
         let height = propertiesShownAsText ? line.typographicBounds.height : frame.height
         let heading = CGRect(x: x, y: y, width: 90, height: height)
-        let arrow = CGRect(x: x - 20, y: y + (height - 14) / 2, width: 14, height: 14)
-        // Just after the heading's word, or the fence's, at its middle.
+        // Centred on the word's capitals, where the eye centres a word, not
+        // on its line box, whose middle sits above them. The heading is
+        // drawn with its glyph box centred in the line.
         let word = propertiesShownAsText ? "---" : "Properties"
         let font = propertiesShownAsText
             ? NSFont.monospacedSystemFont(ofSize: Theme.bodySize - 2, weight: .regular)
             : NSFont.systemFont(ofSize: Theme.bodySize - 1, weight: .semibold)
+        let glyphTop: CGFloat
+        if propertiesShownAsText {
+            glyphTop = y + line.typographicBounds.minY + line.glyphOrigin.y - font.ascender
+        } else {
+            glyphTop = y + (height - (font.ascender - font.descender)) / 2
+        }
+        let middle = glyphTop + font.ascender - font.capHeight / 2
+        let arrow = CGRect(x: x - 20, y: middle - 7, width: 14, height: 14)
+        // Just after the heading's word, or the fence's, at the same middle.
         let width = ceil(NSAttributedString(string: word, attributes: [.font: font]).size().width)
-        let source = CGRect(x: x + width + 8, y: y + (height - 14) / 2, width: 16, height: 14)
+        // A point lower than the capitals' middle: the braces reach above
+        // the capitals and below the baseline, and centred exactly they
+        // read as sitting high.
+        let source = CGRect(x: x + width + 8, y: middle - 6, width: 16, height: 14)
         return (heading, arrow, source)
     }
 

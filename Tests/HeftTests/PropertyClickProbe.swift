@@ -113,6 +113,8 @@ struct PropertyRealClickTests {
                     (String(describing: Swift.type(of: sub)).contains("InsertionIndicator") ? [sub] : []) + indicators(in: sub)
                 }
             }
+            // A list being edited draws its own caret after its pills.
+            if let list = view.listInputCaretRect() { return list.minX }
             if let block = view.vimBlockFrameForTesting { return block.minX }
             if let indicator = indicators(in: view).first(where: { !$0.isHidden }) {
                 return indicator.convert(indicator.bounds, to: view).midX
@@ -506,6 +508,126 @@ extension PropertyRealClickTests {
         #expect(h.view.toolTip?.contains("twice") == true)
         h.view.updatePropertyToolTip(at: CGPoint(x: icon.rect.midX + 300, y: icon.rect.midY))
         #expect(h.view.toolTip == nil)
+    }
+
+    @Test("Editing a wrapped list, the typed item and caret are after the last pill, on its row", arguments: Mode.allCases)
+    func wrappedListInput(mode: Mode) async throws {
+        let note = "---\naliases:\n  - ama\n  - asf\n  - asfd asfd sdf sadf\n  - one more\nMamba: asf\n---\nBody text.\n"
+        let h = Harness(vim: mode != .plain, note: note, width: 420)
+        if mode == .insert { h.view.enterVimInsertForTesting() }
+        try await Task.sleep(for: .milliseconds(30))
+        _ = try await click(h, line: 4, at: \.column, plus: 300)
+        let first = try #require(h.view.listInputCaretRect())
+        guard case .propertyRow(let row)? = h.view.liveLayout.blocks[4], let chips = row.chips, let input = chips.input else {
+            Issue.record("no list being edited")
+            return
+        }
+        let lastRow = chips.rows.max() ?? 0
+        #expect(lastRow >= 1, "the pills wrap")
+        #expect(input.row >= lastRow, "input on the last row or the one after")
+        let rowTop = try #require(h.row(4)).frame.minY
+        #expect(first.minY > rowTop + chips.rowPitch * CGFloat(lastRow) - 4, "caret on the last row: \(first.minY)")
+        try await type("zz", in: h, mode: mode)
+        let after = try #require(h.view.listInputCaretRect())
+        #expect(after.minX > first.minX + 8, "the caret moves on as the item is typed")
+        if case .propertyRow(let typed)? = h.view.liveLayout.blocks[4] {
+            #expect(typed.chips?.input?.label.string == "zz")
+        }
+    }
+
+    @Test("A short list's input is right after its pills, on the first row", arguments: Mode.allCases)
+    func shortListInput(mode: Mode) async throws {
+        let h = try await harness(mode)
+        let hit = try await click(h, line: 28, at: \.column, plus: 200)
+        let caret = try #require(h.view.listInputCaretRect())
+        guard case .propertyRow(let row)? = h.view.liveLayout.blocks[28], let chips = row.chips else {
+            Issue.record("no tags row")
+            return
+        }
+        let pillEnd = hit.column + (chips.x.last ?? 0) + (chips.widths.last ?? 0)
+        #expect(caret.minX > pillEnd && caret.minX < pillEnd + 20, "caret at \(caret.minX), pills end \(pillEnd)")
+        #expect(chips.input?.row == 0)
+    }
+
+    @Test("The typed item on a line of its own is inside the row's outline and room")
+    func inputLineInOutline() async throws {
+        let note = "---\ntags:\n  - reading\n  - novels\n  - thesis\n  - green\nNext: 1\n---\nBody text.\n"
+        // The width where the pills just fill one line, so the input takes
+        // the next one.
+        var found = false
+        for width in stride(from: 900, through: 420, by: -15) {
+            let h = Harness(vim: false, note: note, width: CGFloat(width))
+            try await Task.sleep(for: .milliseconds(20))
+            _ = try await click(h, line: 4, at: \.column, plus: 250)
+            guard case .propertyRow(let row)? = h.view.liveLayout.blocks[4], let chips = row.chips, let input = chips.input,
+                  (chips.rows.max() ?? 0) == 0, input.row == 1
+            else { continue }
+            found = true
+            #expect(chips.lastLine == 1)
+            let rows = PropertyEditing.rows(in: h.view.string)
+            guard let caret = h.view.listInputCaretRect() else {
+                Issue.record("no list caret: selection \(h.view.selectedRange()), row ends \(rows.map(\.valueEnd)), line \((h.view.string as NSString).substring(with: NSRange(location: 4, length: 8)).debugDescription)")
+                break
+            }
+            let next = try #require(h.row((h.view.string as NSString).range(of: "Next").location))
+            #expect(caret.maxY <= next.frame.minY + 2, "the input's line is room the row has, above the next")
+            break
+        }
+        #expect(found, "some width puts the input on a line of its own")
+    }
+
+    @Test("The menu follows a list's input at once when a pill goes, not at the next key")
+    func menuFollows() async throws {
+        let note = "---\ntags:\n  - reading\n  - novels\n---\nBody text.\n"
+        let h = Harness(vim: false, note: note)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("heft-menu-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "Some #thesis and #theory notes.\n".write(to: root.appendingPathComponent("N.md"), atomically: true, encoding: .utf8)
+        h.view.completionIndex = VaultIndex.build(root: VaultScanner.scan(root: root))
+        try await Task.sleep(for: .milliseconds(30))
+        _ = try await click(h, line: 4, at: \.column, plus: 300)
+        try await type("th", in: h, mode: .plain)
+        let before = try #require(h.view.completionAnchorForTesting, "the tag menu is open")
+        // Gone without a click, which closes a menu as any click does: as an
+        // undo or a key takes it.
+        h.view.removeItem(at: 0, fromListAt: 4)
+        try await Task.sleep(for: .milliseconds(80))
+        let after = try #require(h.view.completionAnchorForTesting, "still open")
+        let caret = try #require(h.view.listInputCaretRect())
+        #expect(after.minX < before.minX - 20, "moved left with the pill gone: \(before.minX) to \(after.minX)")
+        #expect(abs(after.minX - caret.minX) < 2, "at the input: menu \(after.minX), caret \(caret.minX)")
+    }
+
+    @Test("A space typed into a list's item shows at once, the caret after it", arguments: Mode.allCases)
+    func spaceInAlias(mode: Mode) async throws {
+        let note = "---\naliases:\n  - ama\n---\nBody text.\n"
+        let h = Harness(vim: mode != .plain, note: note)
+        if mode == .insert { h.view.enterVimInsertForTesting() }
+        try await Task.sleep(for: .milliseconds(30))
+        _ = try await click(h, line: 4, at: \.column, plus: 300)
+        try await type("new", in: h, mode: mode)
+        let word = try #require(h.view.listInputCaretRect())
+        try await type(" ", in: h, mode: mode == .normal ? .insert : mode)
+        guard case .propertyRow(let row)? = h.view.liveLayout.blocks[4] else {
+            Issue.record("no aliases row")
+            return
+        }
+        #expect(row.chips?.input?.label.string == "new ")
+        let spaced = try #require(h.view.listInputCaretRect())
+        #expect(spaced.minX > word.minX + 2, "the caret moved past the space: \(word.minX) to \(spaced.minX)")
+    }
+
+    @Test("A pill's band holds the capitals and the descenders, with room on both sides")
+    func pillBand() {
+        let font = NSFont.systemFont(ofSize: 15)
+        let band = HeftLayoutFragment.pillBand(x: 0, width: 40, baseline: 100, font: font)
+        let capitalsTop = 100 - font.capHeight
+        let descendersBottom = 100 - font.descender
+        #expect(band.minY < capitalsTop - 2)
+        #expect(band.maxY > descendersBottom + 2)
+        // Not the old band, which held the whole ascender and sat high.
+        #expect(band.minY > 100 - font.ascender - 1.5)
     }
 }
 

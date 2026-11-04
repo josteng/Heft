@@ -1385,15 +1385,6 @@ enum LiveStyler {
             var row = 0
             // Every pill carries its ×, as Obsidian's do.
             let extra = PropertyChips.removeWidth
-            // Editing, the item being typed goes after the pills; when they
-            // leave it too little room they start on the row below instead.
-            if editingList {
-                let total = line.items.reduce(CGFloat(0)) { sum, item in
-                    sum + ceil(NSAttributedString(string: item, attributes: [.font: font]).size().width)
-                        + PropertyChips.padding * 2 + extra + PropertyChips.gap
-                }
-                if total > available - PropertyChips.inputRoom { row = 1 }
-            }
             // Tags read as the body's tags do, in the tag colour, without
             // the `#` a property's tags never carry.
             let ink = line.isTags ? context.tagColor : NSColor.labelColor
@@ -1421,23 +1412,42 @@ enum LiveStyler {
                 rowPitch: rowPitch, font: font, tint: line.isTags ? context.tagColor : nil,
                 removable: true, invalid: invalid
             )
-            // The typed item's place: after the pills on the first row, or
-            // at the start of it when they moved below.
-            if editingList, let keyEnd {
-                let onFirstRow = zip(rows, zip(xs, widths)).filter { $0.0 == 0 }
-                let offset = onFirstRow.last.map { $0.1.0 + $0.1.1 + PropertyChips.gap } ?? 0
-                if keyEnd.colon.length > 0 {
-                    storage.addAttribute(
-                        .kern, value: max(column - keyEnd.width, 4) + offset,
-                        range: NSRange(location: keyEnd.colon.location, length: 1)
-                    )
+            // The typed item's place: after the last pill, or at the start
+            // of a row of its own when that one has too little room left.
+            // What is typed lives on the key's line in the file, which TextKit
+            // can only draw on the row's first line, so it is drawn here
+            // instead, its own glyphs made clear, and the caret with it.
+            var inputRow = row
+            if editingList {
+                let lastEnd = xs.last.map { $0 + (widths.last ?? 0) + PropertyChips.gap } ?? 0
+                var inputX = lastEnd
+                if !xs.isEmpty, available - lastEnd < PropertyChips.inputRoom {
+                    inputRow = row + 1
+                    inputX = 0
                 }
+                var typed = ""
+                if case let .entry(_, colon, value) = line.kind, colon.length > 0 {
+                    // To the line's end, not the value's last letter: a space
+                    // typed between words is the item's too, and left out it
+                    // showed only once the next letter came.
+                    var end = NSMaxRange(paragraphRange)
+                    while end > absolute(value).location, [10, 13].contains(text.character(at: end - 1)) { end -= 1 }
+                    let typedRange = NSRange(location: absolute(value).location, length: end - absolute(value).location)
+                    if typedRange.length > 0 {
+                        typed = text.substring(with: typedRange)
+                        storage.addAttribute(.foregroundColor, value: NSColor.clear, range: typedRange)
+                    }
+                }
+                chips?.input = PropertyChips.Input(
+                    row: inputRow, x: inputX,
+                    label: NSAttributedString(string: typed, attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+                )
             }
             // Pills wrapped onto more lines get the room below the row's
             // line, not a taller line: AppKit sets a line's text at the
             // bottom of its height, which put the key and icon low and the
             // pills over the next row.
-            paragraph.paragraphSpacing += rowPitch * CGFloat(row)
+            paragraph.paragraphSpacing += rowPitch * CGFloat(inputRow)
             storage.addAttribute(.paragraphStyle, value: paragraph, range: paragraphRange)
         }
         if drawsWidgets {

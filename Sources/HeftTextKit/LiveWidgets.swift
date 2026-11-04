@@ -91,6 +91,18 @@ struct PropertyChips {
     /// The items Obsidian would not take as they are, drawn red: a tag
     /// holding a space.
     var invalid: Set<Int> = []
+    /// While the list is edited, where the item being typed is drawn: after
+    /// the last pill, by row and offset from the value column.
+    struct Input {
+        let row: Int
+        let x: CGFloat
+        let label: NSAttributedString
+    }
+    var input: Input?
+
+    /// The last line the pills take, or the typed item's when it has a line
+    /// of its own after them: how far down the row's outline reaches.
+    var lastLine: Int { max(rows.max() ?? 0, input?.row ?? 0) }
 
     static let padding: CGFloat = 7
     static let gap: CGFloat = 5
@@ -1186,8 +1198,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         let font = NSFont.systemFont(ofSize: Theme.bodySize - 1)
         let firstBaseline = point.y + first.typographicBounds.minY + first.glyphOrigin.y
         var lastBaseline = point.y + last.typographicBounds.minY + last.glyphOrigin.y
-        if let chips = row.chips, let rows = chips.rows.max() {
-            lastBaseline = firstBaseline + CGFloat(rows) * chips.rowPitch
+        // The pills' last line, or the typed item's when it has a line of
+        // its own after them: the outline holds both.
+        if let chips = row.chips {
+            lastBaseline = firstBaseline + CGFloat(chips.lastLine) * chips.rowPitch
         }
         // Centred where the eye centres a line, between its capitals' tops
         // and its baseline; the ascender sits well above the capitals.
@@ -1271,12 +1285,10 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
         guard let line = textLineFragments.first else { return }
         let left = point.x - indent + chips.column
         let baseline = point.y + line.typographicBounds.minY + line.glyphOrigin.y
-        let inset: CGFloat = 1.5
         for index in chips.labels.indices {
             let rowBaseline = baseline + CGFloat(chips.rows[index]) * chips.rowPitch
-            let rect = CGRect(
-                x: left + chips.x[index], y: rowBaseline - chips.font.ascender - inset,
-                width: chips.widths[index], height: chips.font.ascender - chips.font.descender + inset * 2
+            let rect = Self.pillBand(
+                x: left + chips.x[index], width: chips.widths[index], baseline: rowBaseline, font: chips.font
             )
             let tint = chips.invalid.contains(index) ? NSColor.systemRed : chips.tint
             context.setFillColor(
@@ -1288,11 +1300,15 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             context.fillPath()
             chips.labels[index].draw(at: CGPoint(x: rect.minX + PropertyChips.padding, y: rowBaseline - chips.font.ascender))
             if chips.removable,
-               let cross = Self.tintedSymbol("xmark", side: 9, tint: chips.tint ?? .secondaryLabelColor) {
+               let cross = Self.tintedSymbol("xmark", side: 9, tint: (chips.invalid.contains(index) ? .systemRed : chips.tint) ?? .secondaryLabelColor) {
                 cross.draw(in: CGRect(
                     x: rect.maxX - PropertyChips.padding - 9, y: rect.midY - 4.5, width: 9, height: 9
                 ))
             }
+        }
+        if let input = chips.input {
+            let rowBaseline = baseline + CGFloat(input.row) * chips.rowPitch
+            input.label.draw(at: CGPoint(x: left + input.x, y: rowBaseline - chips.font.ascender))
         }
     }
 
@@ -2002,6 +2018,16 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
 
     /// The rounded capsule behind a `#tag`, which is Obsidian's treatment and
     /// cannot be had from a `.backgroundColor` attribute.
+    /// The band a pill fills behind its word: from a little above the
+    /// capitals to a little below the descenders. Centred on the font's
+    /// whole box instead, it reserved the room above the capitals the
+    /// ascender holds, and sat high: a `g` came close to its lower edge.
+    static func pillBand(x: CGFloat, width: CGFloat, baseline: CGFloat, font: NSFont) -> CGRect {
+        let top = baseline - font.capHeight - 4
+        let bottom = baseline - font.descender + 2.5
+        return CGRect(x: x, y: top, width: width, height: bottom - top)
+    }
+
     private func drawTagPill(
         _ tag: (range: NSRange, color: NSColor, font: NSFont, ink: CGRect),
         at point: CGPoint, in context: CGContext
@@ -2033,11 +2059,9 @@ final class HeftLayoutFragment: NSTextLayoutFragment {
             // taller than its glyphs with the text sitting at the bottom.
             let bounds = line.typographicBounds
             let baseline = point.y + bounds.minY + line.glyphOrigin.y
-            let rect = CGRect(
+            let rect = Self.pillBand(
                 x: point.x + bounds.minX + leading + tag.ink.minX - Self.tagPadding,
-                y: baseline - tag.font.ascender - Self.tagInset,
-                width: tag.ink.width + Self.tagPadding * 2,
-                height: tag.font.ascender - tag.font.descender + Self.tagInset * 2
+                width: tag.ink.width + Self.tagPadding * 2, baseline: baseline, font: tag.font
             )
             // Safe to resolve here, unlike at styling time: `draw(at:in:)` has
             // already made the view's appearance current.
