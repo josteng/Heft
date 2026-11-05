@@ -160,6 +160,18 @@
 		020000000000000000000022 /* HeftMacShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = HeftMacShare.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1A0000000000000000000001 /* Exceptions for "HeftShareShared" folder in "HeftMacShare" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				CaptureTextView.swift,
+				GlassSwitch.swift,
+				ShareView.swift,
+			);
+			target = 090000000000000000000010 /* HeftMacShare */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		040000000000000000000001 /* Heft */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/Heft; sourceTree = "<group>"; };
 		040000000000000000000002 /* HeftCore */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftCore; sourceTree = "<group>"; };
@@ -175,7 +187,7 @@
 		040000000000000000000011 /* HeftShare */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftShare; sourceTree = "<group>"; };
 		040000000000000000000012 /* HeftTextKit */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftTextKit; sourceTree = "<group>"; };
 		040000000000000000000013 /* HeftMacShare */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftMacShare; sourceTree = "<group>"; };
-		040000000000000000000014 /* HeftShareShared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftShareShared; sourceTree = "<group>"; };
+		040000000000000000000014 /* HeftShareShared */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (1A0000000000000000000001 /* Exceptions for "HeftShareShared" folder in "HeftMacShare" target */, ); path = Sources/HeftShareShared; sourceTree = "<group>"; };
 		040000000000000000000015 /* HeftReview */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/HeftReview; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
@@ -536,6 +548,7 @@
 				040000000000000000000007 /* HeftiOS */,
 				040000000000000000000008 /* HeftiOSShared */,
 				040000000000000000000010 /* HeftiOSVault */,
+				040000000000000000000014 /* HeftShareShared */,
 				040000000000000000000012 /* HeftTextKit */,
 				040000000000000000000015 /* HeftReview */,
 			);

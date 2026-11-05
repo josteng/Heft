@@ -143,6 +143,11 @@ struct MobileRootView: View {
     @State private var tab: MobileTab = .recent
     @State private var capture: CaptureSheetRequest?
     @State private var quickCapture: CaptureSheetRequest?
+    #if DEBUG
+    /// `HEFT_IOS_SHARE=<text>` (and `HEFT_IOS_SHARE_URL`): the share sheet as
+    /// the extension shows it, for a screenshot; nothing it adds is kept.
+    @State private var sharePreview = false
+    #endif
     /// A note open on the Mac, chosen from the app switcher.
     @State private var handedOff: MobileRoute?
     @Environment(\.scenePhase) private var scenePhase
@@ -191,6 +196,14 @@ struct MobileRootView: View {
             .fullScreenCover(item: $quickCapture) { capture in
                 CaptureSheet(requested: capture.target, fullScreen: true)
             }
+            #if DEBUG
+            .sheet(isPresented: $sharePreview) {
+                let environment = ProcessInfo.processInfo.environment
+                ShareView(initialText: environment["HEFT_IOS_SHARE"] ?? "",
+                          url: environment["HEFT_IOS_SHARE_URL"].flatMap(URL.init(string:)), pageTitle: nil,
+                          finish: { sharePreview = false }, cancel: { sharePreview = false })
+            }
+            #endif
             .onChange(of: request.target, initial: true) { _, target in
                 guard let target else { return }
                 request.target = nil
@@ -376,6 +389,7 @@ struct MobileRootView: View {
                 }
             }
         }
+        if environment["HEFT_IOS_SHARE"] != nil { sharePreview = true }
         if environment["HEFT_IOS_CAPTURE"] != nil {
             if environment["HEFT_IOS_QUICK"] != nil {
                 quickCapture = CaptureSheetRequest(target: .inbox)

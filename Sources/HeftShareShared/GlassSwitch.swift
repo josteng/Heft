@@ -12,6 +12,9 @@ struct GlassSwitch<Value: Hashable>: View {
     /// Where a swipe has the highlight, counted in options from the first,
     /// while one is under way; nil otherwise.
     var dragged: CGFloat?
+    /// Only the chosen option named, the others by their icon: three in a
+    /// phone's width beside a close button.
+    var compact = false
     @State private var frames: [Int: CGRect] = [:]
     @State private var taps = 0
 
@@ -31,7 +34,7 @@ struct GlassSwitch<Value: Hashable>: View {
                     // Named, not just drawn: a bar shows labels as icons alone
                     // unless told otherwise.
                     Label(option.title, systemImage: option.symbol)
-                        .labelStyle(.titleAndIcon)
+                        .labelStyle(TitleWhen(shown: !compact || lit))
                         .font(.headline)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 9)
@@ -42,6 +45,7 @@ struct GlassSwitch<Value: Hashable>: View {
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("glassSwitch")) } action: {
                     frames[index] = $0
                 }
+                .accessibilityLabel(option.title)
                 .accessibilityAddTraits(option.value == selection ? .isSelected : [])
             }
         }
@@ -161,5 +165,18 @@ private struct FingerPan: UIGestureRecognizerRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+/// Title and icon, or the icon alone; the button keeps the title for
+/// VoiceOver.
+private struct TitleWhen: LabelStyle {
+    var shown: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if shown {
+            HStack(spacing: 6) { configuration.icon; configuration.title }
+        } else {
+            configuration.icon
+        }
     }
 }

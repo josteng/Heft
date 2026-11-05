@@ -146,6 +146,30 @@ enum SharedVault {
         return (try? JSONDecoder().decode([ListedNote].self, from: data)) ?? []
     }
 
+    /// What a capture in the share sheet draws and offers as the app does:
+    /// the vault's tags, most used first, and the tag colour.
+    struct CaptureContext: Codable, Equatable {
+        var tags: [String] = []
+        /// `#RRGGBBAA`, or nil for the accent.
+        var tagColor: String?
+    }
+
+    private static var captureContextURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
+            .appendingPathComponent("Capture.json")
+    }
+
+    /// Written by the app after every scan, beside the note list.
+    static func publishCaptureContext(_ context: CaptureContext) {
+        guard let url = captureContextURL, let data = try? JSONEncoder().encode(context) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func captureContext() -> CaptureContext {
+        guard let url = captureContextURL, let data = try? Data(contentsOf: url) else { return CaptureContext() }
+        return (try? JSONDecoder().decode(CaptureContext.self, from: data)) ?? CaptureContext()
+    }
+
     // MARK: Queue
 
     struct Pending: Codable {

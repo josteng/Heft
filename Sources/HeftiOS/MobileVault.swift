@@ -255,6 +255,9 @@ final class MobileVault {
                                        excerpt: index.excerpt(of: $0.relativePath))
             }
             SharedVault.publishNoteList(listed)
+            SharedVault.publishCaptureContext(.init(
+                tags: Array(index.allTags.prefix(500)), tagColor: AppearancePreferences.hex((appearance ?? AppearancePreferences()).tagColor)
+            ))
             let pins = Pins.load(from: root)
             await self.land(token: token, tree: tree, index: index, settings: settings,
                             appearance: appearance, listed: listed, pins: pins, pending: pending.count,

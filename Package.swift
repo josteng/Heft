@@ -51,10 +51,12 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // What a share becomes in a note, compiled into both share
-        // extensions; built here so that tests reach it.
+        // extensions; built here so that tests reach it. The rest of the
+        // folder is the iOS share sheet's views.
         .target(
             name: "HeftShareShared",
             path: "Sources/HeftShareShared",
+            sources: ["SharedContent.swift"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // The Today widget's snapshot, for the same reason; the rest of the
