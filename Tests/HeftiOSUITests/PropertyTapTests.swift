@@ -79,6 +79,20 @@ final class PropertyTapTests: XCTestCase {
         return text
     }
 
+    /// Taps `item` in the text's menu, which on a phone is a bar whose
+    /// overflow is past its next-page arrow, "Forward" on some systems and
+    /// "Next Page" on others. The row's items come first, Format never.
+    private func chooseFromMenu(_ item: String) {
+        let wanted = app.descendants(matching: .any)[item].firstMatch
+        let forward = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label IN %@", ["Forward", "Next Page"])).firstMatch
+        XCTAssertTrue(wanted.waitForExistence(timeout: 3) || forward.exists, app.debugDescription)
+        for _ in 0..<4 where !wanted.exists && forward.exists { forward.tap() }
+        XCTAssertTrue(wanted.waitForExistence(timeout: 2), app.debugDescription)
+        XCTAssertFalse(app.menuItems["Format"].exists, "Format offered on a property")
+        wanted.tap()
+    }
+
     private func finishTyping() {
         let done = app.buttons["Done"]
         if done.waitForExistence(timeout: 3) { done.tap() }
@@ -160,16 +174,7 @@ final class PropertyTapTests: XCTestCase {
         point(onRow: "title", x: 280).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
         point(onRow: "title", x: 280).tap()
-        // On a phone the menu is a bar; what does not fit is past Forward.
-        let property = app.descendants(matching: .any)["Property"].firstMatch
-        let forward = app.descendants(matching: .any)["Forward"].firstMatch
-        XCTAssertTrue(forward.waitForExistence(timeout: 3) || property.exists)
-        for _ in 0..<4 where !property.exists && forward.exists { forward.tap() }
-        XCTAssertTrue(property.waitForExistence(timeout: 2), app.debugDescription)
-        property.tap()
-        let remove = app.descendants(matching: .any)["Remove"].firstMatch
-        XCTAssertTrue(remove.waitForExistence(timeout: 3), app.debugDescription)
-        remove.tap()
+        chooseFromMenu("Remove")
         let text = saved { !$0.contains("Weekend") }
         XCTAssertTrue(text.hasPrefix("---\nstatus:\n"), text)
     }
@@ -196,15 +201,7 @@ final class PropertyTapTests: XCTestCase {
 
     private func longPressRemoves(at spot: XCUICoordinate, gone: String) {
         spot.press(forDuration: 1.0)
-        let property = app.descendants(matching: .any)["Property"].firstMatch
-        let forward = app.descendants(matching: .any)["Forward"].firstMatch
-        XCTAssertTrue(forward.waitForExistence(timeout: 3) || property.exists, app.debugDescription)
-        for _ in 0..<4 where !property.exists && forward.exists { forward.tap() }
-        XCTAssertTrue(property.waitForExistence(timeout: 2))
-        property.tap()
-        let remove = app.descendants(matching: .any)["Remove"].firstMatch
-        XCTAssertTrue(remove.waitForExistence(timeout: 3))
-        remove.tap()
+        chooseFromMenu("Remove")
         let text = saved { !$0.contains(gone) }
         XCTAssertFalse(text.contains(gone), text)
     }

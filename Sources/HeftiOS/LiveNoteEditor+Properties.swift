@@ -591,7 +591,15 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
         else { return nil }
         let items = propertyMenu(forLineAt: row.range.location)
         guard !items.isEmpty else { return nil }
-        return UIMenu(children: suggested + [
+        // No Format: Markdown in a property's value is stored as its
+        // asterisks, and Obsidian shows them so.
+        let text = suggested.filter { ($0 as? UIMenu)?.identifier != .format }
+        // Nothing selected, the property's own items first, as a right-click
+        // on the Mac gives them; a selection is text being worked on.
+        if range.length == 0 {
+            return UIMenu(children: [UIMenu(options: .displayInline, children: items)] + text)
+        }
+        return UIMenu(children: text + [
             UIMenu(title: "Property", image: UIImage(systemName: "list.bullet.rectangle"), children: items),
         ])
     }
