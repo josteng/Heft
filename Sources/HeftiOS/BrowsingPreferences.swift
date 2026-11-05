@@ -132,6 +132,28 @@ final class BrowsingPreferences {
     var searchShowsKeyboard: Bool {
         didSet { HeftDefaults.shared.set(searchShowsKeyboard, forKey: Self.searchKeyboardKey) }
     }
+    /// Every note's properties shown as the YAML they are written in rather
+    /// than as a table, as the Mac's View menu has it; the `{}` beside a
+    /// note's heading does it for that note alone.
+    /// Whether a note opens with its properties folded to their heading;
+    /// folding or opening one by hand holds for it while the app runs.
+    var foldsProperties: Bool {
+        didSet {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["HEFT_IOS_PROPERTIES_FOLDED"] != nil { return }
+            #endif
+            HeftDefaults.shared.set(foldsProperties, forKey: Self.foldsPropertiesKey)
+        }
+    }
+    var propertiesAsText: Bool {
+        didSet {
+            #if DEBUG
+            // A launch's override is not the reader's choice.
+            if ProcessInfo.processInfo.environment["HEFT_IOS_PROPERTIES_AS_TEXT"] != nil { return }
+            #endif
+            HeftDefaults.shared.set(propertiesAsText, forKey: Self.propertiesAsTextKey)
+        }
+    }
 
     private static let orderKey = "dev.stenglein.Heft.iOS.recentOrder"
     private static let layoutKey = "dev.stenglein.Heft.iOS.recentLayout"
@@ -140,6 +162,8 @@ final class BrowsingPreferences {
     private static func pullKey(_ page: PullPage) -> String { "dev.stenglein.Heft.iOS.pull.\(page.rawValue)" }
     private static let captureStartKey = "dev.stenglein.Heft.iOS.captureStart"
     private static let searchKeyboardKey = "dev.stenglein.Heft.iOS.searchShowsKeyboard"
+    private static let propertiesAsTextKey = "dev.stenglein.Heft.propertiesAsText"
+    private static let foldsPropertiesKey = "dev.stenglein.Heft.foldsProperties"
 
     private init() {
         let defaults = HeftDefaults.shared
@@ -152,5 +176,17 @@ final class BrowsingPreferences {
         })
         captureStart = CaptureStart(rawValue: defaults.string(forKey: Self.captureStartKey) ?? "") ?? .lastUsed
         searchShowsKeyboard = defaults.object(forKey: Self.searchKeyboardKey) as? Bool ?? false
+        propertiesAsText = defaults.bool(forKey: Self.propertiesAsTextKey)
+        foldsProperties = defaults.bool(forKey: Self.foldsPropertiesKey)
+        #if DEBUG
+        // `HEFT_IOS_PROPERTIES_AS_TEXT=1|0` and `HEFT_IOS_PROPERTIES_FOLDED=1|0`
+        // for one launch, never stored.
+        if let asText = ProcessInfo.processInfo.environment["HEFT_IOS_PROPERTIES_AS_TEXT"] {
+            propertiesAsText = asText == "1"
+        }
+        if let folded = ProcessInfo.processInfo.environment["HEFT_IOS_PROPERTIES_FOLDED"] {
+            foldsProperties = folded == "1"
+        }
+        #endif
     }
 }

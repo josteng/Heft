@@ -85,6 +85,15 @@ final class AppearanceSettings: ObservableObject {
         }
     }
 
+    /// Whether a note opens with its properties folded to their heading.
+    /// Folding or opening one by hand holds for that note while the app runs.
+    @Published var foldsProperties: Bool {
+        didSet {
+            HeftDefaults.shared.set(foldsProperties, forKey: Self.foldsPropertiesKey)
+            AppearanceSync.changed()
+        }
+    }
+
     /// The frontmatter as the YAML it is, rather than drawn as a table.
     /// Obsidian's "source" display of properties.
     @Published var showsPropertiesAsText: Bool {
@@ -236,6 +245,7 @@ final class AppearanceSettings: ObservableObject {
     private static let italicKey = "dev.stenglein.Heft.appearance.italicColor"
     private static let colorfulFormattingKey = "dev.stenglein.Heft.colorfulFormatting"
     private static let propertiesAsTextKey = "dev.stenglein.Heft.propertiesAsText"
+    private static let foldsPropertiesKey = "dev.stenglein.Heft.foldsProperties"
     private static let headingFontKey = "dev.stenglein.Heft.appearance.headingFont"
     private static let paletteKey = "dev.stenglein.Heft.appearance.palette"
     private static let swatchesKey = "dev.stenglein.Heft.appearance.swatches"
@@ -261,6 +271,7 @@ final class AppearanceSettings: ObservableObject {
             : HeftDefaults.shared.bool(forKey: Self.colorfulFormattingKey)
         colorfulFormattingEnabled = colorful
         showsPropertiesAsText = HeftDefaults.shared.bool(forKey: Self.propertiesAsTextKey)
+        foldsProperties = HeftDefaults.shared.bool(forKey: Self.foldsPropertiesKey)
         palette = HeftDefaults.shared.string(forKey: Self.paletteKey)
             .flatMap(AppearancePreferences.ColorPalette.init(rawValue:)) ?? (launchedBefore ? .vivid : .muted)
         swatches = (HeftDefaults.shared.dictionary(forKey: Self.swatchesKey) as? [String: String] ?? [:])
@@ -517,6 +528,17 @@ struct AppearanceSettingsView: View {
                 }
             } header: {
                 SectionHeading("Headings", detail: "Besides their size and weight, how headings stand out from the text.")
+            }
+
+            Section {
+                Toggle(isOn: $appearance.showsPropertiesAsText) {
+                    SettingLabel("Show as Text", detail: "The YAML they are written in, rather than a table.")
+                }
+                Toggle(isOn: $appearance.foldsProperties) {
+                    SettingLabel("Start Folded", detail: "Notes open with their properties folded to the heading.")
+                }
+            } header: {
+                SectionHeading("Properties", detail: "The frontmatter at the top of a note.")
             }
 
             Section {

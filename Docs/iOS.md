@@ -44,7 +44,7 @@ note beside it. Narrowed in Split View or Slide Over it has the phone's
 tabs; so does an iPhone in landscape. The sidebar reuses the phone's lists:
 their rows are `NavigationLink(value:)`, which in a `List(selection:)`
 select instead of pushing. `HEFT_IOS_PAD_SIDEBAR` shows the sidebar in portrait, `HEFT_IOS_PAD_MODE` picks the pill's mode, and
-`HEFT_IOS_PAD_MONTH` opens the month, `HEFT_IOS_PAD_NO_CALENDAR=1|0` hides or shows it (kept by the scene), `HEFT_IOS_PAD_FORMAT` the Aa popover. `HEFT_IOS_PAD_STEPS=A.md,B.md,back` opens
+`HEFT_IOS_PAD_MONTH` opens the month, `HEFT_IOS_PAD_NO_CALENDAR=1|0` hides or shows it (kept by the scene), `HEFT_IOS_PROPERTIES_AS_TEXT=1|0` and `HEFT_IOS_PROPERTIES_FOLDED=1|0` set Show as Text and Start Folded for one launch, `HEFT_IOS_PAD_FORMAT` the Aa popover. `HEFT_IOS_PAD_STEPS=A.md,B.md,back` opens
 notes and goes back or forward, a step a second.
 The iPadOS menu bar has the Mac's File, Format and View items with the
 Mac's shortcuts (`HeftMenuCommands`), acting on the focused window's note

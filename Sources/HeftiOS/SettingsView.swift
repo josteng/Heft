@@ -125,6 +125,7 @@ struct SettingsView: View {
 /// change on either shows on the other once the vault has synced.
 private struct AppearanceSettingsView: View {
     @Environment(MobileVault.self) private var vault
+    @Bindable private var preferences = BrowsingPreferences.shared
 
     var body: some View {
         let appearance = vault.appearance
@@ -187,6 +188,14 @@ private struct AppearanceSettingsView: View {
                 Text("Headings")
             } footer: {
                 Text("New York is Apple's serif. Level Colors draws a bar in each level's color beside the heading.")
+            }
+            Section {
+                Toggle("Show as Text", isOn: $preferences.propertiesAsText)
+                Toggle("Start Folded", isOn: $preferences.foldsProperties)
+            } header: {
+                Text("Properties")
+            } footer: {
+                Text("Show as Text gives the YAML they are written in rather than a table. Start Folded opens notes with them folded to the heading.")
             }
         }
         .syncBadge(synced: true)

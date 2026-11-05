@@ -432,6 +432,24 @@ extension PropertyRealClickTests {
         #expect(rowCount(h) == open)
     }
 
+    @Test("Start Folded opens a note folded; the arrow opens it, and that holds for the note")
+    func startFolded() async throws {
+        let h = try await harness(.plain)
+        h.view.noteIdentity = "start-folded.md"
+        HeftTextKit2View.foldedPropertyNotes.remove(h.view.noteIdentity)
+        let open = rowCount(h)
+        h.view.propertiesStartFolded = { true }
+        h.coordinator.restyle(h.view)
+        #expect(h.view.propertiesFolded)
+        #expect(rowCount(h) == 0)
+        let rects = try #require(h.view.propertiesHeadingRect())
+        _ = h.click(CGPoint(x: rects.arrow.midX, y: rects.arrow.midY))
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(!h.view.propertiesFolded)
+        #expect(rowCount(h) == open)
+        #expect(h.view.string == Self.note, "folding writes nothing")
+    }
+
     @Test("Pills wrapped in a narrow window stay under their key's line and above the next row")
     func wrappedPills() async throws {
         let note = "---\naliases:\n  - ama\n  - asf\n  - asfd asfd sdf sadf sdf asdf\n  - one more\nMamba: asf\n---\nBody text.\n"

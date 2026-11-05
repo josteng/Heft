@@ -1679,10 +1679,15 @@ final class HeftTextKit2View: NSTextView {
     }
     /// The note on screen, whose properties may be folded.
     var noteIdentity = ""
-    /// The notes whose properties are folded to their heading, for this run
-    /// of the app.
+    /// The notes whose properties were folded or opened by hand, against
+    /// how Settings opens them, for this run of the app.
     nonisolated(unsafe) static var foldedPropertyNotes: Set<String> = []
-    var propertiesFolded: Bool { Self.foldedPropertyNotes.contains(noteIdentity) }
+    var propertiesFolded: Bool {
+        propertiesStartFolded() != Self.foldedPropertyNotes.contains(noteIdentity)
+    }
+    /// Settings' Start Folded, or a test's own, which must not change it for
+    /// suites running beside it.
+    lazy var propertiesStartFolded: () -> Bool = { AppearanceSettings.shared.foldsProperties }
     /// The notes whose properties are shown as their YAML, for this run of
     /// the app, beside the View menu's setting for every note.
     nonisolated(unsafe) static var sourcePropertyNotes: Set<String> = []
@@ -4934,7 +4939,7 @@ extension HeftTextKit2View {
 
     /// Folds the properties to their heading, or opens them again.
     func togglePropertiesFold() {
-        if propertiesFolded { Self.foldedPropertyNotes.remove(noteIdentity) }
+        if Self.foldedPropertyNotes.contains(noteIdentity) { Self.foldedPropertyNotes.remove(noteIdentity) }
         else { Self.foldedPropertyNotes.insert(noteIdentity) }
         onNeedsRestyle?()
         if let rects = propertiesHeadingRect() {

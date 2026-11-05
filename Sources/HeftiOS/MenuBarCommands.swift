@@ -82,6 +82,7 @@ struct HeftMenuCommands: Commands {
                 Button("Numbered List") { note?.format(.numbers) }
                 Button("Quote") { note?.format(.quote) }
                 Button("Callout") { note?.format(.callout) }
+                Button("Add Property") { note?.addProperty() }
                 Divider()
                 Button("Indent") { note?.format(.indent) }
                 Button("Outdent") { note?.format(.outdent) }
@@ -101,6 +102,8 @@ struct HeftMenuCommands: Commands {
             }
         }
         CommandGroup(after: .sidebar) {
+            Toggle("Properties as Text", isOn: Bindable(BrowsingPreferences.shared).propertiesAsText)
+            Divider()
             Button("Files") { library?.numbered(1) }.keyboardShortcut("1")
             Button("Recent") { library?.numbered(2) }.keyboardShortcut("2")
             Button("Tags") { library?.numbered(3) }.keyboardShortcut("3")

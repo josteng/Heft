@@ -2590,6 +2590,7 @@ final class AppModel: ObservableObject, ProposalReviewing {
             headingFont: appearance.headingFont,
             headingBars: appearance.headingColor == .levelColors,
             propertiesAsText: appearance.showsPropertiesAsText,
+            propertiesFolded: appearance.foldsProperties,
             palette: appearance.palette,
             accentColor: ink(appearance.accentColor),
             linkColor: ink(appearance.linkColor),

@@ -277,6 +277,8 @@ struct LiveNoteEditor: UIViewRepresentable {
                 && a.current?.relativePath == b.current?.relativePath
                 && a.strictLineBreaks == b.strictLineBreaks
                 && a.colorfulFormatting == b.colorfulFormatting
+                && a.propertiesAsText == b.propertiesAsText
+                && a.propertiesFolded == b.propertiesFolded
                 && a.headingFont == b.headingFont && a.headingBars == b.headingBars
                 && a.palette == b.palette
                 && sameColors([a.accentColor, a.linkColor, a.tagColor, a.codeColor, a.boldColor, a.italicColor]

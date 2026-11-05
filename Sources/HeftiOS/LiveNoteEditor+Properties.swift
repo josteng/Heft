@@ -36,8 +36,17 @@ struct PropertyEditorState {
 
 extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
     private var noteKey: String { document?.path ?? "" }
-    var propertiesFolded: Bool { PropertyEditorState.foldedNotes.contains(noteKey) }
-    var propertiesAsText: Bool { PropertyEditorState.sourceNotes.contains(noteKey) }
+    /// As Settings opens notes, unless this one was folded or opened by
+    /// hand; `foldedNotes` holds those.
+    var propertiesFolded: Bool { (renderContext?.propertiesFolded ?? false) != PropertyEditorState.foldedNotes.contains(noteKey) }
+
+    private func toggleFold() {
+        if PropertyEditorState.foldedNotes.contains(noteKey) { PropertyEditorState.foldedNotes.remove(noteKey) }
+        else { PropertyEditorState.foldedNotes.insert(noteKey) }
+    }
+    /// Every note's, by setting, or this one's, from its `{}`.
+    var propertiesAsText: Bool { allPropertiesAsText || PropertyEditorState.sourceNotes.contains(noteKey) }
+    private var allPropertiesAsText: Bool { renderContext?.propertiesAsText ?? false }
 
     private func origin(of textView: UITextView) -> CGPoint {
         CGPoint(x: textView.textContainerInset.left, y: textView.textContainerInset.top)
@@ -63,7 +72,7 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
     private func allTargets(in textView: MobileTextView) -> [(rect: CGRect, target: PropertyGeometry.Target)] {
         PropertyGeometry.targets(
             in: textView.text ?? "", layout: layout, manager: textView.textLayoutManager, origin: origin(of: textView),
-            asText: propertiesAsText, folded: propertiesFolded, offersSource: true, slop: 6
+            asText: propertiesAsText, folded: propertiesFolded, offersSource: !allPropertiesAsText, slop: 6
         )
     }
 
@@ -145,8 +154,7 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
     func performProperty(_ target: PropertyGeometry.Target, in textView: MobileTextView) {
         switch target {
         case .fold:
-            if propertiesFolded { PropertyEditorState.foldedNotes.remove(noteKey) }
-            else { PropertyEditorState.foldedNotes.insert(noteKey) }
+            toggleFold()
             restyle(textView)
         case .source:
             if propertiesAsText {
@@ -217,9 +225,7 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
             if let block = PropertyEditing.blockRange(in: text) {
                 // A caret arriving in folded properties opens them: on a
                 // folded row it would stand invisible.
-                if propertiesFolded, caret > 0, caret < NSMaxRange(block) {
-                    PropertyEditorState.foldedNotes.remove(noteKey)
-                }
+                if propertiesFolded, caret > 0, caret < NSMaxRange(block) { toggleFold() }
             }
             if let target = PropertySurface.caretOutOfColonGap(
                 in: text, caret: caret, previous: properties.lastCaret,
@@ -438,7 +444,9 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
         properties.sourceButton = source
         let symbol = UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
         arrow.isHidden = heading == nil || propertiesAsText
-        source.isHidden = heading == nil
+        // The setting shows every note's as YAML; the button is for one
+        // note, so it is not offered against that.
+        source.isHidden = heading == nil || allPropertiesAsText
         if let heading {
             arrow.frame = heading.arrow
             arrow.image = UIImage(systemName: propertiesFolded ? "chevron.right" : "chevron.down", withConfiguration: symbol)

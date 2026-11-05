@@ -42,6 +42,9 @@ final class PropertyTapTests: XCTestCase {
         app = XCUIApplication()
         app.launchEnvironment["HEFT_IOS_VAULT"] = vault.path
         app.launchEnvironment["HEFT_IOS_OPEN"] = "Trip.md"
+        // The table, whatever the simulator's Settings say.
+        app.launchEnvironment["HEFT_IOS_PROPERTIES_AS_TEXT"] = "0"
+        app.launchEnvironment["HEFT_IOS_PROPERTIES_FOLDED"] = "0"
         app.launch()
         XCTAssertTrue(row("title").waitForExistence(timeout: 10))
     }
@@ -171,6 +174,21 @@ final class PropertyTapTests: XCTestCase {
         XCTAssertTrue(text.hasPrefix("---\nstatus:\n"), text)
     }
 
+    func testStartFoldedOpensFoldedAndTheHeadingOpensIt() {
+        let title = row("title").frame
+        app.terminate()
+        app.launchEnvironment["HEFT_IOS_PROPERTIES_FOLDED"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(row("title").waitForExistence(timeout: 2), "rows shown though folded")
+        // The heading, where it stood above the first row.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: title.midX + 40, dy: title.midY - 34)).tap()
+        XCTAssertTrue(row("title").waitForExistence(timeout: 3))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(saved { _ in true }, Self.source)
+    }
+
     func testALongPressOffersTheRowsMenu() { longPressRemoves(at: point(onRow: "title", x: 220), gone: "Weekend") }
     func testALongPressOnAnEmptyValueOffersTheRowsMenu() { longPressRemoves(at: value("status"), gone: "status") }
     func testALongPressOnPillsOffersTheRowsMenu() { longPressRemoves(at: point(onRow: "tags", x: 160), gone: "travel") }
@@ -189,6 +207,15 @@ final class PropertyTapTests: XCTestCase {
         remove.tap()
         let text = saved { !$0.contains(gone) }
         XCTAssertFalse(text.contains(gone), text)
+    }
+
+    func testPropertiesAsTextShowsTheYAMLForEveryNote() {
+        app.terminate()
+        app.launchEnvironment["HEFT_IOS_PROPERTIES_AS_TEXT"] = "1"
+        app.launch()
+        // As text, the rows have no icon buttons, and the text is typed into
+        // as written: a tap on the empty value's line and a letter after it.
+        XCTAssertFalse(row("title").waitForExistence(timeout: 4))
     }
 
     func testTheIconMenuSaysWhyARowIsRed() {
