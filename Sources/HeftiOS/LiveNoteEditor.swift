@@ -63,12 +63,24 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.onTextWidth = { [weak coordinator, weak view] in
             guard let view else { return }
             coordinator?.restyleIfWidthChanged(view)
+            coordinator?.placePendingPropertyControls(in: view)
         }
         view.onAcceptSuggestion = { [weak coordinator] position in coordinator?.acceptSuggestion(position) }
+        view.onAddProperty = { [weak coordinator] in coordinator?.addProperty() }
+        view.onKey = { [weak coordinator] key in coordinator?.handlePropertyKey(key) ?? false }
+        view.caretOverride = { [weak coordinator, weak view] in
+            guard let view else { return nil }
+            return coordinator?.listCaretRect(in: view)
+        }
         coordinator.fillShortcutsBar(of: view)
         view.isOnPicture = { [weak coordinator, weak view] point in
             guard let coordinator, let view else { return false }
             return coordinator.pictureRange(at: point, in: view) != nil
+                || coordinator.isOnPropertyControl(at: point, in: view)
+        }
+        view.isOnPropertyRow = { [weak coordinator, weak view] point in
+            guard let coordinator, let view else { return false }
+            return coordinator.propertyRow(at: point, in: view) != nil
         }
         view.addInteraction(UIScribbleInteraction(delegate: coordinator))
         if UIDevice.current.userInterfaceIdiom == .pad {
@@ -114,12 +126,12 @@ struct LiveNoteEditor: UIViewRepresentable {
         UIGestureRecognizerDelegate
     {
         weak var textView: MobileTextView?
-        private var document: NoteDocument?
+        var document: NoteDocument?
         /// Double-tap and squeeze, on an iPad.
         var pencil: UIPencilInteraction?
         /// The format palette a Pencil gesture opened, while it shows.
         weak var palette: UIViewController?
-        private var renderContext: RenderContext?
+        var renderContext: RenderContext?
         private var scrolledDown: ((Bool) -> Void)?
         private var follow: ((URL) -> Void)?
         private var attach: ((EditorAttachment) throws -> String)?
@@ -127,7 +139,10 @@ struct LiveNoteEditor: UIViewRepresentable {
         private var attachAt: NSRange?
 
         private let restyler = LiveRestyler()
-        private var layout: LiveLayout { restyler.layout }
+        var layout: LiveLayout { restyler.layout }
+        /// The properties table's state: what the caret left, the tap
+        /// being settled, the menu buttons.
+        var properties = PropertyEditorState()
         /// The text revision this view last took from the document, so a
         /// rescan that re-read the same text does not reset the caret.
         private var loadedRevision = -1
@@ -138,7 +153,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         private var settlingUntil = Date.distantPast
         /// Whether the text view had the keyboard when a tap began, so a
         /// checkbox tapped while reading does not leave the keyboard up.
-        private var hadFocusAtTap = false
+        var hadFocusAtTap = false
 
         func update(from editor: LiveNoteEditor) {
             document = editor.document
@@ -277,7 +292,11 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// a capture merged in above the line being typed moves that line.
         private func load(_ text: String, into textView: MobileTextView) {
             let selection = textView.selectedRange
-            let caret = NoteSync.caret(selection.location, from: textView.text, to: text)
+            // A note opens past its frontmatter, as on the Mac: on the
+            // opening fence the caret would stand in the heading.
+            let caret = loadedRevision < 0
+                ? PropertyEditing.openingCaret(in: text)
+                : NoteSync.caret(selection.location, from: textView.text, to: text)
             restyler.reset()
             textView.text = text
             textView.selectedRange = NSRange(location: caret, length: 0)
@@ -346,6 +365,8 @@ struct LiveNoteEditor: UIViewRepresentable {
 
             var context = renderContext
             context.appearance = textView.traitCollection
+            context.propertiesFolded = propertiesFolded
+            context.propertiesAsText = propertiesAsText
             switch restyler.restyle(
                 storage, source: source, reveal: reveal, context: context,
                 width: textView.textContainer.size.width, minimumContentWidth: 200
@@ -361,6 +382,7 @@ struct LiveNoteEditor: UIViewRepresentable {
                 updateTypingAttributes(in: textView)
                 refreshFormatState()
             }
+            layoutPropertyControls(in: textView)
         }
 
         /// A blank line takes plain body text, as on the Mac; anywhere else
@@ -393,6 +415,9 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
+            if let view = textView as? MobileTextView, handlePropertyTyping(text, in: range, of: view) {
+                return false
+            }
             if text == "\n", range.length == 0, let view = textView as? MobileTextView,
                continueStructure(at: range.location, in: view) {
                 return false
@@ -485,14 +510,16 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         /// Through the text view, so undo and the delegate see it as typing.
         /// A break in `text` is written in the note's line ending.
-        private func replace(_ range: NSRange, with text: String, in textView: MobileTextView) {
+        func replace(_ range: NSRange, with text: String, in textView: MobileTextView) {
             let text = inNoteLineEnding(text, in: textView) ?? text
             guard let start = textView.position(from: textView.beginningOfDocument, offset: range.location),
                   let end = textView.position(from: start, offset: range.length),
                   let textRange = textView.textRange(from: start, to: end)
             else { return }
             noteEdit(range, replacedBy: text)
+            properties.replacing = true
             textView.replace(textRange, withText: text)
+            properties.replacing = false
         }
 
         /// Each edit restyles before the next, so the shift is replaced
@@ -592,7 +619,10 @@ struct LiveNoteEditor: UIViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 restyleQueued = false
-                if let textView { restyle(textView) }
+                if let textView {
+                    settlePropertyCaret(in: textView)
+                    restyle(textView)
+                }
                 refreshFormatState()
                 updateBarForSelection()
                 updateSuggestions()
@@ -603,6 +633,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
+            if let view = textView as? MobileTextView { leaveProperties(in: view) }
             document?.editing = false
             if let view = textView as? MobileTextView { restyle(view) }
             document?.saveSoon(immediately: true)
@@ -654,6 +685,10 @@ struct LiveNoteEditor: UIViewRepresentable {
             case link(URL)
             /// A drawn picture, whose source is hidden under it.
             case picture(NSRange)
+            /// The properties table's fold, `{}`, a pill's × or Add property.
+            case property(PropertyGeometry.Target)
+            /// A property row's text, whose caret the editor places itself.
+            case propertyRow(line: Int, inValue: Bool, at: CGPoint)
         }
 
         /// The embed under a drawn picture at `point`, if there is one.
@@ -682,6 +717,10 @@ struct LiveNoteEditor: UIViewRepresentable {
                 x: point.x - textView.textContainerInset.left,
                 y: point.y - textView.textContainerInset.top
             )
+            if let hit = propertyTarget(at: point, in: textView) { return .property(hit) }
+            if let row = propertyRow(at: point, in: textView) {
+                return .propertyRow(line: row.line, inValue: row.inValue, at: point)
+            }
             guard let fragment = manager.textLayoutFragment(for: inContainer) else { return nil }
             let text = textView.text as NSString
             let start = content.offset(from: content.documentRange.location,
@@ -745,7 +784,9 @@ struct LiveNoteEditor: UIViewRepresentable {
             hadFocusAtTap = textView.isFirstResponder
             guard let found = target(at: touch.location(in: textView), in: textView) else { return false }
             if !hadFocusAtTap {
-                if case .picture = found {} else {
+                switch found {
+                case .picture, .propertyRow: break
+                default:
                     textView.refusesFocus = true
                     // Back once the tap is over, or a moment later if it
                     // became a scroll instead.
@@ -778,6 +819,12 @@ struct LiveNoteEditor: UIViewRepresentable {
                 // finger. Typing or Delete then acts on the picture.
                 if !textView.isFirstResponder { textView.becomeFirstResponder() }
                 textView.selectedRange = range
+                return
+            case .property(let hit):
+                performProperty(hit, in: textView)
+                if case .addProperty = hit { return }
+            case .propertyRow(let line, let inValue, let point):
+                tapRow(line, inValue: inValue, at: point, in: textView)
                 return
             }
             // The text view refused the keyboard for this tap; a box ticked
@@ -940,7 +987,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// A completion offered in the strip: what it shows, and what
         /// accepting it writes for the link or tag being typed.
         private struct Suggestion: Equatable {
-            enum Kind { case link, linkFollowUp, linkPart, pastedTitle, tag, callout, color }
+            enum Kind { case link, linkFollowUp, linkPart, pastedTitle, tag, callout, color, property }
             var title: String
             var detail: String
             var destination: String
@@ -958,7 +1005,7 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// `[[` offers notes, as the Mac's menu does: by name and by alias,
         /// best first, and the most recently edited before anything is
         /// typed. `#` offers the vault's tags, most used first.
-        private func updateSuggestions() {
+        func updateSuggestions() {
             guard let textView, let index = renderContext?.index else { return }
             let text = textView.text ?? ""
             let selection = textView.selectedRange
@@ -1024,6 +1071,14 @@ struct LiveNoteEditor: UIViewRepresentable {
                     let count = index.noteCount(forTag: $0)
                     return Suggestion(title: "#\($0)", detail: count == 1 ? "1 note" : "\(count) notes",
                                       destination: $0, kind: .tag)
+                }
+            } else if !propertiesAsText, let property = PropertyCompletionContext.detect(
+                in: text, selection: selection, emptyKey: properties.keyMenuRow == selection.location
+            ) {
+                let isKey = property.part == .key
+                found = propertySuggestions(property, in: text, index: index).map {
+                    Suggestion(title: $0, detail: "", destination: $0, kind: .property,
+                               symbol: isKey ? "list.bullet.rectangle" : nil)
                 }
             }
             guard found != suggestions else { return }
@@ -1217,6 +1272,8 @@ struct LiveNoteEditor: UIViewRepresentable {
             case .color:
                 guard let context = HighlightCompletionContext.detect(in: text, selection: selection) else { return }
                 apply(context.accepting(HighlightColor(rawValue: suggestion.destination)))
+            case .property:
+                acceptProperty(suggestion.destination, in: textView)
             }
             updateSuggestions()
         }
@@ -1644,6 +1701,46 @@ final class MobileTextView: UITextView {
     var onFormat: ((FormatTool) -> Void)?
     var onAttach: ((AttachSource) -> Void)?
     var onAcceptSuggestion: ((Int) -> Void)?
+    /// Add Property, from the note's menu.
+    var onAddProperty: (() -> Void)?
+    /// A hardware key the properties table takes: ↑, ↓ and ⌘⌫. True
+    /// when it did.
+    var onKey: ((UIKey) -> Bool)?
+    /// Where the caret is drawn instead of where TextKit puts it: after a
+    /// list's typed item, which is drawn after its pills.
+    var caretOverride: (() -> CGRect?)?
+    /// Presses taken by `onKey`, whose ends UIKit must not see either.
+    /// Optional for the reason `keyboardWatch` is: this initializer skips
+    /// Swift's initial values.
+    private var takenPresses: Set<UIPress>?
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.count == 1, let press = presses.first, let key = press.key, onKey?(key) == true {
+            takenPresses = (takenPresses ?? []).union([press])
+            return
+        }
+        super.pressesBegan(presses, with: event)
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let rest = presses.subtracting(takenPresses ?? [])
+        takenPresses?.subtract(presses)
+        if !rest.isEmpty { super.pressesEnded(rest, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let rest = presses.subtracting(takenPresses ?? [])
+        takenPresses?.subtract(presses)
+        if !rest.isEmpty { super.pressesCancelled(rest, with: event) }
+    }
+
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        if let rect = caretOverride?(), let selection = selectedTextRange, selection.isEmpty,
+           compare(position, to: selection.start) == .orderedSame {
+            return rect
+        }
+        return super.caretRect(for: position)
+    }
     /// Called when the window's width class changes, as entering Split View.
     var onWidthClass: (() -> Void)?
     /// Called after a layout pass in a window, for the editor to check
@@ -1674,6 +1771,7 @@ final class MobileTextView: UITextView {
         return super.canPerformAction(action, withSender: sender)
     }
     var isOnPicture: (CGPoint) -> Bool = { _ in false }
+    var isOnPropertyRow: (CGPoint) -> Bool = { _ in false }
 
     /// UIKit's own taps and presses would put a caret into the source a
     /// picture hides, revealing it and moving the picture away from the
@@ -1681,6 +1779,12 @@ final class MobileTextView: UITextView {
     override func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
         if recognizer !== ownTap, !(recognizer is UIPanGestureRecognizer),
            isOnPicture(recognizer.location(in: self)) {
+            return false
+        }
+        // A single tap in a property row is the editor's to place; a long
+        // press or a double tap still selects as anywhere else.
+        if recognizer !== ownTap, let tap = recognizer as? UITapGestureRecognizer, tap.numberOfTapsRequired == 1,
+           isOnPropertyRow(recognizer.location(in: self)) {
             return false
         }
         return super.gestureRecognizerShouldBegin(recognizer)

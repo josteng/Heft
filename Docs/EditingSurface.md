@@ -174,6 +174,16 @@ there by the picker on the row's icon, so the two apps agree; the file is
 edited in place, its other entries untouched. A key with no type gets its
 icon guessed from the value.
 
+Both apps share the decisions, not just the drawing: `PropertySurface`
+answers every caret rule, tap, key and leave-time tidy from the text alone,
+`PropertyLeaving` tracks the rows the caret left, and `PropertyGeometry`
+measures the controls from the drawn layout. Each editor only carries them
+out. On iOS a single tap in a row is the editor's: UIKit put the caret on
+hidden text (the closing fence, a folded item, the gap) and moved it again
+after any correction. Each row's menu is a real `UIButton` over its icon,
+since a tap cannot present a context menu; it is built once, as a menu
+replaced during a restyle closes.
+
 Every row's decoration covers its whole line, newline included: a blank row
 is otherwise an empty range, which no incremental pass writes to. A note
 opens with the caret past its frontmatter, or the opening fence is the

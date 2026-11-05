@@ -18,6 +18,7 @@ swift run Heft daily <vault> [YYYY-MM-DD]       # template expansion without the
 swift run Heft help [--json]                    # every verb and flag, from CommandLineSpec
 swift run Heft version                          # also --version and -v
 xcodebuild -scheme HeftiOS -destination 'generic/platform=iOS Simulator' build   # the iOS app
+xcodebuild test -scheme HeftiOSUITests -destination 'platform=iOS Simulator,name=iPhone 17 Pro'   # real taps
     # DEBUG launch variables set up a screenshot; Docs/iOS.md lists them
 swift run Heft proposals <vault>                # agent edits waiting for review
 swift run Heft backlinks|links|outline <vault> <note>   # the resolved link index

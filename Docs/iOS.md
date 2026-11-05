@@ -12,7 +12,11 @@ xcodebuild -scheme HeftiOS -destination 'generic/platform=iOS' -allowProvisionin
 xcrun devicectl device install app --device <udid> <path>/HeftiOS.app
 ```
 
-Nothing can tap the simulator from a script, so DEBUG builds read launch
+`HeftiOSUITests` taps the simulator for real, through XCUITest, on a
+throwaway vault, and reads the saved file back; it covers the properties
+table, and runs with
+`xcodebuild test -scheme HeftiOSUITests -destination 'platform=iOS Simulator,name=iPhone 17 Pro'`.
+Nothing else can tap the simulator from a script, so DEBUG builds read launch
 variables (`SIMCTL_CHILD_` prefixed for `simctl launch`) that set a screen
 up for a screenshot: `HEFT_IOS_VAULT` opens a folder without the picker,
 `HEFT_IOS_TAB`, `HEFT_IOS_NOTE`, `HEFT_IOS_DAY`, `HEFT_IOS_FOLDED` place the

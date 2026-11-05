@@ -129,6 +129,11 @@ final class NoteDocument {
         (textView as? MobileTextView)?.onAttach?(source)
     }
 
+    /// A new property, typed into the note's properties table.
+    func addProperty() {
+        (textView as? MobileTextView)?.onAddProperty?()
+    }
+
     func find() {
         textView?.findInteraction?.presentFindNavigator(showingReplace: false)
     }
@@ -447,6 +452,7 @@ struct NoteEditingToolbar: ToolbarContent {
             .disabled(!hasOutline)
         Button("Linked From (\(backlinkCount))", systemImage: "arrow.uturn.left", action: showBacklinks)
             .disabled(backlinkCount == 0)
+        Button("Add Property", systemImage: "list.bullet.rectangle") { document.addProperty() }
         Divider()
         if let note = vault.note(at: path) {
             Button("Copy Link", systemImage: "link") {
