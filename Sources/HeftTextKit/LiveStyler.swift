@@ -1353,6 +1353,16 @@ enum LiveStyler {
                 ], range: range)
             }
             paragraph.firstLineHeadIndent = blank ? padding : padding + column
+            // Laid out as a row with a key in it, as a blank body line is
+            // (`blankLineParagraphStyle`): TextKit 2 puts an empty
+            // paragraph's line spacing into its line box, which moved the
+            // row and its outline up and stretched the caret, until the
+            // first letter put them back.
+            if blank {
+                paragraph.paragraphSpacingBefore += paragraph.lineSpacing
+                paragraph.lineSpacing = 0
+                paragraph.maximumLineHeight = paragraph.minimumLineHeight
+            }
         }
         storage.addAttribute(.paragraphStyle, value: paragraph, range: paragraphRange)
 

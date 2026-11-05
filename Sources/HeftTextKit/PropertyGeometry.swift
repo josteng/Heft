@@ -126,6 +126,32 @@ enum PropertyGeometry {
         return targets
     }
 
+    /// The caret in a row's text, for iOS: as tall as the row's letters and
+    /// centred where the row's outline is centred, between the capitals'
+    /// tops and the baseline. UIKit draws the caret nearly the outline's
+    /// height and a point above its middle, so it touched the outline's top
+    /// and not its bottom. `x` is where UIKit put it across.
+    static func rowCaret(
+        in source: String, selection: NSRange, layout: LiveLayout, manager: NSTextLayoutManager?,
+        origin: CGPoint, x: CGFloat
+    ) -> CGRect? {
+        guard selection.length == 0, let row = PropertySurface.row(at: selection.location, in: source),
+              case .propertyRow? = layout.blocks[row.range.location],
+              let manager, let content = manager.textContentManager,
+              let place = content.location(content.documentRange.location, offsetBy: selection.location),
+              let fragment = manager.textLayoutFragment(for: place)
+        else { return nil }
+        let start = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+        let offset = selection.location - start
+        guard let line = fragment.textLineFragments.first(where: {
+            NSLocationInRange(offset, $0.characterRange) || offset == NSMaxRange($0.characterRange)
+        }) ?? fragment.textLineFragments.first else { return nil }
+        let baseline = fragment.layoutFragmentFrame.minY + origin.y + line.typographicBounds.minY + line.glyphOrigin.y
+        let font = NSFont.systemFont(ofSize: Theme.bodySize - 1)
+        let height = ceil(font.ascender - font.descender)
+        return CGRect(x: x, y: baseline - font.capHeight / 2 - height / 2, width: 2, height: height)
+    }
+
     /// The property row drawn at `point`, and whether it is in the value's
     /// column.
     static func column(

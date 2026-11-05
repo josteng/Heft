@@ -320,6 +320,15 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
         )
     }
 
+    /// The caret in a row's text, centred in the row's outline.
+    func rowCaretRect(in textView: MobileTextView, standard: CGRect) -> CGRect? {
+        guard !propertiesAsText, textView.isFirstResponder else { return nil }
+        return PropertyGeometry.rowCaret(
+            in: textView.text ?? "", selection: textView.selectedRange, layout: layout,
+            manager: textView.textLayoutManager, origin: origin(of: textView), x: standard.minX
+        )
+    }
+
     // MARK: Typing
 
     /// What the keyboard types into the table that is not plain typing:
@@ -622,5 +631,6 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
         restyle(textView)
     }
 }
+
 
 

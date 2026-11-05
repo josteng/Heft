@@ -139,6 +139,22 @@ struct PropertyRealClickTests {
                 + line.typographicBounds.minX + line.locationForCharacter(at: offset).x
         }
 
+        /// Where TextKit puts the insertion point at `location`, as a rect
+        /// in the view: the selection segment of an empty range, which the
+        /// caret is drawn from, height included.
+        func caretRect(at location: Int) -> CGRect? {
+            guard let manager = view.textLayoutManager, let content = manager.textContentManager,
+                  let place = content.location(content.documentRange.location, offsetBy: location),
+                  let range = NSTextRange(location: place, end: place)
+            else { return nil }
+            var found: CGRect?
+            manager.enumerateTextSegments(in: range, type: .selection, options: []) { _, frame, _, _ in
+                found = frame
+                return false
+            }
+            return found.map { $0.offsetBy(dx: view.textContainerOrigin.x, dy: view.textContainerOrigin.y) }
+        }
+
         /// A full click at `point`, in view coordinates; returns the caret.
         func click(_ point: CGPoint, count: Int = 1) -> NSRange {
             let inWindow = view.convert(point, to: nil)
@@ -369,6 +385,23 @@ extension PropertyRealClickTests {
         try await addProperty(h)
         #expect(h.view.string.contains("Foo:\n"), "\(h.view.string.debugDescription)")
         #expect(!h.view.visibleCompletions.isEmpty, "\(h.view.string.debugDescription)")
+    }
+
+    @Test("A new row is laid out where its first letter leaves it, caret and all", arguments: Mode.allCases)
+    func newRowLayout(mode: Mode) async throws {
+        let h = try await harness(mode)
+        try await addProperty(h)
+        let start = h.view.selectedRange().location
+        let empty = try #require(h.row(start)?.frame)
+        let emptyCaret = try #require(h.caretRect(at: start))
+        try await type("a", in: h, mode: mode == .normal ? .insert : mode)
+        h.coordinator.restyle(h.view)
+        let typed = try #require(h.row(start)?.frame)
+        let typedCaret = try #require(h.caretRect(at: h.view.selectedRange().location))
+        // The row, which the outline is drawn from: neither moves nor grows.
+        #expect(abs(empty.minY - typed.minY) < 0.5 && abs(empty.height - typed.height) < 0.5, "empty \(empty) typed \(typed)")
+        #expect(abs(emptyCaret.midY - typedCaret.midY) < 0.5, "empty \(emptyCaret) typed \(typedCaret)")
+        #expect(abs(emptyCaret.height - typedCaret.height) < 0.5, "empty \(emptyCaret) typed \(typedCaret)")
     }
 
     @Test("Add property with an empty row waiting goes to it, and makes no second", arguments: Mode.allCases)

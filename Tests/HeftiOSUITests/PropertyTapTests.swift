@@ -239,6 +239,84 @@ final class PropertyTapTests: XCTestCase {
         XCTAssertTrue(text.contains("rating: 4\nmood: calm\n---\n"), text)
     }
 
+    /// The rows, in screen points, of the caret's pixels inside `area`: the
+    /// tint's blue, in whichever of a few screenshots caught it lit.
+    private func caretRows(in area: CGRect) -> ClosedRange<Int>? {
+        for _ in 0..<10 {
+            let shot = XCUIScreen.main.screenshot().image
+            guard let image = shot.cgImage, let data = image.dataProvider?.data,
+                  let bytes = CFDataGetBytePtr(data) else { return nil }
+            let scale = CGFloat(image.width) / shot.size.width
+            let perRow = image.bytesPerRow, perPixel = image.bitsPerPixel / 8
+            var rows: [Int] = []
+            for y in Int(area.minY * scale)..<Int(area.maxY * scale) {
+                for x in Int(area.minX * scale)..<Int(area.maxX * scale) {
+                    let pixel = bytes + y * perRow + x * perPixel
+                    // BGRA or RGBA: the caret is blue on either reading.
+                    let (first, third) = (Int(pixel[0]), Int(pixel[2]))
+                    let blue = image.bitmapInfo.contains(.byteOrder32Little) ? first : third
+                    let red = image.bitmapInfo.contains(.byteOrder32Little) ? third : first
+                    if blue > 180, red < 90 { rows.append(y); break }
+                }
+            }
+            if let low = rows.min(), let high = rows.max() { return low...high }
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        return nil
+    }
+
+    /// The rows, in screen points, of the outline's top and bottom border at
+    /// screen column `x`, between `area`'s top and bottom.
+    private func outlineRows(at x: CGFloat, in area: CGRect) -> (top: CGFloat, bottom: CGFloat)? {
+        let shot = XCUIScreen.main.screenshot().image
+        guard let image = shot.cgImage, let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data)
+        else { return nil }
+        let scale = CGFloat(image.width) / shot.size.width
+        let perRow = image.bytesPerRow, perPixel = image.bitsPerPixel / 8
+        // Light or dark: the border is what differs from the page above it.
+        let column = Int(x * scale)
+        func value(_ y: Int) -> Int { Int((bytes + y * perRow + column * perPixel)[1]) }
+        let page = value(Int(area.minY * scale))
+        var rows: [Int] = []
+        for y in Int(area.minY * scale)..<Int(area.maxY * scale) where abs(value(y) - page) > 30 { rows.append(y) }
+        guard let top = rows.min(), let bottom = rows.max() else { return nil }
+        return (CGFloat(top) / scale, CGFloat(bottom) / scale)
+    }
+
+    func testTheCaretIsCentredInARowsOutline() {
+        point(onRow: "title", x: 280).tap()
+        let icon = row("title")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        Thread.sleep(forTimeInterval: 0.5)
+        // The icon's button is taller than the outline and centred on the
+        // same row, so the outline lies inside its band and no other row does.
+        let area = CGRect(x: 0, y: icon.frame.minY, width: 400, height: icon.frame.height)
+        // Between the icon and the key, where no letter is.
+        let outline = outlineRows(at: icon.frame.maxX + 3, in: area)
+        // The caret, past the value's end.
+        let caret = caretRows(in: CGRect(x: icon.frame.maxX + 150, y: area.minY, width: 200, height: area.height))
+        let shot = XCUIScreen.main.screenshot().image
+        let scale = (shot.cgImage.map { CGFloat($0.width) } ?? shot.size.width) / shot.size.width
+        guard let outline, let caret else { return XCTFail("outline \(String(describing: outline)) caret \(String(describing: caret))") }
+        let above = CGFloat(caret.lowerBound) / scale - outline.top
+        let below = outline.bottom - CGFloat(caret.upperBound) / scale
+        XCTAssertEqual(above, below, accuracy: 1.5, "room above \(above), below \(below)")
+    }
+
+    func testANewRowsCaretStaysPutAtTheFirstLetter() {
+        point(onRow: "rating", x: 30).withOffset(CGVector(dx: 0, dy: 32)).tap()
+        let icon = app.buttons["Property"]
+        XCTAssertTrue(icon.waitForExistence(timeout: 3))
+        // From the icon to well past the first letter, the row's height and some.
+        let area = CGRect(x: icon.frame.maxX, y: icon.frame.minY - 8, width: 60, height: icon.frame.height + 16)
+        let empty = caretRows(in: area)
+        app.typeText("a")
+        Thread.sleep(forTimeInterval: 0.5)
+        let typed = caretRows(in: area)
+        XCTAssertNotNil(empty)
+        XCTAssertEqual(empty, typed, "the caret moved or grew at the first letter")
+    }
+
     func testAddPropertyLeftEmptyLeavesNoRow() {
         point(onRow: "rating", x: 30).withOffset(CGVector(dx: 0, dy: 32)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3) || app.buttons["Done"].exists)

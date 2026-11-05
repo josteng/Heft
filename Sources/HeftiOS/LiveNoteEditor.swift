@@ -76,9 +76,9 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.onAcceptSuggestion = { [weak coordinator] position in coordinator?.acceptSuggestion(position) }
         view.onAddProperty = { [weak coordinator] in coordinator?.addProperty() }
         view.onKey = { [weak coordinator] key in coordinator?.handlePropertyKey(key) ?? false }
-        view.caretOverride = { [weak coordinator, weak view] in
-            guard let view else { return nil }
-            return coordinator?.listCaretRect(in: view)
+        view.caretOverride = { [weak coordinator, weak view] standard in
+            guard let view, let coordinator else { return nil }
+            return coordinator.listCaretRect(in: view) ?? coordinator.rowCaretRect(in: view, standard: standard)
         }
         coordinator.fillShortcutsBar(of: view)
         view.isOnPicture = { [weak coordinator, weak view] point in
@@ -1724,7 +1724,7 @@ final class MobileTextView: UITextView {
     var onKey: ((UIKey) -> Bool)?
     /// Where the caret is drawn instead of where TextKit puts it: after a
     /// list's typed item, which is drawn after its pills.
-    var caretOverride: (() -> CGRect?)?
+    var caretOverride: ((CGRect) -> CGRect?)?
     /// Presses taken by `onKey`, whose ends UIKit must not see either.
     /// Optional for the reason `keyboardWatch` is: this initializer skips
     /// Swift's initial values.
@@ -1751,11 +1751,13 @@ final class MobileTextView: UITextView {
     }
 
     override func caretRect(for position: UITextPosition) -> CGRect {
-        if let rect = caretOverride?(), let selection = selectedTextRange, selection.isEmpty,
-           compare(position, to: selection.start) == .orderedSame {
+        let standard = super.caretRect(for: position)
+        if let selection = selectedTextRange, selection.isEmpty,
+           compare(position, to: selection.start) == .orderedSame,
+           let rect = caretOverride?(standard) {
             return rect
         }
-        return super.caretRect(for: position)
+        return standard
     }
     /// Called when the window's width class changes, as entering Split View.
     var onWidthClass: (() -> Void)?
