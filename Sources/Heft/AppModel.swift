@@ -1557,13 +1557,13 @@ final class AppModel: ObservableObject, ProposalReviewing {
             )
             try "".write(to: target, atomically: true, encoding: .utf8)
             guard let ref = NoteRef(url: target, vaultRoot: vaultRoot) else { return nil }
-            let parentPath = relativePath(of: directory)
-            if !parentPath.isEmpty { expandedFolders.insert(parentPath) }
             reload(immediately: true)
-            // Scrolled to, or the field being typed into is off screen and
-            // the note appears to have been created nowhere. The sidebar may
-            // be showing another folder entirely, and after ⌘N it usually is.
-            revealTarget = ref.relativePath
+            // Every folder above it opened and scrolled to, or the field
+            // being typed into is off screen or inside a shut folder, and the
+            // note appears to have been created nowhere. Opening only the
+            // parent left it hidden whenever a folder further up was shut,
+            // which beside a note opened from search it usually is.
+            reveal(ref.relativePath)
             // Deliberately *not* opened. It has no name yet, and opening it
             // put a caret in the editor while the caret that matters is in
             // the sidebar row: two insertion points, one of which is the
@@ -1618,10 +1618,10 @@ final class AppModel: ObservableObject, ProposalReviewing {
             try FileManager.default.createDirectory(
                 at: target, withIntermediateDirectories: false
             )
-            let parentPath = relativePath(of: parent)
-            if !parentPath.isEmpty { expandedFolders.insert(parentPath) }
             let path = relativePath(of: target)
             reload(immediately: true)
+            // Shown as a new note is, for the same reason.
+            reveal(path)
             status = "Created \(path)"
             return (path, target.lastPathComponent)
         } catch {
