@@ -131,6 +131,24 @@ struct PropertyTypeTests {
         #expect(PropertyTypes.type(of: "rating", in: PropertyTypes.types(in: vault)) == .number)
     }
 
+    @Test("A types file that cannot be read, or is only an iCloud placeholder, is refused, never replaced")
+    func typesRefused() throws {
+        let vault = FileManager.default.temporaryDirectory.appendingPathComponent("heft-types-\(UUID().uuidString)")
+        let obsidian = vault.appendingPathComponent(".obsidian")
+        try FileManager.default.createDirectory(at: obsidian, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: vault) }
+        // Not UTF-8: unreadable as text, so it must be left as it is.
+        let unreadable = Data([0x7B, 0xFF, 0xFE, 0x7D])
+        try unreadable.write(to: obsidian.appendingPathComponent("types.json"))
+        #expect(throws: (any Error).self) { try PropertyTypes.set(.number, for: "Rating", in: vault) }
+        #expect(try Data(contentsOf: obsidian.appendingPathComponent("types.json")) == unreadable)
+        // Only the placeholder iCloud leaves: nothing is written beside it.
+        try FileManager.default.removeItem(at: obsidian.appendingPathComponent("types.json"))
+        try Data().write(to: obsidian.appendingPathComponent(".types.json.icloud"))
+        #expect(throws: PropertyTypes.WriteError.notDownloaded) { try PropertyTypes.set(.number, for: "Rating", in: vault) }
+        #expect(!FileManager.default.fileExists(atPath: obsidian.appendingPathComponent("types.json").path))
+    }
+
     @Test("Changing between a value and a list converts the value")
     func converting() {
         let single = "---\nGenre: Fiction\n---\n"

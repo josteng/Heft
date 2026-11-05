@@ -602,6 +602,14 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
             try PropertyTypes.set(type, for: key, in: root)
         } catch {
             UINotificationFeedbackGenerator().notificationOccurred(.error)
+            let message = (error as? PropertyTypes.WriteError) == .notDownloaded
+                ? "Obsidian's property types are still downloading from iCloud. Try again in a moment."
+                : "The property type could not be saved."
+            let alert = UIAlertController(title: "Type Not Changed", message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            var presenter = textView.window?.rootViewController
+            while let presented = presenter?.presentedViewController { presenter = presented }
+            presenter?.present(alert, animated: true)
             return
         }
         // The value follows a change between a single value and a list.

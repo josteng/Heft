@@ -73,6 +73,11 @@ public enum PropertyTypes {
             return hit.types
         }
         lock.unlock()
+        // Only a placeholder here: fetched, and read once it has arrived.
+        if !FileManager.default.fileExists(atPath: url.path),
+           FileManager.default.fileExists(atPath: placeholder(for: url).path) {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+        }
         let types = (try? Data(contentsOf: url)).map(parse) ?? [:]
         lock.lock()
         cache[url.path] = (stamp, types)
@@ -123,12 +128,46 @@ public enum PropertyTypes {
         return result
     }
 
+    /// Why a type could not be written.
+    public enum WriteError: Error, Equatable {
+        /// The file is only an iCloud placeholder here, still being fetched.
+        case notDownloaded
+    }
+
     /// Gives `key` `type` in the vault's file, creating it if need be.
+    ///
+    /// Read and written through a file coordinator, which has iCloud fetch a
+    /// file that is not on the device; a file that is there but cannot be
+    /// read, or is still only a placeholder, is refused rather than
+    /// replaced, since a fresh file would hold this one key and lose every
+    /// type Obsidian keeps for the others.
     public static func set(_ type: PropertyType, for key: String, in vault: URL) throws {
         let url = file(in: vault)
-        let source = try? String(contentsOf: url, encoding: .utf8)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try setting(type, for: key, in: source).write(to: url, atomically: true, encoding: .utf8)
+        var coordinationError: NSError?
+        var result: Result<Void, Error> = .success(())
+        NSFileCoordinator().coordinate(writingItemAt: url, options: .forMerging, error: &coordinationError) { coordinated in
+            result = Result {
+                let source: String?
+                if FileManager.default.fileExists(atPath: coordinated.path) {
+                    source = try String(contentsOf: coordinated, encoding: .utf8)
+                } else if FileManager.default.fileExists(atPath: placeholder(for: coordinated).path) {
+                    try? FileManager.default.startDownloadingUbiquitousItem(at: coordinated)
+                    throw WriteError.notDownloaded
+                } else {
+                    source = nil
+                }
+                try setting(type, for: key, in: source).write(to: coordinated, atomically: true, encoding: .utf8)
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        try result.get()
+    }
+
+    /// Where iCloud leaves `.types.json.icloud` for a file it has not
+    /// fetched to this device.
+    static func placeholder(for url: URL) -> URL {
+        url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
     }
 
     private static func jsonString(_ string: String) -> String {
