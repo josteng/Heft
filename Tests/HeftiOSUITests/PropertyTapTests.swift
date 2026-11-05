@@ -152,6 +152,45 @@ final class PropertyTapTests: XCTestCase {
         XCTAssertTrue(text.contains("  - planning\n---\n"), text)
     }
 
+    func testTappingTheCaretOffersTheRowsMenu() {
+        // Once to place the caret, again on it for the text's menu.
+        point(onRow: "title", x: 280).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 3))
+        point(onRow: "title", x: 280).tap()
+        // On a phone the menu is a bar; what does not fit is past Forward.
+        let property = app.descendants(matching: .any)["Property"].firstMatch
+        let forward = app.descendants(matching: .any)["Forward"].firstMatch
+        XCTAssertTrue(forward.waitForExistence(timeout: 3) || property.exists)
+        for _ in 0..<4 where !property.exists && forward.exists { forward.tap() }
+        XCTAssertTrue(property.waitForExistence(timeout: 2), app.debugDescription)
+        property.tap()
+        let remove = app.descendants(matching: .any)["Remove"].firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 3), app.debugDescription)
+        remove.tap()
+        let text = saved { !$0.contains("Weekend") }
+        XCTAssertTrue(text.hasPrefix("---\nstatus:\n"), text)
+    }
+
+    func testALongPressOffersTheRowsMenu() { longPressRemoves(at: point(onRow: "title", x: 220), gone: "Weekend") }
+    func testALongPressOnAnEmptyValueOffersTheRowsMenu() { longPressRemoves(at: value("status"), gone: "status") }
+    func testALongPressOnPillsOffersTheRowsMenu() { longPressRemoves(at: point(onRow: "tags", x: 160), gone: "travel") }
+    func testALongPressOnAKeyOffersTheRowsMenu() { longPressRemoves(at: point(onRow: "title", x: 40), gone: "Weekend") }
+
+    private func longPressRemoves(at spot: XCUICoordinate, gone: String) {
+        spot.press(forDuration: 1.0)
+        let property = app.descendants(matching: .any)["Property"].firstMatch
+        let forward = app.descendants(matching: .any)["Forward"].firstMatch
+        XCTAssertTrue(forward.waitForExistence(timeout: 3) || property.exists, app.debugDescription)
+        for _ in 0..<4 where !property.exists && forward.exists { forward.tap() }
+        XCTAssertTrue(property.waitForExistence(timeout: 2))
+        property.tap()
+        let remove = app.descendants(matching: .any)["Remove"].firstMatch
+        XCTAssertTrue(remove.waitForExistence(timeout: 3))
+        remove.tap()
+        let text = saved { !$0.contains(gone) }
+        XCTAssertFalse(text.contains(gone), text)
+    }
+
     func testTheIconMenuSaysWhyARowIsRed() {
         try? "---\nrating: lots\n---\nBody\n".write(to: note, atomically: true, encoding: .utf8)
         app.terminate()

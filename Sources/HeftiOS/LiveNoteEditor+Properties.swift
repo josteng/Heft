@@ -22,6 +22,9 @@ struct PropertyEditorState {
     var foldArrow: UIImageView?
     var sourceButton: UIImageView?
     var catalog: (index: ObjectIdentifier, catalog: PropertyCatalog)?
+    /// The text's menu, shown by a tap on the caret in a row: UIKit's own
+    /// tap, which shows it elsewhere, does not reach a row.
+    var editMenu: UIEditMenuInteraction?
     /// Set by a restyle until the controls were placed against a laid-out
     /// heading: a restyle can come before TextKit lays the line out.
     var controlsPending = false
@@ -31,7 +34,7 @@ struct PropertyEditorState {
     @MainActor static var sourceNotes: Set<String> = []
 }
 
-extension LiveNoteEditor.Coordinator {
+extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
     private var noteKey: String { document?.path ?? "" }
     var propertiesFolded: Bool { PropertyEditorState.foldedNotes.contains(noteKey) }
     var propertiesAsText: Bool { PropertyEditorState.sourceNotes.contains(noteKey) }
@@ -80,10 +83,13 @@ extension LiveNoteEditor.Coordinator {
 
     /// A tap in a row: the caret where it landed, kept to its column, an
     /// empty value given its space, a list's place after its pills.
-    func tapRow(_ line: Int, inValue: Bool, at point: CGPoint, in textView: MobileTextView) {
+    /// True when it showed the text's menu, the caret being there already.
+    @discardableResult
+    func tapRow(_ line: Int, inValue: Bool, at point: CGPoint, in textView: MobileTextView) -> Bool {
         textView.refusesFocus = false
         if !textView.isFirstResponder { textView.becomeFirstResponder() }
-        guard let row = PropertySurface.row(startingAt: line, in: textView.text) else { return }
+        guard let row = PropertySurface.row(startingAt: line, in: textView.text) else { return false }
+        let before = textView.isFirstResponder && textView.selectedRange.length == 0 ? textView.selectedRange.location : nil
         let landed = textView.closestPosition(to: point).map {
             textView.offset(from: textView.beginningOfDocument, to: $0)
         } ?? row.valueEnd
@@ -102,9 +108,38 @@ extension LiveNoteEditor.Coordinator {
         }
         caret = PropertySurface.caretOffFoldedItem(in: textView.text, caret: caret) ?? caret
         properties.lastCaret = caret
+        // A tap on the caret where it already is asks for the text's menu,
+        // as anywhere else in a text view.
+        if caret == before {
+            showEditMenu(at: point, in: textView)
+            return true
+        }
+        properties.editMenu?.dismissMenu()
         textView.selectedRange = NSRange(location: caret, length: 0)
         restyle(textView)
         updateSuggestions()
+        return false
+    }
+
+    /// A secondary click on a row: the caret placed as a tap places it,
+    /// then the text's menu with the row's in it.
+    @objc func pressedRow(_ recognizer: UIGestureRecognizer) {
+        guard let textView, recognizer.state == .recognized else { return }
+        let point = recognizer.location(in: textView)
+        guard let row = propertyRow(at: point, in: textView) else { return }
+        if !tapRow(row.line, inValue: row.inValue, at: point, in: textView) {
+            showEditMenu(at: point, in: textView)
+        }
+    }
+
+    private func showEditMenu(at point: CGPoint, in textView: MobileTextView) {
+        let interaction = properties.editMenu ?? {
+            let interaction = UIEditMenuInteraction(delegate: self)
+            textView.addInteraction(interaction)
+            properties.editMenu = interaction
+            return interaction
+        }()
+        interaction.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point))
     }
 
     func performProperty(_ target: PropertyGeometry.Target, in textView: MobileTextView) {
@@ -516,6 +551,32 @@ extension LiveNoteEditor.Coordinator {
             },
         ]))
         return elements
+    }
+
+    /// The text's own menu, from a long press or a tap on the caret, with
+    /// the row's menu added when it is on a property: what a right-click
+    /// gives on the Mac. A selection keeps its Cut, Copy and Paste first.
+    func textView(_ textView: UITextView, editMenuForTextIn range: NSRange,
+                  suggestedActions: [UIMenuElement]) -> UIMenu? {
+        menu(adding: suggestedActions, for: range, in: textView)
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
+                             suggestedActions: [UIMenuElement]) -> UIMenu? {
+        guard let textView else { return nil }
+        return menu(adding: suggestedActions, for: textView.selectedRange, in: textView)
+            ?? UIMenu(children: suggestedActions)
+    }
+
+    private func menu(adding suggested: [UIMenuElement], for range: NSRange, in textView: UITextView) -> UIMenu? {
+        guard !propertiesAsText, let row = PropertySurface.row(at: range.location, in: textView.text),
+              NSMaxRange(range) <= row.valueEnd
+        else { return nil }
+        let items = propertyMenu(forLineAt: row.range.location)
+        guard !items.isEmpty else { return nil }
+        return UIMenu(children: suggested + [
+            UIMenu(title: "Property", image: UIImage(systemName: "list.bullet.rectangle"), children: items),
+        ])
     }
 
     private func pickType(_ type: PropertyType, for key: String) {

@@ -57,6 +57,14 @@ struct LiveNoteEditor: UIViewRepresentable {
         tap.delegate = coordinator
         view.addGestureRecognizer(tap)
         view.ownTap = tap
+        // A property row's menu from a secondary click with a pointer, as a
+        // right-click gives it on the Mac. A long press needs nothing of its
+        // own: UIKit's shows the text's menu, which carries the row's.
+        let secondary = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.pressedRow(_:)))
+        secondary.buttonMaskRequired = .secondary
+        secondary.delegate = coordinator
+        view.addGestureRecognizer(secondary)
+        view.ownRowMenus = [secondary]
         view.onFormat = { [weak coordinator] tool in coordinator?.applyTool(tool) }
         view.onAttach = { [weak coordinator] source in coordinator?.startAttach(source) }
         view.onWidthClass = { [weak coordinator] in coordinator?.updateAccessory() }
@@ -781,6 +789,9 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             guard let textView else { return false }
+            if textView.ownRowMenus?.contains(where: { $0 === recognizer }) == true {
+                return propertyRow(at: touch.location(in: textView), in: textView) != nil
+            }
             hadFocusAtTap = textView.isFirstResponder
             guard let found = target(at: touch.location(in: textView), in: textView) else { return false }
             if !hadFocusAtTap {
@@ -1687,6 +1698,9 @@ final class MobileTextView: UITextView {
     var topInset: CGFloat = 12
     /// The editor's own tap, which handles a picture itself.
     weak var ownTap: UIGestureRecognizer?
+    /// The editor's secondary click for a property row's menu. Optional
+    /// for the reason `keyboardWatch` is.
+    var ownRowMenus: [UIGestureRecognizer]?
     /// Set for a tap that ticks a box or follows a link while reading. The
     /// text view took such a tap as a request for the keyboard too, and in
     /// taking it scrolled to its old caret, often the top of the note,
@@ -1783,7 +1797,8 @@ final class MobileTextView: UITextView {
         }
         // A single tap in a property row is the editor's to place; a long
         // press or a double tap still selects as anywhere else.
-        if recognizer !== ownTap, let tap = recognizer as? UITapGestureRecognizer, tap.numberOfTapsRequired == 1,
+        let own = recognizer === ownTap || ownRowMenus?.contains(where: { $0 === recognizer }) == true
+        if !own, let tap = recognizer as? UITapGestureRecognizer, tap.numberOfTapsRequired == 1,
            isOnPropertyRow(recognizer.location(in: self)) {
             return false
         }
