@@ -239,6 +239,11 @@ enum SharedVault {
                     // where a share with no other home goes.
                     try file(pending.text, to: .inbox, in: root, at: pending.date,
                              inTimeOrder: true)
+                } catch DailyNoteCaptureError.outsideVault {
+                    // A daily-notes folder outside the vault never becomes
+                    // writable: retried, the share waited forever unseen.
+                    try file(pending.text, to: .inbox, in: root, at: pending.date,
+                             inTimeOrder: true)
                 }
                 try? FileManager.default.removeItem(at: url)
                 filed += 1
