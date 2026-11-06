@@ -1748,15 +1748,12 @@ struct FileMenu: View {
             model.revealInFinder(item.url)
         }
         // The system's Share, as a note's menu has it on iOS: Mail,
-        // Messages, AirDrop and the rest, for the files themselves.
-        ShareLink(items: (many ? items : [item]).map(\.url)) {
-            Label {
-                Text(many ? "Share \(items.count) Items" : "Share")
-            } icon: {
-                Image(systemName: "square.and.arrow.up").symbolRenderingMode(.monochrome)
-            }
+        // Messages, AirDrop and the rest, for the files themselves. Not a
+        // `ShareLink`: in a context menu on the Mac it does nothing, since
+        // its picker has no view left to open from once the menu closes.
+        MenuButton(many ? "Share \(items.count) Items…" : "Share…", symbol: "square.and.arrow.up") {
+            SharePicker.show((many ? items : [item]).map(\.url))
         }
-        .tint(.primary)
         Divider()
         MenuButton(
             many ? "Move \(items.count) Items to Trash" : "Move to Trash",
@@ -2173,6 +2170,22 @@ final class ForceClick {
             if event.stage == 2, self.stage < 2 { self.clicks.send() }
             self.stage = event.stage
             return event
+        }
+    }
+}
+
+/// The system's share picker for files, opened where the pointer is, as
+/// Finder's Share… opens it from a context menu. On the next turn of the
+/// run loop, once the menu that asked for it has closed.
+@MainActor
+enum SharePicker {
+    static func show(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        DispatchQueue.main.async {
+            guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let view = window.contentView else { return }
+            let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            let anchor = NSRect(x: point.x, y: point.y, width: 1, height: 1)
+            NSSharingServicePicker(items: urls).show(relativeTo: anchor, of: view, preferredEdge: .minY)
         }
     }
 }
