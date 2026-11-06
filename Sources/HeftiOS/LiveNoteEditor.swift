@@ -86,8 +86,16 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.onAddProperty = { [weak coordinator] in coordinator?.addProperty() }
         view.onKey = { [weak coordinator] key in coordinator?.handlePropertyKey(key) ?? false }
         view.caretOverride = { [weak coordinator, weak view] standard in
-            guard let view, let coordinator else { return nil }
-            return coordinator.listCaretRect(in: view) ?? coordinator.rowCaretRect(in: view, standard: standard)
+            guard let view, let coordinator,
+                  let rect = coordinator.listCaretRect(in: view) ?? coordinator.rowCaretRect(in: view, standard: standard)
+            else { return nil }
+            // On whole pixels: iOS 27 draws the caret where it is put, and a
+            // top edge between pixels blurred into one more row of colour,
+            // so the caret grew a pixel as the row's first letter moved it
+            // and read as sitting low. iOS 26 snapped it itself.
+            let scale = max(view.traitCollection.displayScale, 1)
+            func snap(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
+            return CGRect(x: snap(rect.minX), y: snap(rect.minY), width: rect.width, height: snap(rect.height))
         }
         coordinator.fillShortcutsBar(of: view)
         view.isOnPicture = { [weak coordinator, weak view] point in

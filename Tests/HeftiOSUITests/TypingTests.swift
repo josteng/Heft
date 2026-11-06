@@ -132,10 +132,13 @@ final class TypingSettingsTests: XCTestCase {
         add.tap()
         let typed = app.textFields["Typed"]
         XCTAssertTrue(typed.waitForExistence(timeout: 3))
-        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
-        let first = typed.frame.minY
+        let last = app.switches["On"]
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+        let first = (typed.frame.minY, last.frame.minY)
         RunLoop.current.run(until: Date().addingTimeInterval(3))
-        XCTAssertEqual(typed.frame.minY, first, accuracy: 1, "the sheet moved after it opened")
+        print("SHEET typed \(first.0) -> \(typed.frame.minY), on \(first.1) -> \(last.frame.minY)")
+        XCTAssertEqual(typed.frame.minY, first.0, accuracy: 1, "the sheet moved after it opened")
+        XCTAssertEqual(last.frame.minY, first.1, accuracy: 1, "its rows moved after it opened")
     }
 }
 
