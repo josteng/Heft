@@ -306,13 +306,14 @@ struct PadRootView: View {
     private var detail: some View {
         if let day {
             PadDayDetail(day: day).id(day)
-        } else if let selection {
-            switch selection {
-            case .note(let path): NoteView(path: path).id(path)
-            case .newNote(let path): NoteView(path: path, startsTyping: true).id(path)
-            case .image(let path): ImageFileView(path: path).id(path)
-            default: nothingChosen
-            }
+        } else if case .image(let path)? = selection {
+            ImageFileView(path: path).id(path)
+        } else if let path = openNotePath ?? (selection == nil ? following : nil) {
+            // A rename still settling, with the selection cleared under it,
+            // shows the note it went to rather than a moment of nothing
+            // chosen; one branch and one identity, so the note stays as it
+            // is when the selection comes back.
+            NoteView(path: path, startsTyping: { if case .newNote? = selection { true } else { false } }()).id(path)
         } else {
             nothingChosen
         }

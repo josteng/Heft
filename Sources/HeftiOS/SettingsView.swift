@@ -720,10 +720,11 @@ private struct CaptureSettingsView: View {
 private struct TypingSettingsView: View {
     @State private var replaces = MobileTyping.shared.replaces
     @State private var pairs = MobileTyping.shared.pairs
-    @State private var setup = MobileTyping.shared.setup
     @State private var editing: CustomSubstitution?
+    private let typing = MobileTyping.shared
 
     var body: some View {
+        let setup = typing.setup
         Form {
             Section {
                 Toggle("Replacements", isOn: Binding(get: { replaces }, set: { replaces = $0; MobileTyping.shared.replaces = $0 }))
@@ -736,13 +737,19 @@ private struct TypingSettingsView: View {
                     Button("Turn Replacements On Everywhere") { change { $0.substitutions = true } }
                 }
                 ForEach(SmartTypographyGroup.allCases, id: \.self) { group in
-                    Toggle(group.title, isOn: Binding(
+                    // What it replaces under its name, as the Mac shows it.
+                    Toggle(isOn: Binding(
                         get: { !setup.disabledGroups.contains(group.rawValue) },
                         set: { on in change { setup in
                             setup.disabledGroups.removeAll { $0 == group.rawValue }
                             if !on { setup.disabledGroups = (setup.disabledGroups + [group.rawValue]).sorted() }
                         } }
-                    ))
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.title)
+                            Text(group.detail).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             } header: {
                 Text("Built In")
@@ -770,7 +777,7 @@ private struct TypingSettingsView: View {
         .navigationTitle("Typing")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editing) { rule in
-            ReplacementEditor(rule: rule, isNew: !setup.custom.contains { $0.id == rule.id }) { saved in
+            ReplacementEditor(rule: rule, isNew: !typing.setup.custom.contains { $0.id == rule.id }) { saved in
                 change { setup in
                     if let index = setup.custom.firstIndex(where: { $0.id == saved.id }) {
                         setup.custom[index] = saved
@@ -778,14 +785,14 @@ private struct TypingSettingsView: View {
                         setup.custom.append(saved)
                     }
                 }
+            } delete: { gone in
+                change { $0.custom.removeAll { $0.id == gone.id } }
             }
         }
-        .onAppear { setup = MobileTyping.shared.setup }
     }
 
     private func change(_ edit: (inout SharedTypingSetup) -> Void) {
-        MobileTyping.shared.change(edit)
-        setup = MobileTyping.shared.setup
+        typing.change(edit)
     }
 }
 
@@ -794,6 +801,9 @@ private struct ReplacementEditor: View {
     @State var rule: CustomSubstitution
     let isNew: Bool
     let save: (CustomSubstitution) -> Void
+    /// No question first, as iOS's own Text Replacement deletes: one
+    /// replacement is quickly typed again.
+    let delete: (CustomSubstitution) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -814,6 +824,11 @@ private struct ReplacementEditor: View {
                         ForEach(SubstitutionFiring.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     Toggle("On", isOn: $rule.isEnabled)
+                }
+                if !isNew {
+                    Section {
+                        Button("Delete Replacement", role: .destructive) { delete(rule); dismiss() }
+                    }
                 }
             }
             .navigationTitle(isNew ? "New Replacement" : "Replacement")

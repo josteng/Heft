@@ -263,7 +263,10 @@ final class MobileVault {
             let typing = SharedTypingSetup.read(from: root) ?? SharedTypingSetup()
             await MainActor.run {
                 MobileTyping.shared.root = root
-                MobileTyping.shared.setup = typing
+                // Only when it changed: observed, even the same setup set
+                // again redrew Settings, and an open replacement's sheet
+                // jumped as a scan landed.
+                if MobileTyping.shared.setup != typing { MobileTyping.shared.setup = typing }
             }
             await self.land(token: token, tree: tree, index: index, settings: settings,
                             appearance: appearance, listed: listed, pins: pins, pending: pending.count,

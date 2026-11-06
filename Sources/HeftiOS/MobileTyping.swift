@@ -1,10 +1,13 @@
 import Foundation
 import HeftCore
+import Observation
 
 /// Replacements and pairing for the iOS editor: the list the Mac keeps in
 /// the vault (`SharedTypingSetup`), and this device's own switches, which
 /// can turn either off without touching the Mac.
+/// Observed, so Settings shows the vault's setup once a scan has read it.
 @MainActor
+@Observable
 final class MobileTyping {
     static let shared = MobileTyping()
 
@@ -15,7 +18,7 @@ final class MobileTyping {
     }
 
     /// The vault the setup is kept in, for saving an edit made here.
-    var root: URL?
+    @ObservationIgnored var root: URL?
 
     /// Changes the shared setup and writes it to the vault, where the Mac
     /// and the other devices pick it up.
@@ -50,7 +53,7 @@ final class MobileTyping {
         return rules
     }
 
-    private var cached: [SmartTypographyRule]?
+    @ObservationIgnored private var cached: [SmartTypographyRule]?
 
     private static let replacesKey = "dev.stenglein.Heft.iOS.typing.replaces"
     private static let pairsKey = "dev.stenglein.Heft.iOS.typing.pairs"
