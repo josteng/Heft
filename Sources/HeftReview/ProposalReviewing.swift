@@ -22,7 +22,10 @@ protocol ProposalReviewing: AnyObject {
     /// Reads the proposals again after one was settled.
     func refreshProposals()
     /// Writes an accepted text, making the folders a new note needs.
-    func writeAccepted(_ text: String, to relativePath: String)
+    /// `original` is the note as the decision was made against it, nil for
+    /// a new note; a note found holding something else is refused. Throws
+    /// when the text did not reach the note, so the proposal is kept.
+    func writeAccepted(_ text: String, to relativePath: String, replacing original: String?) throws
     /// Tells the reader what a decision did, or, as a problem, why it could
     /// not.
     func reportReview(_ message: String, isProblem: Bool)
@@ -50,9 +53,19 @@ extension ProposalReviewing {
     /// smaller proposal rather than a lost one.
     func decide(_ proposal: Proposal, hunk: Int, accept: Bool) {
         guard let root = proposalVaultRoot else { return }
+        if accept, let refusal = refusal(of: proposal, in: root) {
+            return reportReview(refusal, isProblem: true)
+        }
         recordReview(of: proposal)
         let before = currentText(for: proposal)
         do {
+            // Written before the proposal is settled: a hunk that never
+            // reached the note must still be waiting.
+            if accept {
+                let diff = proposal.diff(against: before)
+                let text = NoteDiff.apply(diff.hunks, to: before, accepting: [hunk])
+                try writeAccepted(text, to: proposal.notePath, replacing: proposal.kind == .create ? nil : before)
+            }
             let outcome = try ProposalStore.settle(
                 proposal,
                 currentText: before,
@@ -60,7 +73,6 @@ extension ProposalReviewing {
                 rejected: accept ? [] : [hunk],
                 in: root
             )
-            if accept { writeAccepted(outcome.noteText, to: proposal.notePath) }
             reviewing = outcome.remaining
             refreshProposals()
             reportReview(accept
@@ -73,14 +85,43 @@ extension ProposalReviewing {
 
     func acceptAll(_ proposal: Proposal) {
         guard let root = proposalVaultRoot else { return }
+        if let refusal = refusal(of: proposal, in: root) {
+            return reportReview(refusal, isProblem: true)
+        }
         recordReview(of: proposal)
         let before = currentText(for: proposal)
-        writeAccepted(proposal.body, to: proposal.notePath)
+        do {
+            try writeAccepted(proposal.body, to: proposal.notePath,
+                              replacing: proposal.kind == .create ? nil : before)
+        } catch {
+            return reportReview("Could not write \(proposal.noteName): \(error.localizedDescription)", isProblem: true)
+        }
         ProposalStore.remove(proposal.id, in: root)
         reviewing = nil
         refreshProposals()
         let diff = proposal.diff(against: before)
         reportReview("Applied \(diff.hunks.count) change(s) to \(proposal.noteName)", isProblem: false)
+    }
+
+    /// Why accepting `proposal` would write somewhere it must not, or
+    /// nil. Each is kept for the reader to reject: a path outside the
+    /// vault, which only a hand-written proposal file can hold; a new note
+    /// whose path has been taken since, by a note it would replace whole;
+    /// and an edit to a note renamed or deleted since, which would bring it
+    /// back under its old name.
+    func refusal(of proposal: Proposal, in root: URL) -> String? {
+        let parts = proposal.notePath.split(separator: "/")
+        guard !proposal.notePath.hasPrefix("/"), !parts.contains("..") else {
+            return "\(proposal.noteName) is outside the vault, so it was not written."
+        }
+        let exists = FileManager.default.fileExists(atPath: root.appendingPathComponent(proposal.notePath).path)
+        if proposal.kind == .create, exists {
+            return "\(proposal.noteName) exists now, and accepting would replace it. Reject this and ask again."
+        }
+        if proposal.kind == .edit, !exists {
+            return "\(proposal.noteName) was renamed or deleted since this was proposed."
+        }
+        return nil
     }
 
     /// Carries out a proposal that is not an edit.

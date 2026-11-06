@@ -110,27 +110,21 @@ final class MobileReview: ProposalReviewing {
         return (try? MobileVault.read(url)) ?? ""
     }
 
-    /// Through a file coordinator, as every write here goes, keeping the
-    /// note's encoding as the Mac does, and then a rescan, on which an open
-    /// note reads itself again.
-    func writeAccepted(_ text: String, to relativePath: String) {
-        guard let root = proposalVaultRoot else { return }
+    /// Through a file coordinator, keeping the note's encoding as the Mac
+    /// does, and then a rescan, on which an open note reads itself again.
+    /// Written only over the text the decision was made against: iCloud
+    /// can bring a newer note while the sheet is open, and the change
+    /// accepted was read off the older one.
+    func writeAccepted(_ text: String, to relativePath: String, replacing original: String?) throws {
+        guard let root = proposalVaultRoot else { throw CocoaError(.fileNoSuchFile) }
         let url = root.appendingPathComponent(relativePath)
-        do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
-            )
-            var coordinationError: NSError?
-            var result: Result<Void, Error> = .success(())
-            NSFileCoordinator().coordinate(writingItemAt: url, options: [], error: &coordinationError) { coordinated in
-                result = Result { try text.writeNote(to: coordinated) }
-            }
-            if let coordinationError { throw coordinationError }
-            try result.get()
-            vault?.noteWritten()
-        } catch {
-            problem = "Could not write \(relativePath): \(error.localizedDescription)"
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let original, FileManager.default.fileExists(atPath: url.path) {
+            try NoteFile.write(text, to: url, replacing: original)
+        } else {
+            try NoteFile.create(text, at: url)
         }
+        vault?.noteWritten()
     }
 
     func reportReview(_ message: String, isProblem: Bool) {

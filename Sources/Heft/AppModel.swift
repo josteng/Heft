@@ -3630,9 +3630,9 @@ final class AppModel: ObservableObject, ProposalReviewing {
     func currentText(for proposal: Proposal) -> String {
         if let current, current.relativePath == proposal.notePath { return text }
         guard let vaultRoot else { return "" }
-        return (try? String(
-            contentsOf: vaultRoot.appendingPathComponent(proposal.notePath), encoding: .utf8
-        )) ?? ""
+        // As the note opens: a Latin-1 note read as UTF-8 was empty, and
+        // the proposal diffed against nothing.
+        return NoteEncoding.read(vaultRoot.appendingPathComponent(proposal.notePath)) ?? ""
     }
 
     func beginReview(of proposal: Proposal) {
@@ -3734,7 +3734,19 @@ final class AppModel: ObservableObject, ProposalReviewing {
 
     var proposalVaultRoot: URL? { vaultRoot }
 
-    func writeAccepted(_ text: String, to relativePath: String) { write(text, to: relativePath) }
+    func writeAccepted(_ text: String, to relativePath: String, replacing original: String?) throws {
+        // The open note takes it through its buffer, which autosaves.
+        if let current, current.relativePath == relativePath { return write(text, to: relativePath) }
+        guard let vaultRoot else { throw CocoaError(.fileNoSuchFile) }
+        let url = vaultRoot.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let original, FileManager.default.fileExists(atPath: url.path) {
+            try NoteFile.write(text, to: url, replacing: original)
+        } else {
+            try NoteFile.create(text, at: url)
+        }
+        reload(immediately: true)
+    }
 
     /// Writes an accepted change. Through the open buffer when it is the note
     /// on screen, so the edit joins the normal autosave and undo path instead
