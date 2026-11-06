@@ -89,6 +89,11 @@ preferences or the icon.
 
 ## Vault and disk
 
+- **An evicted iCloud file is not a missing one.** Only `.Name.icloud` is on
+  disk, and a coordinated write does not fetch it first, so code that takes
+  "no file" for "new file" writes a fresh note where iCloud holds the real
+  one. Ask `ICloudPlaceholder` before creating anything at a path.
+
 - **Two `Date`s read from the same unchanged file can compare unequal.** A
   filesystem timestamp round-trips as a double, and two reads have differed
   below the precision either prints at. Compare modification dates with a
@@ -410,4 +415,7 @@ And elsewhere:
   `strictLineBreaks` says: joining them would rewrite the buffer, and the
   buffer is the file. Only Presentation reads the setting.
 - A group of proposals is applied in an order that works but is not atomic.
+- On iOS 27 the properties table's row buttons are missing from the
+  accessibility tree, so VoiceOver and the UI tests cannot reach them there;
+  taps and long presses work.
 - Deferred: graph view, plugins.
