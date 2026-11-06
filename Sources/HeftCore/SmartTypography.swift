@@ -640,7 +640,7 @@ public enum SmartTypography {
     private static func isInsideInlineSpan(_ prefix: String) -> Bool {
         // Odd counts mean an opener with no closer yet, so the caret is inside.
         if prefix.filter({ $0 == "`" }).count % 2 == 1 { return true }
-        if dollarCount(prefix) % 2 == 1 { return true }
+        if insideInlineMath(prefix) { return true }
 
         if let open = prefix.range(of: "[[", options: .backwards),
            prefix.range(of: "]]", options: .backwards, range: open.upperBound..<prefix.endIndex) == nil {
@@ -660,21 +660,28 @@ public enum SmartTypography {
         return word.contains("://")
     }
 
-    /// `$` characters, ignoring `\$`, which is an escaped literal dollar.
-    private static func dollarCount(_ prefix: String) -> Int {
-        var count = 0
-        var escaped = false
-        for character in prefix {
-            if escaped {
-                escaped = false
-                continue
+    /// Whether `prefix` ends inside an inline `$…$`, read as the surface
+    /// draws one: a `$` opens only before a non-space and closes only after
+    /// one, and `\$` is a literal dollar. Counted instead, `5$ plan … ->`
+    /// was math from the first price on, and nothing after it was replaced.
+    static func insideInlineMath(_ prefix: String) -> Bool {
+        let characters = Array(prefix)
+        var open = false
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character == "\\" { index += 2; continue }
+            if character == "$" {
+                let next = index + 1 < characters.count ? characters[index + 1] : nil
+                if next == "$" { index += 2; continue }
+                if open {
+                    if index > 0, !characters[index - 1].isWhitespace { open = false }
+                } else if next.map({ !$0.isWhitespace }) ?? true {
+                    open = true
+                }
             }
-            if character == "\\" {
-                escaped = true
-            } else if character == "$" {
-                count += 1
-            }
+            index += 1
         }
-        return count
+        return open
     }
 }
