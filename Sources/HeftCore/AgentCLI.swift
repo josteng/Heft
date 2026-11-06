@@ -235,7 +235,9 @@ public enum AgentCLI {
         }
 
         let noteURL = root.appendingPathComponent(relative)
-        var current = try? String(contentsOf: noteURL, encoding: .utf8)
+        // As the editors read it: a Latin-1 note read as UTF-8 was nil, which
+        // passed for a new note and proposed replacing it whole.
+        var current = NoteEncoding.read(noteURL)
 
         // `--replace` means the input is a list of anchored edits rather than
         // the note's new text, so a long note does not have to be restated to
@@ -375,8 +377,11 @@ public enum AgentCLI {
         let isMove = options["move"] != nil
         var destination: String?
         if let requested = options["move"] {
-            let cleaned = NewNoteLocation.normalised(requested)
+            var cleaned = NewNoteLocation.normalised(requested)
             guard !cleaned.isEmpty else { fail("--move needs a destination path") }
+            // A note keeps being a note, so the taken-path check below
+            // looks where it will really land.
+            cleaned = Proposal.noteDestination(cleaned, for: item.relativePath) ?? cleaned
             if existing.contains(where: { $0.relativePath == cleaned }) {
                 // Taken now, but a pending move takes that file away: the
                 // chain a numbered series is renamed by, v0.3 to v0.4 and

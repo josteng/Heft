@@ -66,6 +66,13 @@ enum HeftMain {
         // which carries the new body of one note.
         if arguments.first == "rename", arguments.count > 3 {
             let dryRun = arguments.contains("--dry-run")
+            // The new name is a name: `--now` in its place renamed the note
+            // to `--now`, and `..` in it moved the note out of the vault.
+            let named = arguments[3]
+            if named.hasPrefix("--") || named.hasPrefix("/") || named.split(separator: "/").contains("..") {
+                FileHandle.standardError.write(Data("rename needs a new name inside the vault: heft rename <vault> <path> <new name> --now\n".utf8))
+                exit(1)
+            }
             // Writing to the vault unreviewed has to be asked for. A rename
             // repoints links across every note that pointed at the old name,
             // so it is the widest-reaching edit the command line can make,
@@ -111,7 +118,8 @@ enum HeftMain {
                 // variable that did not expand is the usual way a bad date
                 // arrives, and guessing put a templated note in the vault on
                 // a day nobody asked about.
-                guard let asked = parser.date(from: arguments[2]) else {
+                guard arguments[2].wholeMatch(of: #/\d{4}-\d{2}-\d{2}/#) != nil,
+                      let asked = parser.date(from: arguments[2]) else {
                     FileHandle.standardError.write(Data("""
                         not a date: \(arguments[2])
                         daily takes YYYY-MM-DD, or nothing at all for today.
