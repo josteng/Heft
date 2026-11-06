@@ -25,9 +25,17 @@ public struct NoteRef: Hashable, Identifiable, Sendable {
     /// Builds a reference for a file that may not be in the index yet, such as
     /// a note created moments ago.
     public init?(url: URL, vaultRoot: URL) {
-        let root = vaultRoot.standardizedFileURL.path
-        let path = url.standardizedFileURL.path
-        guard path.hasPrefix(root) else { return nil }
+        // `/private` is dropped by standardizing only from a path that
+        // exists, so a vault under `/private/var` and a note not on disk yet
+        // disagreed, and a note just renamed on an iPad was "no longer in
+        // the vault". Compared without it on either side.
+        func plain(_ url: URL) -> String {
+            let path = url.standardizedFileURL.path
+            return path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path
+        }
+        let root = plain(vaultRoot)
+        let path = plain(url)
+        guard path == root || path.hasPrefix(root + "/") else { return nil }
         let relative = String(path.dropFirst(root.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let kind = VaultScanner.classify(extension: url.pathExtension.lowercased())
         self.init(
