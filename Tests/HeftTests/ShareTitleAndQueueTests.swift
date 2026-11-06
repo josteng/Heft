@@ -46,3 +46,27 @@ struct ShareTitleAndQueueTests {
         #expect(left.isEmpty, "still queued after three drains: \(left)")
     }
 }
+
+@Suite("Sharing into a new note, or as the address")
+struct ShareNewNoteTests {
+    @Test("A share for a new note makes it where Obsidian puts new notes, then adds to it")
+    func newNoteIsMadeThenAddedTo() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("share-new-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".obsidian"), withIntermediateDirectories: true)
+        try #"{"newFileLocation": "folder", "newFileFolderPath": "Notes"}"#
+            .write(to: root.appendingPathComponent(".obsidian/app.json"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try SharedVault.file("[Page](https://example.com)", to: .newNote("Reading: later"), in: root)
+        try SharedVault.file("second", to: .newNote("Reading: later"), in: root)
+        let text = try String(contentsOf: root.appendingPathComponent("Notes/Reading- later.md"), encoding: .utf8)
+        #expect(text.hasPrefix("[Page](https://example.com)\n"), "\(text.debugDescription)")
+        #expect(text.contains("second"))
+    }
+
+    @Test("Address only keeps the comment and writes the bare address")
+    func unlinkedKeepsTheComment() throws {
+        let url = try #require(URL(string: "https://example.com/a"))
+        #expect(SharedContent.unlinked("see [Title](https://example.com/a) later", url: url)
+                == "see https://example.com/a later")
+    }
+}

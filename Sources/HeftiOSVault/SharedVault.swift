@@ -48,6 +48,22 @@ enum SharedVault {
         case inbox
         /// Appended as written, without the capture's time and heading.
         case note(String)
+        /// A note made for it, named as typed, where Obsidian puts new
+        /// notes; added to instead when a note of that name is there by
+        /// the time it is filed.
+        case newNote(String)
+    }
+
+    /// Where a new note named `name` goes: the vault's new-note folder,
+    /// the name made safe for a file and given its `.md`.
+    static func newNotePath(_ name: String, in root: URL) -> String? {
+        let safe = name.components(separatedBy: CharacterSet(charactersIn: "/\\:"))
+            .joined(separator: "-").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !safe.isEmpty, !safe.hasPrefix(".") else { return nil }
+        let folder = ObsidianSettings.load(vaultRoot: root).newNoteLocation
+            .directory(openNoteFolder: nil, focus: nil)
+        let file = safe.lowercased().hasSuffix(".md") ? safe : safe + ".md"
+        return folder.isEmpty ? file : folder + "/" + file
     }
 
     /// `date` is when the line was captured, which for a queued share can be
@@ -64,6 +80,14 @@ enum SharedVault {
             try InboxCapture(vaultRoot: root).capture(text, at: date, inTimeOrder: inTimeOrder)
         case .note(let path):
             try NoteAppend.append(text, to: path, in: root)
+        case .newNote(let name):
+            guard let path = newNotePath(name, in: root) else { throw CocoaError(.fileWriteInvalidFileName) }
+            let url = root.appendingPathComponent(path)
+            if FileManager.default.fileExists(atPath: url.path) || ICloudPlaceholder.isEvicted(url) {
+                try NoteAppend.append(text, to: path, in: root)
+            } else {
+                try NoteFile.create(text.trimmingCharacters(in: .newlines) + "\n", at: url)
+            }
         }
     }
 

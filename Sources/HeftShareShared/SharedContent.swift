@@ -87,6 +87,15 @@ public enum SharedContent {
         return text
     }
 
+    /// `text` with its link to `url` written as the bare address, for a
+    /// share that should keep the address and no title.
+    public static func unlinked(_ text: String, url: URL) -> String {
+        guard let range = linkRange(to: url, in: text) else { return text }
+        var text = text
+        text.replaceSubrange(range, with: url.absoluteString)
+        return text
+    }
+
     /// The `[label](url)` link to `url`, from the `[` that balances the
     /// label's closing bracket: never further back, where the reader's own
     /// brackets or another link on the line begin.

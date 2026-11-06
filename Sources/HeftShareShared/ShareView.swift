@@ -23,14 +23,24 @@ struct ShareView: View {
 
     enum Choice: Hashable { case inbox, today, note }
 
+    private struct Chip: Hashable {
+        let label: String
+        let symbol: String
+        /// The bare address, not a title.
+        var unlinks = false
+    }
+
     @AppStorage("dev.stenglein.Heft.iOS.shareChoice", store: SharedVault.defaults)
     private var lastChoice = "today"
     @State private var choice: Choice = .today
     @State private var dragProgress: CGFloat?
     @State private var text = ""
     @State private var focusRequest = 0
-    /// Titles to put in the link instead: the page's own, then short ones.
-    @State private var titles: [String] = []
+    /// What the link can read instead, as the Mac's link menu offers it:
+    /// the page's title, the site's name, short titles, or no title.
+    @State private var chips: [Chip] = []
+    /// A note to be made for the share, named as typed in the search.
+    @State private var newNoteName: String?
     @State private var notes: [SharedVault.ListedNote] = []
     @State private var query = ""
     @State private var picked: SharedVault.ListedNote?
@@ -48,6 +58,7 @@ struct ShareView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 // Three named options and the close button do not fit a
                 // phone's width: only the chosen one keeps its name there.
@@ -67,9 +78,14 @@ struct ShareView: View {
                             placeholder: "Add a comment", fontSize: 20, submitsOnReturn: false, selectsOnFocus: false, submit: add)
                 .frame(minHeight: 60, maxHeight: choice == .note ? 84 : .infinity)
                 .padding(.top, 14)
+            }
+            // Sideways over the switch and the text only: the rows below
+            // scroll sideways themselves, and a swipe through their chips
+            // switched where the share went.
+            .switchSwipe($choice, among: Self.choices, dragged: $dragProgress)
             if choice == .note {
                 notePicker
-            } else if !titles.isEmpty {
+            } else if !chips.isEmpty {
                 titleRow.padding(.top, 10)
             }
             Spacer(minLength: 0)
@@ -79,8 +95,11 @@ struct ShareView: View {
         .padding(.horizontal, 20)
         .padding(.top, 14)
         .padding(.bottom, 10)
-        .switchSwipe($choice, among: Self.choices, dragged: $dragProgress)
         .sensoryFeedback(.success, trigger: filed)
+        .onChange(of: query) { _, now in
+            // A name changed after it was chosen is not the note chosen.
+            if let name = newNoteName, name != now.trimmingCharacters(in: .whitespacesAndNewlines) { newNoteName = nil }
+        }
         .onChange(of: choice) { _, new in
             if new == .note { searching = true } else { searching = false; focusRequest += 1 }
         }
@@ -116,7 +135,8 @@ struct ShareView: View {
         switch choice {
         case .today: (Date().formatted(.dateTime.weekday(.wide).day().month(.wide)), "calendar")
         case .inbox: ("Added at the top of \(inboxName)", "tray")
-        case .note: (picked.map { "Added to the end of \($0.name)" } ?? "Pick a note", "doc.text")
+        case .note: (newNoteName.map { "A new note, \($0)" }
+                     ?? picked.map { "Added to the end of \($0.name)" } ?? "Pick a note", "doc.text")
         }
     }
 
@@ -135,8 +155,23 @@ struct ShareView: View {
                 .glassEffect(in: .capsule)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if let typed = typedNewNote {
+                        Button { newNoteName = typed; picked = nil } label: {
+                            HStack {
+                                Label("New Note \u{201C}\(typed)\u{201D}", systemImage: "plus")
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if newNoteName == typed {
+                                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                                }
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     ForEach(matches) { note in
-                        Button { picked = note } label: {
+                        Button { picked = note; newNoteName = nil } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(note.name).foregroundStyle(.primary)
@@ -166,6 +201,14 @@ struct ShareView: View {
         .padding(.top, 10)
     }
 
+    /// What is typed in the search, offered as a new note's name while no
+    /// note is called that.
+    private var typedNewNote: String? {
+        let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, !notes.contains(where: { $0.name.lowercased() == typed.lowercased() }) else { return nil }
+        return typed
+    }
+
     private var matches: [SharedVault.ListedNote] {
         let words = query.lowercased().split(separator: " ")
         let found = words.isEmpty ? notes : notes.filter { note in
@@ -182,9 +225,11 @@ struct ShareView: View {
     private var titleRow: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ForEach(Array(titles.enumerated()), id: \.offset) { offset, title in
-                    Button { retitle(title) } label: {
-                        Label(title, systemImage: offset == 0 ? "textformat" : "sparkles")
+                ForEach(chips, id: \.self) { chip in
+                    Button {
+                        if chip.unlinks, let url { text = SharedContent.unlinked(text, url: url) } else { retitle(chip.label) }
+                    } label: {
+                        Label(chip.label, systemImage: chip.symbol)
                             .lineLimit(1)
                     }
                     .buttonStyle(.plain)
@@ -202,16 +247,27 @@ struct ShareView: View {
     /// three short ones from the on-device model when it is available.
     private func lookUpTitles() async {
         guard let url else { return }
-        var title = pageTitle
-        if title == nil, let fetched = await LinkTitles.pageTitle(url)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !fetched.isEmpty {
+        let site = PastedLink(range: NSRange(location: 0, length: 0), address: url.absoluteString).siteName
+        var title = PastedLink.cleanedTitle(pageTitle)
+        // At once what needs nothing fetched, then each as it arrives: a
+        // model that is slow, or not on this device, leaves the rest.
+        func offer(_ short: [String]) {
+            var offered: [Chip] = title.map { [Chip(label: $0, symbol: "textformat")] } ?? []
+            if site.lowercased() != title?.lowercased() { offered.append(Chip(label: site, symbol: "globe")) }
+            offered += short.map { Chip(label: $0, symbol: "sparkles") }
+            offered.append(Chip(label: "Address Only", symbol: "link", unlinks: true))
+            chips = offered
+        }
+        offer([])
+        if title == nil, let fetched = PastedLink.cleanedTitle(await LinkTitles.pageTitle(url)) {
             title = fetched
             // Only while the reader has not started on the text themselves.
             if text == initialText { retitle(fetched) }
+            offer([])
         }
         guard let title else { return }
         let short = await LinkTitles.shortTitles(title, url)
-        titles = short.isEmpty ? [] : [title] + short
+        offer(LinkTitles.cleaned(short.joined(separator: "\n"), avoiding: [title, site]))
     }
 
     private func retitle(_ title: String) {
@@ -282,7 +338,7 @@ struct ShareView: View {
 
     private var canAdd: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (choice != .note || picked != nil)
+            && (choice != .note || picked != nil || newNoteName != nil)
     }
 
     private var inboxName: String {
@@ -295,7 +351,7 @@ struct ShareView: View {
         switch choice {
         case .today: .today
         case .inbox: .inbox
-        case .note: picked.map { .note($0.path) }
+        case .note: newNoteName.map { .newNote($0) } ?? picked.map { .note($0.path) }
         }
     }
 
