@@ -187,19 +187,23 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
     /// keys offered before anything is typed.
     func addProperty() {
         guard let textView else { return }
-        for edit in PropertySurface.tidyingAll(in: textView.text) { applyKeepingCaret(edit, in: textView) }
+        for edit in PropertySurface.tidyingAll(in: textView.text, caret: textView.selectedRange.location) { applyKeepingCaret(edit, in: textView) }
         properties.leaving.bareKeyLine = nil
         let adding = PropertySurface.addingProperty(in: textView.text)
+        var caret = adding.caret
         if let edit = adding.edit {
+            // In the note's line ending, the caret moved to match: a new
+            // block's blank line starts a unit later in a CRLF note.
             let adapted = edit.adapted(to: LineEnding(of: textView.text))
             replace(adapted.range, with: adapted.replacement, in: textView)
+            caret = adapted.selection.location
         } else {
             properties.leaving.blankRow = adding.caret
         }
         textView.refusesFocus = false
         if !textView.isFirstResponder { textView.becomeFirstResponder() }
-        textView.selectedRange = NSRange(location: adding.caret, length: 0)
-        properties.keyMenuRow = adding.caret
+        textView.selectedRange = NSRange(location: caret, length: 0)
+        properties.keyMenuRow = caret
         restyle(textView)
         textView.scrollRangeToVisible(textView.selectedRange)
         updateSuggestions()

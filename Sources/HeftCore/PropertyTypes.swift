@@ -106,10 +106,13 @@ public enum PropertyTypes {
         guard let source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "{\n  \"types\": {\n    \(quotedKey): \"\(type.rawValue)\"\n  }\n}"
         }
+        // In any case, as `type(of:)` reads it, and in the spelling already
+        // there: matched exactly, `Status` was added beside `status`.
         let escaped = NSRegularExpression.escapedPattern(for: quotedKey)
-        if let entry = try? NSRegularExpression(pattern: escaped + #"\s*:\s*"[^"]*""#),
+        if let entry = try? NSRegularExpression(pattern: "(" + escaped + #")\s*:\s*"[^"]*""#, options: .caseInsensitive),
            let match = entry.firstMatch(in: source, range: NSRange(location: 0, length: (source as NSString).length)) {
-            return (source as NSString).replacingCharacters(in: match.range, with: "\(quotedKey): \"\(type.rawValue)\"")
+            let written = (source as NSString).substring(with: match.range(at: 1))
+            return (source as NSString).replacingCharacters(in: match.range, with: "\(written): \"\(type.rawValue)\"")
         }
         if let opening = source.range(of: #""types"\s*:\s*\{"#, options: .regularExpression) {
             let rest = source[opening.upperBound...]

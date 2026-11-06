@@ -4987,6 +4987,8 @@ extension HeftTextKit2View {
 
     /// An edit that leaves the caret where it was, moved along by it.
     func applyKeepingCaret(_ edit: MarkdownEditing.Edit, named name: String) {
+        // In the note's own line ending, as iOS writes it.
+        let edit = edit.adapted(to: LineEnding(of: string))
         let caret = selectedRange().location
         guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
@@ -5282,6 +5284,7 @@ extension HeftTextKit2View {
 
     /// One list edit, undoable under `name`, with the caret where it says.
     func apply(_ edit: MarkdownEditing.Edit, named name: String) {
+        let edit = edit.adapted(to: LineEnding(of: string))
         guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
         textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
         didChangeText()
@@ -5330,7 +5333,7 @@ extension HeftTextKit2View {
         // What earlier editing left, tidied now rather than a moment later,
         // when it would shift the new row from under the caret and close
         // its menu: a key still without its colon gets one.
-        for edit in PropertySurface.tidyingAll(in: string) { applyKeepingCaret(edit, named: "Tidy Property") }
+        for edit in PropertySurface.tidyingAll(in: string, caret: selectedRange().location) { applyKeepingCaret(edit, named: "Tidy Property") }
         bareKeyLine = nil
         // An empty row already waiting is the new property's: the caret goes
         // to it rather than another being made and that one taken away.
@@ -5344,15 +5347,18 @@ extension HeftTextKit2View {
             updateLinkCompletion(allowStart: true)
             return
         }
-        guard shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
-        textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+        // In the note's line ending, the caret moved to match.
+        let adapted = edit.adapted(to: LineEnding(of: string))
+        guard shouldChangeText(in: adapted.range, replacementString: adapted.replacement) else { return }
+        textStorage?.replaceCharacters(in: adapted.range, with: adapted.replacement)
         didChangeText()
         undoManager?.setActionName("Add Property")
         window?.makeFirstResponder(self)
-        setSelectedRange(NSRange(location: adding.caret, length: 0))
+        let caret = adapted.selection.location
+        setSelectedRange(NSRange(location: caret, length: 0))
         enterInsertForNewProperty()
         scrollRangeToVisible(selectedRange())
-        keyMenuRow = adding.caret
+        keyMenuRow = caret
         updateLinkCompletion(allowStart: true)
         #if DEBUG
         // `HEFT_TYPE=<text>` types it after Add Property, key by key through

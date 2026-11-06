@@ -14,8 +14,14 @@ public enum PropertyEditing {
         }
         guard text.length > 0 else { return nil }
         let first = text.lineRange(for: NSRange(location: 0, length: 0))
-        guard isFence(first) else { return nil }
+        // As the surface draws one, or the caret and the tidying act on a
+        // table nobody can see: the opening fence exactly `---`, and a line
+        // before the closing one.
+        guard ["---\n", "---\r\n"].contains(text.substring(with: first)) else { return nil }
         var location = NSMaxRange(first)
+        if location < text.length, isFence(text.lineRange(for: NSRange(location: location, length: 0))) {
+            return nil
+        }
         while location < text.length {
             let line = text.lineRange(for: NSRange(location: location, length: 0))
             if isFence(line) { return NSRange(location: 0, length: NSMaxRange(line)) }
@@ -92,9 +98,12 @@ public enum PropertyEditing {
             if toList {
                 guard items.isEmpty, !value.isEmpty else { return nil }
                 let listed: [String]
-                if value.hasPrefix("["), value.hasSuffix("]") {
-                    listed = value.dropFirst().dropLast().components(separatedBy: ",")
-                        .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                if value.hasPrefix("[["), value.hasSuffix("]]") {
+                    // A link, not a list in a list: one item, quoted as
+                    // Obsidian writes a link in a list.
+                    listed = [scalar(value)]
+                } else if value.hasPrefix("["), value.hasSuffix("]") {
+                    listed = flowItems(String(value.dropFirst().dropLast()))
                 } else {
                     listed = [value]
                 }
@@ -105,7 +114,9 @@ public enum PropertyEditing {
                 )
             }
             guard !items.isEmpty else { return nil }
-            let joined = items.joined(separator: ", ")
+            // Each item's own quotes come off: they quoted the item, and
+            // inside one value they would be read as its text.
+            let joined = items.map(unquoted).joined(separator: ", ")
             let replacement = keyText + " " + scalar(joined) + newline
             return MarkdownEditing.Edit(
                 range: row.range, replacement: replacement,
@@ -113,6 +124,35 @@ public enum PropertyEditing {
             )
         }
         return nil
+    }
+
+    /// An inline list's items as written, split at the commas outside
+    /// quotes: `"Doe, Jane", Bob` is two items, not three.
+    static func flowItems(_ inner: String) -> [String] {
+        var items: [String] = []
+        var current = ""
+        var quote: Character?
+        for character in inner {
+            if let open = quote {
+                if character == open { quote = nil }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character == "," {
+                items.append(current)
+                current = ""
+                continue
+            }
+            current.append(character)
+        }
+        items.append(current)
+        return items.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// A quoted YAML scalar's text without its quotes; anything else as it is.
+    static func unquoted(_ value: String) -> String {
+        guard value.count >= 2, let first = value.first, first == "\"" || first == "'",
+              value.last == first else { return value }
+        return String(value.dropFirst().dropLast())
     }
 
     /// The hidden `: ` between a property's key and its value, on the key
@@ -341,7 +381,9 @@ public enum PropertyRules {
     /// read as something else: a key gets its colon, a colon its space, a
     /// link its quotes (`[[Note]]` bare is a list in a list). Nil when the
     /// row is fine.
-    public static func tidying(_ row: PropertyEditing.Row, in source: String) -> MarkdownEditing.Edit? {
+    public static func tidying(
+        _ row: PropertyEditing.Row, in source: String, addingColon: Bool = true
+    ) -> MarkdownEditing.Edit? {
         let text = source as NSString
         let original = text.substring(with: row.range)
         var lines = original.components(separatedBy: "\n")
@@ -352,10 +394,19 @@ public enum PropertyRules {
         guard !trimmed.isEmpty, head.first != " ", head.first != "\t", !trimmed.hasPrefix("#"), !trimmed.hasPrefix("-")
         else { return nil }
 
-        if let colon = head.firstIndex(of: ":") {
+        // A quoted key's colon is the first after its closing quote: one
+        // inside the quotes is the key's own text.
+        var keyEnd = head.startIndex
+        if let open = head.first, open == "\"" || open == "'" {
+            guard let close = head.dropFirst().firstIndex(of: open) else { return nil }
+            keyEnd = head.index(after: close)
+        }
+        var listValue = true
+        if let colon = head[keyEnd...].firstIndex(of: ":") {
             let key = String(head[..<colon])
             let rest = String(head[head.index(after: colon)...])
             let value = rest.trimmingCharacters(in: .whitespaces)
+            listValue = value.isEmpty
             let fixedValue = quotedLink(value)
             // An empty value is left as written; a value gets its space and
             // its quotes.
@@ -363,10 +414,13 @@ public enum PropertyRules {
                 head = key + ": " + fixedValue
             }
         } else {
+            guard addingColon else { return nil }
             head += ":"
         }
         lines[0] = head + (cr ? "\r" : "")
-        for index in lines.indices.dropFirst() {
+        // Only a list's items are items: under `notes: |` or `>`, a line
+        // starting `- ` is the block's literal text.
+        for index in lines.indices.dropFirst() where listValue {
             let line = lines[index]
             let lead = line.prefix { $0 == " " || $0 == "\t" }
             let rest = line.dropFirst(lead.count)

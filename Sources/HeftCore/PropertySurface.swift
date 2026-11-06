@@ -387,7 +387,8 @@ public enum PropertySurface {
     public static func pastableProperties(_ text: String) -> String? {
         guard !text.isEmpty else { return nil }
         var text = text
-        if !text.hasSuffix("\n") { text += "\n" }
+        // `\r\n` is one Character, so `hasSuffix("\n")` alone missed it.
+        if !text.hasSuffix("\n"), !text.hasSuffix("\r\n") { text += "\n" }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         guard let first = lines.first, first.first != " ", first.first != "-",
               lines.allSatisfy({ line in
@@ -429,11 +430,15 @@ public enum PropertySurface {
 
     /// Every row tidied as `PropertyRules` asks, last first so each edit's
     /// range still holds when it is made.
-    public static func tidyingAll(in source: String) -> [MarkdownEditing.Edit] {
+    public static func tidyingAll(in source: String, caret: Int? = nil) -> [MarkdownEditing.Edit] {
         var current = source
         var edits: [MarkdownEditing.Edit] = []
+        // A colon only for the key on the caret's row, the one just typed:
+        // a `---` opening a note whose later `---` is a rule makes every
+        // line of prose between them a row, and none of them is a key.
         for row in PropertyEditing.rows(in: source).reversed() {
-            guard let edit = PropertyRules.tidying(row, in: current) else { continue }
+            let typed = caret.map { $0 >= row.range.location && $0 <= row.valueEnd } ?? false
+            guard let edit = PropertyRules.tidying(row, in: current, addingColon: typed) else { continue }
             edits.append(edit)
             current = (current as NSString).replacingCharacters(in: edit.range, with: edit.replacement)
         }
