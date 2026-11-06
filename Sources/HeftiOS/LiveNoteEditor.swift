@@ -565,7 +565,8 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// other text should follow the note's name.
         private var justLinked: Int?
         private var pastedLink: PastedLink?
-        private var pastedTitles: [String] = []
+        private var pastedPageTitle: String?
+        private var pastedShortTitles: [String] = []
 
         private func notePaste(in textView: UITextView) {
             guard let paste = pendingPaste else { return }
@@ -574,19 +575,25 @@ struct LiveNoteEditor: UIViewRepresentable {
                   let url = URL(string: link.address)
             else { return }
             pastedLink = link
-            pastedTitles = []
+            pastedPageTitle = nil
+            pastedShortTitles = []
+            // The site's name at once, as the Mac's menu has it; the page's
+            // title and short ones as they arrive. Before, nothing showed
+            // until the title came, and nothing at all when it did not.
+            updateSuggestions()
             Task { [weak self] in
-                guard let title = await LinkTitles.pageTitle(url) else { return }
-                self?.offerTitles([title], for: link)
+                guard let title = PastedLink.cleanedTitle(await LinkTitles.pageTitle(url)) else { return }
+                self?.offerTitles(page: title, short: [], for: link)
                 let short = await LinkTitles.shortTitles(title, url)
-                self?.offerTitles([title] + short, for: link)
+                self?.offerTitles(page: title, short: LinkTitles.cleaned(
+                    short.joined(separator: "\n"), avoiding: [title, link.siteName]), for: link)
             }
         }
 
-        private func offerTitles(_ titles: [String], for link: PastedLink) {
+        private func offerTitles(page: String, short: [String], for link: PastedLink) {
             guard pastedLink == link else { return }
-            var seen = Set<String>()
-            pastedTitles = titles.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            pastedPageTitle = page
+            pastedShortTitles = short
             updateSuggestions()
         }
 
@@ -1146,10 +1153,20 @@ struct LiveNoteEditor: UIViewRepresentable {
                                symbol: "textformat"),
                 ]
             } else if let pasted = pastedLink {
-                found = (pastedTitles + [pasted.siteName]).map {
-                    Suggestion(title: $0, detail: $0 == pasted.siteName ? "Site" : "Title",
-                               destination: $0, kind: .pastedTitle, symbol: "link")
+                // In the Mac's order: the page's title, the site, short titles.
+                var offered: [Suggestion] = []
+                if let page = pastedPageTitle {
+                    offered.append(Suggestion(title: page, detail: "Title", destination: page,
+                                              kind: .pastedTitle, symbol: "textformat"))
                 }
+                if pasted.siteName.lowercased() != pastedPageTitle?.lowercased() {
+                    offered.append(Suggestion(title: pasted.siteName, detail: "Site", destination: pasted.siteName,
+                                              kind: .pastedTitle, symbol: "globe"))
+                }
+                offered += pastedShortTitles.map {
+                    Suggestion(title: $0, detail: "Short title", destination: $0, kind: .pastedTitle, symbol: "sparkles")
+                }
+                found = offered
             } else if let wiki = WikiCompletionContext.detect(in: text, selection: selection) {
                 let pipe = WikiCompletionContext.pipe(at: wiki.queryRange.location, in: text)
                 if wiki.query.isEmpty {
