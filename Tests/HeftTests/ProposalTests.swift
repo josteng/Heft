@@ -126,6 +126,7 @@ struct ProposalTests {
             notePath: "Note.md", base: before, body: "A\nb\nC\n",
             agent: "test", summary: "Two changes", group: Proposal.Group(summary: "Tidy up")
         )
+        try ProposalStore.write(proposal, in: root)
         let diff = proposal.diff(against: before)
         let outcome = try ProposalStore.settle(
             proposal, currentText: before,

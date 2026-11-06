@@ -96,8 +96,17 @@ public struct Proposal: Codable, Sendable, Equatable, Identifiable {
         self.summary = summary
         self.createdAt = createdAt
         self.kind = kind
-        self.destination = destination
+        self.destination = Self.noteDestination(destination, for: notePath)
         self.group = group
+    }
+
+    /// A note moved keeps being a note: `Archive/A` for `A.md` is
+    /// `Archive/A.md`, as `rename` adds the `.md` a note is shown without.
+    static func noteDestination(_ destination: String?, for notePath: String) -> String? {
+        guard let destination, (notePath as NSString).pathExtension.lowercased() == "md",
+              (destination as NSString).pathExtension.lowercased() != "md"
+        else { return destination }
+        return destination + ".md"
     }
 
     /// Hand-written, because the synthesised one requires every field: adding
@@ -122,7 +131,8 @@ public struct Proposal: Codable, Sendable, Equatable, Identifiable {
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         kind = try container.decodeIfPresent(Kind.self, forKey: .kind)
             ?? (base == nil ? .create : .edit)
-        destination = try container.decodeIfPresent(String.self, forKey: .destination)
+        destination = Self.noteDestination(
+            try container.decodeIfPresent(String.self, forKey: .destination), for: notePath)
         group = try container.decodeIfPresent(Group.self, forKey: .group)
     }
 
@@ -280,20 +290,31 @@ public enum ProposalStore {
     /// Every pending proposal, oldest first. Unreadable files are skipped
     /// rather than thrown: one corrupt proposal must not hide the others.
     public static func all(in vaultRoot: URL) -> [Proposal] {
-        let folder = directory(in: vaultRoot)
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: nil
-        )) ?? []
-        return contents
-            .filter { $0.pathExtension == "json" }
-            .compactMap { url -> Proposal? in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? decoder.decode(Proposal.self, from: data)
-            }
+        // Once per id: iCloud keeps a clash as `id 2.json` holding the same
+        // proposal, which listed it twice and made its id ambiguous.
+        var seen = Set<String>()
+        return files(in: vaultRoot)
+            .sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }
+            .map(\.proposal)
+            .filter { seen.insert($0.id).inserted }
             // By id where the timestamps tie, which they do: the dates are
             // encoded to the second, and two proposals from one agent run land
             // inside one. Without it the list reorders itself between reads.
             .sorted { $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt < $1.createdAt }
+    }
+
+    /// Every readable proposal file, with the proposal it holds.
+    private static func files(in vaultRoot: URL) -> [(url: URL, proposal: Proposal)] {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: directory(in: vaultRoot), includingPropertiesForKeys: nil
+        )) ?? []
+        return contents
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url in
+                guard let data = try? Data(contentsOf: url),
+                      let proposal = try? decoder.decode(Proposal.self, from: data) else { return nil }
+                return (url, proposal)
+            }
     }
 
     /// A readable id for a proposal.
@@ -443,7 +464,15 @@ public enum ProposalStore {
     public static func conflict(
         forNote relativePath: String, among proposals: [Proposal], ignoring: String? = nil
     ) -> Proposal? {
-        proposals.first { $0.notePath == relativePath && $0.id != ignoring }
+        let note = normalized(relativePath)
+        return proposals.first { normalized($0.notePath) == note && $0.id != ignoring }
+    }
+
+    /// A note path as the disk tells notes apart: `Sub//Note.md`,
+    /// `./Sub/Note.md` and `sub/note.md` are one note on a case-insensitive
+    /// volume, and were three pending proposals for it.
+    static func normalized(_ path: String) -> String {
+        path.split(separator: "/").filter { $0 != "." }.joined(separator: "/").lowercased()
     }
 
     /// What is waiting, sorted into the three things a review list shows:
@@ -502,9 +531,20 @@ public enum ProposalStore {
         return result
     }
 
+    /// The proposal's file and any iCloud conflict copy of it, which holds
+    /// the same id and would otherwise offer the same change again.
     public static func remove(_ id: String, in vaultRoot: URL) {
         let url = directory(in: vaultRoot).appendingPathComponent("\(id).json")
         try? FileManager.default.removeItem(at: url)
+        for copy in files(in: vaultRoot) where copy.proposal.id == id {
+            try? FileManager.default.removeItem(at: copy.url)
+        }
+    }
+
+    /// Whether a proposal with this id is still waiting.
+    static func exists(_ id: String, in vaultRoot: URL) -> Bool {
+        FileManager.default.fileExists(atPath: directory(in: vaultRoot).appendingPathComponent("\(id).json").path)
+            || files(in: vaultRoot).contains { $0.proposal.id == id }
     }
 
     /// Rewrites a proposal so that the hunks already dealt with are gone.
@@ -550,7 +590,9 @@ public enum ProposalStore {
             // Still part of the change it was proposed as.
             group: proposal.group
         )
-        try write(remaining, in: vaultRoot)
+        // Not written back once another device has answered it: a sheet
+        // still holding a discarded proposal would bring it back.
+        if exists(proposal.id, in: vaultRoot) { try write(remaining, in: vaultRoot) }
         return (updated, remaining)
     }
 }
