@@ -51,6 +51,13 @@ struct PadRootView: View {
     @State private var expandedTags: Set<String> = []
     @State private var creating: NewNoteRequest?
     @State private var action: ItemAction?
+    /// The item the last sidebar action was for, kept until it is done.
+    @State private var acting: String?
+    /// A note the pane followed to its new name, held until the rescan the
+    /// rename started has listed it: a list whose rows do not have it yet
+    /// can clear the selection, and the pane blinked shut. However long the
+    /// rescan takes.
+    @State private var following: String?
     @State private var detailPath: [MobileRoute] = []
     /// The note in the pane, which the panel beside it is about.
     @State private var panelNote: PanelNote?
@@ -92,6 +99,15 @@ struct PadRootView: View {
             day = nil
         }
         .onChange(of: selection) { _, route in
+            if let follow = following {
+                // Only while the rename is still settling: after it, closing
+                // the pane is the reader's, and stays closed.
+                if route == nil, vault.isScanning || vault.note(at: follow) == nil {
+                    selection = .note(follow)
+                    return
+                }
+                if route != .note(follow) { following = nil }
+            }
             guard let route else { return }
             switch route {
             case .note(let path), .newNote(let path):
@@ -104,6 +120,10 @@ struct PadRootView: View {
                 // not in the note pane.
                 open(route)
             }
+        }
+        // The rescan is done and has the note: nothing left to hold.
+        .onChange(of: vault.isScanning) { _, scanning in
+            if !scanning, let follow = following, vault.note(at: follow) != nil { following = nil }
         }
         .onChange(of: place, initial: true) { _, place in
             if let place { history.visit(place) }
@@ -234,7 +254,38 @@ struct PadRootView: View {
             }
         }
         .newNoteSheet($creating)
-        .itemActionHost($action)
+        // A row of the open note, or of a folder holding it: its typing is
+        // written first, so the file moves with it, and the pane follows it
+        // to where it went. Left on the old path, every later save went to
+        // a file that was no longer there.
+        .itemActionHost($action) { action in
+            acting = action.item.path
+            if let open = openNotePath, Self.contains(action.item.path, open) {
+                await NoteDocument.saveOpen(open)
+            }
+        } done: { outcome in
+            guard let source = acting, let open = openNotePath, Self.contains(source, open) else { return }
+            switch outcome {
+            case .moved(let path):
+                let moved = path + open.dropFirst(source.count)
+                following = moved
+                selection = .note(moved)
+            case .deleted: selection = nil
+            }
+        }
+    }
+
+    /// The path of the note in the note pane.
+    private var openNotePath: String? {
+        switch selection {
+        case .note(let path), .newNote(let path): path
+        default: nil
+        }
+    }
+
+    /// Whether `item` is the note at `path`, or a folder above it.
+    private static func contains(_ item: String, _ path: String) -> Bool {
+        path == item || path.hasPrefix(item + "/")
     }
 
     // MARK: Note pane
