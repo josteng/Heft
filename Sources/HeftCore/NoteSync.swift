@@ -205,9 +205,13 @@ public final class NoteSync {
     }
 
     private func write() async {
-        guard let vault, let text = pending, let base = onDisk,
-              let url = vault.noteURL(at: path)
-        else { return }
+        guard let vault, let text = pending, let base = onDisk else { return }
+        // A note deleted or renamed elsewhere has left the index, but the
+        // typing still has to go somewhere: to where it was, which the write
+        // finds missing and reports as changed elsewhere, so the reader is
+        // asked. Returning here kept it only in memory.
+        guard let url = vault.noteURL(at: path) ?? vault.root?.appendingPathComponent(path)
+        else { return recordDraft() }
         // Saving waits for the reader; the draft keeps up with the typing.
         guard !conflict else { return recordDraft() }
         var written = text
@@ -403,7 +407,11 @@ public enum NoteFile {
         var result: Result<String, Error> = .failure(CocoaError(.fileReadUnknown))
         NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) {
             coordinated in
-            result = Result { try String(contentsOf: coordinated, encoding: .utf8) }
+            // As the Mac reads it: UTF-8, else Latin-1, which saving keeps.
+            result = Result {
+                guard let text = NoteEncoding.read(coordinated) else { throw CocoaError(.fileReadUnknown) }
+                return text
+            }
         }
         if let coordinationError { throw coordinationError }
         return try result.get()
@@ -427,7 +435,7 @@ public enum NoteFile {
                 guard FileManager.default.fileExists(atPath: coordinated.path) else {
                     throw NoteWriteError.changedElsewhere
                 }
-                let current = try String(contentsOf: coordinated, encoding: .utf8)
+                guard let current = NoteEncoding.read(coordinated) else { throw CocoaError(.fileReadUnknown) }
                 guard current == original else { throw NoteWriteError.changedElsewhere }
                 try text.writeNote(to: coordinated)
             }
