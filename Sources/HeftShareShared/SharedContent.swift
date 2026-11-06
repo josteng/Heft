@@ -58,9 +58,15 @@ public enum SharedContent {
     /// Brackets in the title become parentheses rather than being escaped:
     /// `\[` is valid markdown, but not every editor reads a link around it,
     /// and a title reads the same either way.
+    /// Line breaks become spaces too: a label with a blank line in it is
+    /// not read as a link at all.
     public static func link(_ label: String, _ url: URL) -> String {
         let plain = label.replacingOccurrences(of: "[", with: "(")
             .replacingOccurrences(of: "]", with: ")")
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
         return "[\(plain)](\(url.absoluteString))"
     }
 
@@ -70,9 +76,8 @@ public enum SharedContent {
     /// the reader has rewritten, becomes the link.
     public static func retitled(_ text: String, url: URL, title: String) -> String {
         let replacement = link(title, url)
-        let pattern = #"\[[^\n]*\]\("# + NSRegularExpression.escapedPattern(for: url.absoluteString) + #"\)"#
         var text = text
-        if let range = text.range(of: pattern, options: .regularExpression) {
+        if let range = linkRange(to: url, in: text) {
             text.replaceSubrange(range, with: replacement)
         } else if let range = text.range(of: url.absoluteString) {
             text.replaceSubrange(range, with: replacement)
@@ -80,5 +85,26 @@ public enum SharedContent {
             text = replacement
         }
         return text
+    }
+
+    /// The `[label](url)` link to `url`, from the `[` that balances the
+    /// label's closing bracket: never further back, where the reader's own
+    /// brackets or another link on the line begin.
+    static func linkRange(to url: URL, in text: String) -> Range<String.Index>? {
+        guard let tail = text.range(of: "](" + url.absoluteString + ")") else { return nil }
+        var depth = 1
+        var index = tail.lowerBound
+        while index > text.startIndex {
+            index = text.index(before: index)
+            switch text[index] {
+            case "]": depth += 1
+            case "[":
+                depth -= 1
+                if depth == 0 { return index..<tail.upperBound }
+            case "\n", "\r\n": return nil
+            default: break
+            }
+        }
+        return nil
     }
 }

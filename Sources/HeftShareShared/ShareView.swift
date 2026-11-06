@@ -39,6 +39,9 @@ struct ShareView: View {
     @State private var queuedNotice = false
     @State private var queuedReason = ""
     @State private var filed = 0
+    /// Set by the first tap on Add: the sheet stays a moment after filing,
+    /// and a second tap in it filed the share again.
+    @State private var adding = false
     @FocusState private var searching: Bool
 
     private static let choices: [Choice] = [.inbox, .today, .note]
@@ -235,7 +238,7 @@ struct ShareView: View {
                 .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
                 .background(canAdd ? AnyShapeStyle(.tint) : AnyShapeStyle(.tint.opacity(0.4)), in: .circle)
-                .disabled(!canAdd)
+                .disabled(!canAdd || adding)
         }
     }
 
@@ -297,7 +300,8 @@ struct ShareView: View {
     }
 
     private func add() {
-        guard canAdd, let destination else { return }
+        guard canAdd, !adding, let destination else { return }
+        adding = true
         lastChoice = choice.stored
         let now = Date()
         do {
@@ -312,6 +316,7 @@ struct ShareView: View {
                 queuedNotice = true
             } catch {
                 problem = error.localizedDescription
+                adding = false
             }
         }
     }
