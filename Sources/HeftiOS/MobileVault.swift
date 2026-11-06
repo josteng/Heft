@@ -259,6 +259,12 @@ final class MobileVault {
                 tags: Array(index.allTags.prefix(500)), tagColor: AppearancePreferences.hex((appearance ?? AppearancePreferences()).tagColor)
             ))
             let pins = Pins.load(from: root)
+            // The Mac's replacements and pairing, as it keeps them here.
+            let typing = SharedTypingSetup.read(from: root) ?? SharedTypingSetup()
+            await MainActor.run {
+                MobileTyping.shared.root = root
+                MobileTyping.shared.setup = typing
+            }
             await self.land(token: token, tree: tree, index: index, settings: settings,
                             appearance: appearance, listed: listed, pins: pins, pending: pending.count,
                             outdated: stale.count)

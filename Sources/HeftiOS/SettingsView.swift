@@ -5,12 +5,13 @@ import UIKit
 /// The pages of Settings, as the Mac has tabs: a list to pick one from, so a
 /// new page is a new row and not a longer form.
 enum SettingsPage: String, Hashable, CaseIterable {
-    case appearance, browsing, search, capture, vault
+    case appearance, browsing, typing, search, capture, vault
 
     var title: String {
         switch self {
         case .appearance: "Appearance"
         case .browsing: "Browsing"
+        case .typing: "Typing"
         case .search: "Search"
         case .capture: "Capture"
         case .vault: "Vault"
@@ -21,6 +22,7 @@ enum SettingsPage: String, Hashable, CaseIterable {
         switch self {
         case .appearance: "paintpalette"
         case .browsing: "sidebar.left"
+        case .typing: "keyboard"
         case .search: "magnifyingglass"
         case .capture: "text.badge.plus"
         case .vault: "books.vertical"
@@ -104,6 +106,7 @@ struct SettingsView: View {
                 switch page {
                 case .appearance: AppearanceSettingsView()
                 case .browsing: BrowsingSettingsView()
+                case .typing: TypingSettingsView()
                 case .search: SearchSettingsView()
                 case .capture: CaptureSettingsView()
                 case .vault: VaultSettingsView()
@@ -712,6 +715,122 @@ private struct CaptureSettingsView: View {
 }
 
 /// Which vault, and what Heft read from its Obsidian settings.
+/// Replacements and pairing: this device's switches, and the list itself,
+/// kept in the vault and shared with the Mac and the other devices.
+private struct TypingSettingsView: View {
+    @State private var replaces = MobileTyping.shared.replaces
+    @State private var pairs = MobileTyping.shared.pairs
+    @State private var setup = MobileTyping.shared.setup
+    @State private var editing: CustomSubstitution?
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Replacements", isOn: Binding(get: { replaces }, set: { replaces = $0; MobileTyping.shared.replaces = $0 }))
+                Toggle("Pair Brackets and Markers", isOn: Binding(get: { pairs }, set: { pairs = $0; MobileTyping.shared.pairs = $0 }))
+            } footer: {
+                Text("On this device. As you type, -> becomes \u{2192} and ( gets its ). Backspace right after a replacement puts back what you typed.")
+            }
+            Section {
+                if !setup.substitutions {
+                    Button("Turn Replacements On Everywhere") { change { $0.substitutions = true } }
+                }
+                ForEach(SmartTypographyGroup.allCases, id: \.self) { group in
+                    Toggle(group.title, isOn: Binding(
+                        get: { !setup.disabledGroups.contains(group.rawValue) },
+                        set: { on in change { setup in
+                            setup.disabledGroups.removeAll { $0 == group.rawValue }
+                            if !on { setup.disabledGroups = (setup.disabledGroups + [group.rawValue]).sorted() }
+                        } }
+                    ))
+                }
+            } header: {
+                Text("Built In")
+            }
+            Section {
+                ForEach(setup.custom) { rule in
+                    Button { editing = rule } label: {
+                        LabeledContent {
+                            Text(rule.replacement).lineLimit(1)
+                        } label: {
+                            Text(rule.trigger.isEmpty ? "New Replacement" : rule.trigger)
+                                .foregroundStyle(rule.isEnabled ? .primary : .secondary)
+                        }
+                    }
+                    .tint(.primary)
+                }
+                .onDelete { offsets in change { $0.custom.remove(atOffsets: offsets) } }
+                Button("Add Replacement", systemImage: "plus") { editing = CustomSubstitution(firing: .afterWord) }
+            } header: {
+                Text("Your Own")
+            } footer: {
+                Text("Kept in the vault, so Heft on the Mac and your other devices type with the same list.")
+            }
+        }
+        .navigationTitle("Typing")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $editing) { rule in
+            ReplacementEditor(rule: rule, isNew: !setup.custom.contains { $0.id == rule.id }) { saved in
+                change { setup in
+                    if let index = setup.custom.firstIndex(where: { $0.id == saved.id }) {
+                        setup.custom[index] = saved
+                    } else {
+                        setup.custom.append(saved)
+                    }
+                }
+            }
+        }
+        .onAppear { setup = MobileTyping.shared.setup }
+    }
+
+    private func change(_ edit: (inout SharedTypingSetup) -> Void) {
+        MobileTyping.shared.change(edit)
+        setup = MobileTyping.shared.setup
+    }
+}
+
+/// One replacement: what is typed, what it becomes, and when.
+private struct ReplacementEditor: View {
+    @State var rule: CustomSubstitution
+    let isNew: Bool
+    let save: (CustomSubstitution) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Typed", text: $rule.trigger)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Becomes", text: $rule.replacement, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } footer: {
+                    Text("{{date}}, {{time}} and {{title}} become today, the time and the note's name; {{caret}} is where the caret goes.")
+                }
+                Section {
+                    Picker("Replace", selection: $rule.firing) {
+                        ForEach(SubstitutionFiring.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    Toggle("On", isOn: $rule.isEnabled)
+                }
+            }
+            .navigationTitle(isNew ? "New Replacement" : "Replacement")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", systemImage: "xmark") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", systemImage: "checkmark", role: .confirm) { save(rule); dismiss() }
+                        .disabled(rule.trigger.isEmpty)
+                }
+            }
+        }
+    }
+}
+
 private struct VaultSettingsView: View {
     @Environment(MobileVault.self) private var vault
     @State private var choosing = false

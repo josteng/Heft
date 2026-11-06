@@ -458,6 +458,16 @@ struct LiveNoteEditor: UIViewRepresentable {
             if let view = textView as? MobileTextView, handlePropertyTyping(text, in: range, of: view) {
                 return false
             }
+            if let view = textView as? MobileTextView, handleTyping(text, in: range, of: view) {
+                return false
+            }
+            // Return ends a word, so a rule that waits for one fires first;
+            // the break then goes in as typed, list continuation and all.
+            if text == "\n", range.length == 0, let view = textView as? MobileTextView,
+               view.markedTextRange == nil, applySubstitution(in: view, endingWord: true) {
+                view.insertText("\n")
+                return false
+            }
             if text == "\n", range.length == 0, let view = textView as? MobileTextView,
                continueStructure(at: range.location, in: view) {
                 return false
@@ -474,6 +484,75 @@ struct LiveNoteEditor: UIViewRepresentable {
             // More than a character at once is a paste or a dictation, never
             // typing; a web address arriving that way is offered as a link.
             pendingPaste = (text as NSString).length > 1 ? (range.location, text) : nil
+            return true
+        }
+
+        // MARK: Replacements and pairing, as the Mac types
+
+        /// The replacement just made, which a backspace right after puts
+        /// back as typed: the way out the one time `->` meant `->`.
+        private var lastSubstitution: TextSubstitution?
+        /// A character typed that a replacement may follow, once it is in.
+        private var substituteAfterChange = false
+
+        /// Pairing as a bracket or a marker is typed, and backspace undoing
+        /// a replacement or taking an empty pair; true when it made the edit.
+        /// The rules are the Mac's, `BracketPairing` and `SmartTypography`.
+        private func handleTyping(_ text: String, in range: NSRange, of view: MobileTextView) -> Bool {
+            guard view.markedTextRange == nil else { return false }
+            let typing = MobileTyping.shared
+            let source = view.text as NSString
+            let caret = view.selectedRange
+            if text.isEmpty {
+                defer { lastSubstitution = nil }
+                guard range.length == 1, caret.length == 0, NSMaxRange(range) == caret.location else { return false }
+                if let done = lastSubstitution, caret.location == done.caret,
+                   NSMaxRange(done.replacedRange) <= source.length,
+                   source.substring(with: done.replacedRange) == done.replacement {
+                    replace(done.replacedRange, with: done.original, in: view)
+                    view.selectedRange = NSRange(location: done.range.location + (done.original as NSString).length, length: 0)
+                    return true
+                }
+                if BracketPairing.deletesPair(in: source, at: caret.location,
+                                              brackets: typing.pairsBrackets, markdown: typing.pairsMarkdown) {
+                    let pair = NSRange(location: caret.location - 1, length: 2)
+                    replace(pair, with: "", in: view)
+                    view.selectedRange = NSRange(location: pair.location, length: 0)
+                    return true
+                }
+                return false
+            }
+            lastSubstitution = nil
+            guard (text as NSString).length == 1, text != "\n" else { return false }
+            switch BracketPairing.action(typing: text, in: source, selection: range,
+                                         brackets: typing.pairsBrackets, markdown: typing.pairsMarkdown) {
+            case let .insert(paired, caretOffset, selects):
+                replace(range, with: paired, in: view)
+                view.selectedRange = NSRange(location: range.location + caretOffset, length: selects)
+                return true
+            case .skip:
+                view.selectedRange = NSRange(location: range.location + 1, length: 0)
+                return true
+            case .none:
+                break
+            }
+            if range.length == 0 { substituteAfterChange = true }
+            return false
+        }
+
+        /// The replacement due at the caret, made; true when there was one.
+        @discardableResult
+        private func applySubstitution(in view: MobileTextView, endingWord: Bool) -> Bool {
+            let caret = view.selectedRange
+            let title = ((document?.path ?? "") as NSString).lastPathComponent
+            guard caret.length == 0, let substitution = SmartTypography.substitution(
+                in: view.text, caret: caret.location, rules: MobileTyping.shared.rules,
+                expansion: SubstitutionExpansion(noteTitle: (title as NSString).deletingPathExtension),
+                endingWord: endingWord
+            ) else { return false }
+            replace(substitution.range, with: substitution.replacement, in: view)
+            view.selectedRange = NSRange(location: substitution.caret, length: 0)
+            lastSubstitution = substitution
             return true
         }
 
@@ -580,6 +659,10 @@ struct LiveNoteEditor: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             guard let view = textView as? MobileTextView else { return }
+            if substituteAfterChange {
+                substituteAfterChange = false
+                applySubstitution(in: view, endingWord: false)
+            }
             notePaste(in: view)
             restyle(view)
             document?.edited(view.text, at: loadedRevision)
