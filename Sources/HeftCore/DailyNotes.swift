@@ -146,7 +146,13 @@ public struct DailyNotes: Sendable {
     @discardableResult
     public func ensureNote(for date: Date) throws -> URL {
         let target = try checkedURL(for: date)
+        // Evicted is not absent: the note exists and is on its way, and a
+        // template written here would replace it.
         if FileManager.default.fileExists(atPath: target.path) { return target }
+        if ICloudPlaceholder.isEvicted(target) {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: target)
+            return target
+        }
 
         try FileManager.default.createDirectory(
             at: target.deletingLastPathComponent(), withIntermediateDirectories: true
@@ -166,7 +172,7 @@ public struct DailyNotes: Sendable {
         var coordinationError: NSError?
         var writeError: Error?
         coordinator.coordinate(writingItemAt: target, options: [], error: &coordinationError) { url in
-            guard !FileManager.default.fileExists(atPath: url.path) else { return }
+            guard !FileManager.default.fileExists(atPath: url.path), !ICloudPlaceholder.isEvicted(url) else { return }
             do {
                 try body.write(to: url, atomically: true, encoding: .utf8)
             } catch {

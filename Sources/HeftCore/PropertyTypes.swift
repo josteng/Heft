@@ -166,9 +166,7 @@ public enum PropertyTypes {
 
     /// Where iCloud leaves `.types.json.icloud` for a file it has not
     /// fetched to this device.
-    static func placeholder(for url: URL) -> URL {
-        url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
-    }
+    static func placeholder(for url: URL) -> URL { ICloudPlaceholder.url(for: url) }
 
     private static func jsonString(_ string: String) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: [string], options: [.fragmentsAllowed, .withoutEscapingSlashes])) ?? Data()

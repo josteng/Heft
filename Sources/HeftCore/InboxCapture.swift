@@ -321,6 +321,9 @@ public struct InboxCapture: Sendable {
             error: &coordinationError
         ) { coordinatedURL in
             do {
+                // Evicted, the inbox is not missing: a fresh one written here
+                // would stand in for every line iCloud still holds.
+                try ICloudPlaceholder.requireDownloaded(coordinatedURL)
                 let exists = FileManager.default.fileExists(atPath: coordinatedURL.path)
                 let existing = exists
                     ? try String(contentsOf: coordinatedURL, encoding: .utf8)
