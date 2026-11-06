@@ -370,6 +370,29 @@ public struct InboxCapture: Sendable {
         guard !text.isEmpty else { throw InboxCaptureError.emptyCapture }
 
         let newline = existing.contains("\r\n") ? "\r\n" : "\n"
+        // Frontmatter stays first, or Obsidian no longer reads it as
+        // properties: everything below is placed in the rest of the note,
+        // and a `#` comment in the YAML is never taken for a heading.
+        if let block = PropertyEditing.blockRange(in: existing) {
+            let note = existing as NSString
+            var front = note.substring(to: block.length)
+            if !front.hasSuffix("\n") { front += newline }
+            return front + placing(
+                text, in: note.substring(from: block.length), newline: newline, at: date,
+                calendar: calendar, title: title, timestamped: timestamped, done: done,
+                inTimeOrder: inTimeOrder
+            )
+        }
+        return placing(
+            text, in: existing, newline: newline, at: date, calendar: calendar, title: title,
+            timestamped: timestamped, done: done, inTimeOrder: inTimeOrder
+        )
+    }
+
+    private static func placing(
+        _ text: String, in existing: String, newline: String, at date: Date, calendar: Calendar,
+        title: String, timestamped: Bool, done: Bool, inTimeOrder: Bool
+    ) -> String {
         let day = formatted(date, pattern: "yyyy-MM-dd", calendar: calendar)
         let time = timestamped ? formatted(date, pattern: "HH:mm", calendar: calendar) : ""
         let entry = markdownEntry(text, time: time, done: done, newline: newline)
