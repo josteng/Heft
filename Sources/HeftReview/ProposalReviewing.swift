@@ -35,6 +35,10 @@ protocol ProposalReviewing: AnyObject {
     func carryOut(_ proposal: Proposal, confirmed: Bool) -> Bool
     /// One question for every file a group would delete; true to go ahead.
     func confirmDeletes(in group: ProposalGroup) -> Bool
+    /// Shows the note at `relativePath`, which a review just changed.
+    func openReviewed(_ relativePath: String)
+    /// Whether accepting opens the note, as the reader has it set.
+    var opensReviewedNotes: Bool { get }
 }
 
 extension ProposalReviewing {
@@ -75,6 +79,8 @@ extension ProposalReviewing {
             )
             reviewing = outcome.remaining
             refreshProposals()
+            // The last change decided, with an accept: the note, changed.
+            if accept, outcome.remaining == nil { openAccepted(proposal.notePath) }
             reportReview(accept
                 ? "Applied one change to \(proposal.noteName)"
                 : "Rejected one change to \(proposal.noteName)", isProblem: false)
@@ -83,7 +89,9 @@ extension ProposalReviewing {
         }
     }
 
-    func acceptAll(_ proposal: Proposal) {
+    /// `opening` is false inside a group, which changes several notes and
+    /// opens none of them.
+    func acceptAll(_ proposal: Proposal, opening: Bool = true) {
         guard let root = proposalVaultRoot else { return }
         if let refusal = refusal(of: proposal, in: root) {
             return reportReview(refusal, isProblem: true)
@@ -99,6 +107,7 @@ extension ProposalReviewing {
         ProposalStore.remove(proposal.id, in: root)
         reviewing = nil
         refreshProposals()
+        if opening { openAccepted(proposal.notePath) }
         let diff = proposal.diff(against: before)
         reportReview("Applied \(diff.hunks.count) change(s) to \(proposal.noteName)", isProblem: false)
     }
@@ -131,7 +140,7 @@ extension ProposalReviewing {
     /// here. Both are answered whole: there are no hunks in "remove this
     /// file". The proposal is settled only once the file really went: a
     /// proposal dropped after a refusal would look like it had been applied.
-    func applyStructural(_ proposal: Proposal, confirmed: Bool = false) {
+    func applyStructural(_ proposal: Proposal, confirmed: Bool = false, opening: Bool = true) {
         guard let root = proposalVaultRoot, proposal.kind == .delete || proposal.kind == .move,
               carryOut(proposal, confirmed: confirmed)
         else { return }
@@ -139,6 +148,14 @@ extension ProposalReviewing {
         ProposalStore.remove(proposal.id, in: root)
         reviewing = nil
         refreshProposals()
+        // A moved note, where it went; a deleted one has nothing to show.
+        if opening, proposal.kind == .move, let destination = proposal.destination { openAccepted(destination) }
+    }
+
+    /// Opens what a review changed, unless the reader turned it off.
+    func openAccepted(_ relativePath: String) {
+        guard opensReviewedNotes else { return }
+        openReviewed(relativePath)
     }
 
     /// Accepts every proposal in a group, in an order that cannot trip over
@@ -154,10 +171,10 @@ extension ProposalReviewing {
         // whole group rather than leaving its edits in and its deletes out.
         guard confirmDeletes(in: group) else { return }
         for proposal in group.proposals where !proposal.isStructural {
-            acceptAll(proposal)
+            acceptAll(proposal, opening: false)
         }
         for proposal in group.proposals where proposal.isStructural {
-            applyStructural(proposal, confirmed: true)
+            applyStructural(proposal, confirmed: true, opening: false)
         }
         reportReview("Applied \(group.summary)", isProblem: false)
     }

@@ -8,6 +8,7 @@ import SwiftUI
 /// whole.
 struct ReviewSection: View {
     @Environment(MobileVault.self) private var vault
+    @Environment(\.mobilePush) private var push
     /// A group about to be accepted that deletes files, asked about once.
     @State private var confirming: ProposalGroup?
 
@@ -15,40 +16,46 @@ struct ReviewSection: View {
         let review = vault.review
         let pending = review.pendingProposals
         if !pending.isEmpty {
-            Section {
-                ForEach(pending.groups) { group in
-                    DisclosureGroup {
-                        ForEach(group.proposals) { row($0) }
-                        // Named with its count: "Accept All" in the review
-                        // means every hunk of one proposal.
-                        Button("Accept All \(group.proposals.count) Changes", systemImage: "checkmark") {
-                            accept(group)
-                        }
-                        // Red symbol and all: the role colours the words, and
-                        // the list's tint was left on the symbol.
-                        Button("Discard All", systemImage: "xmark", role: .destructive) {
-                            review.discardGroup(group)
-                        }
-                        .tint(.red)
-                    } label: {
-                        ProposalGroupLabel(group: group)
+            reviewList(review, pending)
+                // Where an accepted note opens: on this stack, behind the sheet.
+                .onAppear { review.showsNote = { push(.note($0)) } }
+        }
+    }
+
+    private func reviewList(_ review: MobileReview, _ pending: ProposalStore.Pending) -> some View {
+        Section {
+            ForEach(pending.groups) { group in
+                DisclosureGroup {
+                    ForEach(group.proposals) { row($0) }
+                    // Named with its count: "Accept All" in the review
+                    // means every hunk of one proposal.
+                    Button("Accept All \(group.proposals.count) Changes", systemImage: "checkmark") {
+                        accept(group)
                     }
+                    // Red symbol and all: the role colours the words, and
+                    // the list's tint was left on the symbol.
+                    Button("Discard All", systemImage: "xmark", role: .destructive) {
+                        review.discardGroup(group)
+                    }
+                    .tint(.red)
+                } label: {
+                    ProposalGroupLabel(group: group)
                 }
-                ForEach(pending.edits) { row($0) }
-                ForEach(pending.structural) { row($0) }
-            } header: {
-                Label("Waiting for Review", systemImage: "sparkles")
             }
-            .confirmationDialog(
-                confirming.flatMap(ReviewQuestion.deletes(in:))?.title ?? "",
-                isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
-                titleVisibility: .visible,
-                presenting: confirming
-            ) { group in
-                Button("Delete", role: .destructive) { review.acceptGroup(group) }
-            } message: { group in
-                Text(ReviewQuestion.deletes(in: group)?.message ?? "")
-            }
+            ForEach(pending.edits) { row($0) }
+            ForEach(pending.structural) { row($0) }
+        } header: {
+            Label("Waiting for Review", systemImage: "sparkles")
+        }
+        .confirmationDialog(
+            confirming.flatMap(ReviewQuestion.deletes(in:))?.title ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+            titleVisibility: .visible,
+            presenting: confirming
+        ) { group in
+            Button("Delete", role: .destructive) { review.acceptGroup(group) }
+        } message: { group in
+            Text(ReviewQuestion.deletes(in: group)?.message ?? "")
         }
     }
 
@@ -101,6 +108,7 @@ struct ReviewSection: View {
 /// The Mac's review card at the foot of the iPad's sidebar, shared, over
 /// the iOS review. Accepting a group that deletes files asks once first.
 struct PadReviewCard: View {
+    @Environment(\.mobilePush) private var push
     /// How far the month's card is laid over the panel's foot.
     var tuckedUnder: CGFloat = 0
     @Environment(MobileVault.self) private var vault
@@ -116,6 +124,8 @@ struct PadReviewCard: View {
             discardGroup: { review.discardGroup($0) },
             tuckedUnder: tuckedUnder
         )
+        // Where an accepted note opens: the note pane.
+        .onAppear { review.showsNote = { push(.note($0)) } }
         .confirmationDialog(
             confirming.flatMap(ReviewQuestion.deletes(in:))?.title ?? "",
             isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),

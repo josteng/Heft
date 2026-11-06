@@ -3734,6 +3734,17 @@ final class AppModel: ObservableObject, ProposalReviewing {
 
     var proposalVaultRoot: URL? { vaultRoot }
 
+    /// The setting, read when asked; a test sets its own model's.
+    lazy var opensReviewedNotesSetting: () -> Bool = { ReviewPreference.opensAcceptedNote }
+    var opensReviewedNotes: Bool { opensReviewedNotesSetting() }
+
+    func openReviewed(_ relativePath: String) {
+        guard current?.relativePath != relativePath, let vaultRoot,
+              let ref = NoteRef(url: vaultRoot.appendingPathComponent(relativePath), vaultRoot: vaultRoot)
+        else { return }
+        open(ref)
+    }
+
     func writeAccepted(_ text: String, to relativePath: String, replacing original: String?) throws {
         // The open note takes it through its buffer, which autosaves.
         if let current, current.relativePath == relativePath { return write(text, to: relativePath) }

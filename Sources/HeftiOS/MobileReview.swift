@@ -20,6 +20,9 @@ final class MobileReview: ProposalReviewing {
     var problem: String?
 
     @ObservationIgnored weak var vault: MobileVault?
+    /// Shows a note, set by the screen the review list is on: the phone's
+    /// stack pushes it, the iPad's note pane shows it.
+    @ObservationIgnored var showsNote: ((String) -> Void)?
     #if DEBUG
     @ObservationIgnored private var launchReviewOpened = false
     #endif
@@ -125,6 +128,15 @@ final class MobileReview: ProposalReviewing {
             try NoteFile.create(text, at: url)
         }
         vault?.noteWritten()
+    }
+
+    /// Not a note already open, as a banner's is: deciding there leaves
+    /// the reader where they are.
+    var opensReviewedNotes: Bool { ReviewPreference.opensAcceptedNote }
+
+    func openReviewed(_ relativePath: String) {
+        guard !NoteDocument.isOpen(relativePath) else { return }
+        showsNote?(relativePath)
     }
 
     func reportReview(_ message: String, isProblem: Bool) {

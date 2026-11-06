@@ -715,6 +715,7 @@ private struct CaptureSettingsView: View {
 private struct VaultSettingsView: View {
     @Environment(MobileVault.self) private var vault
     @State private var choosing = false
+    @State private var opensAccepted = ReviewPreference.opensAcceptedNote
 
     var body: some View {
         Form {
@@ -731,6 +732,15 @@ private struct VaultSettingsView: View {
                                value: vault.settings.dailyNotesFolder.isEmpty ? vault.name : vault.settings.dailyNotesFolder)
             } footer: {
                 Text("From the vault's Obsidian settings, which Heft on the Mac uses too.")
+            }
+            Section {
+                Toggle("Open Note After Accepting", isOn: Binding(
+                    get: { opensAccepted }, set: { opensAccepted = $0; ReviewPreference.opensAcceptedNote = $0 }
+                ))
+            } header: {
+                Text("Review")
+            } footer: {
+                Text("Once the last change waiting on a note is accepted, the note opens to show it.")
             }
         }
         .navigationTitle("Vault")

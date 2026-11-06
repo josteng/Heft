@@ -197,6 +197,7 @@ struct GeneralSettingsView: View {
     /// real vault — so the suggestion would have made a folder beside a file
     /// of the same name, which is the one thing a default here must not do.
     @State private var typedFolder = ""
+    @State private var opensAccepted = ReviewPreference.opensAcceptedNote
 
     private var choice: Binding<Choice> {
         Binding(
@@ -290,6 +291,16 @@ struct GeneralSettingsView: View {
                             ? "A vault without agent instructions is asked once whether to add them. "
                                 + "Not Now is remembered for that vault."
                             : "Never asked. File ▸ Set Up Agent Access still writes the instructions when you want them."
+                    )
+                }
+                Toggle(isOn: Binding(
+                    get: { opensAccepted },
+                    set: { opensAccepted = $0; ReviewPreference.opensAcceptedNote = $0 }
+                )) {
+                    SettingLabel(
+                        "Open a note after accepting its changes",
+                        detail: "Once the last change waiting on a note is accepted, the note opens to show it. "
+                            + "Rejecting, and accepting a group of notes, opens nothing."
                     )
                 }
             }

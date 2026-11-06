@@ -538,6 +538,8 @@ struct ProposalTests {
         // note offering to delete or move it is the wrong place to decide.
         #expect(model.proposalsForCurrentNote.isEmpty)
         let move = try #require(model.pendingProposals.structural.first)
+        // The note open stays open, so its repointed buffer is what is read.
+        model.opensReviewedNotesSetting = { false }
         model.applyStructural(move)
 
         #expect(FileManager.default.fileExists(

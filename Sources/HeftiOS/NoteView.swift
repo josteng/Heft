@@ -65,6 +65,11 @@ final class NoteDocument {
     /// lines the proposal removes.
     private static let made = NSHashTable<NoteDocument>.weakObjects()
 
+    /// Whether a screen holds `path` now.
+    static func isOpen(_ path: String) -> Bool {
+        made.allObjects.contains { $0.path == path }
+    }
+
     /// Writes whatever is typed in `path`, wherever it is open.
     static func saveOpen(_ path: String) async {
         for document in made.allObjects where document.path == path {
