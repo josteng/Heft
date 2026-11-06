@@ -49,6 +49,8 @@ final class VaultSession: ObservableObject {
     private var watcher: VaultWatcher?
     private var reloadTask: Task<Void, Never>?
     private var contentChangeObserver: NSObjectProtocol?
+    /// Keeps `.heft/typing.json` in step with the Typing settings.
+    private var typingWatch: AnyCancellable?
 
     /// Where the parse cache lives; a test passes its own.
     private let cache: IndexCache
@@ -61,6 +63,13 @@ final class VaultSession: ObservableObject {
         openedAt = (HeftDefaults.shared.dictionary(forKey: openedAtKey) as? [String: Double] ?? [:])
             .mapValues(Date.init(timeIntervalSince1970:))
         reload()
+        // The replacements and pairing, shared with Heft on the iPhone and
+        // iPad: what was changed there while the Mac was off first.
+        takeTypingEdits()
+        publishTyping()
+        typingWatch = TypingSettings.shared.objectWillChange
+            .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.publishTyping() }
         watcher = VaultWatcher(root: self.root) { [weak self] in
             self?.vaultDidChangeOnDisk()
         }
@@ -76,6 +85,28 @@ final class VaultSession: ObservableObject {
             }
         }
     }
+
+    private func publishTyping() {
+        let setup = TypingSettings.shared.sharedSetup
+        try? setup.write(to: root)
+        if let data = try? JSONEncoder().encode(setup) { HeftDefaults.shared.set(data, forKey: publishedTypingKey) }
+    }
+
+    /// The vault's typing setup taken into the Mac's settings when it is
+    /// neither the Mac's own nor what the Mac last wrote there: then an
+    /// iPhone or iPad changed it. Before anything was written there is
+    /// nothing to tell an edit from the Mac's own, and the Mac's wins.
+    private func takeTypingEdits() {
+        let written = HeftDefaults.shared.data(forKey: publishedTypingKey)
+            .flatMap { try? JSONDecoder().decode(SharedTypingSetup.self, from: $0) }
+        guard let there = SharedTypingSetup.edit(
+            inVault: SharedTypingSetup.read(from: root), mine: TypingSettings.shared.sharedSetup, lastWritten: written
+        ) else { return }
+        TypingSettings.shared.apply(there)
+        if let data = try? JSONEncoder().encode(there) { HeftDefaults.shared.set(data, forKey: publishedTypingKey) }
+    }
+
+    private var publishedTypingKey: String { "dev.stenglein.Heft.typing.published.\(root.path)" }
 
     deinit {
         reloadTask?.cancel()
@@ -300,6 +331,7 @@ final class VaultSession: ObservableObject {
         // redraw it. Published only when one did, for the reason above.
         if ImageCache.refreshChanged() { objectWillChange.send() }
         diskChanges.send()
+        takeTypingEdits()
         reload()
     }
 }

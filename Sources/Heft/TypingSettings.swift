@@ -103,6 +103,25 @@ final class TypingSettings: ObservableObject {
         didSet { HeftDefaults.shared.set(suggestsShortLinkTitles, forKey: Self.shortLinkTitlesKey) }
     }
 
+    /// The vault's setup taken in, when it was changed on an iPhone or iPad.
+    func apply(_ setup: SharedTypingSetup) {
+        let groups = setup.config.enabledGroups
+        if substitutionsEnabled != setup.substitutions { substitutionsEnabled = setup.substitutions }
+        if enabledGroups != groups { enabledGroups = groups }
+        if customRules != setup.custom { customRules = setup.custom }
+        if pairsBrackets != setup.pairsBrackets { pairsBrackets = setup.pairsBrackets }
+        if pairsMarkdown != setup.pairsMarkdown { pairsMarkdown = setup.pairsMarkdown }
+    }
+
+    /// What the vault carries for the iPhone and iPad.
+    var sharedSetup: SharedTypingSetup {
+        SharedTypingSetup(
+            substitutions: substitutionsEnabled,
+            disabledGroups: Set(SmartTypographyGroup.allCases).subtracting(enabledGroups).map(\.rawValue).sorted(),
+            custom: customRules, pairsBrackets: pairsBrackets, pairsMarkdown: pairsMarkdown
+        )
+    }
+
     var config: SmartTypographyConfig {
         SmartTypographyConfig(
             isEnabled: substitutionsEnabled, enabledGroups: enabledGroups, custom: customRules
