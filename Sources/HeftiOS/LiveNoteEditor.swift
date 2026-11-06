@@ -58,13 +58,22 @@ struct LiveNoteEditor: UIViewRepresentable {
         view.addGestureRecognizer(tap)
         view.ownTap = tap
         // A property row's menu from a secondary click with a pointer, as a
-        // right-click gives it on the Mac. A long press needs nothing of its
-        // own: UIKit's shows the text's menu, which carries the row's.
+        // right-click gives it on the Mac, and from a long press. UIKit's
+        // own long press only placed the caret on a device, under the
+        // loupe, and never showed the menu; it is kept out of the rows.
         let secondary = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.pressedRow(_:)))
         secondary.buttonMaskRequired = .secondary
+        // A pointer's click only: on iOS 27 a finger lifted after a long
+        // press passed for one, and placed the caret again under the menu
+        // the long press had just opened.
+        secondary.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
         secondary.delegate = coordinator
         view.addGestureRecognizer(secondary)
-        view.ownRowMenus = [secondary]
+        let press = UILongPressGestureRecognizer(target: coordinator, action: #selector(Coordinator.pressedRow(_:)))
+        press.minimumPressDuration = 0.45
+        press.delegate = coordinator
+        view.addGestureRecognizer(press)
+        view.ownRowMenus = [secondary, press]
         view.onFormat = { [weak coordinator] tool in coordinator?.applyTool(tool) }
         view.onAttach = { [weak coordinator] source in coordinator?.startAttach(source) }
         view.onWidthClass = { [weak coordinator] in coordinator?.updateAccessory() }
@@ -120,6 +129,11 @@ struct LiveNoteEditor: UIViewRepresentable {
     }
 
     func updateUIView(_ view: MobileTextView, context: Context) {
+        // The view on screen. SwiftUI can make two for one coordinator and
+        // keep the first, after the coordinator had loaded the note into the
+        // second: on iOS 27 the one shown then had no rows to answer for,
+        // and a long press or a tap on a property found none.
+        if context.coordinator.textView !== view { context.coordinator.adopt(view) }
         // Grows while a banner sits over the note's top, so its first
         // lines start below the banner rather than under it.
         if view.topInset != topInset {
@@ -162,6 +176,22 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// Whether the text view had the keyboard when a tap began, so a
         /// checkbox tapped while reading does not leave the keyboard up.
         var hadFocusAtTap = false
+
+        /// Takes `view` as the one shown, as though nothing had been loaded
+        /// into it yet: the note, its styling and the table's controls go
+        /// to it, out of the view SwiftUI discarded.
+        func adopt(_ view: MobileTextView) {
+            for button in properties.menuButtons.values { button.removeFromSuperview() }
+            properties.foldArrow?.removeFromSuperview()
+            properties.sourceButton?.removeFromSuperview()
+            properties.menuButtons = [:]
+            properties.foldArrow = nil
+            properties.sourceButton = nil
+            properties.editMenu = nil
+            textView = view
+            loadedRevision = -1
+            renderContext = nil
+        }
 
         func update(from editor: LiveNoteEditor) {
             document = editor.document
@@ -1799,11 +1829,14 @@ final class MobileTextView: UITextView {
            isOnPicture(recognizer.location(in: self)) {
             return false
         }
-        // A single tap in a property row is the editor's to place; a long
-        // press or a double tap still selects as anywhere else.
+        // A single tap and a long press in a property row are the editor's:
+        // the caret placed, and the row's menu. A double tap still selects.
         let own = recognizer === ownTap || ownRowMenus?.contains(where: { $0 === recognizer }) == true
         if !own, let tap = recognizer as? UITapGestureRecognizer, tap.numberOfTapsRequired == 1,
            isOnPropertyRow(recognizer.location(in: self)) {
+            return false
+        }
+        if !own, recognizer is UILongPressGestureRecognizer, isOnPropertyRow(recognizer.location(in: self)) {
             return false
         }
         return super.gestureRecognizerShouldBegin(recognizer)

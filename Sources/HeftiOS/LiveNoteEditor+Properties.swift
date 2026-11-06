@@ -130,14 +130,23 @@ extension LiveNoteEditor.Coordinator: UIEditMenuInteractionDelegate {
         return false
     }
 
-    /// A secondary click on a row: the caret placed as a tap places it,
-    /// then the text's menu with the row's in it.
+    /// A secondary click or a long press on a row: the caret placed as a
+    /// tap places it, then the text's menu with the row's in it. A press
+    /// answers as it is held long enough, not on lifting.
     @objc func pressedRow(_ recognizer: UIGestureRecognizer) {
-        guard let textView, recognizer.state == .recognized else { return }
+        let wanted: UIGestureRecognizer.State = recognizer is UILongPressGestureRecognizer ? .began : .recognized
+        guard let textView, recognizer.state == wanted else { return }
         let point = recognizer.location(in: textView)
         guard let row = propertyRow(at: point, in: textView) else { return }
-        if !tapRow(row.line, inValue: row.inValue, at: point, in: textView) {
-            showEditMenu(at: point, in: textView)
+        let focused = textView.isFirstResponder
+        guard !tapRow(row.line, inValue: row.inValue, at: point, in: textView) else { return }
+        guard !focused else { return showEditMenu(at: point, in: textView) }
+        // The press brought the keyboard up, which closes a menu opened
+        // under it: opened once it is up, at the caret it may have moved.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self, weak textView] in
+            guard let self, let textView, let caret = textView.selectedTextRange?.end else { return }
+            let rect = textView.caretRect(for: caret)
+            self.showEditMenu(at: CGPoint(x: rect.midX, y: rect.midY), in: textView)
         }
     }
 
