@@ -44,6 +44,7 @@ struct VaultMenu: View {
     /// Capture, where the bar has no button of its own for it.
     var capture: (() -> Void)?
     @Environment(MobileVault.self) private var vault
+    @Environment(\.openSettings) private var openSettings
     @State private var settings: SettingsRequest?
     /// The launch hook opens Settings once, on whichever screen shows first.
     @MainActor private static var launched = false
@@ -58,7 +59,7 @@ struct VaultMenu: View {
                     withAnimation(.snappy) { calendarShown.wrappedValue.toggle() }
                 }
             }
-            Button("Settings", systemImage: "gearshape") { settings = SettingsRequest() }
+            Button("Settings", systemImage: "gearshape") { show(nil) }
             Button("Refresh", systemImage: "arrow.clockwise") { vault.refresh() }
         } label: {
             Label("More", systemImage: "ellipsis")
@@ -67,13 +68,19 @@ struct VaultMenu: View {
         .sheet(item: $settings) { SettingsView(page: $0.page) }
         .onAppear {
             #if DEBUG
-            guard !Self.launched else { return }
+            // The iPad's layout opens it itself, from its own sheet.
+            guard !Self.launched, UIDevice.current.userInterfaceIdiom != .pad else { return }
             Self.launched = true
             if let requested = ProcessInfo.processInfo.environment["HEFT_IOS_SETTINGS"] {
-                settings = SettingsRequest(page: SettingsPage(rawValue: requested))
+                show(SettingsPage(rawValue: requested))
             }
             #endif
         }
+    }
+
+    /// Through the root's sheet where there is one, which stays put.
+    private func show(_ page: SettingsPage?) {
+        if let openSettings { openSettings(page) } else { settings = SettingsRequest(page: page) }
     }
 }
 

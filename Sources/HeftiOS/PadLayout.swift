@@ -228,6 +228,7 @@ struct PadRootView: View {
             }
         }
         .sheet(item: $settings) { SettingsView(page: $0.page) }
+        .environment(\.openSettings) { settings = SettingsRequest(page: $0) }
         .navigationTitle(vault.name)
         .navigationBarTitleDisplayMode(.inline)
         // The keyboard belongs to the note beside it: without this the
@@ -412,6 +413,12 @@ struct PadRootView: View {
     }
 
     private func applyLaunchRequest() {
+        #if DEBUG
+        // `HEFT_IOS_SETTINGS=<page>` opens Settings there, from this sheet.
+        if let requested = ProcessInfo.processInfo.environment["HEFT_IOS_SETTINGS"] {
+            settings = SettingsRequest(page: SettingsPage(rawValue: requested))
+        }
+        #endif
         switch BrowsingPreferences.shared.start {
         case .today:
             if selection == nil, day == nil { pick(Date()) }

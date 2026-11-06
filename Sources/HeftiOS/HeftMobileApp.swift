@@ -66,6 +66,10 @@ extension EnvironmentValues {
     /// Pushes onto whichever stack the view is in; a link inside a note uses
     /// it to open the note it names.
     @Entry var mobilePush: (MobileRoute) -> Void = { _ in }
+    /// Opens Settings from the root's own sheet, on a page or its list. A
+    /// sheet shown from a toolbar's menu was laid out again each time the
+    /// bar was, and Settings moved by a few points as scans landed.
+    @Entry var openSettings: ((SettingsPage?) -> Void)?
     /// Swaps the screen on top for another, as when its note was renamed.
     @Entry var mobileReplace: (MobileRoute) -> Void = { _ in }
     /// Closes the note on show, as when it was deleted: a pop on the phone,
@@ -184,6 +188,7 @@ struct MobileRootView: View {
             .environment(\.mobileCapture) { capture = CaptureSheetRequest() }
             .environment(\.mobileLibrary, usesSidebar ? nil : phoneLibrary)
             .sheet(item: $settings) { SettingsView(page: $0.page) }
+            .environment(\.openSettings) { settings = SettingsRequest(page: $0) }
             // A note made from the search opens on Recent.
             .newNoteSheet($creating)
             .environment(\.mobilePush) { route in

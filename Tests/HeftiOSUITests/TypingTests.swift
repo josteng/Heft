@@ -74,22 +74,7 @@ final class TypingSettingsTests: XCTestCase {
         app.launchEnvironment["HEFT_IOS_VAULT"] = vault.path
         app.launchEnvironment["HEFT_IOS_SETTINGS"] = "typing"
         app.launch()
-        // On an iPad Settings is reached through the sidebar's menu.
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            let sidebar = app.buttons["Show Sidebar"].firstMatch
-            if sidebar.waitForExistence(timeout: 3) { sidebar.tap() }
-            // The launch's page opens once the sidebar's menu appears;
-            // asked for through the menu only if it does not.
-            if !app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "Arrows")).firstMatch.waitForExistence(timeout: 6) {
-                app.navigationBars.buttons["More"].firstMatch.tap()
-                let settings = app.buttons["Settings"].firstMatch
-                XCTAssertTrue(settings.waitForExistence(timeout: 3), app.debugDescription)
-                settings.tap()
-                let typing = app.staticTexts["Typing"].firstMatch
-                XCTAssertTrue(typing.waitForExistence(timeout: 3), app.debugDescription)
-                typing.tap()
-            }
-        }
+
         let add = app.buttons["Add Replacement"]
         XCTAssertTrue(app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "Arrows")).firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         // Under the built-in groups, below the fold in a smaller sheet.
