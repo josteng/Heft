@@ -130,7 +130,11 @@ public struct NoteDiff: Sendable, Equatable {
             guard hunk.originalRange.upperBound <= lines.count else { continue }
             lines.replaceSubrange(hunk.originalRange, with: hunk.added)
         }
-        return join(lines)
+        // A file without a final newline keeps going without one: adding it
+        // was a change nobody accepted, and one the review cannot show.
+        let joined = join(lines)
+        if !original.isEmpty, !original.hasSuffix("\n"), joined.hasSuffix("\n") { return String(joined.dropLast()) }
+        return joined
     }
 
     // MARK: - Edit script
