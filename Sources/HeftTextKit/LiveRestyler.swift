@@ -174,9 +174,33 @@ final class LiveRestyler {
             + "\(context.colorfulFormatting)/\(context.headingFont)/\(context.headingBars)/\(context.propertiesAsText)/\(context.propertiesFolded)/\(context.palette)/"
             + "\(context.strictLineBreaks)/\(width)/"
             + "\(context.appearance?.name.rawValue ?? "")/"
-            + "\(context.accentColor)/\(context.linkColor)/\(context.tagColor)/"
-            + "\(context.codeColor)/\(context.boldColor)/\(context.italicColor)/"
-            + "\(context.headingColors)/\(context.imageGeneration)/\(PropertyTypes.generation)"
+            + drawn([context.accentColor, context.linkColor, context.tagColor,
+                     context.codeColor, context.boldColor, context.italicColor] + context.headingColors)
+            + "/\(context.imageGeneration)/\(PropertyTypes.generation)"
+    }
+
+    /// Colours as drawn, in light and dark. Not their descriptions: on iOS
+    /// the appearance makes dynamic colours afresh on every read, each
+    /// described by its address, so every SwiftUI update of the note
+    /// changed the key. The next keystroke then restyled and relaid the
+    /// whole note, TextKit guessed its height anew, and the page jumped.
+    static func drawn(_ colors: [NSColor]) -> String {
+        colors.map { color in
+            [false, true].map { dark in
+                var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+                #if os(macOS)
+                let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) ?? NSAppearance.currentDrawing()
+                var resolved: NSColor?
+                appearance.performAsCurrentDrawingAppearance { resolved = color.usingColorSpace(.extendedSRGB) }
+                guard let resolved else { return color.description }
+                resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+                #else
+                color.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
+                    .getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+                #endif
+                return String(format: "%.4f,%.4f,%.4f,%.4f", red, green, blue, alpha)
+            }.joined(separator: "|")
+        }.joined(separator: "/")
     }
 
     static func invalidate(_ range: NSRange, in manager: NSTextLayoutManager) {
