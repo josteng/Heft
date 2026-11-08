@@ -2019,9 +2019,38 @@ final class MobileTextView: UITextView {
         let least: CGFloat = UIDevice.current.userInterfaceIdiom == .phone ? 24 : 20
         let side = max(least, (bounds.width - 720) / 2)
         let insets = UIEdgeInsets(top: topInset, left: side, bottom: 160, right: side)
+        let previousSide = textContainerInset.left
+        let previousWidth = laidWidth ?? 0
+        laidWidth = bounds.width
         if textContainerInset != insets { textContainerInset = insets }
         super.layoutSubviews()
+        // A note shown at last: its first pass had no width to center in.
+        if previousWidth > 300 { slideText(from: previousSide, to: side) }
         if window != nil, textContainer.size.width > 0 { onTextWidth?() }
+    }
+
+    /// The width the last layout pass had; nil until the first. Optional
+    /// for the reason `keyboardWatch` is.
+    private var laidWidth: CGFloat?
+
+    /// The text's column moved a long way in one pass with nothing
+    /// animating it: closing the iPad's panel hands the note its final
+    /// width at once while the panel slides away, and the text jumped
+    /// sideways. It is shown where it was and slides to its place as the
+    /// panel does. A resize animated frame by frame moves a little each
+    /// pass, and a rotation runs inside UIKit's own animation.
+    private func slideText(from previous: CGFloat, to side: CGFloat) {
+        let jump = side - previous
+        // Only a column moving out, as the note widens: opening the panel
+        // narrows it frame by frame, and a frame late on a long note moved
+        // it far enough to start a slide inside that resize, which flickered.
+        guard previous > 0, jump > 40, window != nil, UIView.inheritedAnimationDuration == 0,
+              !UIAccessibility.isReduceMotionEnabled
+        else { return }
+        bounds.origin.x += jump
+        UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]) {
+            self.bounds.origin.x = 0
+        }
     }
 }
 
