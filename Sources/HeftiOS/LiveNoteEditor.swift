@@ -366,9 +366,16 @@ struct LiveNoteEditor: UIViewRepresentable {
         /// layout pass: restyled at the real width if it was styled at
         /// another, and the visible part laid out if nothing has been. On
         /// the next pass, never inside UIKit's layout.
+        ///
+        /// A width that changes on a styled note waits until it settles:
+        /// the iPad's panel resizes the note on every frame of its slide,
+        /// and a restyle per frame relaid the whole note each time, which
+        /// dropped frames and moved the page. TextKit rewraps meanwhile.
         func restyleIfWidthChanged(_ textView: MobileTextView) {
             guard textView.textContainer.size.width != styledWidth || Self.neverLaidOut(textView) else { return }
-            DispatchQueue.main.async { [weak self, weak textView] in
+            let resizing = styledWidth != nil && !Self.neverLaidOut(textView)
+            widthSettle?.cancel()
+            let settle = DispatchWorkItem { [weak self, weak textView] in
                 guard let self, let textView, textView.window != nil else { return }
                 if textView.textContainer.size.width != self.styledWidth {
                     self.restyle(textView)
@@ -377,7 +384,11 @@ struct LiveNoteEditor: UIViewRepresentable {
                     textView.textLayoutManager?.textViewportLayoutController.layoutViewport()
                 }
             }
+            widthSettle = settle
+            DispatchQueue.main.asyncAfter(deadline: .now() + (resizing ? 0.25 : 0), execute: settle)
         }
+
+        private var widthSettle: DispatchWorkItem?
 
         /// Text that TextKit has laid none of: its usage bounds are still
         /// empty, and the content size is its guess for an empty note.
