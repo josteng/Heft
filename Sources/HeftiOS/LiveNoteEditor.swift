@@ -1980,9 +1980,25 @@ final class MobileTextView: UITextView {
             covered = max(0, mine.maxY - keyboard.minY)
         }
         guard contentInset.bottom != covered else { return }
+        let growing = covered > contentInset.bottom
+        // Only a caret the reader is looking at is kept above the keyboard.
+        // One scrolled away from was brought back: Done hides the keyboard
+        // while the view still has focus, and the page jumped to the caret.
+        let caretShown = growing && isFirstResponder && caretIsOnScreen()
         contentInset.bottom = covered
         verticalScrollIndicatorInsets.bottom = covered
-        if isFirstResponder { scrollRangeToVisible(selectedRange) }
+        if caretShown { scrollRangeToVisible(selectedRange) }
+    }
+
+    /// Whether the caret is inside what the view shows, above whatever
+    /// already covers its foot.
+    private func caretIsOnScreen() -> Bool {
+        guard let position = selectedTextRange?.end else { return false }
+        let caret = caretRect(for: position)
+        let shown = CGRect(x: bounds.minX, y: bounds.minY + adjustedContentInset.top,
+                           width: bounds.width,
+                           height: bounds.height - adjustedContentInset.top - contentInset.bottom)
+        return shown.intersects(caret)
     }
 
     override func layoutSubviews() {
