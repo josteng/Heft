@@ -164,7 +164,10 @@ final class MobileVault {
         recent = SharedVault.noteList()
         tree = recent.isEmpty ? nil : Self.provisionalTree(recent, root: url)
         pins = Pins.load(from: url)
-        appearance = AppearancePreferences()
+        // Read now, as the pins are: left to the scan, the first second of
+        // a launch drew in the system's blue. One iCloud has not brought
+        // down yet still arrives with the scan.
+        appearance = AppearancePreferences.load(fromVault: url) ?? AppearancePreferences()
         loadOpenings()
         firstScan = true
         frecency = FrecencyStore.notes(forVaultAt: url.path)
@@ -200,6 +203,13 @@ final class MobileVault {
         let known = Dictionary(recent.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         isScanning = true
         Task.detached(priority: .userInitiated) {
+            #if DEBUG
+            // `HEFT_IOS_SCAN_DELAY=<s>` holds every scan back, as a large
+            // vault in iCloud does, to look at what shows before one lands.
+            if let delay = ProcessInfo.processInfo.environment["HEFT_IOS_SCAN_DELAY"].flatMap(Double.init) {
+                try? await Task.sleep(for: .seconds(delay))
+            }
+            #endif
             // Shares the extension could not write itself land first, so the
             // scan below already sees them.
             SharedVault.drainQueue(into: root)
