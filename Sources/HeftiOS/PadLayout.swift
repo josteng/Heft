@@ -323,7 +323,10 @@ struct PadRootView: View {
     /// What the Mac shows with no note open: how many notes, and the two
     /// ways in, Quick Open and today's note.
     private var nothingChosen: some View {
-        let count = vault.index.notes.count
+        // Until the first scan has built the index, the last run's list,
+        // which is already on screen: "0 notes" changed to the real count
+        // a second after opening.
+        let count = vault.index.notes.isEmpty ? vault.recent.count : vault.index.notes.count
         return VStack(spacing: 14) {
             Image(systemName: "doc.text")
                 .font(.system(size: 44, weight: .light))
