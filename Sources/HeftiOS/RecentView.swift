@@ -190,11 +190,29 @@ private struct RecentRow: View {
 }
 
 /// What a long first scan is doing, under a list that is already showing.
+///
+/// Only once it has lasted a second: most scans land sooner, and the pill
+/// flashed up and went again, moving the list's foot as it did.
 struct ScanStatus: View {
     @Environment(MobileVault.self) private var vault
+    @State private var lasted = false
 
     var body: some View {
-        if let status = vault.status, !vault.recent.isEmpty {
+        Group {
+            if lasted, let status = vault.status, !vault.recent.isEmpty {
+                pill(status)
+            }
+        }
+        .task(id: vault.status != nil) {
+            lasted = false
+            guard vault.status != nil else { return }
+            try? await Task.sleep(for: .seconds(1))
+            if !Task.isCancelled { lasted = true }
+        }
+    }
+
+    private func pill(_ status: String) -> some View {
+        Group {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text(status)
