@@ -140,6 +140,7 @@ struct PadRootView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: showsSearch)
+        .background { PadSearchKeys(library: library) }
         .focusedSceneValue(\.heftLibrary, library)
         .environment(\.mobileLibrary, library)
     }
@@ -820,5 +821,33 @@ private struct PadDayDetail: View {
         guard let dailyNotes = vault.dailyNotes else { return nil }
         let path = dailyNotes.relativePath(for: day)
         return vault.index.note(atRelativePath: path) != nil ? path : nil
+    }
+}
+
+/// The search's keys and the calendar's, answered by the window itself: a
+/// workaround. On iPadOS 27 the menu bar lists them, but from Search
+/// Everything on, every item in its menu lost its key, whichever key it
+/// had, and moved first it took ⌘1 to ⌘3 with it; neither its title nor
+/// its action alone did that, so the cause is in SwiftUI's menu, unfound.
+/// A shortcut in the window is looked up before the menu's and only the
+/// first match runs, so a press acts once. Remove these when the menu's
+/// own arrive.
+private struct PadSearchKeys: View {
+    let library: LibraryActions
+
+    var body: some View {
+        Group {
+            Button("Search Everything") { library.search(nil) }.keyboardShortcut("t")
+            Button("Quick Open") { library.search(.notes) }.keyboardShortcut("o")
+            Button("Command Palette") { library.search(.commands) }.keyboardShortcut("p")
+            Button("Search Vault Text") { library.search(.contents) }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            Button("Toggle Calendar") { library.toggleCalendar() }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+        }
+        // Nothing to see or to tap: only the keys.
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 }
