@@ -386,12 +386,11 @@ struct LiveTextEditor: NSViewRepresentable {
             }
             nsContext.coordinator.restyle(textView)
         } else if !editedHere, textView.string != text {
-            let selection = textView.selectedRange()
-            nsContext.coordinator.load(text, into: textView)
-            textView.setSelectedRange(NSRange(
-                location: min(selection.location, (text as NSString).length), length: 0
-            ))
-            nsContext.coordinator.restyle(textView)
+            // The same note's text, changed underneath and rendered before
+            // the generation that announces it: the model sets the two one
+            // after the other. A plain load here put the page at the top,
+            // and the generation then found nothing left to keep.
+            replaceKeepingPosition(with: text, in: textView, nsContext.coordinator)
         }
     }
 
