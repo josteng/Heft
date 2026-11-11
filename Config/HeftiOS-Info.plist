@@ -57,5 +57,8 @@
 	<array>
 		<string>dev.josteng.Heft.handoffNote</string>
 	</array>
+	<!-- Only HTTPS, for page titles: exempt, so no export compliance question per build. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

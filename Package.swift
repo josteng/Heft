@@ -79,6 +79,10 @@ let package = Package(
             // HeftReview the review of agent proposals, both shared with the
             // iOS app, which compiles the same folders.
             path: "Sources",
+            // The iOS targets' privacy manifests sit in their own folders
+            // under this path, and would be taken for resources here.
+            exclude: ["HeftiOS/PrivacyInfo.xcprivacy", "HeftShare/PrivacyInfo.xcprivacy",
+                      "HeftControls/PrivacyInfo.xcprivacy"],
             sources: ["Heft", "HeftTextKit", "HeftReview"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
