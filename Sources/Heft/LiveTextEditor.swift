@@ -4806,12 +4806,12 @@ final class HeftTextKit2View: NSTextView {
 }
 
 /// What the system's rewriting did to the editor, in the unified log under
-/// `dev.stenglein.Heft` / `writing-tools`. Siri cannot be driven from a test,
+/// `dev.josteng.Heft` / `writing-tools`. Siri cannot be driven from a test,
 /// so this is how a wrong-note write is traced: which hook fired, for which
 /// note, and whether the write was refused. Notes appear as a fingerprint
 /// that is stable within one run, never as a path or any of their text.
 enum WritingToolsLog {
-    private static let logger = Logger(subsystem: "dev.stenglein.Heft", category: "writing-tools")
+    private static let logger = Logger(subsystem: "dev.josteng.Heft", category: "writing-tools")
 
     static func event(_ name: String, note: String?, onScreen: String? = nil) {
         let fingerprint = { (identity: String?) in

@@ -6,7 +6,7 @@
          of shares it could not file itself. -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.dev.stenglein.HeftMobile</string>
+        <string>group.dev.josteng.Heft</string>
     </array>
 </dict>
 </plist>

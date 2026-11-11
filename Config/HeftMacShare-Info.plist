@@ -24,6 +24,6 @@
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
 	</dict>
 	<key>HeftDefaultsSuite</key>
-	<string>dev.stenglein.Heft</string>
+	<string>dev.josteng.Heft</string>
 </dict>
 </plist>

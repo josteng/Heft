@@ -44,7 +44,7 @@ INSTALLED_BINARY="$TARGET/Contents/MacOS/Heft"
 installed_running() { pgrep -f -x "$INSTALLED_BINARY.*" >/dev/null; }
 if installed_running; then
     echo "Quitting the running copy…"
-    BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$TARGET/Contents/Info.plist" 2>/dev/null || echo dev.stenglein.Heft)
+    BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$TARGET/Contents/Info.plist" 2>/dev/null || echo dev.josteng.Heft)
     osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
     for _ in $(seq 1 20); do
         installed_running || break

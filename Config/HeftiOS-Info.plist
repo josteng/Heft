@@ -6,7 +6,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>dev.stenglein.HeftMobile.url</string>
+			<string>dev.josteng.Heft.url</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>heft</string>
@@ -55,7 +55,7 @@
 	<string>Heft saves the photo you take into the vault and adds it to the note.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
-		<string>dev.stenglein.Heft.handoffNote</string>
+		<string>dev.josteng.Heft.handoffNote</string>
 	</array>
 </dict>
 </plist>

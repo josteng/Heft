@@ -5,7 +5,7 @@
     <!-- The widget reads today's note from here; it cannot open the vault. -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.dev.stenglein.HeftMobile</string>
+        <string>group.dev.josteng.Heft</string>
     </array>
 </dict>
 </plist>

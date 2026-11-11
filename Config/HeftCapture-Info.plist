@@ -30,6 +30,6 @@
         <string>com.apple.appintents-extension</string>
     </dict>
     <key>HeftDefaultsSuite</key>
-    <string>dev.stenglein.Heft</string>
+    <string>dev.josteng.Heft</string>
 </dict>
 </plist>

@@ -97,8 +97,8 @@ struct CaptureSheetRequest: Identifiable {
 /// a quick action chosen while the app is already running.
 final class MobileAppDelegate: NSObject, UIApplicationDelegate {
     static let actions: [(type: String, title: String, symbol: String, target: CaptureTarget)] = [
-        ("dev.stenglein.HeftMobile.captureToday", "Add to Today", "calendar.badge.plus", .today),
-        ("dev.stenglein.HeftMobile.captureInbox", "Capture to Inbox", "tray.and.arrow.down", .inbox),
+        ("dev.josteng.Heft.captureToday", "Add to Today", "calendar.badge.plus", .today),
+        ("dev.josteng.Heft.captureInbox", "Capture to Inbox", "tray.and.arrow.down", .inbox),
     ]
 
     func application(

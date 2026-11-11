@@ -15,6 +15,12 @@
     <!-- Which vault, and which note in it, are the app's preferences. -->
     <key>com.apple.security.temporary-exception.shared-preference.read-write</key>
     <array>
+        <string>dev.josteng.Heft</string>
+    </array>
+    <!-- Heft's preferences before 0.8, under its old identifier: read once
+         to carry them over, should this be the first process to run. -->
+    <key>com.apple.security.temporary-exception.shared-preference.read-only</key>
+    <array>
         <string>dev.stenglein.Heft</string>
     </array>
 </dict>

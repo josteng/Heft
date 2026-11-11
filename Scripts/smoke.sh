@@ -136,7 +136,7 @@ echo "  opened the vault it had, with no arguments"
 # the UI came up.
 
 # 6. And it left the real settings alone.
-REAL=$(defaults read dev.stenglein.Heft 2>/dev/null | grep -c "SmokeVault")
+REAL=$(defaults read dev.josteng.Heft 2>/dev/null | grep -c "SmokeVault")
 [[ "$REAL" == "0" ]] || fail "the smoke vault reached the real settings"
 
 echo "SMOKE PASS: launched, stayed up, opened its vault, real settings untouched"

@@ -69,7 +69,7 @@ under the title; above the keyboard the tab's floating field covered them. Comma
 ## The vault
 
 The Files picker hands over a security-scoped folder, kept as a bookmark in
-the App Group `group.dev.stenglein.HeftMobile`. The share extension can read
+the App Group `group.dev.josteng.Heft`. The share extension can read
 the bookmark but iOS does not let it use it, so a share it cannot file is
 queued there and the app files it on its next scan. The app also publishes a
 note list there after every scan, which is both the share sheet's note

@@ -22,8 +22,8 @@ struct TodaySnapshot: Codable, Equatable {
     /// The first lines, for a widget set to show the start of the note.
     var opening: [Line] = []
 
-    static let widgetKind = "dev.stenglein.HeftMobile.today"
-    private static let group = "group.dev.stenglein.HeftMobile"
+    static let widgetKind = "dev.josteng.Heft.today"
+    private static let group = "group.dev.josteng.Heft"
 
     private static var url: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?

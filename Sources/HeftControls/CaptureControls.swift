@@ -16,7 +16,7 @@ struct HeftControls: WidgetBundle {
 
 struct CaptureTodayControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: "dev.stenglein.HeftMobile.captureToday") {
+        StaticControlConfiguration(kind: "dev.josteng.Heft.captureToday") {
             ControlWidgetButton(action: OpenCaptureIntent(destination: .today)) {
                 Label("Add to Today", systemImage: "calendar.badge.plus")
             }
@@ -28,7 +28,7 @@ struct CaptureTodayControl: ControlWidget {
 
 struct CaptureInboxControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: "dev.stenglein.HeftMobile.captureInbox") {
+        StaticControlConfiguration(kind: "dev.josteng.Heft.captureInbox") {
             ControlWidgetButton(action: OpenCaptureIntent(destination: .inbox)) {
                 Label("Capture", systemImage: "tray.and.arrow.down")
             }

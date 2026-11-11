@@ -13,7 +13,7 @@ import XCTest
 /// hands focus back. The report goes to the unified log, since a UI test
 /// runner's stdout is shown nowhere and its sandbox cannot write a file:
 ///
-///     TEST_RUNNER_HEFT_PROBE_BUNDLE=dev.stenglein.Heft TEST_RUNNER_HEFT_PROBE_ACTIVATE=1 \
+///     TEST_RUNNER_HEFT_PROBE_BUNDLE=dev.josteng.Heft TEST_RUNNER_HEFT_PROBE_ACTIVATE=1 \
 ///     xcodebuild test -scheme HeftIntentTests -destination platform=macOS ...
 ///     /usr/bin/log show --last 2m --predicate 'composedMessage CONTAINS "HeftIntentTests report"'
 ///

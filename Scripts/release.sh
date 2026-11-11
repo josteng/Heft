@@ -219,6 +219,8 @@ cask "heft" do
 
   zap trash: [
     "~/Library/Application Support/Heft",
+    "~/Library/Preferences/dev.josteng.Heft.plist",
+    "~/Library/Saved Application State/dev.josteng.Heft.savedState",
     "~/Library/Preferences/dev.stenglein.Heft.plist",
     "~/Library/Saved Application State/dev.stenglein.Heft.savedState",
   ]

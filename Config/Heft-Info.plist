@@ -38,14 +38,14 @@
     <true/>
     <key>NSUserActivityTypes</key>
     <array>
-        <string>dev.stenglein.Heft.openNote</string>
-        <string>dev.stenglein.Heft.handoffNote</string>
+        <string>dev.josteng.Heft.openNote</string>
+        <string>dev.josteng.Heft.handoffNote</string>
     </array>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>dev.stenglein.Heft.url</string>
+            <string>dev.josteng.Heft.url</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>CFBundleURLSchemes</key>

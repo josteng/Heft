@@ -8,7 +8,7 @@ import Foundation
 /// itself needs only that both apps declare `activityType` and are signed by
 /// the same team.
 public struct HandoffNote: Equatable, Sendable {
-    public static let activityType = "dev.stenglein.Heft.handoffNote"
+    public static let activityType = "dev.josteng.Heft.handoffNote"
 
     /// Vault-relative, with the `.md`.
     public var path: String

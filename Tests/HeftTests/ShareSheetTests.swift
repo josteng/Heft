@@ -101,7 +101,7 @@ struct ShareSheetTests {
         let info = try plist("Config/HeftMacShare-Info.plist")
         let ext = try #require(info["NSExtension"] as? [String: Any])
         #expect(ext["NSExtensionPointIdentifier"] as? String == "com.apple.share-services")
-        #expect(info[HeftDefaults.suiteInfoKey] as? String == "dev.stenglein.Heft")
+        #expect(info[HeftDefaults.suiteInfoKey] as? String == "dev.josteng.Heft")
     }
 
     @Test("The Mac extension is sandboxed, reaches any vault, and may load a page")
@@ -111,7 +111,7 @@ struct ShareSheetTests {
         let files = entitlements["com.apple.security.temporary-exception.files.absolute-path.read-write"] as? [String]
         #expect(files == ["/"], "a vault is wherever the reader keeps it")
         let domains = entitlements["com.apple.security.temporary-exception.shared-preference.read-write"] as? [String]
-        #expect(domains == ["dev.stenglein.Heft"])
+        #expect(domains == ["dev.josteng.Heft"])
         #expect(entitlements["com.apple.security.network.client"] as? Bool == true, "the page title")
     }
 

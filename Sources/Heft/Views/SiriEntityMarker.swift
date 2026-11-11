@@ -123,7 +123,7 @@ final class SiriPointer {
             MacHandoff.resume(on: window)
             return
         }
-        let activity = NSUserActivity(activityType: "dev.stenglein.Heft.openNote")
+        let activity = NSUserActivity(activityType: "dev.josteng.Heft.openNote")
         activity.appEntityIdentifier = identifier
         activity.becomeCurrent()
         window.userActivity = activity

@@ -65,10 +65,10 @@ struct CaptureExtensionTests {
     @Test("The extension reads the app's preferences, under the key the accessor looks up")
     func extensionReadsTheAppsStore() throws {
         let info = try plist("Config/HeftCapture-Info.plist")
-        #expect(info[HeftDefaults.suiteInfoKey] as? String == "dev.stenglein.Heft")
+        #expect(info[HeftDefaults.suiteInfoKey] as? String == "dev.josteng.Heft")
         let entitlements = try plist("Config/HeftCapture.entitlements")
         let domains = entitlements["com.apple.security.temporary-exception.shared-preference.read-write"] as? [String]
-        #expect(domains == ["dev.stenglein.Heft"])
+        #expect(domains == ["dev.josteng.Heft"])
     }
 
     @Test("The extension is an App Intents extension, and sandboxed, or macOS never launches it")

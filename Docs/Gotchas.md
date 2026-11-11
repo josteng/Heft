@@ -62,7 +62,7 @@ preferences or the icon.
 - **Without `--sandbox`, launching the GUI repoints Spotlight capture.**
   Opening a vault writes `dev.stenglein.Heft.vaultPath`, which is where the App
   Intents file things. Put it back afterwards:
-  `defaults write dev.stenglein.Heft dev.stenglein.Heft.vaultPath -string <real vault>`.
+  `defaults write dev.josteng.Heft dev.stenglein.Heft.vaultPath -string <real vault>` (the key kept its pre-0.8 name).
 - **The installed `heft` and the GUI share `UserDefaults`; `swift run Heft`
   does not.** The development build has no bundle identifier and lands in a
   domain named after the executable, which is what keeps a debug run from

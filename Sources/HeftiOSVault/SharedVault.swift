@@ -9,7 +9,7 @@ import HeftCore
 /// something the simulator can show, so a share that cannot reach the vault
 /// is queued in the group container and filed by the app when it next runs.
 enum SharedVault {
-    static let group = "group.dev.stenglein.HeftMobile"
+    static let group = "group.dev.josteng.Heft"
     static let bookmarkKey = "dev.stenglein.Heft.iOS.vaultBookmark"
 
     static var defaults: UserDefaults {

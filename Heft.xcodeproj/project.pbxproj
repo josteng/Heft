@@ -856,7 +856,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Heft-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft;
 				PRODUCT_NAME = Heft;
 				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
 			};
@@ -876,7 +876,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Heft-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft;
 				PRODUCT_NAME = Heft;
 				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
 			};
@@ -961,7 +961,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/HeftCapture-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Capture;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Capture;
 				PRODUCT_NAME = HeftCapture;
 				SKIP_INSTALL = YES;
 				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
@@ -981,7 +981,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/HeftCapture-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Capture;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Capture;
 				PRODUCT_NAME = HeftCapture;
 				SKIP_INSTALL = YES;
 				SWIFT_ENABLE_EMIT_CONST_VALUES = YES;
@@ -1029,7 +1029,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft;
 				PRODUCT_NAME = HeftiOS;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -1055,7 +1055,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft;
 				PRODUCT_NAME = HeftiOS;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -1076,7 +1076,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Heft;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile.Controls;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Controls;
 				PRODUCT_NAME = HeftControls;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1098,7 +1098,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Heft;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile.Controls;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Controls;
 				PRODUCT_NAME = HeftControls;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1120,7 +1120,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Heft;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile.Share;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Share;
 				PRODUCT_NAME = HeftShare;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1141,7 +1141,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Heft;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.HeftMobile.Share;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Share;
 				PRODUCT_NAME = HeftShare;
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1163,7 +1163,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/HeftMacShare-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Share;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Share;
 				PRODUCT_NAME = HeftMacShare;
 				SKIP_INSTALL = YES;
 			};
@@ -1182,7 +1182,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Config/HeftMacShare-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = dev.stenglein.Heft.Share;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.josteng.Heft.Share;
 				PRODUCT_NAME = HeftMacShare;
 				SKIP_INSTALL = YES;
 			};
