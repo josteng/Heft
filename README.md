@@ -2,13 +2,15 @@
 
 **Somewhere you actually want to write.**
 
-A Mac app for Markdown notes: nice to write in, your files stay yours, and a
-command line built for the coding agent you already use. Native Swift, no
-Electron, no lock-in.
+A Mac, iPhone and iPad app for Markdown notes: nice to write in, your files
+stay yours, and a command line built for the coding agent you already use.
+Native Swift, no Electron, no lock-in.
 
 ```bash
 brew install --cask josteng/tap/heft
 ```
+
+On iPhone and iPad, join the beta on [TestFlight](https://testflight.apple.com/join/sDBqe2Ws).
 
 ![A note in Heft: a callout, a table, a task list, a formula and a shell snippet on one editing surface, with the caret inside a bold word so its markup shows](Docs/Screenshots/writing.webp)
 
@@ -29,9 +31,9 @@ Bring whichever agent you already use. Heft has none of its own to sell you.
 
 Point it at any folder of Markdown files, or at an existing Obsidian vault,
 which opens unmodified: no import, no database, nothing to migrate out of. It
-stays a normal vault, so those same notes still open and edit in Obsidian on
-your phone. Starting from nothing instead, `File ▸ New Vault` makes the
-folder and opens it on one short note. One search bar (⌘T) for notes,
+stays a normal vault, so those same notes open in Heft on your iPhone and
+iPad, or still in Obsidian. Starting from nothing instead, `File ▸ New Vault`
+makes the folder and opens it on one short note. One search bar (⌘T) for notes,
 commands, tags and text, also opened as quick open (⌘O) or a command palette (⌘P),
 and a Recent list that shows what is in each note are where you would expect
 them, and as many windows as you like can share one vault.
@@ -54,6 +56,11 @@ git clone https://github.com/josteng/Heft.git
 cd Heft
 Scripts/install.sh
 ```
+
+On iPhone and iPad, Heft is a beta on
+[TestFlight](https://testflight.apple.com/join/sDBqe2Ws) and needs iOS 26 or
+iPadOS 26. Pick your vault folder in Files once; iCloud Drive keeps it in sync
+with the Mac.
 
 **New here? [`Docs/GettingStarted.md`](Docs/GettingStarted.md)** covers opening
 a vault, the six things worth trying first, daily notes and capture.
@@ -361,10 +368,6 @@ Roughly in the order they are likely to land.
   [`Docs/Gotchas.md`](Docs/Gotchas.md) lists, and advanced Vim: Ex commands,
   registers beyond the basics, mappings.
 - **Graph view and themes.**
-- **No iOS or iPadOS app.** Obsidian opens the same vault on a phone today,
-  which takes the urgency out of it. The core is UI-free on purpose, so a
-  second shell is a matter of views; the editing surface is what would need
-  rethinking for touch.
 
 ## Contributing
 
